@@ -14,7 +14,6 @@ import { AgentGraphRouteContent, InsightsPage } from "./screens/InsightsPage";
 import { AgentStatisticsPage } from "./screens/AgentStatisticsPage";
 import { AgentDetailPage } from "./screens/AgentDetailPage";
 import { ComputersPage } from "./screens/ComputersPage";
-import { DesignLabPage, DesignLabSurfacePage } from "./screens/DesignLabPage";
 import { InvitationPage } from "./screens/InvitationPage";
 import { InboxPage } from "./screens/InboxPage";
 import { DirectMessagePage } from "./screens/DirectMessagePage";
@@ -126,16 +125,6 @@ const settingsRoute = createRoute({
   path: "/s/$spaceSlug/settings",
   component: SettingsPage,
 });
-const designLabRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/design-lab",
-  component: DesignLabPage,
-});
-const designLabSurfaceRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/design-lab/$surface",
-  component: DesignLabSurfacePage,
-});
 const agentDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/s/$spaceSlug/agents/$agentId",
@@ -195,8 +184,6 @@ const routeTree = rootRoute.addChildren([
   insightsStatsRoute,
   insightsGraphRoute,
   settingsRoute,
-  designLabRoute,
-  designLabSurfaceRoute,
   agentDetailRoute,
   inboxRoute,
   tasksRoute,

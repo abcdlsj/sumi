@@ -16,7 +16,7 @@ import {
   type AgentGraphNode,
 } from "../api/client";
 import { PixelIdentity } from "../components/PixelIdentity";
-import { buildAgentIdenticon, identityPalette } from "../components/agentIdenticon";
+import { buildAgentIdenticon } from "../components/agentIdenticon";
 import { layoutGraph, type GraphLayoutNode } from "./agentGraphLayout";
 import "./agentGraph.css";
 
@@ -265,7 +265,7 @@ export function AgentGraphWorkspace({
     return (
       <div className="route-status route-status--error">
         <section className="route-status-panel" role="alert">
-          <p className="section-kicker">AGENT GRAPH</p>
+          <p className="section-kicker">Agent graph</p>
           <h1>Could not load the graph.</h1>
           <p>{graph.error instanceof Error ? graph.error.message : "The Server returned no usable data."}</p>
           <button className="command-button command-button--accent" type="button" onClick={() => void graph.refetch()}>
@@ -280,7 +280,7 @@ export function AgentGraphWorkspace({
     return (
       <div className="route-status">
         <section className="route-status-panel">
-          <p className="section-kicker">AGENT GRAPH</p>
+          <p className="section-kicker">Agent graph</p>
           <h1>No Agents yet.</h1>
           <p>Create an Agent and start a conversation; relationships appear here.</p>
         </section>
@@ -373,7 +373,6 @@ export function AgentGraphWorkspace({
                   node.member_id !== selectedNodeId &&
                   selectedNodeIds.has(node.member_id);
                 const avatar = buildAgentIdenticon(node.member_id);
-                const palette = identityPalette(node.member_id);
                 const dimmed =
                   Boolean(selectedNodeId || selectedEdgeKey) && !active && !neighbor;
                 return (
@@ -397,14 +396,14 @@ export function AgentGraphWorkspace({
                       y={-18}
                       width={36}
                       height={36}
-                      fill={palette.background}
+                      rx={8}
+                      fill={avatar.background}
                     />
                     <g
                       transform="translate(-16 -16) scale(4)"
                       shapeRendering="crispEdges"
                       aria-hidden="true"
                     >
-                      <rect width="8" height="8" fill={avatar.background} />
                       {avatar.cells.map(([x, y]) => (
                         <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill={avatar.foreground} />
                       ))}

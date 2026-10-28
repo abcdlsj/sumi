@@ -4,7 +4,7 @@ import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Se
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
 import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
-import { activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
+import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { formatBytes } from "../format";
@@ -108,7 +108,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
       <header className="entity-detail-header">
         <PresenceIdentity name={value.name} kind="agent" seed={value.member_id} activityStatus={value.activity_status} />
         <div className="entity-detail-title">
-          <div><h1 id="agent-heading" title={value.name}>{value.name}</h1><span className="agent-label">AGENT</span></div>
+          <div><h1 id="agent-heading" title={value.name}>{value.name}</h1><span className="agent-label">Agent</span></div>
           <p>{value.role_text}</p>
         </div>
         <div className="agent-header-signals">
@@ -256,7 +256,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
       {retireConfirmOpen ? (
         <DialogFrame close={() => setRetireConfirmOpen(false)} labelId="retire-agent-title" className="confirm-dialog agent-retire-dialog">
           <header>
-            <div><p className="section-kicker">AGENT LIFECYCLE</p><h2 id="retire-agent-title">Retire {value.name}?</h2></div>
+            <div><p className="section-kicker">Agent lifecycle</p><h2 id="retire-agent-title">Retire {value.name}?</h2></div>
             <button className="icon-button" type="button" aria-label="Close retirement confirmation" title="Close retirement confirmation" onClick={() => setRetireConfirmOpen(false)}><X aria-hidden="true" /></button>
           </header>
           <p>Retirement cannot be undone. {value.name} will stop accepting new work and lose its Computer assignment.</p>
@@ -285,24 +285,6 @@ function Field({ label, children, tabular = false, chip }: { label: string; chil
 function capitalize(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function humanize(value: string): string { return value.split("_").map(capitalize).join(" "); }
 
-const activityLabels: Record<AgentActivityItem["kind"], string> = {
-  "message.send": "Sent a message",
-  "task.create": "Created task",
-  "task.link_thread": "Linked a thread to task",
-  "task.unlink_thread": "Unlinked a thread from task",
-  "task.submit_review": "Submitted task for review",
-  "task.done": "Completed task",
-  "task.close": "Closed task",
-  "channel.create": "Created channel",
-  "channel.leave": "Left channel",
-  "channel.invite": "Invited member to channel",
-  "channel.remove": "Removed member from channel",
-  "agent.create": "Created agent",
-  "inbox.ack": "Acknowledged an inbox item",
-  "inbox.defer": "Deferred an inbox item",
-  "run.yield": "Yielded the current run",
-  "run.delivery_rejected": "Recovered a rejected delivery",
-};
 
 function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; spaceSlug: string; channels: Channel[] }) {
   const items = useAgentActivity(agentId);
@@ -318,7 +300,7 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
           <li className="agent-activity-row" key={item.eventId}>
             <div className="agent-activity-main">
               <p>
-                <span className="agent-activity-kind">{activityLabels[item.kind]}</span>
+                <span className="agent-activity-kind">{AGENT_ACTIVITY_LABELS[item.kind]}</span>
                 {link ? <span className="agent-activity-link">{link}</span> : null}
               </p>
               {item.arguments.length || item.messagePreview ? (

@@ -45,14 +45,15 @@ export function SpaceCreatePage() {
           <span className="wordmark-mark" aria-hidden="true">
             <SumiLogo />
           </span>
-          SUMI
+          Sumi
         </Link>
         <OnboardingProgress current={2} />
       </header>
 
       <section className="register-stage" aria-labelledby="space-title">
-        <div className="stage-copy stage-copy--space" style={{ backgroundColor: accent }}>
-          <p className="eyebrow">02 · COLLABORATION BOUNDARY</p>
+        <div className="stage-copy stage-copy--space">
+          <span className="space-preview-mark" style={{ backgroundColor: accent }} aria-hidden="true"><SumiLogo /></span>
+          <p className="eyebrow">Step 2 · Space</p>
           <h1 id="space-title">Create your Space.</h1>
           <p className="stage-note">Members, Channels and Computers live inside this boundary.</p>
           <p className="space-address" aria-live="polite">/s/{slug || "your-space"}</p>
@@ -124,8 +125,7 @@ export function SpaceCreatePage() {
       </section>
 
       <footer className="onboarding-footer">
-        <span>SPACE IS THE BOUNDARY</span>
-        <span className="status-light">SESSION ACTIVE</span>
+        <span>A Space is the boundary for people, Agents and Computers</span>
       </footer>
     </main>
   );

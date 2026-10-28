@@ -16,6 +16,7 @@ import {
 import { activityLabel } from "../../agentActivity";
 import { PixelAgent, type AgentPose } from "../../components/company/PixelAgent";
 import { useSpaceEvents } from "../../hooks/useSpaceEvents";
+import "./office.css";
 
 const HOT_WINDOW_MS = 120_000;
 const HOT_THRESHOLD = 5;

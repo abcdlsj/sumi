@@ -1,6 +1,6 @@
-// Screenshot the design-lab sample states for review and before/after diffs.
-// Usage: node design-lab/demo/shots.mjs
-// Needs the design demo web on SUMI_DESIGN_WEB_PORT (default 5174).
+// Screenshot the UI demo sample states for review and before/after diffs.
+// Usage: node scripts/ui-demo/shots.mjs
+// Needs the UI demo web on SUMI_UI_DEMO_WEB_PORT (default 5174).
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -8,10 +8,10 @@ import { join } from "node:path";
 const require = createRequire(import.meta.url);
 const { chromium } = require("../../web/node_modules/@playwright/test");
 
-const WEB = process.env.SUMI_DESIGN_WEB_URL ?? "http://127.0.0.1:5174";
+const WEB = process.env.SUMI_UI_DEMO_WEB_URL ?? "http://127.0.0.1:5174";
 const EMAIL = process.env.SUMI_SEED_EMAIL ?? "dev@example.test";
 const PASSWORD = process.env.SUMI_SEED_PASSWORD ?? "correct horse battery staple";
-const OUT = process.env.SUMI_SHOT_DIR ?? "design-lab/demo/.runtime/shots";
+const OUT = process.env.SUMI_SHOT_DIR ?? "scripts/ui-demo/.runtime/shots";
 mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
@@ -46,14 +46,13 @@ async function shot(path, selector, wait = 400) {
 }
 
 await shot("/s/sumi-dev/channels/general", ".channel-workspace");
-await shot("/s/sumi-dev/channels/design-lab", ".channel-workspace");
+await shot("/s/sumi-dev/channels/review", ".channel-workspace");
 await shot("/s/sumi-dev/channels/empty-lab", ".channel-workspace");
 await shot("/s/sumi-dev/tasks", ".tasks-workspace");
 await shot("/s/sumi-dev/inbox", ".inbox-workspace");
 await shot("/s/sumi-dev/members", ".members-workspace");
 await shot("/s/sumi-dev/agents", ".members-workspace--agents");
 await shot("/s/sumi-dev/computers", ".computers-workspace");
-await shot("/s/sumi-dev/design-lab", ".design-lab", 1200);
 
 // Task detail and Agent detail need IDs; reuse the logged-in page session.
 const ids = await page.evaluate(async () => {
@@ -68,8 +67,8 @@ const ids = await page.evaluate(async () => {
 if (ids.taskId) await shot(`/s/sumi-dev/tasks/${ids.taskId}`, ".task-detail");
 if (ids.agentId) await shot(`/s/sumi-dev/agents/${ids.agentId}`, ".agent-workspace");
 
-// Thread pane: open the first sample thread from #design-lab.
-await page.goto(`${WEB}/s/sumi-dev/channels/design-lab`);
+// Thread pane: open the first sample thread from #review.
+await page.goto(`${WEB}/s/sumi-dev/channels/review`);
 await page.locator(".message-row").first().waitFor();
 await page.locator(".message-row").first().hover();
 const replyButtons = page.getByRole("button", { name: "Reply in Thread" });

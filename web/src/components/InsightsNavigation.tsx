@@ -6,7 +6,7 @@ export function InsightsNavigation({ spaceSlug }: { spaceSlug: string }) {
   const path = location.pathname;
   return (
     <div className="insights-navigation" aria-label="Agent insights">
-      <p className="nav-label">AGENT INSIGHTS</p>
+      <p className="nav-label">Agent insights</p>
       <Link
         className={`context-entity-row insights-nav-item${
           path.endsWith("/insights/stats") ? " context-entity-row--active" : ""

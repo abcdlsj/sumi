@@ -7,17 +7,16 @@ import {
   LockKeyhole,
   ListTodo,
   LoaderCircle,
-  MessageCircle,
+  Menu,
   Monitor,
   Network,
-  Palette,
   Plus,
   Settings,
   Users,
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -28,10 +27,10 @@ import {
   getSpaceBySlug,
   joinChannel,
   listChannels,
-  listTasks,
   listAgents,
   listComputers,
   listDirectMessages,
+  listInbox,
   listMembers,
   type Channel,
   type Agent,
@@ -39,22 +38,20 @@ import {
   type DirectMessage,
   type Member,
   type Space,
-  type Task,
   type User,
 } from "../api/client";
 import { activityLabel } from "../agentActivity";
-import { designLabEnabled } from "../featureFlags";
 import {
   AGENT_INSIGHTS_FEATURE_ID,
   COMPANY_OFFICE_FEATURE_ID,
   useFeatureEnabled,
 } from "../featureRegistry";
 import { useSpaceEvents } from "../hooks/useSpaceEvents";
-import { loadLastConversationRoute, saveLastConversationRoute } from "../conversationMemory";
+import { saveLastConversationRoute } from "../conversationMemory";
+import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
 import { InsightsNavigation } from "./InsightsNavigation";
 import { PixelIdentity } from "./PixelIdentity";
-import { PixelWord } from "./PixelWord";
 import { SettingsNavigation } from "./SettingsNavigation";
 import { SumiMark } from "./SumiMark";
 
@@ -76,8 +73,7 @@ export function SpaceShell({
   children,
 }: {
   spaceSlug: string;
-  // "design" is the demo-only candidate board; it has no rail entry.
-  active: "channel" | "dm" | "company" | "members" | "agents" | "inbox" | "tasks" | "computers" | "insights" | "settings" | "design";
+  active: "channel" | "dm" | "company" | "members" | "agents" | "inbox" | "tasks" | "computers" | "insights" | "settings";
   children: (context: SpaceShellContext) => ReactNode;
 }) {
   const navigate = useNavigate();
@@ -85,7 +81,6 @@ export function SpaceShell({
   const authenticationRedirect = useRef(location.href);
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [navigationTrigger, setNavigationTrigger] = useState<HTMLElement | null>(null);
   const [channelFormOpen, setChannelFormOpen] = useState(false);
   const [directMessageFormOpen, setDirectMessageFormOpen] = useState(false);
@@ -93,18 +88,16 @@ export function SpaceShell({
   const companyOfficeEnabled = useFeatureEnabled(COMPANY_OFFICE_FEATURE_ID);
   const [unreadChannelIds, setUnreadChannelIds] = useState<ReadonlySet<string>>(() => new Set());
   const navigationPanel = useRef<HTMLElement>(null);
-  const railNavigationTrigger = useRef<HTMLButtonElement>(null);
+  const topbarNavigationTrigger = useRef<HTMLButtonElement>(null);
   function closeNavigation() {
     setNavigationOpen(false);
-    setNavigationCollapsed(true);
-    window.requestAnimationFrame(() => (navigationTrigger ?? railNavigationTrigger.current)?.focus());
+    window.requestAnimationFrame(() => (navigationTrigger ?? topbarNavigationTrigger.current)?.focus());
   }
   function dismissNavigationDrawer() {
     setNavigationOpen(false);
   }
   function openNavigation() {
     setNavigationTrigger(document.activeElement as HTMLElement);
-    setNavigationCollapsed(false);
     setNavigationOpen(true);
   }
   const space = useQuery({
@@ -138,10 +131,12 @@ export function SpaceShell({
     queryFn: () => listComputers(space.data!.id),
     enabled: active === "computers" && Boolean(space.data),
   });
-  const navTasks = useQuery({
-    queryKey: ["nav-tasks", space.data?.id],
-    queryFn: () => listTasks(space.data!.id),
-    enabled: active === "tasks" && Boolean(space.data),
+  // Shares the Inbox page cache, so reading there clears the count here.
+  const inbox = useQuery({
+    queryKey: ["inbox", space.data?.id, space.data?.current_member_id],
+    queryFn: () => listInbox(space.data!.current_member_id),
+    enabled: Boolean(space.data),
+    retry: false,
   });
   useSpaceEvents(space.data?.id, ({ channelId }) => {
     if (channelId === viewingChannelId(location.pathname, channels.data?.channels, directMessages.data)) {
@@ -221,7 +216,6 @@ export function SpaceShell({
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (event.key === "Escape") {
         setNavigationOpen(false);
-        setNavigationCollapsed(true);
         window.requestAnimationFrame(() => navigationTrigger?.focus());
         return;
       }
@@ -300,127 +294,50 @@ export function SpaceShell({
   const roleByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agent.role_text] as const),
   );
-  const activeChannelSlug = location.pathname.match(/\/channels\/([^/]+)$/)?.[1];
-  const activeDmMemberId = location.pathname.match(/\/dm\/([^/]+)$/)?.[1];
-  const savedConversationRoute = loadLastConversationRoute(space.data.slug);
-  const currentOrSavedConversationRoute = activeChannelSlug
-    ? { kind: "channel" as const, channelSlug: activeChannelSlug }
-    : activeDmMemberId
-      ? { kind: "dm" as const, memberId: activeDmMemberId }
-      : savedConversationRoute;
-  const savedChannelSlug =
-    currentOrSavedConversationRoute?.kind === "channel" &&
-    channels.data.channels.some(
-      (candidate) => candidate.joined && candidate.slug === currentOrSavedConversationRoute.channelSlug,
-    )
-      ? currentOrSavedConversationRoute.channelSlug
-      : "general";
-  const savedDmMemberId =
-    currentOrSavedConversationRoute?.kind === "dm" &&
-    (directMessages.data ?? []).some(
-      (candidate) => candidate.other_member.id === currentOrSavedConversationRoute.memberId,
-    )
-      ? currentOrSavedConversationRoute.memberId
-      : undefined;
-  const conversationHref = savedDmMemberId
-    ? `/s/${space.data.slug}/dm/${savedDmMemberId}`
-    : `/s/${space.data.slug}/channels/${savedChannelSlug}`;
+  const inboxCount = groupInboxItems(inbox.data ?? []).length;
+  const spaceSlugValue = space.data.slug;
+  const contextNavigation =
+    active === "computers" ? (
+      <ComputersNavigation
+        computers={computers.data ?? []}
+        spaceSlug={spaceSlugValue}
+        activeHash={location.hash}
+        canManage={["owner", "admin"].includes(currentMember.access_level)}
+      />
+    ) : active === "insights" ? (
+      <InsightsNavigation spaceSlug={spaceSlugValue} />
+    ) : active === "settings" ? (
+      <SettingsNavigation spaceSlug={spaceSlugValue} />
+    ) : active === "company" ? (
+      <CompanyNavigation spaceSlug={spaceSlugValue} locationPath={location.pathname} />
+    ) : null;
 
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <main
-        id="main-content"
-        className={`space-shell${navigationCollapsed ? " space-shell--navigation-collapsed" : ""}`}
-        style={{ "--space-accent": space.data.accent } as CSSProperties}
-      >
-      <aside
-        className="space-rail"
-        aria-label="Space tools"
-        onClick={(event) => {
-          if (!(event.target as HTMLElement).closest("a, button")) openNavigation();
-        }}
-      >
-        <Link
-          className="space-badge"
-          to="/s/$spaceSlug"
-          params={{ spaceSlug: space.data.slug }}
-          aria-label="Sumi home"
-          title="Sumi home"
-        >
-          <SumiMark className="space-brand-mark" />
-        </Link>
-        <nav className="rail-tools" aria-label="Space management">
-          <RailItem
-            icon={MessageCircle}
-            label="Conversation"
-            active={active === "channel" || active === "dm"}
-            href={conversationHref}
-          />
-          {companyOfficeEnabled ? (
-            <RailItem
-              icon={Building2}
-              label="Company"
-              active={active === "company"}
-              href={`/s/${space.data.slug}/company`}
-            />
-          ) : null}
-          <RailItem
-            icon={Inbox}
-            label="Inbox"
-            active={active === "inbox"}
-            href={`/s/${space.data.slug}/inbox`}
-          />
-          <RailItem
-            icon={ListTodo}
-            label="Tasks"
-            active={active === "tasks"}
-            href={`/s/${space.data.slug}/tasks`}
-          />
-          <RailItem
-            icon={Users}
-            label="Members"
-            active={active === "members" || active === "agents"}
-            href={`/s/${space.data.slug}/members`}
-          />
-          <RailItem
-            icon={Monitor}
-            label="Computers"
-            active={active === "computers"}
-            href={`/s/${space.data.slug}/computers`}
-          />
-          {agentInsightsEnabled ? (
-            <RailItem
-              icon={Network}
-              label="Agent insights"
-              active={active === "insights"}
-              href={`/s/${space.data.slug}/insights/stats`}
-            />
-          ) : null}
-          {designLabEnabled() ? (
-            <RailItem
-              icon={Palette}
-              label="Design lab"
-              active={active === "design"}
-              href={`/s/${space.data.slug}/design-lab`}
-            />
-          ) : null}
-        </nav>
+      <main id="main-content" className="space-shell">
+      <header className="space-topbar">
         <button
-          ref={railNavigationTrigger}
-          className="rail-spacer"
+          ref={topbarNavigationTrigger}
+          className="icon-button"
           type="button"
           aria-label="Open navigation"
           title="Open navigation"
           onClick={openNavigation}
-        />
-        <RailItem
-          icon={Settings}
-          label="Settings"
-          active={active === "settings"}
-          href={`/s/${space.data.slug}/settings`}
-        />
-      </aside>
+        >
+          <Menu />
+        </button>
+        <strong title={space.data.name}>{space.data.name}</strong>
+        <Link
+          className="space-topbar-inbox"
+          to="/s/$spaceSlug/inbox"
+          params={{ spaceSlug: spaceSlugValue }}
+          aria-label={inboxCount ? `Inbox, ${inboxCount} waiting for you` : "Inbox"}
+        >
+          <Inbox aria-hidden="true" />
+          {inboxCount ? <span className="nav-count">{inboxCount}</span> : null}
+        </Link>
+      </header>
 
       {navigationOpen ? (
         <button
@@ -438,8 +355,11 @@ export function SpaceShell({
           if ((event.target as HTMLElement).closest("a")) dismissNavigationDrawer();
         }}
       >
-        <header className="space-name-row">
-          <PixelWord text={space.data.name} className="space-name-pixel" variant="bold" />
+        <header className="space-header">
+          <Link className="space-identity" to="/s/$spaceSlug" params={{ spaceSlug: spaceSlugValue }} title={space.data.name}>
+            <span className="space-mark" aria-hidden="true"><SumiMark /></span>
+            <strong>{space.data.name}</strong>
+          </Link>
           <button
             className="navigation-close icon-button"
             type="button"
@@ -450,119 +370,89 @@ export function SpaceShell({
             <X />
           </button>
         </header>
-        <nav>
-          <div className="mobile-space-tools" aria-label="Space tools">
+        <div className="space-navigation-body">
+          <nav className="nav-group" aria-label="Space tools">
             <NavigationItem
-              icon={MessageCircle}
-              label="Conversation"
-              active={active === "channel" || active === "dm"}
-              href={conversationHref}
+              icon={Inbox}
+              label="Inbox"
+              active={active === "inbox"}
+              href={`/s/${spaceSlugValue}/inbox`}
+              count={inboxCount}
+            />
+            <NavigationItem
+              icon={ListTodo}
+              label="Tasks"
+              active={active === "tasks"}
+              href={`/s/${spaceSlugValue}/tasks`}
+            />
+            <NavigationItem
+              icon={Users}
+              label="Members"
+              active={active === "members" || active === "agents"}
+              href={`/s/${spaceSlugValue}/members`}
+            />
+            <NavigationItem
+              icon={Monitor}
+              label="Computers"
+              active={active === "computers"}
+              href={`/s/${spaceSlugValue}/computers`}
             />
             {companyOfficeEnabled ? (
               <NavigationItem
                 icon={Building2}
                 label="Company"
                 active={active === "company"}
-                href={`/s/${space.data.slug}/company`}
+                href={`/s/${spaceSlugValue}/company`}
               />
             ) : null}
-            <NavigationItem
-              icon={Inbox}
-              label="Inbox"
-              active={active === "inbox"}
-              href={`/s/${space.data.slug}/inbox`}
-            />
-            <NavigationItem
-              icon={Users}
-              label="Members"
-              active={active === "members" || active === "agents"}
-              href={`/s/${space.data.slug}/members`}
-            />
-            <NavigationItem
-              icon={ListTodo}
-              label="Tasks"
-              active={active === "tasks"}
-              href={`/s/${space.data.slug}/tasks`}
-            />
-            <NavigationItem
-              icon={Monitor}
-              label="Computers"
-              active={active === "computers"}
-              href={`/s/${space.data.slug}/computers`}
-            />
             {agentInsightsEnabled ? (
               <NavigationItem
                 icon={Network}
                 label="Agent insights"
                 active={active === "insights"}
-                href={`/s/${space.data.slug}/insights/stats`}
+                href={`/s/${spaceSlugValue}/insights/stats`}
               />
             ) : null}
-            <NavigationItem
-              icon={Settings}
-              label="Settings"
-              active={active === "settings"}
-              href={`/s/${space.data.slug}/settings`}
-            />
-          </div>
-          {active === "members" || active === "agents" ? (
-            <MembersNavigation members={members.data} activityByMemberId={activityByMemberId} roleByMemberId={roleByMemberId} spaceSlug={space.data.slug} locationPath={location.pathname} />
-          ) : active === "computers" ? (
-            <ComputersNavigation
-              computers={computers.data ?? []}
-              spaceSlug={space.data.slug}
-              activeHash={location.hash}
-              canManage={["owner", "admin"].includes(currentMember.access_level)}
-            />
-          ) : active === "inbox" ? (
-            <InboxNavigation />
-          ) : active === "tasks" ? (
-            <TasksNavigation tasks={navTasks.data ?? []} spaceSlug={space.data.slug} pending={navTasks.isPending} />
-          ) : active === "company" ? (
-            <CompanyNavigation
-              spaceSlug={space.data.slug}
-              locationPath={location.pathname}
-            />
-          ) : active === "insights" ? (
-            <InsightsNavigation spaceSlug={space.data.slug} />
-          ) : active === "settings" ? (
-            <SettingsNavigation spaceSlug={space.data.slug} />
-          ) : (
-            <>
-          <div className="nav-section-heading">
-            <p className="nav-label">CHANNELS <span>{channels.data.channels.filter((channel) => channel.joined).length}</span></p>
-            {channels.data.can_create ? (
-              <button
-                type="button"
-                aria-label="Create Channel"
-                title="Create Channel"
-                onClick={() => {
-                  setChannelFormOpen(true);
-                  channelCreation.reset();
-                }}
-              >
-                <Plus />
-              </button>
-            ) : null}
-          </div>
-          {channels.data.channels
-            .filter((channel) => channel.joined)
-            .map((channel) => (
-              <NavigationItem
-                key={channel.id}
-                icon={channel.kind === "private" ? LockKeyhole : Hash}
-                label={channel.slug}
-                active={
-                  active === "channel" &&
-                  location.pathname.endsWith(`/channels/${channel.slug}`)
-                }
-                href={`/s/${space.data.slug}/channels/${channel.slug}`}
-                unread={unreadChannelIds.has(channel.id)}
-              />
-            ))}
+          </nav>
+          {contextNavigation ? <div className="nav-group nav-group--context">{contextNavigation}</div> : null}
+          <section className="nav-group" aria-labelledby="nav-channels-heading">
+            <div className="nav-section-heading">
+              <h2 className="nav-label" id="nav-channels-heading">Channels</h2>
+              {channels.data.can_create ? (
+                <button
+                  type="button"
+                  aria-label="Create Channel"
+                  title="Create Channel"
+                  onClick={() => {
+                    setChannelFormOpen(true);
+                    channelCreation.reset();
+                  }}
+                >
+                  <Plus />
+                </button>
+              ) : null}
+            </div>
+            {channels.data.channels
+              .filter((channel) => channel.joined)
+              .map((channel) => (
+                <NavigationItem
+                  key={channel.id}
+                  icon={channel.kind === "private" ? LockKeyhole : Hash}
+                  label={channel.slug}
+                  active={
+                    active === "channel" &&
+                    location.pathname.endsWith(`/channels/${channel.slug}`)
+                  }
+                  href={`/s/${spaceSlugValue}/channels/${channel.slug}`}
+                  unread={unreadChannelIds.has(channel.id)}
+                />
+              ))}
+          </section>
           {channels.data.channels.some((channel) => !channel.joined) ? (
-            <>
-              <p className="nav-label">DISCOVER</p>
+            <section className="nav-group" aria-labelledby="nav-discover-heading">
+              <div className="nav-section-heading">
+                <h2 className="nav-label" id="nav-discover-heading">Discover</h2>
+              </div>
               {channels.data.channels
                 .filter((channel) => !channel.joined)
                 .map((channel) => (
@@ -576,47 +466,62 @@ export function SpaceShell({
                       title={`Join #${channel.slug}`}
                       onClick={() => channelJoin.mutate(channel.id)}
                     >
-                      JOIN
+                      Join
                     </button>
                   </div>
                 ))}
-            </>
+            </section>
           ) : null}
-          <div className="nav-section-heading nav-section-heading--dms">
-            <p className="nav-label nav-label--section">DMS <span>{availableDirectMessages.length}</span></p>
-            <button
-              type="button"
-              aria-label="Start DM"
-              title="Start DM"
-              onClick={() => {
-                setDirectMessageFormOpen(true);
-                directMessageCreation.reset();
-              }}
-            >
-              <Plus />
-            </button>
-          </div>
-          {directMessages.error ? (
-            <span className="nav-empty nav-empty--centered">DMs unavailable</span>
-          ) : availableDirectMessages.length === 0 ? (
-            <span className="nav-empty nav-empty--centered">No DMs yet</span>
-          ) : null}
-          {availableDirectMessages.map((dm) => (
-            <DirectMessageNavigationItem
-              key={dm.channel_id}
-              member={dm.other_member}
-              activityStatus={activityByMemberId.get(dm.other_member.id)}
-              active={
-                active === "dm" &&
-                location.pathname.endsWith(`/dm/${dm.other_member.id}`)
-              }
-              href={`/s/${space.data.slug}/dm/${dm.other_member.id}`}
-              unread={unreadChannelIds.has(dm.channel_id)}
-            />
-          ))}
-            </>
-          )}
-        </nav>
+          <section className="nav-group" aria-labelledby="nav-dms-heading">
+            <div className="nav-section-heading">
+              <h2 className="nav-label" id="nav-dms-heading">Direct messages</h2>
+              <button
+                type="button"
+                aria-label="Start DM"
+                title="Start DM"
+                onClick={() => {
+                  setDirectMessageFormOpen(true);
+                  directMessageCreation.reset();
+                }}
+              >
+                <Plus />
+              </button>
+            </div>
+            {directMessages.error ? (
+              <span className="nav-empty">DMs unavailable</span>
+            ) : availableDirectMessages.length === 0 ? (
+              <span className="nav-empty">No DMs yet</span>
+            ) : null}
+            {availableDirectMessages.map((dm) => (
+              <DirectMessageNavigationItem
+                key={dm.channel_id}
+                member={dm.other_member}
+                activityStatus={activityByMemberId.get(dm.other_member.id)}
+                role={roleByMemberId.get(dm.other_member.id)}
+                active={
+                  active === "dm" &&
+                  location.pathname.endsWith(`/dm/${dm.other_member.id}`)
+                }
+                href={`/s/${spaceSlugValue}/dm/${dm.other_member.id}`}
+                unread={unreadChannelIds.has(dm.channel_id)}
+              />
+            ))}
+          </section>
+        </div>
+        <footer className="space-self">
+          <PixelIdentity name={currentMember.display_name} kind="human" seed={currentMember.id} />
+          <span title={currentMember.display_name}>{currentMember.display_name}</span>
+          <Link
+            className={`icon-button space-settings-link${active === "settings" ? " space-settings-link--active" : ""}`}
+            to="/s/$spaceSlug/settings"
+            params={{ spaceSlug: spaceSlugValue }}
+            aria-label="Settings"
+            title="Settings"
+            aria-current={active === "settings" ? "page" : undefined}
+          >
+            <Settings aria-hidden="true" />
+          </Link>
+        </footer>
       </aside>
 
       {channelFormOpen ? (
@@ -657,60 +562,14 @@ export function SpaceShell({
 
 function RouteFailure({ error, retry }: { error: unknown; retry: () => void }) {
   const message = error instanceof ApiRequestError ? error.message : "The Server did not return a usable response.";
-  return <main className="route-status route-status--error"><section className="route-status-panel" role="alert"><p className="section-kicker">COULD NOT OPEN SPACE</p><h1>Something interrupted this view.</h1><p>{message}</p><button className="command-button command-button--accent" type="button" onClick={retry}>Retry</button></section></main>;
-}
-
-function MembersNavigation({ members, activityByMemberId, roleByMemberId, spaceSlug, locationPath }: { members: Member[]; activityByMemberId: Map<string, Agent["activity_status"]>; roleByMemberId: Map<string, string>; spaceSlug: string; locationPath: string }) {
-  const agents = members.filter((member) => member.kind === "agent");
-  const humans = members.filter((member) => member.kind === "human");
-  return (
-    <div className="members-navigation">
-      <MemberNavigationGroup
-        label="Agents"
-        members={agents}
-        activityByMemberId={activityByMemberId}
-        roleByMemberId={roleByMemberId}
-        spaceSlug={spaceSlug}
-        locationPath={locationPath}
-      />
-      <MemberNavigationGroup
-        label="Humans"
-        members={humans}
-        activityByMemberId={activityByMemberId}
-        roleByMemberId={roleByMemberId}
-        spaceSlug={spaceSlug}
-        locationPath={locationPath}
-      />
-    </div>
-  );
-}
-
-function MemberNavigationGroup({ label, members, activityByMemberId, roleByMemberId, spaceSlug, locationPath }: { label: string; members: Member[]; activityByMemberId: Map<string, Agent["activity_status"]>; roleByMemberId: Map<string, string>; spaceSlug: string; locationPath: string }) {
-  return (
-    <section className="member-navigation-group" aria-labelledby={`member-navigation-${label.toLowerCase()}`}>
-      <h3 className="nav-label" id={`member-navigation-${label.toLowerCase()}`}>
-        {label === "Agents" ? <Link className="member-navigation-heading-link" to="/s/$spaceSlug/agents" params={{ spaceSlug }}>{label}</Link> : label}<span>{members.length}</span>
-      </h3>
-      {members.length ? members.map((member) => member.kind === "agent" ? (
-        <Link key={member.id} className={`context-entity-row${locationPath.endsWith(`/agents/${member.id}`) ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/agents/$agentId" params={{ spaceSlug, agentId: member.id }}>
-          <PresenceIdentity name={member.display_name} kind="agent" seed={member.id} activityStatus={activityByMemberId.get(member.id)} />
-          <span><strong title={member.display_name}>{member.display_name}</strong><small title={roleByMemberId.get(member.id)}>{roleByMemberId.get(member.id) ?? "Agent"}</small></span>
-        </Link>
-      ) : (
-        <div className="context-entity-row context-entity-row--static" key={member.id}>
-          <PixelIdentity name={member.display_name} kind="human" seed={member.id} />
-          <span><strong title={member.display_name}>{member.display_name}</strong></span>
-        </div>
-      )) : <p className="nav-empty">No {label.toLowerCase()}</p>}
-    </section>
-  );
+  return <main className="route-status route-status--error"><section className="route-status-panel" role="alert"><p className="section-kicker">Could not open Space</p><h1>Something interrupted this view.</h1><p>{message}</p><button className="command-button command-button--accent" type="button" onClick={retry}>Retry</button></section></main>;
 }
 
 function ComputersNavigation({ computers, spaceSlug, activeHash, canManage }: { computers: Computer[]; spaceSlug: string; activeHash: string; canManage: boolean }) {
   const normalizedHash = activeHash.replace(/^#/, "");
   return <>
-    <div className="nav-section-heading computer-nav-heading">
-      <p className="nav-label">COMPUTERS <span>{computers.length}</span></p>
+    <div className="nav-section-heading">
+      <p className="nav-label">Paired computers <span>{computers.length}</span></p>
       {canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer" aria-label="Pair Computer" title="Pair Computer"><Plus /></Link> : null}
     </div>
     {computers.length ? computers.map((computer) => {
@@ -718,30 +577,10 @@ function ComputersNavigation({ computers, spaceSlug, activeHash, canManage }: { 
       const selected = normalizedHash === hash;
       return <Link key={computer.id} className={`context-entity-row computer-context-row${selected ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={hash}>
         <Monitor aria-hidden="true" />
-        <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status} <em>v{computer.daemon_version}</em></small></span>
+        <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status}<em>v{computer.daemon_version}</em></small></span>
       </Link>;
     }) : <div className="computer-nav-empty"><Monitor aria-hidden="true" /><p>No paired Computers</p>{canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer">Pair Computer</Link> : null}</div>}
   </>;
-}
-
-function InboxNavigation() {
-  return <div className="context-groups" aria-label="Inbox groups"><span><strong>01</strong> DM &amp; mentions</span><span><strong>02</strong> Replies</span><span><strong>03</strong> Channel activity</span></div>;
-}
-
-function TasksNavigation({ tasks, spaceSlug, pending }: { tasks: Task[]; spaceSlug: string; pending: boolean }) {
-  if (pending) return <div className="nav-empty">Loading tasks…</div>;
-  if (!tasks.length) return <div className="nav-empty">No tasks yet</div>;
-  return (
-    <div className="nav-task-list">
-      <p className="nav-label">RECENT TASKS</p>
-      {tasks.slice(0, 6).map((task) => (
-        <Link key={task.id} className="nav-task-item" to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: task.id }}>
-          <span className={`nav-task-status nav-task-status--${task.status}`}>{task.status.replace("_", " ")}</span>
-          <span title={task.title}>{task.title}</span>
-        </Link>
-      ))}
-    </div>
-  );
 }
 
 function CompanyNavigation({
@@ -754,7 +593,7 @@ function CompanyNavigation({
   const officeActive = locationPath.endsWith("/company/office") || locationPath.endsWith("/company");
   return (
     <div className="company-navigation">
-      <p className="nav-label">COMPANY</p>
+      <p className="nav-label">Company</p>
       <NavigationItem
         icon={Building2}
         label="Office"
@@ -781,32 +620,6 @@ function viewingChannelId(
     )?.channel_id;
   }
   return undefined;
-}
-
-function RailItem({
-  icon: Icon,
-  label,
-  active = false,
-  href,
-  disabled = false,
-}: {
-  icon: LucideIcon;
-  label: string;
-  active?: boolean;
-  href?: string;
-  disabled?: boolean;
-}) {
-  const className = `rail-tool${active ? " rail-tool--active" : ""}${disabled ? " rail-tool--disabled" : ""}`;
-  const content = <Icon aria-hidden="true" />;
-  return href ? (
-    <Link className={className} to={href} aria-label={label} title={label} aria-current={active ? "page" : undefined}>
-      {content}
-    </Link>
-  ) : (
-    <button className={className} type="button" aria-label={label} title={label} disabled>
-      {content}
-    </button>
-  );
 }
 
 function ChannelDialog({
@@ -836,7 +649,7 @@ function ChannelDialog({
   return (
     <DialogFrame className="channel-dialog" close={close} labelId="create-channel-title">
         <header>
-          <div><p className="section-kicker">NEW CONVERSATION</p><h2 id="create-channel-title">Create Channel</h2></div>
+          <div><p className="section-kicker">New conversation</p><h2 id="create-channel-title">Create Channel</h2></div>
           <button className="icon-button" type="button" aria-label="Close Create Channel" onClick={close}><X /></button>
         </header>
         <form className="channel-create-form" onSubmit={submit}>
@@ -893,7 +706,7 @@ function DirectMessageDialog({
   return (
     <DialogFrame className="dm-dialog" close={close} labelId="start-dm-title">
       <header>
-        <div><p className="section-kicker">DIRECT MESSAGE</p><h2 id="start-dm-title">Start DM</h2></div>
+        <div><p className="section-kicker">Direct message</p><h2 id="start-dm-title">Start DM</h2></div>
         <button className="icon-button" type="button" aria-label="Close Start DM" onClick={close}><X /></button>
       </header>
       <div className="dm-picker">
@@ -925,21 +738,24 @@ function NavigationItem({
   active = false,
   href,
   unread = false,
+  count = 0,
 }: {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   href?: string;
   unread?: boolean;
+  count?: number;
 }) {
   const content = (
     <>
       <Icon aria-hidden="true" />
       <span>{label}</span>
+      {count ? <span className="nav-count" aria-label={`${count} waiting for you`}>{count}</span> : null}
       {unread ? <span className="nav-unread-dot" aria-label="Unread messages" /> : null}
     </>
   );
-  const className = `nav-item${active ? " nav-item--active" : ""}`;
+  const className = `nav-item${active ? " nav-item--active" : ""}${unread ? " nav-item--unread" : ""}`;
   return href ? (
     <Link className={className} to={href} aria-current={active ? "page" : undefined}>
       {content}
@@ -949,13 +765,18 @@ function NavigationItem({
   );
 }
 
-function DirectMessageNavigationItem({ member, activityStatus, active, href, unread }: { member: Member; activityStatus?: Agent["activity_status"]; active: boolean; href: string; unread: boolean }) {
+function DirectMessageNavigationItem({ member, activityStatus, role, active, href, unread }: { member: Member; activityStatus?: Agent["activity_status"]; role?: string; active: boolean; href: string; unread: boolean }) {
+  const working = activityStatus === "working" || activityStatus === "dispatched";
   return (
-    <Link className={`nav-item dm-nav-item${active ? " nav-item--active" : ""}`} to={href} aria-current={active ? "page" : undefined}>
+    <Link className={`nav-item dm-nav-item${active ? " nav-item--active" : ""}${unread ? " nav-item--unread" : ""}`} to={href} aria-current={active ? "page" : undefined}>
       <PresenceIdentity name={member.display_name} kind={member.kind} seed={member.id} activityStatus={activityStatus} />
       <span>
         <strong title={member.display_name}>{member.display_name}</strong>
-        <small>{member.kind === "agent" ? activityLabel(activityStatus) : "Human"}</small>
+        {member.kind === "agent" ? (
+          <small className={working ? "dm-nav-status--working" : undefined} title={role}>
+            {working ? activityLabel(activityStatus) : role || activityLabel(activityStatus)}
+          </small>
+        ) : null}
       </span>
       {unread ? <span className="nav-unread-dot" aria-label="Unread messages" /> : null}
     </Link>
@@ -967,8 +788,10 @@ export function PresenceIdentity({ name, kind = "human", seed, activityStatus }:
     return <PixelIdentity name={name} kind={kind} seed={seed} />;
   }
   const label = activityLabel(activityStatus);
+  // Working breathes a teal ring around the seal; idle stays silent; only
+  // error and suspended add a corner dot.
   return (
-    <span className="presence-identity">
+    <span className={`presence-identity presence-identity--${activityStatus}`}>
       <PixelIdentity name={name} kind={kind} seed={seed} />
       <span className={`presence-dot presence-dot--${activityStatus}`} role="img" aria-label={`${name} is ${label}`} title={`${name} · ${label}`} />
     </span>

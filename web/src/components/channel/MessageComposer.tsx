@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { LoaderCircle, Paperclip, Send, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, Paperclip, X } from "lucide-react";
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { uploadAttachment, type Member, type Message } from "../../api/client";
@@ -142,10 +142,10 @@ export function MessageComposer({
         title={sendButtonLabel}
         disabled={submission.isPending || upload.isPending || !body.trim()}
       >
-        {submission.isPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
+        {submission.isPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}
         <span>Send</span>
       </button>
-      <span className="composer-shortcut">⌘ ENTER TO SEND</span>
+      <span className="composer-shortcut" aria-hidden="true">⌘ Enter to send</span>
       {attachments.length ? (
         <div className="composer-attachments" aria-label={attachmentsAriaLabel}>
           {attachments.map((attachment) => (
@@ -271,7 +271,7 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
             <button key={member.id} id={`mention-option-${member.id}`} type="button" role="option" tabIndex={-1} aria-selected={index + (allSuggestion ? 1 : 0) === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(member)}>
               <PixelIdentity name={member.display_name} kind={member.kind} seed={member.id} />
               <span><strong>{member.display_name}</strong></span>
-              {member.kind === "agent" ? <span className="agent-label">AGENT</span> : null}
+              {member.kind === "agent" ? <span className="agent-label">Agent</span> : null}
             </button>
           ))}
         </div>

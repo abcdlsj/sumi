@@ -1,12 +1,24 @@
-const IDENTICON_PALETTES = [
-  { background: "#FFE0EA", foreground: "#6B1839" },
-  { background: "#DDF7FD", foreground: "#0E5364" },
-  { background: "#FFF0B3", foreground: "#5A4312" },
-  { background: "#E4F2CF", foreground: "#315517" },
-  { background: "#E3DEFF", foreground: "#40346F" },
-  { background: "#FBE0CF", foreground: "#63392D" },
-  { background: "#D8ECE9", foreground: "#244D48" },
-  { background: "#EEEAE5", foreground: "#4B4540" },
+// Humans read as soft tinted initials; Agents share one neutral seal ground
+// and differ by ink, so the two kinds never blur together in a list.
+const HUMAN_PALETTES = [
+  { background: "#EEEAFB", foreground: "#5547A8" },
+  { background: "#E6F2EA", foreground: "#2F6E47" },
+  { background: "#FBEDE4", foreground: "#9A4B22" },
+  { background: "#E5EFF8", foreground: "#2D5E8C" },
+  { background: "#F7E9EF", foreground: "#94385E" },
+  { background: "#F1EFE6", foreground: "#5E5640" },
+] as const;
+
+const AGENT_SEAL_BACKGROUND = "#F1F0EC";
+const AGENT_INKS = [
+  "#3A5FC8",
+  "#2B2A27",
+  "#A8592C",
+  "#2E7D6F",
+  "#7A4FB5",
+  "#B5434F",
+  "#4F7A2E",
+  "#8A6A1F",
 ] as const;
 
 export interface AgentIdenticon {
@@ -19,7 +31,10 @@ export interface AgentIdenticon {
 export function buildAgentIdenticon(memberId: string): AgentIdenticon {
   const shapeHash = stableHash(memberId, 0x9e3779b9);
   const detailHash = stableHash(memberId, 0x85ebca6b);
-  const palette = identityPalette(memberId);
+  const palette = {
+    background: AGENT_SEAL_BACKGROUND,
+    foreground: AGENT_INKS[stableHash(memberId, 0xc2b2ae35) % AGENT_INKS.length],
+  };
   const cells = new Set<string>();
 
   for (let row = 0; row < 6; row += 1) {
@@ -44,7 +59,7 @@ export function buildAgentIdenticon(memberId: string): AgentIdenticon {
 }
 
 export function identityPalette(memberId: string) {
-  return IDENTICON_PALETTES[stableHash(memberId, 0xc2b2ae35) % IDENTICON_PALETTES.length];
+  return HUMAN_PALETTES[stableHash(memberId, 0xc2b2ae35) % HUMAN_PALETTES.length];
 }
 
 function addMirroredCell(cells: Set<string>, x: number, y: number) {

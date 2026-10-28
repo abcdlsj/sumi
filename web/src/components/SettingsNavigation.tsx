@@ -8,7 +8,7 @@ export function SettingsNavigation({ spaceSlug }: { spaceSlug: string }) {
   const states = useFeatureStates();
   return (
     <div className="settings-navigation" aria-label="Settings features">
-      <p className="nav-label">FEATURES</p>
+      <p className="nav-label">Features</p>
       {REGISTERED_FEATURES.map((feature) => {
         const enabled = states.get(feature.id) ?? false;
         const active = hash === `feature-${feature.id}`;
