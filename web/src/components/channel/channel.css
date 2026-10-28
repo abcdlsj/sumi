@@ -882,6 +882,21 @@ details.system-event .system-event-heading {
   padding: 28px 0 18px;
 }
 
+/* An empty conversation centres its opening note instead of leaving a
+   blank column above the composer. */
+.message-timeline .empty-channel {
+  max-width: 380px;
+  justify-items: center;
+  margin: auto;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.message-timeline .empty-channel .channel-glyph {
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-raised);
+}
+
 .channel-workspace > .empty-channel {
   align-self: center;
   justify-items: center;

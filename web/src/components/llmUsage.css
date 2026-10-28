@@ -3,31 +3,41 @@
 }
 
 .llm-usage-range {
-  display: flex;
-  gap: 4px;
-}
-
-.llm-usage-range button {
-  min-width: 38px;
-  height: 28px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--ink);
-  font-size: var(--text-meta);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.llm-usage-range button:hover,
-.llm-usage-range button:focus-visible {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
   background: var(--bg-subtle);
 }
 
-.llm-usage-range .llm-usage-range--active {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--bg);
+.llm-usage-range button {
+  min-width: 40px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.llm-usage-range button:hover {
+  color: var(--ink);
+}
+
+.llm-usage-range button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.llm-usage-range .llm-usage-range--active,
+.llm-usage-range .llm-usage-range--active:hover {
+  background: var(--bg-selected);
+  box-shadow: var(--shadow-selected);
+  color: var(--ink);
 }
 
 .llm-usage-state {

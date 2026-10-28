@@ -4,6 +4,7 @@ import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Se
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
 import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
@@ -290,7 +291,7 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
   const items = useAgentActivity(agentId);
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   if (items.length === 0) {
-    return <p className="agent-activity-empty">No visible activity yet.</p>;
+    return <EmptyState icon={Activity} title="No visible activity yet">Messages, Task runs and tool calls show up here as the Agent works.</EmptyState>;
   }
   return (
     <ol className="agent-activity-list" aria-label="Agent activity">

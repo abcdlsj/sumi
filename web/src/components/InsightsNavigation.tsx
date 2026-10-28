@@ -1,38 +1,26 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { BarChart3, Network } from "lucide-react";
 
-export function InsightsNavigation({ spaceSlug }: { spaceSlug: string }) {
-  const location = useLocation();
-  const path = location.pathname;
+export function InsightsTabs({ spaceSlug }: { spaceSlug: string }) {
+  const path = useLocation().pathname;
   return (
-    <div className="insights-navigation" aria-label="Agent insights">
-      <p className="nav-label">Agent insights</p>
+    <nav className="page-tabs" aria-label="Agent insights">
       <Link
-        className={`context-entity-row insights-nav-item${
-          path.endsWith("/insights/stats") ? " context-entity-row--active" : ""
-        }`}
         to="/s/$spaceSlug/insights/stats"
         params={{ spaceSlug }}
+        aria-current={path.endsWith("/insights/stats") ? "page" : undefined}
       >
         <BarChart3 aria-hidden="true" />
-        <span>
-          <strong>Statistics</strong>
-          <small>Token usage per Agent</small>
-        </span>
+        Statistics
       </Link>
       <Link
-        className={`context-entity-row insights-nav-item${
-          path.endsWith("/insights/graph") ? " context-entity-row--active" : ""
-        }`}
         to="/s/$spaceSlug/insights/graph"
         params={{ spaceSlug }}
+        aria-current={path.endsWith("/insights/graph") ? "page" : undefined}
       >
         <Network aria-hidden="true" />
-        <span>
-          <strong>Graph</strong>
-          <small>Agent relationships</small>
-        </span>
+        Graph
       </Link>
-    </div>
+    </nav>
   );
 }

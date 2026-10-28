@@ -120,7 +120,7 @@ export function MessageTimeline({
               <Hash />
             </span>
             <h2>{emptyTitle}</h2>
-            <p>Messages you send in this conversation will appear here.</p>
+            <p>Messages you send here appear in this timeline. Mention an Agent with @ to hand it work.</p>
           </div>
         ) : null}
         {timelineGroups.map((messages, index, all) => {

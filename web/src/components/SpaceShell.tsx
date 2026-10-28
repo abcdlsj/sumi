@@ -50,9 +50,7 @@ import { useSpaceEvents } from "../hooks/useSpaceEvents";
 import { saveLastConversationRoute } from "../conversationMemory";
 import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
-import { InsightsNavigation } from "./InsightsNavigation";
 import { PixelIdentity } from "./PixelIdentity";
-import { SettingsNavigation } from "./SettingsNavigation";
 import { SumiMark } from "./SumiMark";
 
 export { PixelIdentity } from "./PixelIdentity";
@@ -297,20 +295,23 @@ export function SpaceShell({
   const inboxCount = groupInboxItems(inbox.data ?? []).length;
   const spaceSlugValue = space.data.slug;
   const contextNavigation =
-    active === "computers" ? (
+    active === "computers" && computers.data?.length ? (
       <ComputersNavigation
         computers={computers.data ?? []}
         spaceSlug={spaceSlugValue}
         activeHash={location.hash}
         canManage={["owner", "admin"].includes(currentMember.access_level)}
       />
-    ) : active === "insights" ? (
-      <InsightsNavigation spaceSlug={spaceSlugValue} />
-    ) : active === "settings" ? (
-      <SettingsNavigation spaceSlug={spaceSlugValue} />
-    ) : active === "company" ? (
-      <CompanyNavigation spaceSlug={spaceSlugValue} locationPath={location.pathname} />
     ) : null;
+  const page = children({
+    space: space.data,
+    user: user.data,
+    channels: channels.data.channels,
+    directMessages: availableDirectMessages,
+    members: members.data,
+    currentMember,
+    navigationOpen,
+  });
 
   return (
     <>
@@ -414,7 +415,6 @@ export function SpaceShell({
               />
             ) : null}
           </nav>
-          {contextNavigation ? <div className="nav-group nav-group--context">{contextNavigation}</div> : null}
           <section className="nav-group" aria-labelledby="nav-channels-heading">
             <div className="nav-section-heading">
               <h2 className="nav-label" id="nav-channels-heading">Channels</h2>
@@ -546,15 +546,15 @@ export function SpaceShell({
         />
       ) : null}
 
-        {children({
-          space: space.data,
-          user: user.data,
-          channels: channels.data.channels,
-          directMessages: availableDirectMessages,
-          members: members.data,
-          currentMember,
-          navigationOpen,
-        })}
+        {contextNavigation ? (
+          // Section lists live beside the page so the sidebar stays put.
+          <div className="space-section">
+            <nav className="section-nav" aria-label="Paired computers">
+              {contextNavigation}
+            </nav>
+            <div className="section-main">{page}</div>
+          </div>
+        ) : page}
       </main>
     </>
   );
@@ -572,36 +572,15 @@ function ComputersNavigation({ computers, spaceSlug, activeHash, canManage }: { 
       <p className="nav-label">Paired computers <span>{computers.length}</span></p>
       {canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer" aria-label="Pair Computer" title="Pair Computer"><Plus /></Link> : null}
     </div>
-    {computers.length ? computers.map((computer) => {
+    {computers.map((computer) => {
       const hash = `computer-${computer.id}`;
       const selected = normalizedHash === hash;
       return <Link key={computer.id} className={`context-entity-row computer-context-row${selected ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={hash}>
         <Monitor aria-hidden="true" />
         <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status}<em>v{computer.daemon_version}</em></small></span>
       </Link>;
-    }) : <div className="computer-nav-empty"><Monitor aria-hidden="true" /><p>No paired Computers</p>{canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer">Pair Computer</Link> : null}</div>}
+    })}
   </>;
-}
-
-function CompanyNavigation({
-  spaceSlug,
-  locationPath,
-}: {
-  spaceSlug: string;
-  locationPath: string;
-}) {
-  const officeActive = locationPath.endsWith("/company/office") || locationPath.endsWith("/company");
-  return (
-    <div className="company-navigation">
-      <p className="nav-label">Company</p>
-      <NavigationItem
-        icon={Building2}
-        label="Office"
-        active={officeActive}
-        href={`/s/${spaceSlug}/company/office`}
-      />
-    </div>
-  );
 }
 
 function viewingChannelId(

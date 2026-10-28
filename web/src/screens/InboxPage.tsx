@@ -9,6 +9,7 @@ import {
   markInboxItemRead,
   type Member,
 } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
 import { groupInboxItems, type InboxStack } from "../inbox";
 
@@ -134,20 +135,9 @@ function InboxWorkspace({
           {inbox.isPending ? <p className="timeline-status">Loading Inbox...</p> : null}
           {inbox.error ? <p className="timeline-status timeline-status--error">{inbox.error.message}</p> : null}
           {!inbox.isPending && !inbox.error && stacks.length === 0 ? (
-          <section className="inbox-empty" aria-labelledby="inbox-empty-title">
-            <div className="inbox-empty-intro">
-              <span className="inbox-empty-icon" aria-hidden="true"><Inbox /></span>
-              <div>
-                <p className="section-kicker">Attention queue</p>
-                <h2 id="inbox-empty-title">Nothing needs your attention</h2>
-                <p>Inbox lists collaboration routed to you. It is not your Message history.</p>
-              </div>
-            </div>
-            <ul className="inbox-empty-groups" aria-label="Empty Inbox groups">
-              <li><span><strong>Direct messages</strong><small>One row per direct conversation</small></span><b>0</b></li>
-              <li><span><strong>Threads</strong><small>One row per Thread with new attention</small></span><b>0</b></li>
-            </ul>
-          </section>
+          <EmptyState icon={Inbox} title="Nothing needs your attention" titleId="inbox-empty-title">
+            Mentions, DMs and Thread replies meant for you land here.
+          </EmptyState>
           ) : null}
           {groupedItems.map((group) => group.stacks.length > 0 ? (
           <InboxGroup

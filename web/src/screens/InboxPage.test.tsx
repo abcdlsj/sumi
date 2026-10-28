@@ -41,11 +41,7 @@ describe("Human Inbox", () => {
     renderRoute("/s/sumi-lab/inbox");
 
     expect(await screen.findByRole("heading", { name: "Nothing needs your attention" })).toBeVisible();
-    expect(screen.getByText(/not your Message history/i)).toBeVisible();
-    const groups = screen.getByRole("list", { name: "Empty Inbox groups" });
-    expect(groups).toHaveTextContent("Direct messages");
-    expect(groups).toHaveTextContent("Threads");
-    expect(screen.getAllByText("0")).toHaveLength(2);
+    expect(screen.getByText(/Thread replies meant for you land here/i)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Mark all read" })).toBeNull();
   });
 

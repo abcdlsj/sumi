@@ -2,6 +2,7 @@ import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { getSpaceBySlug } from "../api/client";
+import { InsightsTabs } from "../components/InsightsNavigation";
 import { SpaceShell } from "../components/SpaceShell";
 import { AGENT_INSIGHTS_FEATURE_ID, useFeatureEnabled } from "../featureRegistry";
 import { AgentGraphWorkspace } from "./AgentGraphPage";
@@ -17,7 +18,7 @@ export function InsightsPage() {
             <section className="route-status-panel">
               <p className="section-kicker">Experimental</p>
               <h1>Agent insights is disabled.</h1>
-              <p>Enable experimental features in Settings to show this entry in the rail.</p>
+              <p>Turn it on in Settings to add it to the sidebar.</p>
               <Link
                 className="command-button command-button--accent"
                 to="/s/$spaceSlug/settings"
@@ -33,7 +34,12 @@ export function InsightsPage() {
   }
   return (
     <SpaceShell spaceSlug={spaceSlug} active="insights">
-      {() => <Outlet />}
+      {() => (
+        <div className="insights-page">
+          <InsightsTabs spaceSlug={spaceSlug} />
+          <Outlet />
+        </div>
+      )}
     </SpaceShell>
   );
 }

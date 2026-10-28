@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowUpRight, Clock, RotateCcw, X, XCircle } from "lucide-react";
+import { ArrowUpRight, Clock, ListTodo, RotateCcw, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -17,6 +17,7 @@ import {
   type ThreadReference,
 } from "../api/client";
 import { DialogFrame } from "../components/DialogFrame";
+import { EmptyState } from "../components/EmptyState";
 import { SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
@@ -51,7 +52,7 @@ const statusLabels: Record<TaskStatus, string> = {
 
 const emptyFacts: Record<TaskFilter, string> = {
   all_open: "No open Tasks.",
-  todo: "No TODO Tasks.",
+  todo: "No Tasks to do.",
   in_progress: "No Tasks in progress.",
   in_review: "No Tasks in review.",
   done: "No completed Tasks.",
@@ -97,18 +98,18 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
       {tasks.isPending ? <div className="route-status">Loading Tasks…</div> : null}
       {tasks.error ? <div className="route-status route-status--error" role="alert">Tasks unavailable. Retry from this page.</div> : null}
       {!tasks.isPending && !tasks.error && visible.length === 0 ? (
-        <div className="tasks-empty" role="status">
-          <span className="tasks-empty-mark" aria-hidden="true">—</span>
-          <div>
-            <p>{emptyFacts[filter]}</p>
-            {filter === "all_open" ? (
-              <Link className="tasks-empty-action" to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: "general" }}>
-                Open Conversation
-                <ArrowUpRight aria-hidden="true" />
-              </Link>
-            ) : null}
-          </div>
-        </div>
+        <EmptyState
+          icon={ListTodo}
+          title={emptyFacts[filter]}
+          action={filter === "all_open" ? (
+            <Link className="command-button" to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: "general" }}>
+              Open #general
+              <ArrowUpRight aria-hidden="true" />
+            </Link>
+          ) : undefined}
+        >
+          {filter === "all_open" ? "Create a Task from any Root Message to hand work to an Agent." : null}
+        </EmptyState>
       ) : null}
       {groups.length ? (
         <div className="task-groups">

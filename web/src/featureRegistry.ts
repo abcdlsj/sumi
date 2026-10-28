@@ -29,7 +29,7 @@ export const REGISTERED_FEATURES: readonly RegisteredFeature[] = [
     name: "Agent insights",
     kind: "experimental",
     description:
-      "Agent-level usage statistics and the Agent-to-Agent coordination graph, shown in the left rail.",
+      "Agent-level usage statistics and the Agent-to-Agent coordination graph, shown in the sidebar.",
     storageKey: "sumi.feature.agent-insights",
     fields: [],
   },
@@ -37,7 +37,7 @@ export const REGISTERED_FEATURES: readonly RegisteredFeature[] = [
     id: COMPANY_OFFICE_FEATURE_ID,
     name: "Company office",
     kind: "experimental",
-    description: "Kairosoft-style company office shown in the left rail.",
+    description: "Kairosoft-style company office shown in the sidebar.",
     storageKey: "sumi.feature.company-office",
     fields: [],
   },

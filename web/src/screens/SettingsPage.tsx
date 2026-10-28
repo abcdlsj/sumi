@@ -1,11 +1,11 @@
 import { useLocation, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { SpaceShell } from "../components/SpaceShell";
 import {
   type FeatureConfigField,
   type RegisteredFeature,
-  registeredFeature,
+  REGISTERED_FEATURES,
   setFeatureEnabled,
   useFeatureEnabled,
 } from "../featureRegistry";
@@ -26,56 +26,85 @@ export function SettingsPage() {
 }
 
 export function SettingsWorkspace({ selectedFeatureId }: { selectedFeatureId?: string }) {
-  const feature = selectedFeatureId ? registeredFeature(selectedFeatureId) : undefined;
-  if (!feature) {
-    return (
-      <div className="settings-page settings-page--empty">
-        <header className="settings-header">
-          <h1>Settings</h1>
-          <p>Choose a feature from the list to configure it.</p>
-        </header>
-        <p className="settings-note">
-          Every feature registers its own config items; experimental features include an enable
-          switch.
-        </p>
-      </div>
-    );
-  }
-  return <FeatureDetail feature={feature} />;
-}
-
-function FeatureDetail({ feature }: { feature: RegisteredFeature }) {
-  const enabled = useFeatureEnabled(feature.id);
+  useEffect(() => {
+    if (!selectedFeatureId) return;
+    document.getElementById(`feature-${selectedFeatureId}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedFeatureId]);
   return (
     <div className="settings-page">
-      <header className="settings-detail-header">
-        <h1>{feature.name}</h1>
-        <span className={`settings-kind settings-kind--${feature.kind}`}>{feature.kind}</span>
+      <header className="settings-header">
+        <h1>Settings</h1>
+        <p>Preferences for this browser.</p>
       </header>
-      <p className="settings-description">{feature.description}</p>
-
-      <section className="settings-section" aria-labelledby="feature-config-heading">
-        <div>
-          <h2 id="feature-config-heading">Configuration</h2>
-          <p>Settings are stored in this browser only.</p>
+      <section className="settings-group" aria-labelledby="settings-experimental-heading">
+        <div className="settings-group-heading">
+          <h2 id="settings-experimental-heading">Experimental features</h2>
+          <p>Early features you can turn on. Each one adds an entry to the sidebar.</p>
         </div>
-        <div className="settings-config">
-          {feature.kind === "experimental" ? (
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(event) => setFeatureEnabled(feature.id, event.target.checked)}
-              />
-              <span>Enabled</span>
-            </label>
-          ) : null}
+        <ul className="settings-list">
+          {REGISTERED_FEATURES.map((feature) => (
+            <FeatureRow
+              key={feature.id}
+              feature={feature}
+              highlighted={feature.id === selectedFeatureId}
+            />
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function FeatureRow({ feature, highlighted }: { feature: RegisteredFeature; highlighted: boolean }) {
+  const enabled = useFeatureEnabled(feature.id);
+  const labelId = `feature-${feature.id}-label`;
+  return (
+    <li id={`feature-${feature.id}`} className={`settings-row${highlighted ? " settings-row--highlighted" : ""}`}>
+      <div className="settings-row-main">
+        <div className="settings-row-copy">
+          <strong id={labelId}>{feature.name}</strong>
+          <p>{feature.description}</p>
+        </div>
+        <Switch
+          labelledBy={labelId}
+          checked={enabled}
+          onChange={(value) => setFeatureEnabled(feature.id, value)}
+        />
+      </div>
+      {enabled && feature.fields.length ? (
+        <div className="settings-row-fields">
           {feature.fields.map((field) => (
             <FeatureField key={field.id} feature={feature} field={field} />
           ))}
         </div>
-      </section>
-    </div>
+      ) : null}
+    </li>
+  );
+}
+
+function Switch({
+  checked,
+  onChange,
+  labelledBy,
+  label,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  labelledBy?: string;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      className="settings-switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+    >
+      <span aria-hidden="true" />
+    </button>
   );
 }
 
@@ -92,17 +121,16 @@ function FeatureField({
   );
   if (field.kind !== "toggle") return null;
   return (
-    <label className="settings-toggle">
-      <input
-        type="checkbox"
+    <div className="settings-field">
+      <span>{field.label}</span>
+      <Switch
+        label={field.label}
         checked={checked}
-        onChange={(event) => {
-          const value = event.target.checked;
+        onChange={(value) => {
           setChecked(value);
           window.localStorage?.setItem(storageKey, value ? "1" : "0");
         }}
       />
-      <span>{field.label}</span>
-    </label>
+    </div>
   );
 }

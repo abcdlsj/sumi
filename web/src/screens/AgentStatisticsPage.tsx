@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Activity, ArrowDownToLine, ArrowUpFromLine, Gauge } from "lucide-react";
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Gauge } from "lucide-react";
 
 import {
   getComputerLlmUsage,
@@ -11,6 +11,7 @@ import {
   type LlmUsageAgentSeries,
   type LlmUsageBucket,
 } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity } from "../components/PixelIdentity";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "../components/TokenUsageChart";
 import "./agentStatistics.css";
@@ -194,11 +195,11 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
           </button>
         </div>
       ) : merged.agents.length === 0 || !selectedAgent ? (
-        <p className="agent-statistics-empty" role="status">
+        <EmptyState icon={BarChart3} title={usagePartial ? "Usage is incomplete" : "No usage yet"}>
           {usagePartial
             ? "No complete LLM usage data is available from the responding Computers."
             : "No LLM usage recorded yet. Usage appears after an Agent runs a model turn."}
-        </p>
+        </EmptyState>
       ) : (
         <>
           {usagePartial ? (

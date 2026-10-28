@@ -14,28 +14,29 @@ afterEach(() => {
 });
 
 describe("SettingsWorkspace", () => {
-  it("shows a placeholder when no feature is selected", () => {
+  it("lists every registered feature on one page", () => {
     render(<SettingsWorkspace />);
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeVisible();
-    expect(screen.getByText(/Choose a feature from the list/)).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Experimental features" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Agent insights" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Company office" })).toBeVisible();
   });
 
-  it("shows the experimental enable toggle and persists it per feature", () => {
-    render(<SettingsWorkspace selectedFeatureId="agent-insights" />);
+  it("persists the enable switch per feature", () => {
+    render(<SettingsWorkspace />);
 
-    const toggle = screen.getByRole("checkbox", { name: "Enabled" });
-    expect(toggle).not.toBeChecked();
+    const toggle = screen.getByRole("switch", { name: "Agent insights" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     fireEvent.click(toggle);
 
-    expect(screen.getByRole("checkbox", { name: "Enabled" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Agent insights" })).toHaveAttribute("aria-checked", "true");
     expect(window.localStorage.getItem("sumi.feature.agent-insights")).toBe("1");
   });
 
-  it("labels the feature kind", () => {
-    render(<SettingsWorkspace selectedFeatureId="agent-insights" />);
+  it("highlights the feature named in the link", () => {
+    render(<SettingsWorkspace selectedFeatureId="company-office" />);
 
-    expect(screen.getByText("experimental")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Agent insights" })).toBeVisible();
+    expect(document.getElementById("feature-company-office")).toHaveClass("settings-row--highlighted");
   });
 });
