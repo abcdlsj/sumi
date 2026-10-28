@@ -202,7 +202,6 @@ impl LocalIpcAdapter {
                     task_id: context.task_id,
                     focus_thread_id: context.focus_thread_id,
                     run_id: context.run_id,
-                    message_snapshot_sequence: context.message_snapshot_sequence,
                 },
                 action.clone(),
                 request.idempotency_key,
@@ -217,7 +216,14 @@ impl LocalIpcAdapter {
                     "Capability action rejected"
                 );
             }
+            // A held Message was not posted, so the Item it carried stays unhandled and the Run must
+            // see the returned Messages before writing again.
+            let held = matches!(
+                &response.data,
+                Some(data) if data.get("status").and_then(serde_json::Value::as_str) == Some("held")
+            );
             if response.ok
+                && !held
                 && CapabilityService::record_success(store, context.run_id, &action)
                     .await
                     .is_err()
@@ -420,7 +426,6 @@ mod tests {
                 assert_eq!(context.task_id, Some(task_id));
                 assert_eq!(context.focus_thread_id, thread_id);
                 assert_eq!(context.run_id, run_id);
-                assert_eq!(context.message_snapshot_sequence, 9);
                 assert!(matches!(action, Action::TaskLinkThread { .. }));
                 Response::success(serde_json::json!({ "forwarded": true }))
             },

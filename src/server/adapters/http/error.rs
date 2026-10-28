@@ -107,10 +107,10 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "Run context changed before the write; re-read the current context, then retry once",
             retryable: false,
         },
-        ApplicationError::StaleMessageContext { .. } => ErrorClass {
+        ApplicationError::StaleMessageContext => ErrorClass {
             status: StatusCode::CONFLICT,
             code: "context_changed",
-            message: "Message context changed before the write; re-read the channel/thread to refresh context, then retry once",
+            message: "The Focus Thread has Messages you have not read; read the Thread, then retry once",
             retryable: false,
         },
         ApplicationError::Unavailable => ErrorClass {
@@ -281,13 +281,10 @@ mod tests {
 
     #[test]
     fn classify_context_changed_is_actionable_and_not_blindly_retryable() {
-        let stale = classify(&ApplicationError::StaleMessageContext {
-            expected: 4,
-            actual: 5,
-        });
+        let stale = classify(&ApplicationError::StaleMessageContext);
         assert_eq!(stale.code, "context_changed");
         assert!(!stale.retryable);
-        assert!(stale.message.contains("re-read the channel/thread"));
+        assert!(stale.message.contains("read the Thread"));
         assert!(stale.message.contains("retry once"));
 
         let changed = classify(&ApplicationError::ContextChanged);

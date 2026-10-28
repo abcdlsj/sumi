@@ -23,7 +23,6 @@ pub(in crate::computer) struct AuthorizedCapability {
     pub(in crate::computer) task_id: Option<TaskId>,
     pub(in crate::computer) focus_thread_id: ThreadId,
     pub(in crate::computer) run_id: RunId,
-    pub(in crate::computer) message_snapshot_sequence: u64,
 }
 
 impl std::fmt::Debug for AuthorizedCapability {
@@ -35,7 +34,6 @@ impl std::fmt::Debug for AuthorizedCapability {
             .field("task_id", &self.task_id)
             .field("focus_thread_id", &self.focus_thread_id)
             .field("run_id", &self.run_id)
-            .field("message_snapshot_sequence", &self.message_snapshot_sequence)
             .finish()
     }
 }
@@ -121,7 +119,6 @@ impl CapabilityService {
             task_id: run.view().task_id,
             focus_thread_id: run.view().focus_thread_id,
             run_id: run.view().id,
-            message_snapshot_sequence: run.view().input.context.message_snapshot_sequence,
         })
     }
 }

@@ -82,6 +82,9 @@ impl CapabilityFixture {
                  INSERT INTO run_items(run_id,inbox_item_id,delivery_seq,attached_at) VALUES
                    ('{run_id}','{handled_item_id}',1,now()),
                    ('{run_id}','{deferred_item_id}',2,now());
+                 INSERT INTO run_observations(run_id,scope_kind,scope_id,observed_seq) VALUES
+                   ('{run_id}','channel','{channel_id}',1),
+                   ('{run_id}','thread','{focus_id}',1);
                  COMMIT;",
                 token_hash(computer_token),
             ))
@@ -122,7 +125,6 @@ impl CapabilityFixture {
                 task_id: None,
                 focus_thread_id: ThreadId::from_uuid(focus_id),
                 run_id: RunId::from_uuid(run_id),
-                message_snapshot_sequence: 1,
             },
             handled_item_id: InboxItemId::from_uuid(handled_item_id),
             deferred_item_id: InboxItemId::from_uuid(deferred_item_id),
@@ -673,7 +675,6 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
             body: "must roll back".to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: Some(fixture.handled_item_id),
-            snapshot_sequence: None,
         }))
         .await
         .unwrap_err();
@@ -806,7 +807,6 @@ async fn message_send_keeps_the_first_disposition_timestamp() {
             body: body.to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: Some(fixture.handled_item_id),
-            snapshot_sequence: None,
         })
     };
     fixture
@@ -852,7 +852,6 @@ async fn agent_message_send_resolves_display_name_mentions_in_the_target_channel
             body: "@Owner hello and @Nobody ignored".to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: None,
-            snapshot_sequence: None,
         }))
         .await
         .unwrap();
@@ -872,7 +871,6 @@ async fn agent_message_send_resolves_display_name_mentions_in_the_target_channel
             body: "no mention here".to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: None,
-            snapshot_sequence: Some(2),
         }))
         .await
         .unwrap();
@@ -897,7 +895,6 @@ async fn agent_message_send_can_open_an_agent_only_dm() {
             body: "private Agent note".to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: None,
-            snapshot_sequence: None,
         }))
         .await
         .unwrap();
@@ -1429,7 +1426,6 @@ async fn capability_message_send_mounts_ready_attachments_from_uploader() {
             body: "with attachment".into(),
             attachment_ids: vec![AttachmentId::from_uuid(attachment_id)],
             handle_item_id: None,
-            snapshot_sequence: None,
         }))
         .await
         .unwrap();
@@ -1472,7 +1468,6 @@ async fn capability_message_send_mounts_ready_attachments_from_uploader() {
             body: "pending attachment".into(),
             attachment_ids: vec![AttachmentId::from_uuid(pending_id)],
             handle_item_id: None,
-            snapshot_sequence: None,
         }))
         .await
         .unwrap_err();
@@ -1548,7 +1543,7 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
 }
 
 #[tokio::test]
-async fn channel_read_is_authorized_and_chat_writes_are_not_snapshot_gated() {
+async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
     let mut fixture = CapabilityFixture::create().await;
     let channel_id: Uuid =
         sqlx::query_scalar("SELECT channel_id FROM messages WHERE id=$1 AND placement='root'")
@@ -1568,33 +1563,8 @@ async fn channel_read_is_authorized_and_chat_writes_are_not_snapshot_gated() {
     assert_eq!(read["messages"].as_array().unwrap().len(), 1);
 
     let task_id = fixture.bind_task().await;
-    let new_message_id = Uuid::now_v7();
-    sqlx::query("UPDATE channels SET next_seq=next_seq+1 WHERE id=$1")
-        .bind(channel_id)
-        .execute(&fixture.state.pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES($1,$2,$3,$4,2,'reply','text',$5,'new context',now())")
-            .bind(new_message_id)
-            .bind(fixture.context.space_id.into_uuid())
-            .bind(channel_id)
-            .bind(fixture.context.focus_thread_id.into_uuid())
-            .bind(fixture.context.agent_id.into_uuid())
-            .execute(&fixture.state.pool)
-            .await
-            .unwrap();
+    let unseen = insert_focus_message(&fixture, channel_id, "unseen by the Run").await;
 
-    let committed = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "must commit".into(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-            snapshot_sequence: None,
-        }))
-        .await
-        .unwrap();
-    assert!(committed["message_id"].is_string());
     let stale_done = fixture
         .execute(capability::Action::TaskDone {
             result: "must not finish".into(),
@@ -1604,15 +1574,65 @@ async fn channel_read_is_authorized_and_chat_writes_are_not_snapshot_gated() {
         .unwrap_err();
     assert_eq!(stale_done.code, capability::ErrorCode::ContextChanged);
     assert!(!stale_done.retryable);
-    assert!(stale_done.message.contains("re-read the channel/thread"));
+    assert!(stale_done.message.contains("read the Thread"));
+    assert!(stale_done.details.is_empty());
+
+    // A held write records no idempotency, so the retry may reuse the same key.
+    let key = IdempotencyKey::from_uuid(Uuid::now_v7());
+    let held = fixture
+        .execute_with_key(
+            capability::Action::MessageSend(capability::MessageSend {
+                target: capability::MessageTarget::Focus,
+                body: "must wait".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: Some(fixture.handled_item_id),
+            }),
+            key,
+        )
+        .await
+        .unwrap();
+    assert_eq!(held["status"], "held");
+    let unseen_messages = held["unseen_messages"].as_array().unwrap();
+    assert_eq!(unseen_messages.len(), 1);
+    assert_eq!(unseen_messages[0]["seq"], serde_json::json!(unseen));
     assert_eq!(
-        stale_done.details["expected_snapshot"],
-        serde_json::json!(1)
+        unseen_messages[0]["content"]["body_markdown"],
+        "unseen by the Run"
     );
-    assert_eq!(stale_done.details["actual_snapshot"], serde_json::json!(3));
+    let after_hold: (i64, Option<String>) = (
+        sqlx::query_scalar("SELECT count(*) FROM messages WHERE body_markdown='must wait'")
+            .fetch_one(&fixture.state.pool)
+            .await
+            .unwrap(),
+        sqlx::query_scalar(
+            "SELECT disposition FROM run_items WHERE run_id=$1 AND inbox_item_id=$2",
+        )
+        .bind(fixture.context.run_id.into_uuid())
+        .bind(fixture.handled_item_id.into_uuid())
+        .fetch_one(&fixture.state.pool)
+        .await
+        .unwrap(),
+    );
+    assert_eq!(after_hold, (0, None));
+
+    let posted = fixture
+        .execute_with_key(
+            capability::Action::MessageSend(capability::MessageSend {
+                target: capability::MessageTarget::Focus,
+                body: "must wait".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            }),
+            key,
+        )
+        .await
+        .unwrap();
+    assert_eq!(posted["status"], "posted");
+    assert!(posted["message_id"].is_string());
+
     let facts: (String, String, i64) = sqlx::query_as(
             "SELECT tasks.status,runs.status, \
-             (SELECT count(*) FROM messages WHERE body_markdown IN ('must commit','must not finish')) \
+             (SELECT count(*) FROM messages WHERE body_markdown IN ('must wait','must not finish')) \
              FROM tasks JOIN agent_runs runs ON runs.task_id=tasks.id WHERE tasks.id=$1",
         )
         .bind(task_id.into_uuid())
@@ -1620,6 +1640,115 @@ async fn channel_read_is_authorized_and_chat_writes_are_not_snapshot_gated() {
         .await
         .unwrap();
     assert_eq!(facts, ("in_progress".into(), "working".into(), 1));
+    fixture.destroy().await;
+}
+
+#[tokio::test]
+async fn a_run_posts_after_five_consecutive_holds() {
+    let fixture = CapabilityFixture::create().await;
+    let channel_id: Uuid =
+        sqlx::query_scalar("SELECT channel_id FROM messages WHERE id=$1 AND placement='root'")
+            .bind(fixture.context.focus_thread_id.into_uuid())
+            .fetch_one(&fixture.state.pool)
+            .await
+            .unwrap();
+
+    for hop in 0..5 {
+        insert_focus_message(&fixture, channel_id, &format!("chatter {hop}")).await;
+        let held = fixture
+            .execute(capability::Action::MessageSend(capability::MessageSend {
+                target: capability::MessageTarget::Focus,
+                body: "insisting".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(held["status"], "held");
+    }
+    let posted = fixture
+        .execute(capability::Action::MessageSend(capability::MessageSend {
+            target: capability::MessageTarget::Focus,
+            body: "insisting".into(),
+            attachment_ids: Vec::new(),
+            handle_item_id: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(posted["status"], "posted");
+    let posted_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM messages WHERE body_markdown='insisting'")
+            .fetch_one(&fixture.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(posted_count, 1);
+    fixture.destroy().await;
+}
+
+#[tokio::test]
+async fn a_run_is_not_held_by_its_own_messages_or_by_other_threads() {
+    let fixture = CapabilityFixture::create().await;
+    let channel_id: Uuid =
+        sqlx::query_scalar("SELECT channel_id FROM messages WHERE id=$1 AND placement='root'")
+            .bind(fixture.context.focus_thread_id.into_uuid())
+            .fetch_one(&fixture.state.pool)
+            .await
+            .unwrap();
+
+    insert_focus_message(&fixture, channel_id, "own words written as the Agent").await;
+    sqlx::query("UPDATE messages SET author_member_id=$1 WHERE body_markdown='own words written as the Agent'")
+        .bind(fixture.context.agent_id.into_uuid())
+        .execute(&fixture.state.pool)
+        .await
+        .unwrap();
+    let other_thread = Uuid::now_v7();
+    let sequence: i64 = sqlx::query_scalar(
+        "UPDATE channels SET next_seq=next_seq+1 WHERE id=$1 RETURNING next_seq-1",
+    )
+    .bind(channel_id)
+    .fetch_one(&fixture.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) \
+         VALUES($1,$2,$3,$4,$5,'root','text',$6,'elsewhere',now())",
+    )
+    .bind(other_thread)
+    .bind(fixture.context.space_id.into_uuid())
+    .bind(channel_id)
+    .bind(other_thread)
+    .bind(sequence)
+    .bind(fixture.owner_id)
+    .execute(&fixture.state.pool)
+    .await
+    .unwrap();
+
+    let posted = fixture
+        .execute(capability::Action::MessageSend(capability::MessageSend {
+            target: capability::MessageTarget::Focus,
+            body: "not blocked".into(),
+            attachment_ids: Vec::new(),
+            handle_item_id: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(posted["status"], "posted");
+
+    let held = fixture
+        .execute(capability::Action::MessageSend(capability::MessageSend {
+            target: capability::MessageTarget::Channel(ChannelId::from_uuid(channel_id)),
+            body: "new root".into(),
+            attachment_ids: Vec::new(),
+            handle_item_id: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(held["status"], "held");
+    assert_eq!(held["unseen_messages"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        held["unseen_messages"][0]["content"]["body_markdown"],
+        "elsewhere"
+    );
     fixture.destroy().await;
 }
 
@@ -1643,8 +1772,7 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
         .await
         .unwrap_err();
     assert_eq!(stale.code, capability::ErrorCode::ContextChanged);
-    assert_eq!(stale.details["expected_snapshot"], serde_json::json!(1));
-    assert_eq!(stale.details["actual_snapshot"], serde_json::json!(2));
+    assert!(stale.details.is_empty());
 
     fixture
         .execute(capability::Action::ChannelRead {
@@ -1788,7 +1916,6 @@ async fn agent_write_actions_emit_agent_activity_events() {
             body: "activity check".into(),
             attachment_ids: Vec::new(),
             handle_item_id: None,
-            snapshot_sequence: None,
         }))
         .await
         .unwrap();
@@ -1831,12 +1958,6 @@ async fn agent_write_actions_emit_agent_activity_events() {
         })
         .await
         .unwrap();
-    let snapshot: i64 = sqlx::query_scalar("SELECT next_seq-1 FROM channels WHERE id=$1")
-        .bind(fixture.channel_id)
-        .fetch_one(&fixture.state.pool)
-        .await
-        .unwrap();
-    fixture.context.message_snapshot_sequence = snapshot as u64;
     fixture
         .execute(capability::Action::TaskDone {
             result: "Agent Result".into(),

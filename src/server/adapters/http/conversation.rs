@@ -391,9 +391,25 @@ pub(super) async fn insert_message(
     context: MessageWriteContext,
     body: CreateMessageBody,
 ) -> Result<Uuid, ApplicationError> {
+    match publish_message(state, channel_id, author, context, body, None).await? {
+        PublishOutcome::Published(published) => Ok(published.message_id.into_uuid()),
+        PublishOutcome::Held(_) => Err(ApplicationError::Internal),
+    }
+}
+
+/// Publishes a Message and routes its hard Items. `observer` is set for Agent Run writes, which
+/// the Server holds while the target has Messages the Run has not observed.
+pub(super) async fn publish_message(
+    state: &RuntimeState,
+    channel_id: Uuid,
+    author: Uuid,
+    context: MessageWriteContext,
+    body: CreateMessageBody,
+    observer: Option<RunId>,
+) -> Result<PublishOutcome, ApplicationError> {
     let message_id = MessageId::from_uuid(Uuid::now_v7());
     let mut storage = state.storage.clone();
-    let published = PublishMessage::execute(
+    let outcome = PublishMessage::execute(
         &mut storage,
         MessageDraft {
             message_id,
@@ -415,17 +431,20 @@ pub(super) async fn insert_message(
             }),
             now: OffsetDateTime::now_utc(),
         },
+        observer,
     )
     .await?;
-    for item_id in published.hard_item_ids {
-        let mut storage = state.storage.clone();
-        if let Err(error) =
-            RouteHardItem::execute(&mut storage, RouteHardItemInput { item_id }).await
-        {
-            tracing::warn!(%item_id, error = %error, "hard Inbox Item remains pending after immediate routing failed");
+    if let PublishOutcome::Published(published) = &outcome {
+        for item_id in published.hard_item_ids.iter().copied() {
+            let mut storage = state.storage.clone();
+            if let Err(error) =
+                RouteHardItem::execute(&mut storage, RouteHardItemInput { item_id }).await
+            {
+                tracing::warn!(%item_id, error = %error, "hard Inbox Item remains pending after immediate routing failed");
+            }
         }
     }
-    Ok(published.message_id.into_uuid())
+    Ok(outcome)
 }
 
 pub(super) async fn channel_member(

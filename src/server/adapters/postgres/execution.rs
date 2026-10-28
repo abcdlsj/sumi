@@ -291,32 +291,242 @@ impl PostgresTransaction {
         Ok(())
     }
 
-    pub(super) async fn observed_thread_sequence(
+    /// Resolves the Channel that owns `scope` and the stored key of the scope.
+    async fn observation_target(
         &mut self,
-        run_id: RunId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        let sequence: Option<Option<i64>> =
-            sqlx::query_scalar("SELECT observed_thread_seq FROM agent_runs WHERE id=$1")
-                .bind(run_id.into_uuid())
-                .fetch_optional(&mut *self.connection)
+        scope: ObservationScope,
+    ) -> Result<(Uuid, &'static str, Uuid), ApplicationError> {
+        match scope {
+            ObservationScope::Channel(channel_id) => {
+                Ok((channel_id.into_uuid(), "channel", channel_id.into_uuid()))
+            }
+            ObservationScope::ChannelRoots(channel_id) => Ok((
+                channel_id.into_uuid(),
+                "channel_roots",
+                channel_id.into_uuid(),
+            )),
+            ObservationScope::Thread(thread_id) => {
+                let channel_id = sqlx::query_scalar::<_, Uuid>(
+                    "SELECT channel_id FROM messages WHERE id=$1 AND placement='root'",
+                )
+                .bind(thread_id.into_uuid())
+                .fetch_one(&mut *self.connection)
                 .await
                 .map_err(map_sqlx)?;
-        sequence
-            .flatten()
-            .map(|value| u64::try_from(value).map_err(|_| ApplicationError::Internal))
-            .transpose()
+                Ok((channel_id, "thread", thread_id.into_uuid()))
+            }
+        }
     }
 
-    pub(super) async fn record_observed_thread_sequence(
+    /// Effective observed position: the scope's own position or the Channel-wide one, whichever
+    /// is later. `None` when the Run holds neither.
+    async fn effective_observation(
         &mut self,
         run_id: RunId,
-        sequence: u64,
-    ) -> Result<(), ApplicationError> {
-        sqlx::query(
-            "UPDATE agent_runs SET observed_thread_seq=GREATEST(observed_thread_seq,$2) WHERE id=$1",
+        channel_id: Uuid,
+        kind: &str,
+        scope_id: Uuid,
+    ) -> Result<Option<(i64, i32)>, ApplicationError> {
+        sqlx::query_as::<_, (Option<i64>, i32)>(
+            "SELECT GREATEST( \
+                (SELECT observed_seq FROM run_observations \
+                 WHERE run_id=$1 AND scope_kind=$2 AND scope_id=$3), \
+                (SELECT observed_seq FROM run_observations \
+                 WHERE run_id=$1 AND scope_kind='channel' AND scope_id=$4)), \
+             COALESCE((SELECT consecutive_holds FROM run_observations \
+                 WHERE run_id=$1 AND scope_kind=$2 AND scope_id=$3), 0)",
         )
         .bind(run_id.into_uuid())
-        .bind(i64::try_from(sequence).map_err(|_| ApplicationError::Conflict)?)
+        .bind(kind)
+        .bind(scope_id)
+        .bind(channel_id)
+        .fetch_one(&mut *self.connection)
+        .await
+        .map(|(observed, holds)| observed.map(|observed| (observed, holds)))
+        .map_err(map_sqlx)
+    }
+
+    pub(super) async fn record_run_start_observations(
+        &mut self,
+        start: &RunStart,
+    ) -> Result<(), ApplicationError> {
+        let channel_sequence = i64::try_from(start.channel_snapshot_sequence)
+            .map_err(|_| ApplicationError::Internal)?;
+        let focus_sequence =
+            i64::try_from(start.focus.message_sequence).map_err(|_| ApplicationError::Internal)?;
+        sqlx::query(
+            "INSERT INTO run_observations(run_id,scope_kind,scope_id,observed_seq) \
+             VALUES ($1,'channel',$2,$3),($1,'thread',$4,$5) \
+             ON CONFLICT (run_id,scope_kind,scope_id) \
+             DO UPDATE SET observed_seq=GREATEST(run_observations.observed_seq,EXCLUDED.observed_seq)",
+        )
+        .bind(start.run_id.into_uuid())
+        .bind(start.focus.channel_id.into_uuid())
+        .bind(channel_sequence)
+        .bind(start.focus.thread_id.into_uuid())
+        .bind(focus_sequence)
+        .execute(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(())
+    }
+
+    pub(super) async fn unobserved_messages(
+        &mut self,
+        run_id: RunId,
+        observer: MemberId,
+        scope: ObservationScope,
+        limit: u32,
+    ) -> Result<Option<UnobservedMessages>, ApplicationError> {
+        let (channel_id, kind, scope_id) = self.observation_target(scope).await?;
+        sqlx::query("SELECT 1 FROM channels WHERE id=$1 FOR UPDATE")
+            .bind(channel_id)
+            .execute(&mut *self.connection)
+            .await
+            .map_err(map_sqlx)?;
+        let Some((observed, holds)) = self
+            .effective_observation(run_id, channel_id, kind, scope_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let rows = sqlx::query_as::<_, (Uuid, i64)>(
+            "SELECT id,channel_seq FROM messages \
+             WHERE channel_id=$1 AND channel_seq>$2 AND deleted_at IS NULL \
+               AND content_kind='text' AND author_member_id IS DISTINCT FROM $3 \
+               AND CASE $4 WHEN 'thread' THEN thread_id=$5 \
+                           WHEN 'channel_roots' THEN placement='root' \
+                           ELSE TRUE END \
+             ORDER BY channel_seq LIMIT $6",
+        )
+        .bind(channel_id)
+        .bind(observed)
+        .bind(observer.into_uuid())
+        .bind(kind)
+        .bind(scope_id)
+        .bind(i64::from(limit))
+        .fetch_all(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        let messages = rows
+            .into_iter()
+            .map(|(id, sequence)| {
+                Ok(ObservedMessage {
+                    id: MessageId::from_uuid(id),
+                    sequence: u64::try_from(sequence).map_err(|_| ApplicationError::Internal)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?;
+        Ok(Some(UnobservedMessages {
+            consecutive_holds: u32::try_from(holds).map_err(|_| ApplicationError::Internal)?,
+            messages,
+        }))
+    }
+
+    pub(super) async fn record_hold(
+        &mut self,
+        run_id: RunId,
+        scope: ObservationScope,
+        observed_sequence: u64,
+    ) -> Result<(), ApplicationError> {
+        let (_, kind, scope_id) = self.observation_target(scope).await?;
+        sqlx::query(
+            "INSERT INTO run_observations(run_id,scope_kind,scope_id,observed_seq,consecutive_holds) \
+             VALUES ($1,$2,$3,$4,1) \
+             ON CONFLICT (run_id,scope_kind,scope_id) DO UPDATE SET \
+                observed_seq=GREATEST(run_observations.observed_seq,EXCLUDED.observed_seq), \
+                consecutive_holds=run_observations.consecutive_holds+1",
+        )
+        .bind(run_id.into_uuid())
+        .bind(kind)
+        .bind(scope_id)
+        .bind(i64::try_from(observed_sequence).map_err(|_| ApplicationError::Conflict)?)
+        .execute(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(())
+    }
+
+    pub(super) async fn clear_holds(
+        &mut self,
+        run_id: RunId,
+        scope: ObservationScope,
+    ) -> Result<(), ApplicationError> {
+        let (_, kind, scope_id) = self.observation_target(scope).await?;
+        sqlx::query(
+            "UPDATE run_observations SET consecutive_holds=0 \
+             WHERE run_id=$1 AND scope_kind=$2 AND scope_id=$3 AND consecutive_holds>0",
+        )
+        .bind(run_id.into_uuid())
+        .bind(kind)
+        .bind(scope_id)
+        .execute(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(())
+    }
+
+    pub(super) async fn record_read(
+        &mut self,
+        run_id: RunId,
+        observer: MemberId,
+        scope: ObservationScope,
+        sequences: &[u64],
+    ) -> Result<(), ApplicationError> {
+        let Some(&maximum) = sequences.iter().max() else {
+            return Ok(());
+        };
+        let maximum = i64::try_from(maximum).map_err(|_| ApplicationError::Internal)?;
+        let returned = sequences
+            .iter()
+            .map(|sequence| i64::try_from(*sequence).map_err(|_| ApplicationError::Internal))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (channel_id, kind, scope_id) = self.observation_target(scope).await?;
+        // A missing position means the scope was never observed, so the read has to start at its
+        // first Message before it can claim anything.
+        let observed = self
+            .effective_observation(run_id, channel_id, kind, scope_id)
+            .await?
+            .map(|(observed, _)| observed)
+            .unwrap_or(0);
+        if observed >= maximum {
+            return Ok(());
+        }
+        // The position never claims a Message the read did not return: a single unseen Message
+        // between the old position and the returned maximum blocks the advance.
+        let gap: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM messages \
+             WHERE channel_id=$1 AND channel_seq>$2 AND channel_seq<=$3 \
+               AND deleted_at IS NULL AND content_kind='text' \
+               AND author_member_id IS DISTINCT FROM $4 \
+               AND channel_seq<>ALL($5) \
+               AND CASE $6 WHEN 'thread' THEN thread_id=$7 \
+                           WHEN 'channel_roots' THEN placement='root' \
+                           ELSE TRUE END)",
+        )
+        .bind(channel_id)
+        .bind(observed)
+        .bind(maximum)
+        .bind(observer.into_uuid())
+        .bind(&returned)
+        .bind(kind)
+        .bind(scope_id)
+        .fetch_one(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        if gap {
+            return Ok(());
+        }
+        sqlx::query(
+            "INSERT INTO run_observations(run_id,scope_kind,scope_id,observed_seq) \
+             VALUES ($1,$2,$3,$4) \
+             ON CONFLICT (run_id,scope_kind,scope_id) \
+             DO UPDATE SET observed_seq=GREATEST(run_observations.observed_seq,EXCLUDED.observed_seq)",
+        )
+        .bind(run_id.into_uuid())
+        .bind(kind)
+        .bind(scope_id)
+        .bind(maximum)
         .execute(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;
@@ -696,18 +906,39 @@ impl ExecutionTransaction for PostgresTransaction {
     async fn save_run(&mut self, run: Run) -> Result<(), ApplicationError> {
         self.save_run(run).await
     }
-    async fn observed_thread_sequence(
+    async fn unobserved_messages(
         &mut self,
         run_id: RunId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        self.observed_thread_sequence(run_id).await
+        observer: MemberId,
+        scope: ObservationScope,
+        limit: u32,
+    ) -> Result<Option<UnobservedMessages>, ApplicationError> {
+        self.unobserved_messages(run_id, observer, scope, limit)
+            .await
     }
-    async fn record_observed_thread_sequence(
+    async fn record_hold(
         &mut self,
         run_id: RunId,
-        sequence: u64,
+        scope: ObservationScope,
+        observed_sequence: u64,
     ) -> Result<(), ApplicationError> {
-        self.record_observed_thread_sequence(run_id, sequence).await
+        self.record_hold(run_id, scope, observed_sequence).await
+    }
+    async fn clear_holds(
+        &mut self,
+        run_id: RunId,
+        scope: ObservationScope,
+    ) -> Result<(), ApplicationError> {
+        self.clear_holds(run_id, scope).await
+    }
+    async fn record_read(
+        &mut self,
+        run_id: RunId,
+        observer: MemberId,
+        scope: ObservationScope,
+        sequences: &[u64],
+    ) -> Result<(), ApplicationError> {
+        self.record_read(run_id, observer, scope, sequences).await
     }
     async fn dispatchable_work(
         &mut self,

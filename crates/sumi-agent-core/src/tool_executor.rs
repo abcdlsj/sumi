@@ -308,7 +308,7 @@ mod tests {
         let error = "shell exited with exit status: 1: {\"schema_version\":1,\"ok\":false,"
             .to_owned()
             + "\"error\":{\"code\":\"context_changed\",\"message\":\"Message context changed\","
-            + "\"retryable\":false,\"details\":{\"expected_snapshot\":4,\"actual_snapshot\":5}}}";
+            + "\"retryable\":false,\"details\":{}}}";
 
         assert_eq!(tool_error_code(&error), "context_changed");
         assert_eq!(capability_error_code(&error), Some("context_changed"));

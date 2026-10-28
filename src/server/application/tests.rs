@@ -67,10 +67,10 @@ use super::{
         ApplicationError, AttachmentObjectPort, AttachmentTransaction, AuthenticatedHuman,
         CollaborationTransaction, ComputerRecord, DirectMessageView, DispatchCandidate, Effect,
         EffectSink, ExecutionTransaction, HumanMemberRecord, IdentityTransaction, InboxItemView,
-        InboxScope, InvitationTokenPort, MemberKind, MessageDraft, PairedComputer, PairingCodePort,
-        PasswordPort, PublishedMessage, RawInvitationToken, RawPairingCode, RawSessionToken,
-        RunCapabilityProof, SessionTokenPort, SpaceHumanMember, SpaceMemberView, StoredObject,
-        TaskTransaction, TransactionPort,
+        InboxScope, InvitationTokenPort, MemberKind, MessageDraft, ObservationScope,
+        PairedComputer, PairingCodePort, PasswordPort, PublishedMessage, RawInvitationToken,
+        RawPairingCode, RawSessionToken, RunCapabilityProof, SessionTokenPort, SpaceHumanMember,
+        SpaceMemberView, StoredObject, TaskTransaction, TransactionPort, UnobservedMessages,
     },
     task::{
         CreateTaskFromRootMessage, CreateTaskInput, LinkThreadInput, LinkThreadToTask,
@@ -1223,12 +1223,6 @@ impl CollaborationTransaction for MemoryTransaction {
             .get(&thread_id)
             .is_some_and(|thread| thread.audience.contains(&actor)))
     }
-    async fn thread_message_sequence(
-        &mut self,
-        _thread_id: ThreadId,
-    ) -> Result<u64, ApplicationError> {
-        Ok(0)
-    }
     async fn publish_message(
         &mut self,
         draft: MessageDraft,
@@ -1715,16 +1709,36 @@ impl ExecutionTransaction for MemoryTransaction {
         self.state.runs.insert(run.view().id, run);
         Ok(())
     }
-    async fn observed_thread_sequence(
+    async fn unobserved_messages(
         &mut self,
         _run_id: RunId,
-    ) -> Result<Option<u64>, ApplicationError> {
+        _observer: MemberId,
+        _scope: ObservationScope,
+        _limit: u32,
+    ) -> Result<Option<UnobservedMessages>, ApplicationError> {
         Ok(None)
     }
-    async fn record_observed_thread_sequence(
+    async fn record_hold(
         &mut self,
         _run_id: RunId,
-        _sequence: u64,
+        _scope: ObservationScope,
+        _observed_sequence: u64,
+    ) -> Result<(), ApplicationError> {
+        Ok(())
+    }
+    async fn clear_holds(
+        &mut self,
+        _run_id: RunId,
+        _scope: ObservationScope,
+    ) -> Result<(), ApplicationError> {
+        Ok(())
+    }
+    async fn record_read(
+        &mut self,
+        _run_id: RunId,
+        _observer: MemberId,
+        _scope: ObservationScope,
+        _sequences: &[u64],
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -2348,7 +2362,6 @@ async fn source_override_task_activity_item_drives_bound_run_after_current_run_e
             scope: TaskOutcomeScope::AgentRun(OutcomeRunContext {
                 run_id: run(46),
                 computer_id: computer(999),
-                message_snapshot_sequence: 0,
             }),
             actor_member_id: agent,
             idempotency_key: idempotency(47),
@@ -2811,6 +2824,7 @@ async fn publishing_a_reply_refreshes_the_thread_and_each_notified_inbox() {
             handled_item: None,
             now: OffsetDateTime::UNIX_EPOCH,
         },
+        None,
     )
     .await
     .unwrap();
@@ -3102,19 +3116,19 @@ async fn publishing_a_message_requires_ready_attachments_from_the_same_space() {
         now,
     };
 
-    PublishMessage::execute(&mut port, draft(vec![ready.view().id], 601))
+    PublishMessage::execute(&mut port, draft(vec![ready.view().id], 601), None)
         .await
         .unwrap();
     assert!(matches!(
-        PublishMessage::execute(&mut port, draft(vec![uploading.view().id], 602)).await,
+        PublishMessage::execute(&mut port, draft(vec![uploading.view().id], 602), None).await,
         Err(ApplicationError::Conflict)
     ));
     assert!(matches!(
-        PublishMessage::execute(&mut port, draft(vec![other_space.view().id], 603)).await,
+        PublishMessage::execute(&mut port, draft(vec![other_space.view().id], 603), None).await,
         Err(ApplicationError::NotFound)
     ));
     assert!(matches!(
-        PublishMessage::execute(&mut port, draft(vec![attachment(999)], 604)).await,
+        PublishMessage::execute(&mut port, draft(vec![attachment(999)], 604), None).await,
         Err(ApplicationError::NotFound)
     ));
 }
@@ -3422,7 +3436,6 @@ async fn agent_task_done_atomically_finishes_run_items_and_replays() {
         scope: TaskOutcomeScope::AgentRun(OutcomeRunContext {
             run_id,
             computer_id,
-            message_snapshot_sequence: 0,
         }),
         actor_member_id: agent,
         idempotency_key: key,

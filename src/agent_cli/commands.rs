@@ -356,7 +356,6 @@ impl AgentCli {
                         body,
                         attachment_ids: args.attachment,
                         handle_item_id: args.handle,
-                        snapshot_sequence: None,
                     }),
                     true,
                 )

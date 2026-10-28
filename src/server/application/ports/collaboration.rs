@@ -55,10 +55,6 @@ pub(in crate::server) trait CollaborationTransaction {
         actor: MemberId,
         thread_id: ThreadId,
     ) -> Result<bool, ApplicationError>;
-    async fn thread_message_sequence(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<u64, ApplicationError>;
     async fn publish_message(
         &mut self,
         draft: MessageDraft,

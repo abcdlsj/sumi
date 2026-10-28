@@ -13,8 +13,8 @@ use crate::server::domain::{
 
 use super::ports::{
     ApplicationError, AttachmentTransaction, CollaborationTransaction, DirectMessageView, Effect,
-    EffectSink, ExecutionTransaction, IdentityTransaction, MessageDraft, PublishedMessage,
-    TransactionPort,
+    EffectSink, ExecutionTransaction, IdentityTransaction, MessageDraft, ObservationScope,
+    PublishOutcome, PublishedMessage, TransactionPort,
 };
 
 pub(in crate::server) struct ArchiveChannel;
@@ -179,13 +179,21 @@ impl OpenDirectMessage {
     }
 }
 
+/// Consecutive holds one Run accepts for one target before the next write commits unchecked.
+pub(in crate::server) const MAX_CONSECUTIVE_HOLDS: u32 = 5;
+/// Unobserved Messages returned by one hold; the observed position advances only past these.
+pub(in crate::server) const HELD_MESSAGE_LIMIT: u32 = 20;
+
 pub(in crate::server) struct PublishMessage;
 
 impl PublishMessage {
+    /// `observer` is the Run writing on the Agent's behalf. A Run write is held while the target
+    /// has other Members' Messages the Run has not observed.
     pub(in crate::server) async fn execute<P: TransactionPort>(
         port: &mut P,
         draft: MessageDraft,
-    ) -> Result<PublishedMessage, ApplicationError> {
+        observer: Option<RunId>,
+    ) -> Result<PublishOutcome, ApplicationError> {
         if draft.body_markdown.trim().is_empty() {
             return Err(ApplicationError::Conflict);
         }
@@ -198,11 +206,31 @@ impl PublishMessage {
                 )
                 .await?
             {
-                return Ok(PublishedMessage {
+                return Ok(PublishOutcome::Published(PublishedMessage {
                     message_id: MessageId::from_uuid(message_id),
                     hard_item_ids: Vec::new(),
                     notified_member_ids: Vec::new(),
-                });
+                }));
+            }
+            let scope = match draft.thread_id {
+                Some(thread_id) => ObservationScope::Thread(thread_id),
+                None => ObservationScope::ChannelRoots(draft.channel_id),
+            };
+            if let Some(run_id) = observer {
+                // The check and the write share one transaction under the Channel lock, so no
+                // Message can land between them.
+                let unobserved = transaction
+                    .unobserved_messages(run_id, draft.author_member_id, scope, HELD_MESSAGE_LIMIT)
+                    .await?;
+                if let Some(unobserved) = unobserved
+                    && let Some(last) = unobserved.messages.last()
+                    && unobserved.consecutive_holds < MAX_CONSECUTIVE_HOLDS
+                {
+                    transaction
+                        .record_hold(run_id, scope, last.sequence)
+                        .await?;
+                    return Ok(PublishOutcome::Held(unobserved.messages));
+                }
             }
             if !draft.attachment_ids.is_empty() {
                 let channel = transaction.channel(draft.channel_id).await?;
@@ -239,7 +267,10 @@ impl PublishMessage {
             for member_id in &published.notified_member_ids {
                 transaction.emit(Effect::InboxChanged(*member_id));
             }
-            Ok(published)
+            if let Some(run_id) = observer {
+                transaction.clear_holds(run_id, scope).await?;
+            }
+            Ok(PublishOutcome::Published(published))
         })
         .await
     }

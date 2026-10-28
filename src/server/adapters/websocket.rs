@@ -57,7 +57,7 @@ fn channel_activity_error_code(error: &ApplicationError) -> ChannelActivityQuery
         | ApplicationError::Unauthenticated
         | ApplicationError::PayloadTooLarge
         | ApplicationError::ContextChanged
-        | ApplicationError::StaleMessageContext { .. }
+        | ApplicationError::StaleMessageContext
         | ApplicationError::Internal => ChannelActivityQueryErrorCode::Internal,
     }
 }
@@ -627,7 +627,7 @@ mod tests {
                 ..
             }
         ));
-        let future = ProtocolVersionRange::new(ProtocolVersion::new(5), ProtocolVersion::new(5));
+        let future = ProtocolVersionRange::new(ProtocolVersion::new(6), ProtocolVersion::new(6));
         assert!(matches!(
             negotiate(&hello(future), false, true),
             ServerHandshake::Rejected {

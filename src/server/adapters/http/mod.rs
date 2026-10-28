@@ -205,5 +205,5 @@ pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> R
 }
 use crate::server::application::ports::{
     AttachmentTransaction, CollaborationTransaction, EffectSink, ExecutionTransaction,
-    IdentityTransaction, TaskTransaction,
+    IdentityTransaction, ObservationScope, ObservedMessage, PublishOutcome, TaskTransaction,
 };

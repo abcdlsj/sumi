@@ -287,7 +287,7 @@ pub(super) fn run_dispatch_error_code(error: &ApplicationError) -> &'static str 
         ApplicationError::PayloadTooLarge => "run_dispatch_payload_too_large",
         ApplicationError::PermissionDenied => "run_dispatch_permission_denied",
         ApplicationError::Conflict | ApplicationError::Domain(_) => "run_dispatch_conflict",
-        ApplicationError::ContextChanged | ApplicationError::StaleMessageContext { .. } => {
+        ApplicationError::ContextChanged | ApplicationError::StaleMessageContext => {
             "run_dispatch_context_changed"
         }
         ApplicationError::Unavailable => "run_dispatch_unavailable",
@@ -460,22 +460,33 @@ pub(super) async fn execute_agent_action(
             };
             let continuity = agent_continuity(state, context.agent_id.into_uuid(), scope).await;
             Ok(
-                json!({"agent":{"id":context.agent_id,"space_id":context.space_id},"task":task,"focus_thread_id":context.focus_thread_id,"run":{"id":context.run_id,"message_snapshot_sequence":context.message_snapshot_sequence},"dispatched_items":items.iter().map(|row|json!({"id":row.id,"kind":row.kind,"strength":row.strength,"status":row.status,"available_at":timestamp(row.available_at),"delivery_outcome":row.delivery_outcome,"delivery_event_id":row.delivery_event_id,"delivery_receipt_at":row.delivery_receipt_at.map(timestamp),"disposition":row.disposition,"disposition_at":row.disposition_at.map(timestamp)})).collect::<Vec<_>>(),"session_continuity":continuity}),
+                json!({"agent":{"id":context.agent_id,"space_id":context.space_id},"task":task,"focus_thread_id":context.focus_thread_id,"run":{"id":context.run_id},"dispatched_items":items.iter().map(|row|json!({"id":row.id,"kind":row.kind,"strength":row.strength,"status":row.status,"available_at":timestamp(row.available_at),"delivery_outcome":row.delivery_outcome,"delivery_event_id":row.delivery_event_id,"delivery_receipt_at":row.delivery_receipt_at.map(timestamp),"disposition":row.disposition,"disposition_at":row.disposition_at.map(timestamp)})).collect::<Vec<_>>(),"session_continuity":continuity}),
             )
         }
         capability::Action::SpaceMembers => {
             agent_read_space_members(state, context.space_id.into_uuid()).await
         }
         capability::Action::MessageRead(page) => {
-            let value = agent_read_thread(state, context.focus_thread_id.into_uuid(), page).await?;
-            record_observed_thread_sequence(state, context).await;
+            let (value, sequences) =
+                agent_read_thread(state, context.focus_thread_id.into_uuid(), page).await?;
+            record_read(
+                state,
+                context,
+                ObservationScope::Thread(context.focus_thread_id),
+                &sequences,
+            )
+            .await;
             Ok(value)
         }
         capability::Action::ThreadRead { thread_id, page } => {
-            let value = agent_read_thread(state, thread_id.into_uuid(), page).await?;
-            if thread_id == context.focus_thread_id {
-                record_observed_thread_sequence(state, context).await;
-            }
+            let (value, sequences) = agent_read_thread(state, thread_id.into_uuid(), page).await?;
+            record_read(
+                state,
+                context,
+                ObservationScope::Thread(thread_id),
+                &sequences,
+            )
+            .await;
             Ok(value)
         }
         capability::Action::ChannelMembers { channel_id } => {
@@ -499,7 +510,7 @@ pub(super) async fn execute_agent_action(
                     false,
                 ));
             }
-            let value = agent_read_channel(
+            let (value, sequences) = agent_read_channel(
                 state,
                 context.agent_id.into_uuid(),
                 channel_id.into_uuid(),
@@ -507,11 +518,13 @@ pub(super) async fn execute_agent_action(
                 limit,
             )
             .await?;
-            if channel_contains_focus_thread(state, context.focus_thread_id, channel_id.into_uuid())
-                .await
-            {
-                record_observed_thread_sequence(state, context).await;
-            }
+            record_read(
+                state,
+                context,
+                ObservationScope::Channel(channel_id),
+                &sequences,
+            )
+            .await;
             Ok(value)
         }
         capability::Action::MessageSend(send) => {
@@ -581,7 +594,7 @@ pub(super) async fn execute_agent_action(
             let mentions = agent_mention_ids(&state.read, channel_id, &send.body)
                 .await
                 .map_err(api_to_capability)?;
-            let message_id = insert_message(
+            let outcome = publish_message(
                 state,
                 channel_id,
                 context.agent_id.into_uuid(),
@@ -609,9 +622,16 @@ pub(super) async fn execute_agent_action(
                         .collect(),
                     reply_to_message_id: None,
                 },
+                Some(context.run_id),
             )
             .await
             .map_err(app_to_capability)?;
+            let message_id = match outcome {
+                PublishOutcome::Published(published) => published.message_id.into_uuid(),
+                PublishOutcome::Held(messages) => {
+                    return held_message_send(state, channel_id, thread_id, &messages).await;
+                }
+            };
             record_agent_activity(
                 state,
                 context.space_id.into_uuid(),
@@ -635,7 +655,7 @@ pub(super) async fn execute_agent_action(
             )
             .await;
             Ok(
-                json!({"message_id":message_id,"thread_id":thread_id.unwrap_or(message_id),"channel_id":channel_id}),
+                json!({"status":"posted","message_id":message_id,"thread_id":thread_id.unwrap_or(message_id),"channel_id":channel_id}),
             )
         }
         capability::Action::TaskCreate {
@@ -1421,7 +1441,6 @@ pub(super) async fn finish_agent_task(
             scope: TaskOutcomeScope::AgentRun(OutcomeRunContext {
                 run_id: context.run_id,
                 computer_id: ComputerId::from_uuid(computer_id),
-                message_snapshot_sequence: context.message_snapshot_sequence,
             }),
             actor_member_id: MemberId::from_uuid(context.agent_id.into_uuid()),
             idempotency_key,
@@ -1566,11 +1585,12 @@ async fn discover_operation(
     }))
 }
 
+/// Returns the page and the sequences it contains, so the caller can record what the Run observed.
 pub(super) async fn agent_read_thread(
     state: &RuntimeState,
     thread_id: Uuid,
     page: capability::Page,
-) -> Result<Value, capability::Error> {
+) -> Result<(Value, Vec<u64>), capability::Error> {
     let limit = i64::from(page.limit);
     let rows = state
         .read
@@ -1588,9 +1608,17 @@ pub(super) async fn agent_read_thread(
                 false,
             )
         })?;
-    Ok(
+    let sequences = sequences(rows.iter().map(|row| row.channel_seq));
+    Ok((
         json!({"thread_id":thread_id,"messages":rows.iter().map(|row|json!({"id":row.id,"seq":row.channel_seq,"author_member_id":row.author_member_id,"content":{"type":"text","body_markdown":row.body_markdown.clone().unwrap_or_default()},"created_at":timestamp(row.created_at)})).collect::<Vec<_>>()}),
-    )
+        sequences,
+    ))
+}
+
+fn sequences(values: impl Iterator<Item = i64>) -> Vec<u64> {
+    values
+        .filter_map(|value| u64::try_from(value).ok())
+        .collect()
 }
 
 pub(super) async fn agent_read_space_members(
@@ -1685,7 +1713,7 @@ pub(super) async fn agent_read_channel(
     channel_id: Uuid,
     around_message_id: Option<Uuid>,
     limit: u16,
-) -> Result<Value, capability::Error> {
+) -> Result<(Value, Vec<u64>), capability::Error> {
     let mut storage = state.storage.clone();
     let member = ReadAgentChannel::membership(
         &mut storage,
@@ -1748,61 +1776,83 @@ pub(super) async fn agent_read_channel(
     let snapshot = ReadAgentChannel::snapshot(&mut storage, ChannelId::from_uuid(channel_id))
         .await
         .map_err(app_to_capability)?;
-    Ok(json!({
-        "channel_id": channel_id,
-        "messages": messages,
-        "snapshot_channel_seq": snapshot
-    }))
+    Ok((
+        json!({
+            "channel_id": channel_id,
+            "messages": messages,
+            "snapshot_channel_seq": snapshot
+        }),
+        sequences(rows.iter().map(|row| row.channel_seq)),
+    ))
 }
 
-async fn record_observed_thread_sequence(state: &RuntimeState, context: &capability::RunContext) {
-    let sequence = match state
-        .read
-        .thread_max_sequence(context.focus_thread_id.into_uuid())
-        .await
-    {
-        Ok(sequence) => sequence,
-        Err(error) => {
-            tracing::warn!(
-                %context.run_id,
-                %error,
-                "observed thread sequence read failed"
-            );
-            return;
-        }
-    };
+/// Records what a read returned. A failure only leaves the position behind, which can hold a later
+/// write; it never lets a write skip unobserved Messages.
+async fn record_read(
+    state: &RuntimeState,
+    context: &capability::RunContext,
+    scope: ObservationScope,
+    sequences: &[u64],
+) {
     let mut storage = state.storage.clone();
     if let Err(error) = storage
         .transact(async |transaction| {
             transaction
-                .record_observed_thread_sequence(context.run_id, sequence)
+                .record_read(
+                    context.run_id,
+                    MemberId::from_uuid(context.agent_id.into_uuid()),
+                    scope,
+                    sequences,
+                )
                 .await
         })
         .await
     {
-        tracing::warn!(
-            %context.run_id,
-            %error,
-            "observed thread sequence record failed"
-        );
+        tracing::warn!(%context.run_id, %error, "observed read position record failed");
     }
 }
 
-async fn channel_contains_focus_thread(
+/// The send did not commit. The response carries the unobserved Messages so the Agent can revise
+/// and resend without another read.
+async fn held_message_send(
     state: &RuntimeState,
-    focus_thread_id: crate::ids::ThreadId,
     channel_id: Uuid,
-) -> bool {
-    let mut storage = state.storage.clone();
-    storage
-        .transact(async |transaction| {
-            transaction
-                .channel_for_thread(focus_thread_id)
+    thread_id: Option<Uuid>,
+    held: &[ObservedMessage],
+) -> Result<Value, capability::Error> {
+    let mut messages = Vec::with_capacity(held.len());
+    for message in held {
+        let row = state
+            .read
+            .message(message.id.into_uuid())
+            .await
+            .map_err(|_| {
+                capability_error(
+                    capability::ErrorCode::Internal,
+                    "Unobserved Messages could not be read",
+                    false,
+                )
+            })?
+            .ok_or_else(|| {
+                capability_error(
+                    capability::ErrorCode::Internal,
+                    "Unobserved Messages could not be read",
+                    false,
+                )
+            })?;
+        messages.push(
+            message_row(&state.read, &row)
                 .await
-                .map(|channel| channel.is_some_and(|id| id.into_uuid() == channel_id))
-        })
-        .await
-        .unwrap_or(false)
+                .map_err(api_to_capability)?,
+        );
+    }
+    Ok(json!({
+        "status": "held",
+        "reason": "Not posted: the target has Messages you had not seen. Read them, then send again only if your Message is still needed; revise it to fit them.",
+        "channel_id": channel_id,
+        "thread_id": thread_id,
+        "unseen_messages": messages,
+    }))
 }
 
 pub(super) fn capability_error(
@@ -1836,17 +1886,12 @@ pub(super) fn api_to_capability(error: ApiError) -> capability::Error {
 }
 
 pub(super) fn app_to_capability(error: ApplicationError) -> capability::Error {
-    let mut details = std::collections::BTreeMap::new();
-    if let ApplicationError::StaleMessageContext { expected, actual } = &error {
-        details.insert("expected_snapshot".to_owned(), serde_json::json!(expected));
-        details.insert("actual_snapshot".to_owned(), serde_json::json!(actual));
-    }
     let class = classify(&error);
     capability::Error {
         code: capability_code(class.code),
         message: class.message.to_owned(),
         retryable: class.retryable,
-        details,
+        details: Default::default(),
     }
 }
 

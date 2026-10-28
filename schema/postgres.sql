@@ -2,7 +2,7 @@ CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TIMESTAMPTZ NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (9, now());
+INSERT INTO schema_meta (version, applied_at) VALUES (10, now());
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -319,7 +319,6 @@ CREATE TABLE agent_runs (
     agent_id UUID NOT NULL REFERENCES agents(member_id) ON DELETE RESTRICT,
     task_id UUID,
     focus_thread_id UUID NOT NULL,
-    observed_thread_seq BIGINT,
     status TEXT NOT NULL CHECK (status IN ('dispatched', 'working', 'completed', 'yielded', 'failed', 'canceled')),
     trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('mention', 'direct_message', 'task_activity', 'thread_activity', 'channel_activity', 'schedule')),
     cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
@@ -354,6 +353,16 @@ CREATE TABLE agent_runs (
 );
 CREATE UNIQUE INDEX agent_runs_one_active_per_agent
     ON agent_runs(agent_id) WHERE status NOT IN ('completed', 'yielded', 'failed', 'canceled');
+CREATE TABLE run_observations (
+    run_id UUID NOT NULL REFERENCES agent_runs(id) ON DELETE RESTRICT,
+    -- scope_id names a Channel for 'channel' and 'channel_roots', and a Thread root for 'thread'.
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('channel', 'channel_roots', 'thread')),
+    scope_id UUID NOT NULL,
+    -- The Run has seen every visible Message in the scope up to and including this channel_seq.
+    observed_seq BIGINT NOT NULL CHECK (observed_seq >= 0),
+    consecutive_holds INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_holds >= 0),
+    PRIMARY KEY (run_id, scope_kind, scope_id)
+);
 CREATE TABLE inbox_items (
     id UUID PRIMARY KEY,
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE RESTRICT,

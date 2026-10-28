@@ -14,7 +14,7 @@ use crate::server::domain::{
 
 use super::ports::{
     ApplicationError, CollaborationTransaction, Effect, EffectSink, ExecutionTransaction,
-    IdentityTransaction, ServerTransaction, TaskTransaction, TransactionPort,
+    IdentityTransaction, ObservationScope, ServerTransaction, TaskTransaction, TransactionPort,
 };
 
 pub(in crate::server) enum TaskSource {
@@ -215,7 +215,6 @@ impl TaskOutcome {
 pub(in crate::server) struct OutcomeRunContext {
     pub(in crate::server) run_id: RunId,
     pub(in crate::server) computer_id: ComputerId,
-    pub(in crate::server) message_snapshot_sequence: u64,
 }
 
 pub(in crate::server) enum TaskOutcomeScope {
@@ -260,18 +259,16 @@ impl RecordTaskOutcome {
                     {
                         return Err(ApplicationError::PermissionDenied);
                     }
-                    let current = transaction
-                        .thread_message_sequence(run.view().focus_thread_id)
+                    let unobserved = transaction
+                        .unobserved_messages(
+                            context.run_id,
+                            input.actor_member_id,
+                            ObservationScope::Thread(run.view().focus_thread_id),
+                            1,
+                        )
                         .await?;
-                    let observed = transaction
-                        .observed_thread_sequence(context.run_id)
-                        .await?
-                        .unwrap_or(context.message_snapshot_sequence);
-                    if current != observed {
-                        return Err(ApplicationError::StaleMessageContext {
-                            expected: observed,
-                            actual: current,
-                        });
+                    if unobserved.is_some_and(|unobserved| !unobserved.messages.is_empty()) {
+                        return Err(ApplicationError::StaleMessageContext);
                     }
                     Some(run)
                 }

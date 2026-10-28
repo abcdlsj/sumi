@@ -24,14 +24,35 @@ pub(in crate::server) trait ExecutionTransaction {
         computer_id: ComputerId,
     ) -> Result<(), ApplicationError>;
     async fn save_run(&mut self, run: Run) -> Result<(), ApplicationError>;
-    async fn observed_thread_sequence(
+    /// Locks the Channel that owns `scope`, then returns up to `limit` unobserved Messages. Returns
+    /// `None` when the Run holds no observed position for the scope.
+    async fn unobserved_messages(
         &mut self,
         run_id: RunId,
-    ) -> Result<Option<u64>, ApplicationError>;
-    async fn record_observed_thread_sequence(
+        observer: MemberId,
+        scope: ObservationScope,
+        limit: u32,
+    ) -> Result<Option<UnobservedMessages>, ApplicationError>;
+    /// Advances the observed position after a held write and counts the hold.
+    async fn record_hold(
         &mut self,
         run_id: RunId,
-        sequence: u64,
+        scope: ObservationScope,
+        observed_sequence: u64,
+    ) -> Result<(), ApplicationError>;
+    async fn clear_holds(
+        &mut self,
+        run_id: RunId,
+        scope: ObservationScope,
+    ) -> Result<(), ApplicationError>;
+    /// Records Messages a read returned. The position advances only when the returned sequences
+    /// cover every visible Message between the current position and the returned maximum.
+    async fn record_read(
+        &mut self,
+        run_id: RunId,
+        observer: MemberId,
+        scope: ObservationScope,
+        sequences: &[u64],
     ) -> Result<(), ApplicationError>;
     async fn dispatchable_work(
         &mut self,

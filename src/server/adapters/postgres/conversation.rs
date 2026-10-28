@@ -1248,22 +1248,6 @@ impl PostgresTransaction {
         })
     }
 
-    pub(super) async fn thread_message_sequence(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<u64, ApplicationError> {
-        let sequence = sqlx::query_scalar::<_, i64>(
-            "SELECT channels.next_seq-1 FROM messages \
-             JOIN channels ON channels.id=messages.channel_id \
-             WHERE messages.id=$1 AND messages.placement='root' FOR UPDATE OF channels",
-        )
-        .bind(thread_id.into_uuid())
-        .fetch_one(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)?;
-        u64::try_from(sequence).map_err(|_| ApplicationError::Internal)
-    }
-
     pub(super) async fn save_message(&mut self, message: Message) -> Result<(), ApplicationError> {
         let MessageContent::Text(body) = message.content else {
             return Err(ApplicationError::Conflict);
@@ -1479,12 +1463,6 @@ impl CollaborationTransaction for PostgresTransaction {
         thread_id: ThreadId,
     ) -> Result<bool, ApplicationError> {
         self.can_read_thread(actor, thread_id).await
-    }
-    async fn thread_message_sequence(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<u64, ApplicationError> {
-        self.thread_message_sequence(thread_id).await
     }
     async fn publish_message(
         &mut self,

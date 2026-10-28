@@ -37,8 +37,8 @@ pub(in crate::server) enum ApplicationError {
     Conflict,
     #[error("run context changed")]
     ContextChanged,
-    #[error("message context changed (expected {expected}, actual {actual})")]
-    StaleMessageContext { expected: u64, actual: u64 },
+    #[error("message context changed")]
+    StaleMessageContext,
     #[error("external dependency is unavailable")]
     Unavailable,
     #[error("server adapter failed")]
@@ -364,6 +364,35 @@ pub(in crate::server) struct MessageDraft {
     pub(in crate::server) attachment_ids: Vec<AttachmentId>,
     pub(in crate::server) handled_item: Option<(RunId, InboxItemId)>,
     pub(in crate::server) now: time::OffsetDateTime,
+}
+
+/// Message range whose observed position a Run records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::server) enum ObservationScope {
+    /// Every Message in one Channel.
+    Channel(ChannelId),
+    /// Root Messages in one Channel.
+    ChannelRoots(ChannelId),
+    /// The Root Message of one Thread and its replies.
+    Thread(ThreadId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::server) struct ObservedMessage {
+    pub(in crate::server) id: MessageId,
+    pub(in crate::server) sequence: u64,
+}
+
+pub(in crate::server) struct UnobservedMessages {
+    pub(in crate::server) consecutive_holds: u32,
+    /// Other Members' text Messages after the Run's effective observed position, oldest first.
+    pub(in crate::server) messages: Vec<ObservedMessage>,
+}
+
+pub(in crate::server) enum PublishOutcome {
+    Published(PublishedMessage),
+    /// The Run had not observed these Messages in the target; nothing was written.
+    Held(Vec<ObservedMessage>),
 }
 
 pub(in crate::server) struct PublishedMessage {

@@ -7,7 +7,7 @@ use crate::ids::{
     RunId, SpaceId, TaskId, ThreadId,
 };
 
-pub(crate) const SCHEMA_VERSION: u16 = 1;
+pub(crate) const SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -199,7 +199,6 @@ pub(crate) struct MessageSend {
     pub(crate) body: String,
     pub(crate) attachment_ids: Vec<AttachmentId>,
     pub(crate) handle_item_id: Option<InboxItemId>,
-    pub(crate) snapshot_sequence: Option<u64>,
 }
 
 impl fmt::Debug for MessageSend {
@@ -210,7 +209,6 @@ impl fmt::Debug for MessageSend {
             .field("body", &"[REDACTED]")
             .field("attachment_ids", &self.attachment_ids)
             .field("handle_item_id", &self.handle_item_id)
-            .field("snapshot_sequence", &self.snapshot_sequence)
             .finish()
     }
 }
@@ -263,7 +261,6 @@ pub(crate) struct RunContext {
     pub(crate) task_id: Option<TaskId>,
     pub(crate) focus_thread_id: ThreadId,
     pub(crate) run_id: RunId,
-    pub(crate) message_snapshot_sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -342,7 +339,6 @@ mod tests {
                 body: "private body".to_owned(),
                 attachment_ids: Vec::new(),
                 handle_item_id: None,
-                snapshot_sequence: None,
             }),
         };
         let debug = format!("{request:?}");

@@ -173,9 +173,9 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        let observed_thread_seq: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-                 WHERE table_name='agent_runs' AND column_name='observed_thread_seq')",
+        let run_observations: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
+                 WHERE table_name='run_observations')",
         )
         .fetch_one(&pool)
         .await
@@ -190,8 +190,8 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         assert!(messages_self_fk);
         assert!(!legacy_session_table);
         assert!(slug_constraint);
-        assert!(observed_thread_seq);
-        assert_eq!(schema_version, 9);
+        assert!(run_observations);
+        assert_eq!(schema_version, 10);
 
         sqlx::raw_sql(
             "ALTER TABLE channels DROP CONSTRAINT channels_slug_form_check; \
@@ -199,8 +199,8 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
              DROP INDEX inbox_items_open_channel_ambient_aggregate; \
              DROP INDEX inbox_items_open_thread_ambient_aggregate; \
              ALTER TABLE inbox_items DROP COLUMN ambient_channel_id; \
-             ALTER TABLE agent_runs DROP COLUMN observed_thread_seq; \
-             UPDATE schema_meta SET version=5 WHERE version=9;",
+             DROP TABLE run_observations; \
+             UPDATE schema_meta SET version=5 WHERE version=10;",
         )
         .execute(&pool)
         .await
@@ -217,6 +217,13 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let migrated_run_observations: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
+                 WHERE table_name='run_observations')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         let migrated_observed_thread_seq: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
                  WHERE table_name='agent_runs' AND column_name='observed_thread_seq')",
@@ -224,9 +231,10 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(migrated_version, 9);
+        assert_eq!(migrated_version, 10);
         assert!(migrated_constraint);
-        assert!(migrated_observed_thread_seq);
+        assert!(migrated_run_observations);
+        assert!(!migrated_observed_thread_seq);
         pool.close().await;
     }
     .await;
@@ -1539,9 +1547,9 @@ async fn v6_to_v7_migration_merges_channel_aggregates_across_threads() {
              DROP INDEX inbox_items_open_channel_ambient_aggregate;
              DROP INDEX inbox_items_open_thread_ambient_aggregate;
              ALTER TABLE inbox_items DROP COLUMN ambient_channel_id;
-             ALTER TABLE agent_runs DROP COLUMN observed_thread_seq;
+             DROP TABLE run_observations;
              CREATE UNIQUE INDEX inbox_items_open_ambient_aggregate ON inbox_items(member_id,thread_id) WHERE strength='ambient' AND status='pending' AND retry_count=0;
-             UPDATE schema_meta SET version=6 WHERE version=9;
+             UPDATE schema_meta SET version=6 WHERE version=10;
              INSERT INTO spaces (id,slug,name,accent,owner_member_id,created_at) VALUES ('{space}','migration-space','Migration Space','#F0602F','{owner}',now());
              INSERT INTO members (id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner}','{space}','human','Owner','owner',now()),('{agent}','{space}','agent','Migrator','member',now());
              INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','migration',5,now());
@@ -1570,8 +1578,254 @@ async fn v6_to_v7_migration_merges_channel_aggregates_across_threads() {
                 .fetch_one(&pool)
                 .await
                 .unwrap(),
-            9
+            10
         );
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}
+
+#[tokio::test]
+async fn run_observations_start_frozen_and_advance_only_over_what_a_read_returned() {
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_run_observations_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let mut adapter = PostgresAdapter::new(pool.clone());
+        adapter.initialize_schema().await.unwrap();
+        let space = Uuid::now_v7();
+        let owner = Uuid::now_v7();
+        let agent = Uuid::now_v7();
+        let computer = Uuid::now_v7();
+        let channel = Uuid::now_v7();
+        let root = Uuid::now_v7();
+        let run = Uuid::now_v7();
+        let item = Uuid::now_v7();
+        sqlx::raw_sql(&format!(
+            "BEGIN;
+             INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) VALUES ('{space}','observations','Observations','#F0602F','{owner}',now());
+             INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES
+               ('{owner}','{space}','human','Owner','owner',now()),
+               ('{agent}','{space}','agent','Agent','member',now());
+             INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer}','{space}','Computer','localhost','linux','observations-hash','online',1,now());
+             INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer}','Act',1,'active','codex',now());
+             INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',3,now());
+             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES
+               ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0);
+             INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES
+               ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now()),
+               ('{}','{space}','{channel}','{root}',2,'reply','text','{owner}','early reply',now());
+             INSERT INTO inbox_items(id,space_id,member_id,message_id,thread_id,kind,strength,status,available_at,created_at) VALUES
+               ('{item}','{space}','{agent}','{root}','{root}','mention','hard','pending',now(),now());
+             COMMIT;",
+            Uuid::now_v7()
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        DispatchRun::execute(
+            &mut adapter,
+            DispatchRunInput {
+                run_id: RunId::from_uuid(run),
+                agent_id: MemberId::from_uuid(agent),
+                task_id: None,
+                focus_thread_id: ThreadId::from_uuid(root),
+                trigger: RunTrigger::Mention,
+                item_ids: vec![InboxItemId::from_uuid(item)],
+            },
+        )
+        .await
+        .unwrap();
+
+        let positions = |pool: PgPool| async move {
+            sqlx::query_as::<_, (String, i64)>(
+                "SELECT scope_kind,observed_seq FROM run_observations WHERE run_id=$1 ORDER BY scope_kind",
+            )
+            .bind(run)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        };
+        assert_eq!(
+            positions(pool.clone()).await,
+            vec![("channel".to_owned(), 2), ("thread".to_owned(), 2)],
+            "RunStart freezes both positions at the dispatched snapshot"
+        );
+
+        let append = |pool: PgPool, sequence: i64, body: &'static str| async move {
+            sqlx::query(
+                "INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) \
+                 VALUES($1,$2,$3,$4,$5,'reply','text',$6,$7,now())",
+            )
+            .bind(Uuid::now_v7())
+            .bind(space)
+            .bind(channel)
+            .bind(root)
+            .bind(sequence)
+            .bind(owner)
+            .bind(body)
+            .execute(&pool)
+            .await
+            .unwrap();
+        };
+
+        append(pool.clone(), 3, "third").await;
+        adapter
+            .transact(async |transaction| {
+                transaction
+                    .record_read(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        &[3],
+                    )
+                    .await
+            })
+            .await
+            .unwrap();
+        assert_eq!(positions(pool.clone()).await[1].1, 3);
+
+        // A read that skips a visible Message cannot claim it, so the position stays where it was.
+        append(pool.clone(), 4, "fourth").await;
+        append(pool.clone(), 5, "fifth").await;
+        adapter
+            .transact(async |transaction| {
+                transaction
+                    .record_read(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        &[5],
+                    )
+                    .await
+            })
+            .await
+            .unwrap();
+        assert_eq!(positions(pool.clone()).await[1].1, 3);
+
+        adapter
+            .transact(async |transaction| {
+                transaction
+                    .record_read(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        &[4, 5],
+                    )
+                    .await
+            })
+            .await
+            .unwrap();
+        assert_eq!(positions(pool.clone()).await[1].1, 5);
+
+        let observed = adapter
+            .transact(async |transaction| {
+                transaction
+                    .unobserved_messages(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        20,
+                    )
+                    .await
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(observed.messages.is_empty());
+        assert_eq!(observed.consecutive_holds, 0);
+
+        append(pool.clone(), 6, "sixth").await;
+        let observed = adapter
+            .transact(async |transaction| {
+                transaction
+                    .unobserved_messages(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        20,
+                    )
+                    .await
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed.messages.len(), 1);
+        assert_eq!(observed.messages[0].sequence, 6);
+
+        for expected in [1, 2] {
+            adapter
+                .transact(async |transaction| {
+                    transaction
+                        .record_hold(
+                            RunId::from_uuid(run),
+                            ObservationScope::Thread(ThreadId::from_uuid(root)),
+                            6,
+                        )
+                        .await
+                })
+                .await
+                .unwrap();
+            let observed = adapter
+                .transact(async |transaction| {
+                    transaction
+                        .unobserved_messages(
+                            RunId::from_uuid(run),
+                            MemberId::from_uuid(agent),
+                            ObservationScope::Thread(ThreadId::from_uuid(root)),
+                            20,
+                        )
+                        .await
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(observed.consecutive_holds, expected);
+        }
+        adapter
+            .transact(async |transaction| {
+                transaction
+                    .clear_holds(
+                        RunId::from_uuid(run),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                    )
+                    .await
+            })
+            .await
+            .unwrap();
+        let observed = adapter
+            .transact(async |transaction| {
+                transaction
+                    .unobserved_messages(
+                        RunId::from_uuid(run),
+                        MemberId::from_uuid(agent),
+                        ObservationScope::Thread(ThreadId::from_uuid(root)),
+                        20,
+                    )
+                    .await
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed.consecutive_holds, 0);
+
         pool.close().await;
     }
     .await;
