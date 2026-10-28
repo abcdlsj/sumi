@@ -120,7 +120,7 @@ Driver：
 - `details` 只包含错误处理需要的结构化标识，不得包含 Message、Attachment、Memory、Secret 或 Provider transcript 正文。
 - Server 为每个 Run 记录已观察位置，Agent 不传序号。位置有三类：Channel 全量、Channel Root、Thread。RunStart 把 Focus Channel 全量位置设为 `channel_snapshot_seq`，把 Focus Thread 位置设为 Focus 最新序号；`thread read` 推进 Thread 位置，`channel read` 推进 Channel 全量位置。位置只能推进到本次实际返回的最大序号，且仅当原位置之后、该序号之前没有未返回的其他成员文本消息。Thread 的有效位置取 Thread 与所属 Channel 全量位置中的较大者；Channel Root 同理。
 - Agent `message send` 在锁定目标 Channel 的同一事务内检查目标是否有该 Run 未观察的其他成员文本消息：回复检查目标 Thread，新 Root 检查目标 Channel 的 Root。目标没有观察位置时不检查。
-- 存在未观察消息时不提交 Message、不处理 `--handle` Item、不记录 idempotency；响应 `status=held`，按序号返回最多 20 条未观察消息，并把位置推进到返回的最后一条。同一 Run 对同一目标连续 held 5 次后，下一次直接提交；成功提交清零计数。成功的 `message send` 返回 `status=posted`、`message_id`、`thread_id` 与 `channel_id`。
+- 存在未观察消息时不提交 Message、不处理 `--handle` Item、不记录 idempotency；重发时必须再次带上该 `--handle`；响应 `status=held`，按序号返回最多 20 条未观察消息，并把位置推进到返回的最后一条。同一 Run 对同一目标连续 held 5 次后，下一次直接提交；成功提交清零计数。成功的 `message send` 返回 `status=posted`、`message_id`、`thread_id` 与 `channel_id`。
 - Task submit-review、done、close 发现 Focus Thread 有未观察的其他成员消息时返回 context_changed，不创建部分结果。
 - 同一波内相互独立的调用必须在一次 tool-call batch 中发出；有数据依赖、写入冲突或可见顺序的调用保留屏障；run yield 必须是该 Run 最后一次调用。
 - `details.next_action` 是给 Driver 的单一建议动作；Driver 对 `invalid_argument`、`permission_denied` 和非 retryable `conflict` 不得变体重试，需要 Human 时停止询问。
