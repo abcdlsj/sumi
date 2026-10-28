@@ -5,10 +5,14 @@ import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, use
 
 import { createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
+import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
 import { TaskStatusIcon } from "../taskStatusIcon";
+import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
+
+type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
 
 export function MessageTimeline({
   timelineRef,
@@ -23,6 +27,7 @@ export function MessageTimeline({
   spaceSlug,
   openThread,
   activityByMemberId,
+  workingLabelByMemberId,
   members,
   direct = false,
   onOpenAgentDm,
@@ -39,6 +44,7 @@ export function MessageTimeline({
   spaceSlug: string;
   openThread: (threadId: string, trigger?: HTMLButtonElement) => void;
   activityByMemberId: ReadonlyMap<string, Agent["activity_status"]>;
+  workingLabelByMemberId?: ReadonlyMap<string, string>;
   members: Member[];
   direct?: boolean;
   onOpenAgentDm?: (memberId: string) => void;
@@ -82,7 +88,17 @@ export function MessageTimeline({
     }
   }, [page]);
 
+  const selfMemberId = useSelfMemberId();
   const timelineGroups = groupTimelineMessages(page?.messages ?? []);
+  // An Agent at work shows one quiet line under its latest Message here.
+  const workingLineMessageIds = new Map<string, string>();
+  for (const message of page?.messages ?? []) {
+    const status = activityByMemberId.get(message.author.id);
+    if (message.author.kind === "agent" && (status === "working" || status === "dispatched")) {
+      workingLineMessageIds.set(message.author.id, message.id);
+    }
+  }
+  const workingMessageIds = new Set(workingLineMessageIds.values());
 
   return (
     <div className="message-timeline-shell">
@@ -126,6 +142,7 @@ export function MessageTimeline({
           }
           // A day divider always restarts the visual grouping.
           const grouped = !showDivider && !message.task && message.reply_count === 0 && !startsNewGroup(message, previous);
+          const forYou = isForMember(message, selfMemberId);
           return (
             <div className="message-block" id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id}>
               {showDivider ? (
@@ -133,7 +150,7 @@ export function MessageTimeline({
                   <time dateTime={message.created_at}>{formatDayDivider(message.created_at)}</time>
                 </div>
               ) : null}
-              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}`}>
+              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${forYou ? " message-row--for-you" : ""}`}>
                 {grouped ? (
                   <time className="message-gutter-time" dateTime={message.created_at}>
                     {formatMessageTime(message.created_at)}
@@ -153,6 +170,7 @@ export function MessageTimeline({
                     <header>
                       <strong>{message.author.display_name}</strong>
                       <time dateTime={message.created_at}>{formatMessageTime(message.created_at)}</time>
+                      {forYou ? <span className="message-for-you">For you</span> : null}
                       <span
                         className="message-seq"
                         aria-label={`Channel sequence @${message.seq}`}
@@ -162,6 +180,7 @@ export function MessageTimeline({
                       </span>
                     </header>
                   )}
+                  {grouped && forYou ? <span className="visually-hidden">For you</span> : null}
                   <MessageBody
                     message={message}
                     spaceSlug={spaceSlug}
@@ -178,6 +197,9 @@ export function MessageTimeline({
                       replyCount={message.reply_count}
                       open={(trigger) => openThread(message.thread_id!, trigger)}
                     />
+                  ) : null}
+                  {workingMessageIds.has(message.id) ? (
+                    <AgentWorkingLine name={message.author.display_name} memberId={message.author.id} step={workingLabelByMemberId?.get(message.author.id)} />
                   ) : null}
                 </div>
                 {!message.deleted_at ? (
@@ -253,8 +275,9 @@ function SystemNoticeGroup({
 }
 
 export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void }) {
+  const forYou = isForMember(message, useSelfMemberId());
   return (
-    <article className="thread-message" id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1}>
+    <article className={`thread-message${forYou ? " message-row--for-you" : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1}>
       <MessageAvatar
         name={message.author.display_name}
         kind={message.author.kind}
@@ -266,6 +289,8 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
       <div>
         <header>
           <strong>{message.author.display_name}</strong>
+          <time dateTime={message.created_at}>{formatMessageTime(message.created_at)}</time>
+          {forYou ? <span className="message-for-you">For you</span> : null}
           <span
             className="message-seq"
             aria-label={`Channel sequence @${message.seq}`}
@@ -434,13 +459,14 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
 }
 
 function MessageBody({ message, spaceSlug, members }: { message: Message; spaceSlug: string; members: Member[] }) {
+  const selfMemberId = useSelfMemberId();
   if (message.deleted_at) return <p>Message deleted</p>;
   if (message.content.type === "text") {
     const mentionedMemberIds = new Set(message.mentions);
-    const mentionedMembers = new Map<string, Pick<Member, "id" | "kind" | "display_name">>(
+    const mentionedMembers = new Map<string, MentionTarget>(
       members
         .filter((member) => mentionedMemberIds.has(member.id))
-        .map((member) => [member.display_name.toLowerCase(), { id: member.id, kind: member.kind, display_name: member.display_name }] as const),
+        .map((member) => [member.display_name.toLowerCase(), { id: member.id, kind: member.kind, display_name: member.display_name, self: member.id === selfMemberId }] as const),
     );
     if (message.mention_all) mentionedMembers.set("all", { id: "all", kind: "human", display_name: "all" });
     const taskRefs = new Map((message.task_refs ?? []).map((ref) => [ref.seq, ref]));
@@ -464,7 +490,7 @@ function MessageBody({ message, spaceSlug, members }: { message: Message; spaceS
   return <p className="action-message"><PixelIdentity name={message.content.agent.name} kind="agent" seed={message.content.agent.member_id} /><strong>{message.author.display_name}</strong> Created agent {message.content.agent.available ? <Link to="/s/$spaceSlug/agents/$agentId" params={{ spaceSlug, agentId: message.content.agent.member_id }}>{message.content.agent.name}</Link> : <span>Unavailable Agent</span>} <small>{message.content.agent.lifecycle}</small></p>;
 }
 
-export function ExpandableMessageText({ messageId, body, mentionedMembers, taskRefs, spaceSlug }: { messageId: string; body: string; mentionedMembers: ReadonlyMap<string, Pick<Member, "id" | "kind" | "display_name">>; taskRefs: ReadonlyMap<number, MessageTaskRef>; spaceSlug: string }) {
+export function ExpandableMessageText({ messageId, body, mentionedMembers, taskRefs, spaceSlug }: { messageId: string; body: string; mentionedMembers: ReadonlyMap<string, MentionTarget>; taskRefs: ReadonlyMap<number, MessageTaskRef>; spaceSlug: string }) {
   const paragraph = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -524,7 +550,7 @@ function AttentionFailureNotice({ message, members }: { message: Message; member
 
 function highlightMentions(
   body: string,
-  mentionedMembers: ReadonlyMap<string, Pick<Member, "id" | "kind" | "display_name">>,
+  mentionedMembers: ReadonlyMap<string, MentionTarget>,
   taskRefs: ReadonlyMap<number, MessageTaskRef>,
   spaceSlug: string,
   keyPrefix: string,
@@ -553,7 +579,7 @@ function highlightMentions(
           {token}
         </a>
       ) : member ? (
-        <mark className="message-mention" key={`${keyPrefix}-mention-${tokenStart}`}>{token}</mark>
+        <mark className={`message-mention${member.self ? " message-mention--self" : ""}`} key={`${keyPrefix}-mention-${tokenStart}`}>{token}</mark>
       ) : token,
     );
     cursor = tokenStart + token.length;
@@ -611,7 +637,7 @@ const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
 
 function renderMessageBody(
   body: string,
-  mentionedMembers: ReadonlyMap<string, Pick<Member, "id" | "kind" | "display_name">>,
+  mentionedMembers: ReadonlyMap<string, MentionTarget>,
   taskRefs: ReadonlyMap<number, MessageTaskRef>,
   spaceSlug: string,
 ): ReactNode[] {
@@ -706,7 +732,7 @@ function startsMessageBlock(line: string): boolean {
 
 function renderMessageBlock(
   block: MessageBlock,
-  mentionedMembers: ReadonlyMap<string, Pick<Member, "id" | "kind" | "display_name">>,
+  mentionedMembers: ReadonlyMap<string, MentionTarget>,
   taskRefs: ReadonlyMap<number, MessageTaskRef>,
   spaceSlug: string,
   blockIndex: number,
@@ -789,7 +815,7 @@ function renderMessageBlock(
 
 function renderInline(
   text: string,
-  mentionedMembers: ReadonlyMap<string, Pick<Member, "id" | "kind" | "display_name">>,
+  mentionedMembers: ReadonlyMap<string, MentionTarget>,
   taskRefs: ReadonlyMap<number, MessageTaskRef>,
   spaceSlug: string,
   keyPrefix: string,
@@ -925,6 +951,26 @@ function AttachmentList({ attachments }: { attachments: Attachment[] }) {
         </a>
       ))}
     </div>
+  );
+}
+
+function isForMember(message: Message, memberId: string | undefined): boolean {
+  if (!memberId || message.deleted_at || message.author.id === memberId) return false;
+  if (message.content.type !== "text") return false;
+  return message.mention_all || message.mentions.includes(memberId);
+}
+
+// The current step is only a tooltip: Humans see that work is happening,
+// not a progress console they are expected to steer.
+function AgentWorkingLine({ name, memberId, step }: { name: string; memberId: string; step?: string }) {
+  const latest = useAgentActivity(memberId)[0];
+  const last = latest ? `Last action: ${AGENT_ACTIVITY_LABELS[latest.kind]} · ${formatMessageTime(latest.occurredAt)}` : undefined;
+  const detail = [step, last].filter(Boolean).join("\n") || `${name} is working`;
+  return (
+    <span className="agent-working" title={detail}>
+      <span className="agent-working-dots" aria-hidden="true"><i /><i /><i /></span>
+      {name} is working on this
+    </span>
   );
 }
 

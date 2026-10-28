@@ -35,13 +35,13 @@ export function PairComputerPage() {
   return (
     <main className="onboarding-shell">
       <header className="brand-bar">
-        <Link className="wordmark" to="/" search={{ redirect: undefined }} aria-label="Sumi home"><span className="wordmark-mark"><SumiLogo /></span>SUMI</Link>
-        <span className="step-index">PAIR COMPUTER</span>
+        <Link className="wordmark" to="/" search={{ redirect: undefined }} aria-label="Sumi home"><span className="wordmark-mark"><SumiLogo /></span>Sumi</Link>
+        <span className="step-index">Pair Computer</span>
       </header>
       <section className="pairing-stage" aria-labelledby="pairing-title">
         <div className="pairing-machine">
           <MonitorCheck aria-hidden="true" />
-          <p className="eyebrow">CONFIRM THIS MACHINE</p>
+          <p className="eyebrow">Confirm this machine</p>
           <h1 id="pairing-title">{details.data.hostname}</h1>
           <dl>
             <div><dt>Operating system</dt><dd>{details.data.os}</dd></div>

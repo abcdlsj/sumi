@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { Asterisk, Check, Hash, LoaderCircle, MessageCircle, Monitor, Plus, X } from "lucide-react";
+import { Asterisk, Check, Hash, LoaderCircle, Monitor, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -21,6 +21,7 @@ import {
 import { DialogFrame } from "../components/DialogFrame";
 import { MessageComposer, type ComposerInput } from "../components/channel/MessageComposer";
 import { MessageTimeline, type MessageTimelineScrollApi } from "../components/channel/MessageTimeline";
+import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { PixelIdentity, PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 
@@ -47,6 +48,7 @@ export function ChannelPage() {
             placeholder={`Message #${channel.slug}`}
             emptyTitle={`#${channel.slug} starts here.`}
             spaceSlug={space.slug}
+            currentMemberId={currentMember.id}
             setup={channel.slug === "general" ? {
               canPairComputer: ["owner", "admin"].includes(currentMember.access_level),
               canCreateAgent:
@@ -68,6 +70,7 @@ export function MessageWorkspace({
   emptyTitle,
   direct = false,
   spaceSlug,
+  currentMemberId,
   setup,
 }: {
   channel: Channel;
@@ -78,6 +81,7 @@ export function MessageWorkspace({
   emptyTitle: string;
   direct?: boolean;
   spaceSlug: string;
+  currentMemberId: string;
   setup?: { canPairComputer: boolean; canCreateAgent: boolean };
 }) {
   const queryClient = useQueryClient();
@@ -224,6 +228,9 @@ export function MessageWorkspace({
   const activityByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
   );
+  const workingLabelByMemberId = new Map(
+    (agents.data ?? []).flatMap((agent) => agent.activity?.label ? [[agent.member_id, agent.activity.label] as const] : []),
+  );
   async function sendMessage(input: ComposerInput): Promise<Message> {
     return createMessage(channel.id, input);
   }
@@ -258,6 +265,7 @@ export function MessageWorkspace({
   });
 
   return (
+    <SelfMemberContext.Provider value={currentMemberId}>
     <section
       ref={workspace}
       className={`channel-workspace${threadId ? " channel-workspace--thread-open" : ""}${threadPaneResizing ? " channel-workspace--thread-resizing" : ""}`}
@@ -265,18 +273,12 @@ export function MessageWorkspace({
       aria-labelledby="channel-heading"
     >
       <header className="channel-header">
-        <span className="channel-header-glyph" aria-hidden="true">
-          {direct ? <MessageCircle /> : <Hash />}
-        </span>
         <div className="channel-title">
-          <h1 id="channel-heading" tabIndex={-1} aria-label={title}>{title.replace(/^#/, "")}</h1>
-          <p>{subtitle}</p>
-          <small
-            className="channel-seq-hint"
-            title="Message coordinates use the Channel sequence. Replies are shown in Threads."
-          >
-            Seq: Channel-wide
-          </small>
+          <h1 id="channel-heading" tabIndex={-1} aria-label={title}>
+            {direct ? null : <span className="channel-title-hash" aria-hidden="true">#</span>}
+            {title.replace(/^#/, "")}
+          </h1>
+          <p title={subtitle}>{subtitle}</p>
         </div>
         <div className="member-strip">
           <ul className="channel-member-avatars" aria-label="Channel members" tabIndex={0}>
@@ -314,6 +316,7 @@ export function MessageWorkspace({
         spaceSlug={spaceSlug}
         openThread={openThread}
         activityByMemberId={activityByMemberId}
+        workingLabelByMemberId={workingLabelByMemberId}
         members={channelMembers.data?.members ?? []}
         direct={direct}
         onOpenAgentDm={direct ? undefined : (memberId) => openAgentDm.mutate(memberId)}
@@ -365,6 +368,7 @@ export function MessageWorkspace({
         />
       ) : null}
     </section>
+    </SelfMemberContext.Provider>
   );
 }
 function SetupStrip({
@@ -404,7 +408,6 @@ function SetupStrip({
   return (
     <section className="setup-strip" aria-labelledby="setup-strip-title">
       <div className="setup-strip-heading">
-        <span>03 / 03</span>
         <strong id="setup-strip-title">Finish your Space setup</strong>
         <small>#general is ready. Add local compute, then your first Agent.</small>
       </div>
@@ -435,7 +438,7 @@ function AddAgentsDialog({ agents, pending, error, close, submit }: { agents: Ar
   }
   return (
     <DialogFrame className="channel-dialog channel-member-dialog" close={close} labelId="add-channel-agents-title">
-        <header><div><p className="section-kicker">CHANNEL MEMBERS</p><h2 id="add-channel-agents-title">Add Agents</h2></div><button className="icon-button" type="button" aria-label="Close Add Agents" onClick={close}><X /></button></header>
+        <header><div><p className="section-kicker">Channel members</p><h2 id="add-channel-agents-title">Add Agents</h2></div><button className="icon-button" type="button" aria-label="Close Add Agents" onClick={close}><X /></button></header>
         <form onSubmit={handleSubmit}>
           <fieldset className="channel-agent-picker">
             <legend>Available Agents</legend>

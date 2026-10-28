@@ -9,7 +9,7 @@ export function DirectMessagePage() {
   const { spaceSlug, memberId } = useParams({ from: "/s/$spaceSlug/dm/$memberId" });
   return (
     <SpaceShell spaceSlug={spaceSlug} active="dm">
-      {({ space, directMessages }) => {
+      {({ space, directMessages, currentMember }) => {
         const dm = directMessages.find((candidate) => candidate.other_member.id === memberId);
         if (!dm) {
           return (
@@ -40,6 +40,7 @@ export function DirectMessagePage() {
             placeholder={`Message ${dm.other_member.display_name}`}
             emptyTitle={`Your DM with ${dm.other_member.display_name} starts here.`}
             spaceSlug={space.slug}
+            currentMemberId={currentMember.id}
             direct
           />
         );

@@ -4,7 +4,7 @@
   gap: 14px;
   min-width: 0;
   min-height: 0;
-  padding: 18px var(--ui-page-gutter) var(--ui-page-gutter);
+  padding: 18px var(--page-gutter) var(--page-gutter);
 }
 
 .agent-graph-header {
@@ -23,7 +23,7 @@
 .agent-graph-header p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: var(--text-system);
+  font-size: var(--text-small);
 }
 
 .agent-graph-zoom {
@@ -38,13 +38,13 @@
   place-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: var(--paper);
+  background: var(--bg);
   color: var(--ink);
   cursor: pointer;
 }
 
 .agent-graph-zoom button:hover {
-  background: var(--surface-strong);
+  background: var(--bg-subtle);
 }
 
 .agent-graph-zoom svg {
@@ -63,11 +63,11 @@
   min-width: 0;
   min-height: 420px;
   overflow: hidden;
-  border: 2px solid var(--ink);
+  border: 1px solid var(--line);
   background:
     linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 28px 28px,
     linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 28px 28px,
-    var(--panel);
+    var(--bg-sidebar);
   touch-action: none;
 }
 
@@ -99,7 +99,7 @@
 }
 
 .graph-edge:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--series-1);
   outline-offset: 2px;
 }
 
@@ -121,12 +121,12 @@
 }
 
 .graph-node--active .graph-node-avatar {
-  stroke: var(--accent);
+  stroke: var(--ink);
   stroke-width: 3px;
 }
 
 .graph-node--neighbor .graph-node-avatar {
-  stroke: var(--indigo);
+  stroke: var(--line-strong);
   stroke-width: 2px;
 }
 
@@ -136,15 +136,15 @@
 
 .graph-node:hover .graph-node-avatar,
 .graph-node:focus-visible .graph-node-avatar {
-  stroke: var(--accent);
+  stroke: var(--series-1);
   stroke-width: 3px;
 }
 
 .agent-graph-panel {
   min-width: 0;
   overflow: auto;
-  border-top: 2px solid var(--ink);
-  border-bottom: 2px solid var(--ink);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .agent-graph-overview h2,
@@ -173,21 +173,21 @@
 .agent-graph-overview dt,
 .agent-graph-edge-stats dt {
   color: var(--muted);
-  font-size: var(--text-system);
+  font-size: var(--text-small);
 }
 
 .agent-graph-overview dd,
 .agent-graph-edge-stats dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: var(--text-system);
+  font-size: var(--text-small);
   font-weight: 600;
 }
 
 .agent-graph-hint {
   margin: 12px 0 0;
-  color: var(--ink-soft);
-  font-size: var(--text-system);
+  color: var(--ink-2);
+  font-size: var(--text-small);
   line-height: 1.5;
 }
 
@@ -210,7 +210,7 @@
 .agent-graph-details-head p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: var(--text-system);
+  font-size: var(--text-small);
 }
 
 .agent-graph-details-head .icon-button {
@@ -219,9 +219,8 @@
 
 .agent-graph-details h3 {
   margin: 18px 0 8px;
-  font-size: var(--text-section-title);
+  font-size: var(--text-meta);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .agent-graph-neighbors {
@@ -239,19 +238,19 @@
   gap: 2px 8px;
   border: 0;
   padding: 8px 10px;
-  background: var(--panel);
+  background: var(--bg-sidebar);
   text-align: left;
   cursor: pointer;
 }
 
 .agent-graph-neighbors button:hover,
 .agent-graph-neighbors button:focus-visible {
-  background: var(--accent-soft);
+  background: var(--bg-subtle);
 }
 
 .agent-graph-neighbors strong {
   font-family: var(--font-mono);
-  font-size: var(--text-system);
+  font-size: var(--text-small);
 }
 
 .agent-graph-neighbors small {
@@ -282,7 +281,7 @@
 }
 
 .agent-graph-chain-meta strong {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .agent-graph-chain-meta time {
@@ -294,28 +293,28 @@
 .agent-graph-kind {
   border-radius: 999px;
   padding: 1px 7px;
-  background: var(--chip-neutral);
+  background: var(--bg-subtle);
   color: var(--ink);
   font-size: var(--text-meta);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .agent-graph-kind--dm {
-  background: var(--chip-runtime);
+  background: var(--bg-subtle);
 }
 
 .agent-graph-kind--mention {
-  background: var(--chip-model);
+  background: var(--bg-subtle);
 }
 
 .agent-graph-kind--reply {
-  background: var(--chip-reasoning);
+  background: var(--bg-subtle);
 }
 
 .agent-graph-chain-step p {
   margin: 5px 0 0;
-  color: var(--ink-soft);
-  font-size: var(--text-system);
+  color: var(--ink-2);
+  font-size: var(--text-small);
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -326,7 +325,7 @@
   }
 
   .agent-graph-panel {
-    border-top: 2px solid var(--ink);
+    border-top: 1px solid var(--line);
   }
 }
 

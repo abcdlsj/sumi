@@ -149,13 +149,13 @@ env = { SUMI_DEV_SEED = "1", RUST_LOG = "sumi=warn,tower_http=warn" }
 run = "sh scripts/dev-seed-task.sh"
 
 [tasks.demo]
-description = "Start the design-lab demo (isolated ports/database, seeded samples)"
-run = "sh design-lab/demo/start.sh"
+description = "Start the UI demo (isolated ports/database, seeded samples)"
+run = "sh scripts/ui-demo/start.sh"
 
 [tasks.demo-shots]
-description = "Screenshot the design-lab sample states into demo/.runtime/shots"
-run = "node design-lab/demo/shots.mjs"
+description = "Screenshot the UI demo sample states into scripts/ui-demo/.runtime/shots"
+run = "node scripts/ui-demo/shots.mjs"
 
 [tasks.demo-clean]
-description = "Stop the design demo and clean its database and runtime state"
-run = "sh design-lab/demo/clean.sh"
+description = "Stop the UI demo and clean its database and runtime state"
+run = "sh scripts/ui-demo/clean.sh"

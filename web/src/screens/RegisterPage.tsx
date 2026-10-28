@@ -37,14 +37,14 @@ export function RegisterPage() {
           <span className="wordmark-mark" aria-hidden="true">
             <SumiLogo />
           </span>
-          SUMI
+          Sumi
         </Link>
         <OnboardingProgress current={1} />
       </header>
 
       <section className="register-stage" aria-labelledby="register-title">
         <div className="stage-copy">
-          <p className="eyebrow">01 · HUMAN IDENTITY</p>
+          <p className="eyebrow">Step 1 · Identity</p>
           <h1 id="register-title">Join your collaborators.</h1>
           <p className="stage-note">
             Create the Human identity you will use beside Agents. Your first Space comes next.
@@ -96,8 +96,7 @@ export function RegisterPage() {
       </section>
 
       <footer className="onboarding-footer">
-        <span>HUMANS + AGENTS</span>
-        <span className="status-light">SYSTEM READY</span>
+        <span>Humans and Agents, working together</span>
       </footer>
     </main>
   );

@@ -123,13 +123,13 @@ export function ThreadPane({
       />
       <header className="thread-header">
         <div>
-          <span>THREAD</span>
-          <strong>#{channelSlug}:{threadLabel}{channelHasNewMessages ? <i className="thread-unread-dot" aria-label="New messages" /> : null}</strong>
+          <strong>Thread</strong>
+          <span>{direct ? channelSlug : `#${channelSlug}`}{channelHasNewMessages ? <i className="thread-unread-dot" aria-label="New messages" /> : null}</span>
         </div>
         {thread.data?.task && thread.data.task_relation ? (
           <Link className="thread-task-context" to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: thread.data.task.id }} aria-label={`${thread.data.task.title} ${thread.data.task_relation.toUpperCase()}`}>
-            <strong>!{thread.data.task.seq} {thread.data.task.title}</strong>
-            <span>{thread.data.task_relation.toUpperCase()}</span>
+            <b>!{thread.data.task.seq}</b>
+            <span>{thread.data.task.title}</span>
           </Link>
         ) : null}
         {thread.data ? (
@@ -162,9 +162,8 @@ export function ThreadPane({
           {thread.error ? <div className="timeline-status timeline-status--error">{thread.error.message}</div> : null}
           {thread.data ? (
             <>
-              <p className="thread-section-label">ROOT</p>
               <CompactMessage message={thread.data.root} activityStatus={activityByMemberId.get(thread.data.root.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />
-              <p className="thread-section-label">{thread.data.replies.length} REPLIES</p>
+              <p className="thread-section-label">{thread.data.replies.length} {thread.data.replies.length === 1 ? "reply" : "replies"}</p>
               {thread.data.replies.map((message) => <CompactMessage key={message.id} message={message} activityStatus={activityByMemberId.get(message.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />)}
             </>
           ) : null}

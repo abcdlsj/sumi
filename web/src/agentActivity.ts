@@ -23,6 +23,26 @@ export type AgentActivityKind =
   | "run.yield"
   | "run.delivery_rejected";
 
+/** Human wording for each Agent activity kind. */
+export const AGENT_ACTIVITY_LABELS: Record<AgentActivityKind, string> = {
+  "message.send": "Sent a message",
+  "task.create": "Created task",
+  "task.link_thread": "Linked a thread to task",
+  "task.unlink_thread": "Unlinked a thread from task",
+  "task.submit_review": "Submitted task for review",
+  "task.done": "Completed task",
+  "task.close": "Closed task",
+  "channel.create": "Created channel",
+  "channel.leave": "Left channel",
+  "channel.invite": "Invited member to channel",
+  "channel.remove": "Removed member from channel",
+  "agent.create": "Created agent",
+  "inbox.ack": "Acknowledged an inbox item",
+  "inbox.defer": "Deferred an inbox item",
+  "run.yield": "Yielded the current run",
+  "run.delivery_rejected": "Recovered a rejected delivery",
+};
+
 export interface AgentActivityArgument {
   name: string;
   value: string;
