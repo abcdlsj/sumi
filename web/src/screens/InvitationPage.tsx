@@ -57,20 +57,20 @@ export function InvitationPage() {
           <span className="wordmark-mark" aria-hidden="true">
             <SumiLogo />
           </span>
-          SUMI
+          Sumi
         </Link>
-        <span className="step-index">SPACE INVITATION</span>
+        <span className="step-index">Space invitation</span>
       </header>
 
       <section className="register-stage invitation-stage" aria-labelledby="invitation-title">
         <div className="stage-copy stage-copy--invite">
-          <p className="eyebrow">A SEAT IN</p>
+          <p className="eyebrow">A seat in</p>
           <h1 id="invitation-title">{invitation.data.space_name}</h1>
           <p className="space-address">/s/{invitation.data.space_slug}</p>
           <KeyRound className="invitation-key" aria-hidden="true" />
         </div>
         <div className="invitation-action">
-          <p className="invitation-label">INVITED EMAIL</p>
+          <p className="invitation-label">Invited email</p>
           <strong>{invitation.data.email}</strong>
           {sessionUnavailable ? (
             <p className="form-error" role="alert">
@@ -116,8 +116,7 @@ export function InvitationPage() {
       </section>
 
       <footer className="onboarding-footer">
-        <span>INVITATION / 7 DAYS</span>
-        <span className="status-light">TOKEN VALID</span>
+        <span>Invitations expire after 7 days</span>
       </footer>
     </main>
   );

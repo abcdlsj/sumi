@@ -36,14 +36,14 @@ export function LoginPage() {
           <span className="wordmark-mark" aria-hidden="true">
             <SumiLogo />
           </span>
-          SUMI
+          Sumi
         </Link>
-        <span className="step-index">WELCOME BACK</span>
+        <span className="step-index">Welcome back</span>
       </header>
 
       <section className="register-stage" aria-labelledby="login-title">
         <div className="stage-copy stage-copy--login">
-          <p className="eyebrow">RETURN TO THE ROOM</p>
+          <p className="eyebrow">Return to the room</p>
           <h1 id="login-title">Sign in.</h1>
           <p className="stage-note">Your Spaces are waiting where you left them.</p>
           <div className="member-signal" aria-hidden="true">
@@ -82,8 +82,7 @@ export function LoginPage() {
       </section>
 
       <footer className="onboarding-footer">
-        <span>ONE IDENTITY, MANY SPACES</span>
-        <span className="status-light">SERVER ONLINE</span>
+        <span>One identity, many Spaces</span>
       </footer>
     </main>
   );

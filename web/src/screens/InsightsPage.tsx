@@ -15,7 +15,7 @@ export function InsightsPage() {
         {() => (
           <div className="route-status">
             <section className="route-status-panel">
-              <p className="section-kicker">EXPERIMENTAL</p>
+              <p className="section-kicker">Experimental</p>
               <h1>Agent insights is disabled.</h1>
               <p>Enable experimental features in Settings to show this entry in the rail.</p>
               <Link

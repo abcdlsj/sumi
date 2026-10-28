@@ -1,8 +1,6 @@
-import "@fontsource-variable/manrope";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/noto-sans-sc";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/600.css";
-import "@fontsource/jetbrains-mono/700.css";
 import "./styles.css";
 import "./components/channel/channel.css";
 

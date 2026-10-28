@@ -63,7 +63,7 @@ describe("ChannelPage", () => {
 
     expect(await screen.findByRole("heading", { name: "#general starts here." })).toBeVisible();
     expect(screen.queryByRole("link", { name: "Design lab" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Sumi home" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Sumi Lab" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Finish your Space setup" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Pair" })).toHaveAttribute(
       "href",
@@ -83,15 +83,12 @@ describe("ChannelPage", () => {
     expect(new Set(linIdenticons)).toHaveLength(1);
     expect(screen.getByRole("link", { name: /Lin avatar.*Lin is Working.*Lin.*Working/ })).toHaveAttribute("href", `/s/sumi-lab/dm/${linId}`);
 
-    const shell = screen.getByRole("main");
     const navigation = screen.getByRole("complementary", { name: "Space navigation" });
-    fireEvent.click(within(navigation).getByRole("button", { name: "Close navigation" }));
-    expect(shell).toHaveClass("space-shell--navigation-collapsed");
-    const railOpen = within(screen.getByRole("complementary", { name: "Space tools" })).getByRole("button", { name: "Open navigation" });
-    expect(within(screen.getByRole("complementary", { name: "Space tools" })).queryByRole("img", { name: "Ada avatar" })).not.toBeInTheDocument();
-    fireEvent.click(railOpen);
-    expect(shell).not.toHaveClass("space-shell--navigation-collapsed");
+    expect(within(navigation).getByRole("navigation", { name: "Space tools" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
     expect(navigation).toHaveClass("space-navigation--open");
+    fireEvent.click(within(navigation).getByRole("button", { name: "Close navigation" }));
+    expect(navigation).not.toHaveClass("space-navigation--open");
 
     fireEvent.click(screen.getByRole("button", { name: "Create Channel" }));
     const dialog = screen.getByRole("dialog", { name: "Create Channel" });
@@ -116,7 +113,7 @@ describe("ChannelPage", () => {
     });
   });
 
-  it("returns to the last channel when reopening Conversation", async () => {
+  it("returns to the last channel when reopening the Space", async () => {
     window.localStorage.setItem(
       "sumi.lastConversation.sumi-lab",
       JSON.stringify({ kind: "channel", channelSlug: "design" }),
@@ -154,11 +151,9 @@ describe("ChannelPage", () => {
     renderRoute("/s/sumi-lab");
 
     expect(await screen.findByRole("heading", { name: "#design starts here." })).toBeVisible();
-    const rail = screen.getByRole("complementary", { name: "Space tools" });
-    expect(within(rail).getByRole("link", { name: "Conversation" })).toHaveAttribute(
-      "href",
-      "/s/sumi-lab/channels/design",
-    );
+    const tools = screen.getByRole("navigation", { name: "Space tools" });
+    expect(within(tools).getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/s/sumi-lab/inbox");
+    expect(screen.getByRole("link", { name: "design" })).toHaveAttribute("aria-current", "page");
   });
 
   it("creates and opens a DM from conversation navigation", async () => {

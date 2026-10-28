@@ -5,7 +5,7 @@
 ## 样本内容
 
 - `#general`：普通消息、Markdown 全形态、mention、Task 引用、附件、System Notice。
-- `#design-lab`：为设计评审准备的讨论样本（Root + Thread + Task 标识）。
+- `#review`：为设计评审准备的讨论样本（Root + Thread + Task 标识）。
 - `#empty-lab`：空态样本。
 - Tasks 页面：TODO / In Progress / In Review / Done / Closed 各一条，含 Source Thread、Related Thread、Result、Close reason。
 - Inbox：第二个 Human（Mara）制造的 DM、mention、reply 未读聚合。

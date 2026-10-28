@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Design-lab sample set. Drives the same HTTP API the Browser uses to leave a
+// UI demo sample set. Drives the same HTTP API the Browser uses to leave a
 // seeded Space in a state that exercises every visual/AX state we review:
 // Markdown forms, mentions, attachments, Task badges and all five statuses,
 // Thread replies, DM inbox items, Action Messages, System Notices, empty
@@ -7,7 +7,7 @@
 //
 // Requires the dev-seed Space (sumi-dev) to exist first. Run through
 // `mise run demo`; standalone: SUMI_SEED_SERVER=http://127.0.0.1:3001 \
-//   node design-lab/demo/seed-samples.mjs
+//   node scripts/ui-demo/seed-samples.mjs
 
 import { createHash } from "node:crypto";
 
@@ -439,19 +439,19 @@ async function main() {
   );
   await joinChannel(maraCookie, general.id, MARA_NAME);
 
-  // #design-lab: review thread plus one root per Task status.
-  const designLab = await ensureChannel(
+  // #review: review thread plus one root per Task status.
+  const reviewChannel = await ensureChannel(
     ownerCookie,
     space.id,
-    "design-lab",
+    "review",
     "Visual and AX review samples",
     [leo.member_id, iris.member_id, nora.member_id],
   );
-  await joinChannel(maraCookie, designLab.id, MARA_NAME);
+  await joinChannel(maraCookie, reviewChannel.id, MARA_NAME);
 
   const threadRoot = await ensureMessage(
     ownerCookie,
-    designLab.id,
+    reviewChannel.id,
     "Sample: thread root — avatar refresh",
     "Sample: thread root — avatar refresh proposal. Keep the pixel seal, move the colors.",
   );
@@ -499,7 +499,7 @@ async function main() {
   for (const sample of taskSamples) {
     let task = existingTasks.find((candidate) => candidate.title === sample.title);
     if (!task) {
-      const root = await ensureTaskRoot(ownerCookie, designLab.id, sample.marker);
+      const root = await ensureTaskRoot(ownerCookie, reviewChannel.id, sample.marker);
       task = await createTaskFromRoot(ownerCookie, root, sample.title);
     }
     if (

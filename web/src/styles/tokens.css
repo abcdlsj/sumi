@@ -1,48 +1,81 @@
+/* Sumi "Clarity" tokens. Neutral surfaces; colour is reserved for two
+   signals (someone is waiting for you, an Agent is working) plus status. */
 :root {
-  font-family: "Manrope Variable", "Manrope", "Noto Sans SC", sans-serif;
-  color: #241f1a;
-  background: var(--paper);
+  color-scheme: light;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--bg);
   font-synthesis: none;
-  letter-spacing: 0;
-  --font-sans: "Manrope Variable", "Manrope", "Noto Sans SC", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --code-bg: color-mix(in srgb, var(--ink) 6%, var(--paper));
-  --ink: #241f1a;
-  --ink-soft: #5a5146;
-  --paper: #fffbf4;
-  --panel: #f5eee1;
-  --surface-strong: #efe5d5;
-  --rail: #241f1a;
-  --rail-fg: #fffbf4;
-  --accent: #f0602f;
-  --accent-core: #f0602f;
-  --accent-soft: #fde3d5;
-  --cyan: #3d5aa9;
-  --green: #5b9253;
-  --yellow: #e8b42d;
-  --orange: #e08b2c;
-  --red: #d33f2e;
-  --stone: #b4ab9d;
-  --line: #e8decd;
-  --line-strong: #c6b9a6;
-  --status-offline: var(--stone);
-  --muted: #8a8071;
-  --text-page-title: 18px;
-  --text-section-title: 12px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --font-sans: "Geist Variable", "Geist", "Noto Sans SC Variable", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Surfaces */
+  --bg: #ffffff;
+  --bg-sidebar: #f7f6f4;
+  --bg-subtle: #f3f2ef;
+  --bg-hover: #f8f8f6;
+  --bg-selected: #ffffff;
+  --bg-raised: #ffffff;
+  --code-bg: #f3f2ef;
+
+  /* Ink */
+  --ink: #1c1b19;
+  --ink-2: #56544f;
+  --muted: #8f8c86;
+  --line: #eeedea;
+  --line-strong: #dfddd8;
+  --focus: #1c1b19;
+
+  /* Signals */
+  --you: #d9902b;
+  --you-soft: #f8ead0;
+  --you-ink: #93590f;
+  --you-row: #fcf7ee;
+  --live: #2e9c8f;
+  --live-soft: #e3f3f0;
+  --live-ink: #1f7369;
+  --online: #4aa36a;
+  --danger: #c2402a;
+  --danger-soft: #fbece8;
+  --warning: #c98512;
+
+  /* Task status */
+  --status-todo: #a8a59f;
+  --status-in-progress: #2e9c8f;
+  --status-in-review: #d9902b;
+  --status-done: #4aa36a;
+  --status-closed: #c3c0ba;
+
+  /* Chart series */
+  --series-1: #3a5fc8;
+  --series-2: #2e9c8f;
+  --series-3: #d9902b;
+
+  /* Shape */
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-agent: 8px;
+  --shadow-selected: 0 1px 2px rgb(28 27 25 / 6%), 0 0 0 1px rgb(28 27 25 / 4%);
+  --shadow-raised: 0 0 0 1px rgb(28 27 25 / 7%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 6%);
+  --shadow-popover: 0 0 0 1px rgb(28 27 25 / 6%), 0 8px 24px rgb(28 27 25 / 10%);
+
+  /* Type */
+  --text-page-title: 17px;
+  --text-section: 13px;
   --text-body: 14px;
-  --text-message: 14px;
-  --text-system: 13px;
-  --text-meta: 11px;
-  /* Flat classification chip tones — colour carries the category, no border needed. */
-  --chip-runtime: #d8e8e6;
-  --chip-model: #e3e0f7;
-  --chip-reasoning: #f5e6b8;
-  --chip-mode: #f6dfd2;
-  --chip-neutral: #e9e3d8;
-  --ui-page-gutter: 28px;
-  --ui-page-gutter-compact: 14px;
-  --ui-section-gap: 32px;
-  --ui-row-gap: 12px;
-  --ui-control-height: 36px;
-  --ui-control-shadow: 2px 2px 0 var(--ink);
+  --text-small: 13px;
+  --text-meta: 12px;
+
+  /* Layout */
+  --header-height: 56px;
+  --sidebar-width: 256px;
+  --control-height: 34px;
+  --control-height-compact: 30px;
+  --page-gutter: 28px;
+  --page-gutter-compact: 16px;
 }

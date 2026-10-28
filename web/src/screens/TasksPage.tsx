@@ -25,9 +25,9 @@ type TaskFilter = "all_open" | TaskStatus | "assigned_to_me";
 
 const filters: Array<{ id: TaskFilter; label: string }> = [
   { id: "all_open", label: "All open" },
-  { id: "todo", label: "TODO" },
-  { id: "in_progress", label: "In Progress" },
-  { id: "in_review", label: "In Review" },
+  { id: "todo", label: "To do" },
+  { id: "in_progress", label: "In progress" },
+  { id: "in_review", label: "In review" },
   { id: "done", label: "Done" },
   { id: "closed", label: "Closed" },
   { id: "assigned_to_me", label: "Assigned to me" },
@@ -42,7 +42,7 @@ const openOrder: Record<TaskStatus, number> = {
 };
 
 const statusLabels: Record<TaskStatus, string> = {
-  todo: "TODO",
+  todo: "To do",
   in_progress: "In progress",
   in_review: "In review",
   done: "Done",
@@ -118,13 +118,6 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
                 <h2 id={`task-group-${group.status}`}>{statusLabels[group.status]}</h2>
                 <span>{group.tasks.length}</span>
               </header>
-              <div className="task-list-heading" aria-hidden="true">
-                <span>Status</span>
-                <span>Task</span>
-                <span>Assignee</span>
-                <span>Source</span>
-                <span>Updated</span>
-              </div>
               <div className="task-list" role="list">
                 {group.tasks.map((task) => <TaskRow key={task.id} task={task} spaceSlug={spaceSlug} />)}
               </div>
@@ -141,9 +134,9 @@ function TaskRow({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
     <article className="task-row" role="listitem">
       <div className="task-row-status">
         <TaskStatusLabel status={task.status} />
-        <span className="task-row-reference">!{task.seq}</span>
       </div>
       <Link className="task-row-main" to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: task.id }}>
+        <span className="task-row-reference">!{task.seq}</span>
         <strong>{task.title}</strong>
       </Link>
       <dl className="task-row-facts">
@@ -248,7 +241,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
       {closeOpen ? (
         <DialogFrame className="confirm-dialog" close={() => setCloseOpen(false)} labelId="close-task-title">
           <header>
-            <div><p className="section-kicker">CLOSE TASK</p><h2 id="close-task-title">Close task</h2></div>
+            <div><p className="section-kicker">Close Task</p><h2 id="close-task-title">Close task</h2></div>
             <button className="icon-button" type="button" aria-label="Close Close Task" onClick={() => setCloseOpen(false)}><X /></button>
           </header>
           <form onSubmit={(event) => { event.preventDefault(); confirmClose(); }}>
@@ -266,7 +259,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
 }
 
 function TaskStatusLabel({ status }: { status: TaskStatus }) {
-  return <span className={`task-status task-status--${status}`}><TaskStatusIcon status={status} />{statusLabels[status]}</span>;
+  return <span className={`task-status task-status--${status}`}><TaskStatusIcon status={status} /><span>{statusLabels[status]}</span></span>;
 }
 function threadDisplayLabel(thread: ThreadReference): string {
   return thread.channel_slug ? `#${thread.channel_slug}:${thread.root_message_seq}` : `DM · message ${thread.root_message_seq}`;

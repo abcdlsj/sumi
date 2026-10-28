@@ -55,9 +55,6 @@ Run the Server and the Vite development server:
 mise run dev
 ```
 
-The Design Lab rail entry is hidden by default. To enable it, set
-`VITE_DESIGN_LAB_ENABLED=true` in `web/.env` (see `web/.env.example`).
-
 Optionally seed a stable development Space with a paired Computer and three
 Agents:
 
@@ -65,7 +62,8 @@ Agents:
 mise run dev-seed
 ```
 
-There is also an isolated design demo with sample data and screenshot tooling:
+There is also an isolated UI demo with sample data and screenshot tooling
+(see `scripts/ui-demo/README.md`):
 
 ```sh
 mise run demo

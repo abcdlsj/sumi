@@ -89,7 +89,7 @@ describe("Human Inbox", () => {
     expect(view.getByText("Please review the release checklist before continuing")).toHaveClass("inbox-message-preview");
     const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
     expect(styles).toMatch(/\.inbox-message-preview\s*\{[^}]*overflow:\s*hidden/s);
-    expect(styles).toMatch(/\.inbox-message-preview\s*\{[^}]*-webkit-line-clamp:\s*1/s);
+    expect(styles).toMatch(/\.inbox-message-preview\s*\{[^}]*-webkit-line-clamp:\s*2/s);
   });
 
   it("marks an Item read when its source is opened", async () => {
