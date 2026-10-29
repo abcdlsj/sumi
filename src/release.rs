@@ -46,14 +46,16 @@ pub(crate) async fn computer(args: ComputerReleaseArgs) -> anyhow::Result<()> {
         sha256: hex::encode(Sha256::digest(&artifact_content)),
     };
 
+    let target_dir = args.output_dir.join(&release.target);
     ensure_private_directory(&args.output_dir).await?;
-    write_release_file(&args.output_dir.join(&artifact_name), &artifact_content).await?;
+    ensure_private_directory(&target_dir).await?;
+    write_release_file(&target_dir.join(&artifact_name), &artifact_content).await?;
     write_atomically(
-        &args.output_dir.join("manifest.json"),
+        &target_dir.join("manifest.json"),
         &serde_json::to_vec_pretty(&release)?,
     )
     .await?;
-    println!("{}", args.output_dir.display());
+    println!("{}", target_dir.display());
     Ok(())
 }
 
@@ -129,11 +131,15 @@ mod tests {
         .await
         .unwrap();
 
-        let manifest: ComputerRelease =
-            serde_json::from_slice(&tokio::fs::read(output.join("manifest.json")).await.unwrap())
-                .unwrap();
+        let target_dir = output.join("x86_64-unknown-linux-gnu");
+        let manifest: ComputerRelease = serde_json::from_slice(
+            &tokio::fs::read(target_dir.join("manifest.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(
-            tokio::fs::read(output.join(&manifest.artifact))
+            tokio::fs::read(target_dir.join(&manifest.artifact))
                 .await
                 .unwrap(),
             b"computer binary"

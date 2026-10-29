@@ -226,8 +226,10 @@ sumi release computer \
   --output-dir /var/lib/sumi/releases/stable
 ```
 
-The command writes `manifest.json` and an immutable, versioned artifact. The
-Server serves that directory. A Computer downloads releases only from its
+The command writes `<target>/manifest.json` and an immutable, versioned
+artifact under the output directory. Run it once per target into the same
+directory; the Server serves every target from it, so one Server updates macOS
+and Linux Computers alike. A Computer downloads releases only from its
 configured Server and verifies the SHA-256 digest before staging an artifact.
 Production deployments must expose the Server over HTTPS. The Computer
 activates a release only after local Runs finish.
@@ -239,8 +241,10 @@ run the release command.
 
 Pushing a tag that matches the Cargo package version, such as `v0.2.0`, builds
 Linux x86_64, macOS Intel, and macOS Apple Silicon Computer executables and
-Server deployment bundles. The GitHub Actions run stores them as workflow
-artifacts and attaches them with `SHA256SUMS` to the GitHub Release.
+`sumi-computer-releases-<version>.tar.gz`, a `stable` directory holding all
+three targets. Extract it as `computer_update_dir` on the Server. The GitHub
+Actions run stores them as workflow artifacts and attaches them with
+`SHA256SUMS` to the GitHub Release.
 
 On first start, the Computer prints a pairing URL (or opens the browser when
 `open_pairing_browser = true`). Confirm the pairing in the Sumi web UI to bind

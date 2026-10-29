@@ -146,7 +146,11 @@ async fn check_and_stage(
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let endpoint = server.join("api/v1/computer-updates/stable/manifest")?;
+    let release_root = server.join(&format!(
+        "api/v1/computer-updates/stable/{}/",
+        current_target()
+    ))?;
+    let endpoint = release_root.join("manifest.json")?;
     let response = client.get(endpoint).send().await?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -183,10 +187,7 @@ async fn check_and_stage(
     ensure_private_directory(&staged_dir).await?;
     let staged = staged_dir.join("sumi");
     if file_sha256(&staged).await.as_deref() != Some(release.sha256.as_str()) {
-        let artifact_url = server.join(&format!(
-            "api/v1/computer-updates/stable/files/{}",
-            release.artifact
-        ))?;
+        let artifact_url = release_root.join(&release.artifact)?;
         let response = client.get(artifact_url).send().await?.error_for_status()?;
         if let Some(length) = response.content_length() {
             ensure!(
@@ -629,16 +630,17 @@ mod tests {
             artifact: "sumi-test".into(),
             sha256: hex::encode(Sha256::digest(&artifact)),
         };
+        let release_root = format!("/api/v1/computer-updates/stable/{}", current_target());
         let app = Router::new()
             .route(
-                "/api/v1/computer-updates/stable/manifest",
+                &format!("{release_root}/manifest.json"),
                 get({
                     let release = release.clone();
                     move || async move { Json(release) }
                 }),
             )
             .route(
-                "/api/v1/computer-updates/stable/files/sumi-test",
+                &format!("{release_root}/sumi-test"),
                 get({
                     let artifact = artifact.clone();
                     move || async move { artifact }

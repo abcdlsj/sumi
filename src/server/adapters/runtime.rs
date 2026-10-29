@@ -64,15 +64,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
             .not_found_service(ServeFile::new(config.web_dist.join("index.html"))),
     );
     if let Some(update_dir) = &config.computer_update_dir {
-        app = app
-            .route_service(
-                "/api/v1/computer-updates/stable/manifest",
-                ServeFile::new(update_dir.join("manifest.json")),
-            )
-            .nest_service(
-                "/api/v1/computer-updates/stable/files",
-                ServeDir::new(update_dir),
-            );
+        app = app.nest_service("/api/v1/computer-updates/stable", ServeDir::new(update_dir));
     }
     let app = app.layer(TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(config.bind)

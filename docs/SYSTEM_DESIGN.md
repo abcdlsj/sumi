@@ -42,7 +42,7 @@ Driver：
 
 ## Computer 更新
 
-- Server 从配置的 stable release 目录公开不可变 manifest 与二进制。manifest 包含 daemon version、protocol version、target、artifact 和 sha256。
+- Server 从配置的 stable release 目录公开不可变 manifest 与二进制。目录按 target 分子目录，每个 `<target>/manifest.json` 包含 daemon version、protocol version、target、artifact 和 sha256；Computer 读取 `/api/v1/computer-updates/stable/<target>/manifest.json`，再下载同目录下的 artifact。一台 Server 因此可以同时服务多个平台的 Computer。
 - Computer 只从已连接 Server 的同一 origin 下载 manifest 与 artifact；生产传输使用 HTTPS，sha256 检测损坏或不一致的 artifact。Server 是其所承载 Computer 的更新信任边界，不增加全局发行密钥。
 - release Computer 首次从稳定路径之外运行时，把自身原子复制到 `~/.sumi/bin/sumi` 并从该路径重新执行；已存在的稳定副本优先，防止旧下载文件覆盖已更新版本。debug 构建不自动安装。
 - Computer 在启动后检查更新，此后按配置周期检查。Update Policy 关闭自动更新时，Computer 不自动安装或检查发布物。

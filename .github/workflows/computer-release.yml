@@ -77,21 +77,19 @@ jobs:
           if [[ "$host" != "$RELEASE_TARGET" ]]; then
             artifact="target/$RELEASE_TARGET/release/sumi"
           fi
-          output="dist/sumi-computer-$RELEASE_VERSION-$RELEASE_TARGET"
           ./target/release/sumi release computer \
             --artifact "$artifact" \
             --version "$RELEASE_VERSION" \
             --target "$RELEASE_TARGET" \
-            --output-dir "$output"
-          cp "$output/sumi-$RELEASE_VERSION-$RELEASE_TARGET" dist/
-          tar -C dist -czf "$output.tar.gz" "$(basename "$output")"
+            --output-dir dist/stable
+          cp "dist/stable/$RELEASE_TARGET/sumi-$RELEASE_VERSION-$RELEASE_TARGET" dist/
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: sumi-computer-${{ steps.release.outputs.version }}-${{ matrix.target }}
           path: |
-            dist/*.tar.gz
+            dist/stable
             dist/sumi-${{ steps.release.outputs.version }}-${{ matrix.target }}
           if-no-files-found: error
           retention-days: 30
@@ -112,6 +110,14 @@ jobs:
           pattern: sumi-computer-*
           path: dist
           merge-multiple: true
+
+      - name: Bundle the stable release directory
+        working-directory: dist
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          tar -czf "sumi-computer-releases-${RELEASE_TAG#v}.tar.gz" stable
+          rm -r stable
 
       - name: Generate bundle checksums
         working-directory: dist
