@@ -350,6 +350,21 @@ input[type="radio"] {
   font-size: var(--text-small);
 }
 
+.form-hint {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.form-field > label {
+  display: grid;
+  gap: 6px;
+}
+
 .inline-notice {
   margin: 0;
   padding: 9px 12px;

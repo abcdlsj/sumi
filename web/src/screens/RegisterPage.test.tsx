@@ -34,8 +34,45 @@ describe("RegisterPage", () => {
     expect(screen.getByRole("list", { name: "Onboarding step 1 of 3" })).toBeVisible();
     expect(screen.getByLabelText("Display name")).toBeRequired();
     expect(screen.getByLabelText("Email")).toHaveAttribute("type", "email");
-    expect(screen.getByLabelText("Password")).toHaveAttribute("minLength", "10");
+    const password = screen.getByLabelText("Password");
+    expect(password).toHaveAttribute("minLength", "12");
+    expect(password).toHaveAttribute("aria-describedby", "register-password-hint");
+    expect(screen.getByText("At least 12 characters.")).toBeVisible();
     expect(screen.getByRole("button", { name: /continue/i })).toBeVisible();
+  });
+
+  it("reports a registration conflict without revealing that the email exists", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/register" && init?.method === "POST") {
+        return json(
+          { error: { code: "conflict", message: "request conflicts with current state" } },
+          409,
+        );
+      }
+      if (path === "/api/v1/auth/me") {
+        return json({ error: { code: "unauthenticated", message: "Authentication is required" } }, 401);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const router = createAppRouter(createMemoryHistory({ initialEntries: ["/"] }));
+    await router.load();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Display name"), { target: { value: "Ada" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not create the account. Check your details and try again.");
+    expect(alert).not.toHaveTextContent("exists");
+    expect(alert).not.toHaveTextContent("request conflicts with current state");
   });
 
   it("previews the canonical Space URL and enters general with a palette accent", async () => {

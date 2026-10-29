@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowRight, Asterisk, LoaderCircle } from "lucide-react";
 import type { FormEvent } from "react";
 
-import { register } from "../api/client";
+import { ApiRequestError, register } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
 
 export function RegisterPage() {
@@ -66,19 +66,25 @@ export function RegisterPage() {
             Email
             <input name="email" type="email" autoComplete="email" required />
           </label>
-          <label>
-            Password
-            <input
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              minLength={10}
-              required
-            />
-          </label>
+          <div className="form-field">
+            <label>
+              Password
+              <input
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                aria-describedby="register-password-hint"
+                required
+              />
+            </label>
+            <span className="form-hint" id="register-password-hint">
+              At least 12 characters.
+            </span>
+          </div>
           {registration.error ? (
             <p className="form-error" role="alert">
-              {registration.error.message}
+              {registrationErrorText(registration.error)}
             </p>
           ) : null}
           <button className="primary-action" type="submit" disabled={registration.isPending}>
@@ -114,6 +120,15 @@ export function OnboardingProgress({ current }: { current: 1 | 2 }) {
       <li><span>03</span><strong>Setup</strong></li>
     </ol>
   );
+}
+
+// Registration fails for several causes, including an email that already exists. Keep every
+// conflict on one message so a caller cannot tell which accounts are registered.
+function registrationErrorText(error: Error): string {
+  if (error instanceof ApiRequestError && error.status === 409) {
+    return "Could not create the account. Check your details and try again.";
+  }
+  return error.message;
 }
 
 function isSafeRedirect(value: string | undefined): value is string {
