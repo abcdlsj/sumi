@@ -365,6 +365,26 @@ impl PostgresAdapter {
             .execute(&mut *transaction)
             .await?;
         }
+        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if version < 11 {
+            if version != 10 {
+                return Err(sqlx::Error::Protocol(format!(
+                    "unsupported schema baseline version {version}"
+                )));
+            }
+            sqlx::raw_sql(
+                "CREATE OR REPLACE FUNCTION notify_space_event() RETURNS trigger LANGUAGE plpgsql AS $$ \
+                 BEGIN PERFORM pg_notify('sumi_space_events', NEW.space_id::text); RETURN NULL; END; $$; \
+                 DROP TRIGGER IF EXISTS outbox_events_notify ON outbox_events; \
+                 CREATE TRIGGER outbox_events_notify AFTER INSERT ON outbox_events \
+                    FOR EACH ROW EXECUTE FUNCTION notify_space_event(); \
+                 INSERT INTO schema_meta (version, applied_at) VALUES (11, now());",
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await
     }
 

@@ -142,6 +142,7 @@ Driver：
 
 - 可由关联关系推导的数据不重复保存。
 - 事务提交后才发送 SSE、WebSocket command 或外部请求。
+- Browser SSE 以 `outbox_events` 为唯一事实：该表的 insert 触发器在事务提交时以 Space ID `NOTIFY`，Server 唤醒同 Space 的事件流后再读取；唤醒丢失（如监听连接重连）时事件流最多 30 秒后兜底读取，不按固定间隔轮询数据库。
 - 稳定状态使用 text 和 CHECK 约束；正文、Secret、Provider transcript 不进入 idempotency 或 outbox metadata。
 - 基线后 schema 变更使用前向 migration，不得修改已应用 migration。
 - 性能优化先通过查询、索引和可重建投影解决；写模型保持规范化。

@@ -191,7 +191,7 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         assert!(!legacy_session_table);
         assert!(slug_constraint);
         assert!(run_observations);
-        assert_eq!(schema_version, 10);
+        assert_eq!(schema_version, 11);
 
         sqlx::raw_sql(
             "ALTER TABLE channels DROP CONSTRAINT channels_slug_form_check; \
@@ -200,7 +200,7 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
              DROP INDEX inbox_items_open_thread_ambient_aggregate; \
              ALTER TABLE inbox_items DROP COLUMN ambient_channel_id; \
              DROP TABLE run_observations; \
-             UPDATE schema_meta SET version=5 WHERE version=10;",
+             UPDATE schema_meta SET version=5 WHERE version=11;",
         )
         .execute(&pool)
         .await
@@ -231,7 +231,7 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(migrated_version, 10);
+        assert_eq!(migrated_version, 11);
         assert!(migrated_constraint);
         assert!(migrated_run_observations);
         assert!(!migrated_observed_thread_seq);
@@ -1549,7 +1549,7 @@ async fn v6_to_v7_migration_merges_channel_aggregates_across_threads() {
              ALTER TABLE inbox_items DROP COLUMN ambient_channel_id;
              DROP TABLE run_observations;
              CREATE UNIQUE INDEX inbox_items_open_ambient_aggregate ON inbox_items(member_id,thread_id) WHERE strength='ambient' AND status='pending' AND retry_count=0;
-             UPDATE schema_meta SET version=6 WHERE version=10;
+             UPDATE schema_meta SET version=6 WHERE version=11;
              INSERT INTO spaces (id,slug,name,accent,owner_member_id,created_at) VALUES ('{space}','migration-space','Migration Space','#F0602F','{owner}',now());
              INSERT INTO members (id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner}','{space}','human','Owner','owner',now()),('{agent}','{space}','agent','Migrator','member',now());
              INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','migration',5,now());
@@ -1578,7 +1578,7 @@ async fn v6_to_v7_migration_merges_channel_aggregates_across_threads() {
                 .fetch_one(&pool)
                 .await
                 .unwrap(),
-            10
+            11
         );
         pool.close().await;
     }
@@ -2159,6 +2159,81 @@ async fn committed_command_wakes_the_online_connection() {
                 .await
                 .unwrap();
         assert_eq!(pending, 1);
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}
+
+#[tokio::test]
+async fn committed_space_event_wakes_browser_streams_only_after_commit() {
+    use crate::server::adapters::space_events::{SpaceEventSignal, Wake};
+
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_space_event_wakeup_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        PostgresAdapter::new(pool.clone())
+            .initialize_schema()
+            .await
+            .unwrap();
+        let space_id = Uuid::now_v7();
+        let owner_id = Uuid::now_v7();
+        sqlx::raw_sql(&format!(
+            "BEGIN;
+             INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) VALUES ('{space_id}','events','Events','#F0602F','{owner_id}',now());
+             INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner_id}','{space_id}','human','Owner','owner',now());
+             COMMIT;"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let signal = SpaceEventSignal::default();
+        let mut wakeups = signal.subscribe();
+        let listener = tokio::spawn(signal.clone().listen_forever(pool.clone()));
+        let within = std::time::Duration::from_secs(5);
+        assert_eq!(
+            tokio::time::timeout(within, wakeups.recv()).await.unwrap().unwrap(),
+            Wake::All
+        );
+
+        let mut transaction = pool.begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) \
+             VALUES($1,$2,'task.updated','{}',now())",
+        )
+        .bind(Uuid::now_v7())
+        .bind(space_id)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), wakeups.recv())
+                .await
+                .is_err(),
+            "an uncommitted event must not wake streams"
+        );
+        transaction.commit().await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(within, wakeups.recv()).await.unwrap().unwrap(),
+            Wake::Space(space_id)
+        );
+        listener.abort();
     }
     .await;
 

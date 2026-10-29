@@ -104,6 +104,8 @@ pub(super) async fn space_events(
         })
         .transpose()?;
     let viewer = MemberId::from_uuid(viewer);
+    // Subscribe before the first read so a commit between the read and the wait still wakes us.
+    let wakeups = state.space_events.subscribe();
     let initial = state
         .storage
         .browser_events(space_id, viewer, last_event_id)
@@ -116,8 +118,9 @@ pub(super) async fn space_events(
             space_id,
             last_event_id,
             VecDeque::from(initial),
+            wakeups,
         ),
-        move |(storage, space_id, mut cursor, mut buffered)| async move {
+        move |(storage, space_id, mut cursor, mut buffered, mut wakeups)| async move {
             loop {
                 if let Some(event) = buffered.pop_front() {
                     cursor = Some(event.event_id);
@@ -125,9 +128,9 @@ pub(super) async fn space_events(
                         Ok(event) => event,
                         Err(_) => return None,
                     };
-                    return Some((Ok(event), (storage, space_id, cursor, buffered)));
+                    return Some((Ok(event), (storage, space_id, cursor, buffered, wakeups)));
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                super::space_events::wait_for_space(&mut wakeups, space_id.into_uuid()).await;
                 buffered = match storage.browser_events(space_id, viewer, cursor).await {
                     Ok(Some(events)) => VecDeque::from(events),
                     Ok(None) | Err(_) => return None,

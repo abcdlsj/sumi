@@ -2,7 +2,7 @@ CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TIMESTAMPTZ NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (10, now());
+INSERT INTO schema_meta (version, applied_at) VALUES (11, now());
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -739,3 +739,13 @@ CREATE INDEX tasks_space_cursor ON tasks(space_id, updated_at DESC, id DESC);
 CREATE INDEX agent_runs_task_cursor ON agent_runs(task_id, created_at DESC, id DESC);
 CREATE INDEX inbox_items_pending ON inbox_items(member_id, available_at, id)
     WHERE status IN ('pending', 'deferred');
+
+CREATE FUNCTION notify_space_event() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_notify('sumi_space_events', NEW.space_id::text);
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER outbox_events_notify AFTER INSERT ON outbox_events
+    FOR EACH ROW EXECUTE FUNCTION notify_space_event();

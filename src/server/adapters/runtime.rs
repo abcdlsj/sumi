@@ -49,12 +49,15 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         queries: QueryRegistry::default(),
         agent_graph_cache: http::AgentGraphCache::default(),
         web_origin: web_origin.clone(),
+        space_events: super::space_events::SpaceEventSignal::default(),
     };
     let mut api = http::api_router(state.clone(), 100 * 1024 * 1024);
     if let Some(web_origin) = &web_origin {
         api = http::allow_web_origin(api, web_origin);
     }
     let dispatcher = tokio::spawn(dispatch_available_work_forever(state.clone()));
+    let space_event_listener =
+        tokio::spawn(state.space_events.clone().listen_forever(pool.clone()));
     let mut app = axum::Router::new().nest("/api/v1", api).fallback_service(
         ServeDir::new(&config.web_dist)
             .append_index_html_on_directories(true)
@@ -80,6 +83,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         .await
         .context("Server stopped unexpectedly");
     dispatcher.abort();
+    space_event_listener.abort();
     served
 }
 

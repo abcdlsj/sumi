@@ -104,6 +104,7 @@ impl CapabilityFixture {
             queries: QueryRegistry::default(),
             agent_graph_cache: AgentGraphCache::default(),
             web_origin: None,
+            space_events: Default::default(),
         };
         let mut headers = HeaderMap::new();
         headers.insert(

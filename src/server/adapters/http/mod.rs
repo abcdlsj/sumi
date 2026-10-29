@@ -165,6 +165,7 @@ pub(super) struct RuntimeState {
     pub(super) agent_graph_cache: AgentGraphCache,
     /// Origin of a separately deployed Web UI; pairing links point there when it is set.
     pub(super) web_origin: Option<String>,
+    pub(super) space_events: super::space_events::SpaceEventSignal,
 }
 
 mod agent_graph;
