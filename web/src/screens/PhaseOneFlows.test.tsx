@@ -115,7 +115,7 @@ describe("Phase one Human flows", () => {
     expect((await screen.findAllByText("Grace Hopper"))[0]).toBeVisible();
     expect(within(screen.getByRole("navigation", { name: "Space tools" })).getByRole("link", { name: "Members" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "Agents", level: 2 })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", "/s/sumi-lab/agents/019c0000-0000-7000-8000-000000000030");
+    expect(screen.getByRole("link", { name: /^Manage/ })).toHaveAttribute("href", "/s/sumi-lab/agents/019c0000-0000-7000-8000-000000000030");
     const linIdenticons = screen.getAllByRole("img", { name: "Lin avatar" }).map((avatar) => avatar.getAttribute("data-agent-identicon"));
     expect(linIdenticons.every(Boolean)).toBe(true);
     expect(new Set(linIdenticons)).toHaveLength(1);

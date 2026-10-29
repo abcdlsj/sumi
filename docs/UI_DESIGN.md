@@ -9,12 +9,12 @@
 - 视觉语言是“清晰”：中性底色、发丝线分隔、单一的选中态。界面不靠颜色营造层次；颜色只保留给两个注意力信号和 Task 状态。不使用渐变、玻璃、模糊、硬偏移阴影或大写标题。
 - 注意力只有两种信号，任何页面都不新增第三种：
   - **For you**（暖色）：有人在等你。提到我或 `@all`、且作者不是我的 Message 整行使用 `--you-row` 浅暖底，作者行显示 `For you`；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
-  - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；该 Agent 最新一条 Message 下方显示 `X is working on this` 与三点动画；当前步骤只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
-- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #56544F`、`--muted #8F8C86`；线 `--line #EEEDEA`、`--line-strong #DFDDD8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
-- Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），只用于 Space 标识本身，不染色界面。
+  - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
+- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #56544F`、`--muted #8F8C86`；线 `--line #EAE8E4`、`--line-strong #DBD8D2`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
+- Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
 - 字体：Geist（中文回退 Noto Sans SC）；代码、seq、数值使用 Geist Mono 与 tabular figures。
 - 字号层级：页面标题 17px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。
-- 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 ink（主要 CTA），圆角 7px。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
+- 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 accent（主要 CTA），圆角 7px；按下时只加深底色并加内阴影，不位移、不缩放。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
 - 选中态全站统一：白色抬起卡片（`--shadow-selected`），用于导航当前项、筛选 tab、分段控件。hover 只换极浅底色。
 - 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。
 - Task 状态由图形形状承载：TODO 虚线圆、In Progress 半满圆、In Review 圆点环、Done 对勾、Closed 斜线；同时带状态文字或 `aria-label`，颜色不是唯一线索。
@@ -57,7 +57,9 @@
 - Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。
 - 只有 Root Message 提供 `Create Task` 动作；创建后立即替换为 Task 标识，不显示 bind、Source Thread 选择或来源确认步骤。
 - Thread reply 不显示创建动作；reply 上的 Task 动作保持禁用并说明只能从 Root Message 创建。
-- 每条 Message 在 hover 或键盘 focus 时才显示：左侧 gutter 的 `seq`（连续消息显示时间）、右上角的轻量动作面板（Reply to thread 与 Task 动作，白底浮起小条）。静止时消息行只有头像、名字、时间和正文。
+- 每条 Message 在 hover 或键盘 focus 时才显示：左侧 gutter 的 `seq`（连续消息显示时间）、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字、时间和正文。
+- 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。
+- 其他成员的新消息以 0.2 秒淡入上移出现；自己的消息不做动画。
 - Channel 消息与 Thread reply 中的 Agent 头像可点击，直接打开与该 Agent 的 DM；DM 消息中的头像不可点击。
 - Root Message 的 Task 标识是正文下方的浅底小条：状态图形、`!<seq>` 与状态文字；title、assignee 不显示在消息上，hover 显示 title；当前 Run 在其他 Linked Thread 时显示 `· elsewhere`。只有 Root Message 显示。
 - Task 状态颜色只作用于状态图形本身（TODO 灰、In Progress 青、In Review 暖、Done 绿、Closed 浅灰），标签底色保持中性。
@@ -70,9 +72,9 @@
 ## Task 页面
 
 - Tasks 页面使用 list/detail 布局，是对话的辅助入口，不是项目管理页面；入口保留在侧边栏。
-- 筛选固定为 All open、To do、In progress、In review、Done、Closed、Assigned to me；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee、Source Thread、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
-- Task 详情依次显示：Task facts（Created by、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Source Thread、Result（仅 Done）、Close reason（仅 Closed）、侧栏（Current Run and Focus、Recent Run outcomes、Session continuity）。
-- Actions 只有两个操作：Done（直接完成，不需要理由）与 Closed（弹窗选择理由 + 可选备注）。不提供其它状态操作按钮。
+- 筛选固定为 All open、To do、In progress、In review、Done、Closed、Created by me，每个筛选带数量；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee（Agent 小印章 + 名字）、Source Thread、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
+- Task 详情依次显示：Request（白底卡片，Source Thread 的 Root Message 与最新 3 条 reply，右上角 Open Thread）、Task facts（Created by、Created、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Source Thread、Result（仅 Done）、Close reason（仅 Closed）、侧栏（Current Run and Focus、Recent Run outcomes、Session continuity）。
+- Actions 只有两个操作：Mark done（直接完成，不需要理由）与 Close Task（弹窗选择理由 + 可选备注）。TODO 时说明需要先指派 Agent。不提供其它状态操作按钮。
 - Task 创建后不可修改（见 `DESIGN.md`）；不显示 Related Threads 区块，不提供手动 Link/Unlink。
 - Recent Run outcomes 在独立滚动容器内展示，每条 Run 聚合为一行（状态、Agent、Focus、错误码、起止时间）。
 - Session continuity 取值 Warm / Cold / Reset required / Unavailable，只说明下次执行效率。
@@ -91,7 +93,7 @@
 - Human Inbox 按 DM 和 Thread 聚合，每组使用 For you 暖底，同一组只显示最新来源 Message 的预览、时间和组内 Item 数；打开聚合行即标记已读。
 - Inbox 页 header 提供 Mark all read，一次将当前 Human 全部 pending Item 标记为已读；没有待读 Item 时不显示按钮。
 - Agent Inbox 不向普通 Member 公开；Owner/Admin 只能读取来源摘要和错误代码。
-- Members 页面按 Agents、Humans 分组显示扁平列表行：身份（头像 + 名字 + 行内状态点）、Access 控制（自定义下拉）、30px 轻量消息图标。Permission 在 Agent 详情逐项管理，当前动作包括 channel.create、channel.invite、channel.remove 和 agent.create，不提供 Role 套餐。
+- Members 页面按 Agents、Humans 分组显示扁平列表行：身份（头像 + 名字 + 行内状态点；Agent 工作中时跟当前步骤，否则跟 Role 的第一行；自己显示 You）、Access 控制（自定义下拉）、右侧固定列的 30px 轻量图标（Agent 的 Manage 与 Message）。Channel 的 Add Agents 浮层在没有可加 Agent 时提供 Create an Agent。Permission 在 Agent 详情逐项管理，当前动作包括 channel.create、channel.invite、channel.remove 和 agent.create，不提供 Role 套餐。
 - Computers 页面左侧分栏为已配对列表和配对入口；没有已配对 Computer 时不显示分栏，整页为配对 onboarding。
 - Computer 更新状态在 Server 持久化协议完成前不进入 UI；第一期只通过 Computer 本地结构化日志和 update journal 诊断，禁止从在线或离线状态推断更新结果。
 - Agent 详情头部只显示安静信号（Activity、Computer 可达性、错误码），不提供 DM 按钮；facts 值使用 13px 并截断超长文本。
@@ -111,7 +113,7 @@
 ## Settings
 
 - Sidebar 底部身份行右侧提供 Settings 入口（齿轮图标），路由为 `/s/$spaceSlug/settings`。
-- Settings 是单页：`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
+- Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、accent 和你的访问级别；`Keyboard shortcuts` 分组列出快捷键；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
 - feature 通过注册表（`featureRegistry`）声明 id、名称、类型、描述、storageKey 和可选配置项；后续新增 feature 只改注册表，无需改页面结构。
 - 实验类型（experimental）的行即启用开关；所有状态只持久化在浏览器 localStorage（`sumi.feature.<id>`），不上传 Server。开启后 Sidebar 才显示对应实验入口（当前为 Agent insights 与 Company office；Company office 未开启时直达 `/company/office` 显示禁用说明）。
 

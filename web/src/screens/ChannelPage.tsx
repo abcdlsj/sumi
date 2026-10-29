@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { Hash, LoaderCircle, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
@@ -24,6 +24,7 @@ import { MessageComposer, type ComposerInput } from "../components/channel/Messa
 import { MessageTimeline, type MessageTimelineScrollApi } from "../components/channel/MessageTimeline";
 import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
+import { useOutbox } from "../components/channel/outbox";
 import { PixelIdentity, PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 
 export function ChannelPage() {
@@ -241,15 +242,26 @@ export function MessageWorkspace({
   }
 
   function addMessage(message: Message) {
-    queryClient.setQueryData<MessagePage>(["messages", channel.id], (current) => ({
-      channel_id: channel.id,
-      snapshot_channel_seq: message.seq,
-      messages: [...(current?.messages ?? []), message],
-      has_more_before: current?.has_more_before ?? false,
-      has_more_after: false,
-    }));
+    queryClient.setQueryData<MessagePage>(["messages", channel.id], (current) => {
+      // The event stream may already have refetched the page with this message.
+      const messages = current?.messages ?? [];
+      if (messages.some((item) => item.id === message.id)) return current;
+      return {
+        channel_id: channel.id,
+        snapshot_channel_seq: Math.max(message.seq, current?.snapshot_channel_seq ?? 0),
+        messages: [...messages, message],
+        has_more_before: current?.has_more_before ?? false,
+        has_more_after: false,
+      };
+    });
+  }
+  const outbox = useOutbox(sendMessage, addMessage);
+  function queueMessage(input: ComposerInput) {
+    outbox.queue(input);
     window.requestAnimationFrame(() => timelineScrollApi.current?.scrollToBottom());
   }
+  const selfMember = [...(channelMembers.data?.members ?? []), ...(spaceMembers.data ?? [])].find((member) => member.id === currentMemberId);
+  const selfAuthor = selfMember ? { id: selfMember.id, display_name: selfMember.display_name, kind: selfMember.kind } : undefined;
 
   const addAgents = useMutation({
     mutationFn: (agentIds: string[]) => addChannelAgents(channel.id, agentIds),
@@ -335,6 +347,10 @@ export function MessageWorkspace({
         members={channelMembers.data?.members ?? []}
         direct={direct}
         onOpenAgentDm={direct ? undefined : (memberId) => openAgentDm.mutate(memberId)}
+        outgoing={outbox.items}
+        selfAuthor={selfAuthor}
+        onRetryOutgoing={outbox.retry}
+        onDiscardOutgoing={outbox.discard}
       />
       <MessageComposer
         key={`channel:${channel.id}`}
@@ -348,8 +364,7 @@ export function MessageWorkspace({
         attachButtonLabel="Attach file"
         sendButtonLabel="Send message"
         attachmentsAriaLabel="Attachments ready to send"
-        send={sendMessage}
-        onSent={addMessage}
+        queue={queueMessage}
         insert={composerInsert}
       />
 
@@ -377,6 +392,7 @@ export function MessageWorkspace({
       {agentPickerOpen ? (
         <AddAgentsDialog
           agents={availableAgents}
+          spaceSlug={spaceSlug}
           pending={addAgents.isPending}
           error={addAgents.error?.message}
           close={() => setAgentPickerOpen(false)}
@@ -387,7 +403,7 @@ export function MessageWorkspace({
     </SelfMemberContext.Provider>
   );
 }
-function AddAgentsDialog({ agents, pending, error, close, submit }: { agents: Array<Member & { role_text: string }>; pending: boolean; error?: string; close: () => void; submit: (ids: string[]) => void }) {
+function AddAgentsDialog({ agents, spaceSlug, pending, error, close, submit }: { agents: Array<Member & { role_text: string }>; spaceSlug: string; pending: boolean; error?: string; close: () => void; submit: (ids: string[]) => void }) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     submit(new FormData(event.currentTarget).getAll("agent_member_ids").map(String));
@@ -401,7 +417,11 @@ function AddAgentsDialog({ agents, pending, error, close, submit }: { agents: Ar
             {agents.length ? agents.map((agent, index) => <label key={agent.id}><input type="checkbox" name="agent_member_ids" value={agent.id} aria-label={agent.display_name} {...(index === 0 ? { "data-dialog-initial-focus": true } : {})} /><PixelIdentity name={agent.display_name} kind="agent" seed={agent.id} /><span><strong>{agent.display_name}</strong><small>{agent.role_text}</small></span></label>) : <p>Every active Agent is already in this Channel.</p>}
           </fieldset>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
-          <footer><button className="command-button" type="button" onClick={close}>Cancel</button><button className="command-button command-button--accent" type="submit" disabled={pending || agents.length === 0}>{pending ? <LoaderCircle className="spin" aria-hidden="true" /> : null} Add selected</button></footer>
+          {agents.length ? (
+            <footer><button className="command-button" type="button" onClick={close}>Cancel</button><button className="command-button command-button--accent" type="submit" disabled={pending}>{pending ? <LoaderCircle className="spin" aria-hidden="true" /> : null} Add selected</button></footer>
+          ) : (
+            <footer><button className="command-button" type="button" onClick={close}>Close</button><Link className="command-button command-button--accent" to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="create-agent"><Plus aria-hidden="true" /> Create an Agent</Link></footer>
+          )}
         </form>
     </DialogFrame>
   );

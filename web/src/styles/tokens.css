@@ -16,7 +16,7 @@
   --bg: #ffffff;
   --bg-sidebar: #f7f6f4;
   --bg-subtle: #f3f2ef;
-  --bg-hover: #f8f8f6;
+  --bg-hover: #f6f5f2;
   --bg-selected: #ffffff;
   --bg-raised: #ffffff;
   --code-bg: #f3f2ef;
@@ -25,8 +25,8 @@
   --ink: #1c1b19;
   --ink-2: #56544f;
   --muted: #8f8c86;
-  --line: #eeedea;
-  --line-strong: #dfddd8;
+  --line: #eae8e4;
+  --line-strong: #dbd8d2;
   --focus: #1c1b19;
 
   /* Signals */
@@ -41,6 +41,13 @@
   --danger: #c2402a;
   --danger-soft: #fbece8;
   --warning: #c98512;
+
+  /* Space accent: SpaceShell replaces these with the Space's own colour. */
+  --accent: #1c1b19;
+  --accent-hover: #33312d;
+  --accent-ink: #1c1b19;
+  --accent-soft: #f3f2ef;
+  --on-accent: #ffffff;
 
   /* Task status */
   --status-todo: #a8a59f;

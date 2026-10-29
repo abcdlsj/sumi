@@ -199,15 +199,30 @@ textarea:focus-visible {
 
 .command-button--accent,
 .primary-action {
-  background: var(--ink);
+  background: var(--accent);
   box-shadow: none;
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 .command-button--accent:hover:not(:disabled),
 .primary-action:hover:not(:disabled) {
-  background: #33312d;
+  background: var(--accent-hover);
   box-shadow: none;
+}
+
+/* Pressed: a firmer surface, never a transform, so nothing moves on click. */
+.command-button:active:not(:disabled),
+.quiet-button:active:not(:disabled),
+.compact-action:active:not(:disabled),
+.secondary-action:active {
+  background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 2px rgb(28 27 25 / 8%);
+}
+
+.command-button--accent:active:not(:disabled),
+.primary-action:active:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 22%);
 }
 
 .danger-button {
@@ -268,6 +283,13 @@ textarea:focus-visible {
 
 .icon-button:hover:not(:disabled) {
   background: var(--bg-subtle);
+  color: var(--ink);
+}
+
+.icon-button:active:not(:disabled),
+.message-action-button:active:not(:disabled, [aria-disabled="true"]),
+.member-message-button:active:not(:disabled) {
+  background: var(--line-strong);
   color: var(--ink);
 }
 
@@ -341,7 +363,7 @@ input[type="radio"] {
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--ink);
+  accent-color: var(--accent);
 }
 
 .form-error {
@@ -775,8 +797,8 @@ input[type="radio"] {
   flex: none;
   place-items: center;
   border-radius: 7px;
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .space-mark svg {
@@ -1045,7 +1067,7 @@ input[type="radio"] {
 
 .nav-item--active > svg,
 .context-entity-row--active > svg {
-  color: var(--ink);
+  color: var(--accent-ink);
 }
 
 .nav-item > span:not(.nav-count, .nav-unread-dot, .presence-identity, .pixel-identity) {
@@ -2031,6 +2053,34 @@ body > #root > .route-status {
   color: var(--ink);
 }
 
+.task-filter-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgb(28 27 25 / 6%);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+
+.task-assignee-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-assignee-name .pixel-identity {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.task-assignee-name--none {
+  color: var(--muted);
+}
+
 .task-groups {
   display: grid;
   gap: 18px;
@@ -2147,7 +2197,7 @@ body > #root > .route-status {
   justify-content: flex-end;
 }
 
-.task-row-facts > div:nth-child(1) { width: 96px; }
+.task-row-facts > div:nth-child(1) { width: 112px; }
 .task-row-facts > div:nth-child(2) { width: 128px; }
 .task-row-facts > div:nth-child(3) { width: 124px; }
 
@@ -2296,6 +2346,40 @@ a.task-source-link:hover {
   margin: 0;
   color: var(--ink-2);
   font-size: var(--text-small);
+}
+
+.task-actions-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.task-conversation {
+  padding: 14px 16px 10px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-selected);
+}
+
+.task-conversation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-conversation-body {
+  display: grid;
+  gap: 0;
+  margin: 0 6px;
+}
+
+.task-conversation-more,
+.task-conversation-empty {
+  margin: 0;
+  padding: 2px 0 2px 46px;
+  color: var(--muted);
+  font-size: var(--text-meta);
 }
 
 .task-actions {
@@ -2656,7 +2740,7 @@ a.task-source-link:hover {
 
 .member-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 140px 36px;
+  grid-template-columns: minmax(0, 1fr) 140px 68px;
   align-items: center;
   gap: 12px;
   padding: 8px 10px;
@@ -2695,10 +2779,18 @@ a.task-source-link:hover {
 
 .member-status {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
   color: var(--muted);
   font-size: var(--text-meta);
+}
+
+.member-status-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-status-dot {
@@ -2721,28 +2813,6 @@ a.task-source-link:hover {
   background: var(--warning);
 }
 
-.agent-detail-link {
-  margin-left: 4px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-  font-weight: 500;
-  text-decoration: none;
-  opacity: 0;
-  transition: opacity .12s ease, background-color .12s ease;
-}
-
-.member-row:hover .agent-detail-link,
-.agent-detail-link:focus-visible {
-  opacity: 1;
-}
-
-.agent-detail-link:hover {
-  background: var(--bg-subtle);
-  color: var(--ink);
-}
-
 .access-value {
   display: flex;
   justify-content: flex-start;
@@ -2758,6 +2828,7 @@ a.task-source-link:hover {
 .member-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 4px;
 }
 
 .member-message-button {

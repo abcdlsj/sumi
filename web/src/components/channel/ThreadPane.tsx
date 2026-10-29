@@ -15,6 +15,8 @@ import {
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { MessageComposer, type ComposerInput } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
+import { provisionalMessage, useOutbox } from "./outbox";
+import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
 
@@ -98,7 +100,9 @@ export function ThreadPane({
 
   function addReply(message: Message) {
     queryClient.setQueryData<ThreadRead>(["thread", threadId], (current) =>
-      current ? { ...current, snapshot_channel_seq: message.seq, replies: [...current.replies, message] } : current,
+      current && !current.replies.some((reply) => reply.id === message.id)
+        ? { ...current, snapshot_channel_seq: Math.max(message.seq, current.snapshot_channel_seq), replies: [...current.replies, message] }
+        : current,
     );
     // A reply sent from this composer is an explicit navigation action. It
     // must reveal the new reply even when the reader was browsing older ones;
@@ -106,6 +110,14 @@ export function ThreadPane({
     scrollToBottom();
     window.requestAnimationFrame(() => scrollToBottom());
     void queryClient.invalidateQueries({ queryKey: ["messages", channelId] });
+  }
+
+  const outbox = useOutbox(sendReply, addReply);
+  const selfMemberId = useSelfMemberId();
+  const self = members.find((member) => member.id === selfMemberId);
+  function queueReply(input: ComposerInput) {
+    outbox.queue(input);
+    window.requestAnimationFrame(() => scrollToBottom());
   }
 
   return (
@@ -166,6 +178,18 @@ export function ThreadPane({
               <CompactMessage message={thread.data.root} activityStatus={activityByMemberId.get(thread.data.root.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />
               <p className="thread-section-label">{thread.data.replies.length} {thread.data.replies.length === 1 ? "reply" : "replies"}</p>
               {thread.data.replies.map((message) => <CompactMessage key={message.id} message={message} activityStatus={activityByMemberId.get(message.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />)}
+              {self ? outbox.items.map((item) => (
+                <CompactMessage
+                  key={item.key}
+                  message={{ ...provisionalMessage(item, { id: self.id, display_name: self.display_name, kind: self.kind }, channelId), placement: "reply" }}
+                  spaceSlug={spaceSlug}
+                  members={members}
+                  direct={direct}
+                  outgoing={item}
+                  onRetryOutgoing={outbox.retry}
+                  onDiscardOutgoing={outbox.discard}
+                />
+              )) : null}
             </>
           ) : null}
         </div>
@@ -183,8 +207,7 @@ export function ThreadPane({
         attachButtonLabel="Attach file to Thread"
         sendButtonLabel="Send Thread reply"
         attachmentsAriaLabel="Thread Attachments ready to send"
-        send={sendReply}
-        onSent={addReply}
+        queue={queueReply}
       />
     </aside>
   );

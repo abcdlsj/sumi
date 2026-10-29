@@ -1,6 +1,8 @@
 .settings-page {
   display: grid;
   width: min(100%, 760px);
+  /* The page scrolls; rows keep their content height instead of shrinking. */
+  grid-auto-rows: max-content;
   gap: 28px;
   align-content: start;
   padding: 28px var(--page-gutter) 48px;
@@ -8,7 +10,6 @@
 
 .settings-page > .settings-header {
   display: grid;
-  min-height: 0;
   gap: 4px;
   padding: 0;
   border: 0;
@@ -132,7 +133,7 @@
 }
 
 .settings-switch[aria-checked="true"] {
-  background: var(--ink);
+  background: var(--accent);
 }
 
 .settings-switch[aria-checked="true"] > span {
@@ -149,5 +150,70 @@
   .settings-switch > span,
   .settings-row {
     transition: none;
+  }
+}
+
+.settings-facts {
+  margin: 0;
+}
+
+.settings-fact {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 16px;
+}
+
+.settings-fact + .settings-fact {
+  border-top: 1px solid var(--line);
+}
+
+.settings-fact dt {
+  color: var(--ink-2);
+  font-size: var(--text-small);
+}
+
+.settings-fact dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.settings-accent {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgb(28 27 25 / 10%);
+}
+
+.settings-fact kbd {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .settings-fact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 }

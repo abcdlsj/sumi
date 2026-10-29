@@ -9,6 +9,7 @@ import {
   Plus,
   UserPlus,
   Users,
+  Settings2,
   X,
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
@@ -19,6 +20,7 @@ import {
   listAgents,
   listMembers,
   updateMember,
+  type Agent,
   type Member,
   type Space,
 } from "../api/client";
@@ -70,6 +72,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
   const activityByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
   );
+  const agentByMemberId = new Map((agents.data ?? []).map((agent) => [agent.member_id, agent] as const));
   const currentMember = members.data?.find((member) => member.id === space.current_member_id);
   const canInvite = currentMember?.access_level === "owner" || currentMember?.access_level === "admin";
   const canCreateAgent = canInvite || currentMember?.permissions.includes("agent.create");
@@ -263,19 +266,11 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
                       <>
                         <i className={`member-status-dot member-status-dot--${activityByMemberId.get(member.id) ?? "waiting"}`} aria-hidden="true" />
                         {activityLabel(activityByMemberId.get(member.id))}
+                        {agentDetail(agentByMemberId.get(member.id)) ? <span className="member-status-detail">· {agentDetail(agentByMemberId.get(member.id))}</span> : null}
                       </>
-                    ) : "Space member"}
+                    ) : member.id === currentMember?.id ? "You" : "Space member"}
                   </span>
                 </div>
-                {member.kind === "agent" ? (
-                  <Link
-                    className="agent-detail-link"
-                    to="/s/$spaceSlug/agents/$agentId"
-                    params={{ spaceSlug: space.slug, agentId: member.id }}
-                  >
-                    Manage
-                  </Link>
-                ) : null}
               </div>
               <div className="member-controls">
                 <div className="access-value">
@@ -301,6 +296,17 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
                 </div>
               </div>
               <div className="member-actions">
+                {member.kind === "agent" ? (
+                  <Link
+                    className="member-message-button"
+                    to="/s/$spaceSlug/agents/$agentId"
+                    params={{ spaceSlug: space.slug, agentId: member.id }}
+                    aria-label={`Manage ${member.display_name}`}
+                    title={`Manage ${member.display_name}`}
+                  >
+                    <Settings2 aria-hidden="true" />
+                  </Link>
+                ) : null}
                 {member.id !== currentMember?.id ? (
                   <button
                     className="member-message-button"
@@ -348,4 +354,11 @@ function DirectoryMetric({ label, value, loading }: { label: string; value?: num
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** What an Agent is doing now, or else what it is for. */
+function agentDetail(agent: Agent | undefined): string | undefined {
+  if (!agent) return undefined;
+  if (agent.activity?.label && ["working", "dispatched"].includes(agent.activity_status)) return agent.activity.label;
+  return (agent.role_text ?? "").split("\n")[0]?.trim() || undefined;
 }

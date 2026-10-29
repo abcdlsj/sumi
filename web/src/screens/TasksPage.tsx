@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowUpRight, Clock, ListTodo, RotateCcw, X, XCircle } from "lucide-react";
+import { ArrowUpRight, Check, Clock, ListTodo, MessageSquare, RotateCcw, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -9,7 +9,9 @@ import {
   getTask,
   listAgents,
   listTasks,
+  readThread,
   resetTaskSession,
+  type Member,
   startTask,
   type Run,
   type Task,
@@ -22,8 +24,10 @@ import { SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
 import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
+import { CompactMessage } from "../components/channel/MessageTimeline";
+import { PixelIdentity } from "../components/PixelIdentity";
 
-type TaskFilter = "all_open" | TaskStatus | "assigned_to_me";
+type TaskFilter = "all_open" | TaskStatus | "created_by_me";
 
 const filters: Array<{ id: TaskFilter; label: string }> = [
   { id: "all_open", label: "All open" },
@@ -32,7 +36,7 @@ const filters: Array<{ id: TaskFilter; label: string }> = [
   { id: "in_review", label: "In review" },
   { id: "done", label: "Done" },
   { id: "closed", label: "Closed" },
-  { id: "assigned_to_me", label: "Assigned to me" },
+  { id: "created_by_me", label: "Created by me" },
 ];
 
 const openOrder: Record<TaskStatus, number> = {
@@ -58,7 +62,7 @@ const emptyFacts: Record<TaskFilter, string> = {
   in_review: "No Tasks in review.",
   done: "No completed Tasks.",
   closed: "No closed Tasks.",
-  assigned_to_me: "No Tasks assigned to you.",
+  created_by_me: "You have not created any Tasks.",
 };
 
 export function TasksPage() {
@@ -79,12 +83,13 @@ export function TasksPage() {
 function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; spaceSlug: string; currentMemberId: string }) {
   const [filter, setFilter] = useState<TaskFilter>("all_open");
   const tasks = useQuery({ queryKey: ["tasks", spaceId], queryFn: () => listTasks(spaceId) });
+  const matches = (task: Task, id: TaskFilter) => id === "all_open"
+    ? !["done", "closed"].includes(task.status)
+    : id === "created_by_me"
+      ? task.creator_member_id === currentMemberId
+      : task.status === id;
   const visible = (tasks.data ?? [])
-    .filter((task) => filter === "all_open"
-      ? !["done", "closed"].includes(task.status)
-      : filter === "assigned_to_me"
-        ? task.assignee_agent_member_id === currentMemberId
-        : task.status === filter)
+    .filter((task) => matches(task, filter))
     .sort((left, right) => openOrder[left.status] - openOrder[right.status] || right.updated_at.localeCompare(left.updated_at));
   const groups = groupTasks(visible);
 
@@ -94,7 +99,15 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
         <div className="page-title"><h1 id="tasks-heading">Tasks</h1><p>Formal work stays connected to its Threads and Result.</p></div>
       </header>
       <nav className="task-filters" aria-label="Task filters">
-        {filters.map((item) => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
+        {filters.map((item) => {
+          const count = tasks.data ? tasks.data.filter((task) => matches(task, item.id)).length : undefined;
+          return (
+            <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>
+              {item.label}
+              {count ? <span className="task-filter-count" aria-label={`, ${count}`}>{count}</span> : null}
+            </button>
+          );
+        })}
       </nav>
       {tasks.isPending ? <ListSkeleton label="Loading Tasks" avatar={false} /> : null}
       {tasks.error ? <div className="route-status route-status--error" role="alert">Tasks unavailable. Retry from this page.</div> : null}
@@ -142,11 +155,21 @@ function TaskRow({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
         <strong>{task.title}</strong>
       </Link>
       <dl className="task-row-facts">
-        <div><dt>Assignee</dt><dd>{task.assignee_name ?? "Unassigned"}</dd></div>
+        <div><dt>Assignee</dt><dd><TaskAssignee task={task} /></dd></div>
         <div><dt>Source</dt><dd><ThreadLink thread={task.source_thread} spaceSlug={spaceSlug} label="Source" /></dd></div>
         <div><dt>Updated</dt><dd><time dateTime={task.updated_at}>{formatTaskTime(task.updated_at)}</time></dd></div>
       </dl>
     </article>
+  );
+}
+
+function TaskAssignee({ task }: { task: Task }) {
+  if (!task.assignee_name || !task.assignee_agent_member_id) return <span className="task-assignee-name task-assignee-name--none">Unassigned</span>;
+  return (
+    <span className="task-assignee-name">
+      <PixelIdentity name={task.assignee_name} kind="agent" seed={task.assignee_agent_member_id} />
+      {task.assignee_name}
+    </span>
   );
 }
 
@@ -164,12 +187,12 @@ export function TaskDetailPage() {
   const { spaceSlug, taskId } = useParams({ from: "/s/$spaceSlug/tasks/$taskId" });
   return (
     <SpaceShell spaceSlug={spaceSlug} active="tasks">
-      {({ space }) => <TaskDetail taskId={taskId} spaceId={space.id} spaceSlug={space.slug} />}
+      {({ space, members }) => <TaskDetail taskId={taskId} spaceId={space.id} spaceSlug={space.slug} members={members} />}
     </SpaceShell>
   );
 }
 
-function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: string; spaceSlug: string }) {
+function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; spaceId: string; spaceSlug: string; members: Member[] }) {
   const queryClient = useQueryClient();
   const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId) });
   const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: () => listAgents(spaceId) });
@@ -211,7 +234,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
           <p>!{value.seq} · {threadDisplayLabel(value.source_thread)}</p>
         </div>
         <div className="task-detail-header-facts">
-          <div><span>Assignee</span><strong>{value.assignee_name ?? "Unassigned"}</strong></div>
+          <div><span>Assignee</span><strong><TaskAssignee task={value} /></strong></div>
           <TaskStatusLabel status={value.status} />
         </div>
       </header>
@@ -219,15 +242,17 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
       {change.error ? <p className="inline-notice inline-notice--error" role="alert">The Task change failed. The current Server state is unchanged.</p> : null}
       <div className="task-detail-scroll">
         <div className="task-detail-primary">
-        <section className="task-detail-section"><h2>Task facts</h2><dl className="detail-grid"><Field label="Created by" value={value.creator_name} /><Field label="Updated" value={new Date(value.updated_at).toLocaleString()} /></dl>{value.status === "todo" && !value.assignee_agent_member_id ? (
+        <TaskConversation thread={value.source_thread} spaceSlug={spaceSlug} members={members} />
+        <section className="task-detail-section"><h2>Task facts</h2><dl className="detail-grid"><Field label="Created by" value={value.creator_name} /><Field label="Created" value={formatTaskTime(value.created_at)} /><Field label="Updated" value={formatTaskTime(value.updated_at)} /></dl>{value.status === "todo" && !value.assignee_agent_member_id ? (
           <div className="task-assignee"><span>Assignee</span><SumiSelect value="" onChange={(agentId) => change.mutate(() => startTask(value.id, agentId))} options={(agents.data ?? []).filter((agent) => agent.desired_lifecycle === "active").map((agent) => ({ value: agent.member_id, label: agent.name }))} ariaLabel="Assign Agent" disabled={change.isPending} /></div>
         ) : null}</section>
         {!value.finished_at ? (
           <section className="task-detail-section"><h2>Actions</h2>
             <div className="task-actions">
-              <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={markDone}>Done</button>
-              <button className="danger-button" type="button" disabled={change.isPending} onClick={() => setCloseOpen(true)}><XCircle /> Closed</button>
+              <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={markDone}><Check /> Mark done</button>
+              <button className="danger-button" type="button" disabled={change.isPending} onClick={() => setCloseOpen(true)}><XCircle /> Close Task</button>
             </div>
+            {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
           </section>
         ) : null}
         <section className="task-detail-section"><h2>Source Thread</h2><ThreadReferenceRow thread={value.source_thread} spaceSlug={spaceSlug} /></section>
@@ -243,7 +268,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
       {closeOpen ? (
         <DialogFrame className="confirm-dialog" close={() => setCloseOpen(false)} labelId="close-task-title">
           <header>
-            <div><p className="section-kicker">Close Task</p><h2 id="close-task-title">Close task</h2></div>
+            <div><p className="section-kicker">!{value.seq}</p><h2 id="close-task-title">Close Task</h2></div>
             <button className="icon-button" type="button" aria-label="Close Close Task" onClick={() => setCloseOpen(false)}><X /></button>
           </header>
           <form onSubmit={(event) => { event.preventDefault(); confirmClose(); }}>
@@ -255,6 +280,34 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
             </footer>
           </form>
         </DialogFrame>
+      ) : null}
+    </section>
+  );
+}
+
+/** The conversation that asked for the work: the Root Message and its latest replies. */
+function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadReference; spaceSlug: string; members: Member[] }) {
+  const read = useQuery({ queryKey: ["thread", thread.id], queryFn: () => readThread(thread.id) });
+  const replies = read.data?.replies ?? [];
+  const latest = replies.slice(-3);
+  return (
+    <section className="task-detail-section task-conversation" aria-labelledby="task-conversation-heading">
+      <header className="task-conversation-heading">
+        <h2 id="task-conversation-heading">Request</h2>
+        {thread.channel_slug ? (
+          <Link className="compact-action" to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: thread.channel_slug }} hash={`message-${thread.root_message_id}`}>
+            <MessageSquare aria-hidden="true" /> Open Thread
+          </Link>
+        ) : null}
+      </header>
+      {read.isPending ? <ListSkeleton label="Loading request" rows={2} /> : null}
+      {read.error ? <p className="task-conversation-empty">The Source Thread is not visible to you.</p> : null}
+      {read.data ? (
+        <div className="task-conversation-body">
+          <CompactMessage message={read.data.root} spaceSlug={spaceSlug} members={members} />
+          {replies.length > latest.length ? <p className="task-conversation-more">{replies.length - latest.length} earlier {replies.length - latest.length === 1 ? "reply" : "replies"}</p> : null}
+          {latest.map((reply) => <CompactMessage key={reply.id} message={reply} spaceSlug={spaceSlug} members={members} />)}
+        </div>
       ) : null}
     </section>
   );

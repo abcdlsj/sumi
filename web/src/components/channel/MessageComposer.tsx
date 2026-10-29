@@ -49,6 +49,7 @@ export function MessageComposer({
   className,
   send,
   onSent,
+  queue,
   insert,
 }: {
   spaceId: string;
@@ -62,8 +63,10 @@ export function MessageComposer({
   sendButtonLabel: string;
   attachmentsAriaLabel: string;
   className?: string;
-  send: (input: ComposerInput) => Promise<Message>;
-  onSent: (message: Message) => void;
+  send?: (input: ComposerInput) => Promise<Message>;
+  onSent?: (message: Message) => void;
+  /** Hands the message to an outbox that shows it at once; the composer clears immediately. */
+  queue?: (input: ComposerInput) => void;
   /** Text to put in the composer, e.g. a mention from the setup guide; nonce makes repeats apply. */
   insert?: { text: string; nonce: number };
 }) {
@@ -95,9 +98,9 @@ export function MessageComposer({
   const [attachments, setAttachments] = useState<Awaited<ReturnType<typeof uploadAttachment>>[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const submission = useMutation({
-    mutationFn: send,
+    mutationFn: (input: ComposerInput) => send!(input),
     onSuccess: (message) => {
-      onSent(message);
+      onSent?.(message);
       setBody("");
       setAttachments([]);
     },
@@ -111,12 +114,19 @@ export function MessageComposer({
     event.preventDefault();
     const trimmed = body.trim();
     if (!trimmed) return;
-    submission.mutate({
+    const input = {
       body_markdown: trimmed,
       mentions: direct ? [] : mentionIds(trimmed, members),
       mention_all: direct ? false : /(?:^|\s)@all(?![_\p{L}])/iu.test(trimmed),
       attachment_ids: attachments.map((attachment) => attachment.id),
-    });
+    };
+    if (queue) {
+      queue(input);
+      setBody("");
+      setAttachments([]);
+      return;
+    }
+    submission.mutate(input);
   }
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {

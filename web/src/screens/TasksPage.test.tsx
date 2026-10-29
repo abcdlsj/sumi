@@ -40,10 +40,10 @@ describe("Task work index", () => {
     expect(tasksView.getByRole("link", { name: /Design claim flow/ })).toBeVisible();
     expect(tasksView.queryByText(/Ship old slice/)).not.toBeInTheDocument();
     expect(tasksView.getByRole("link", { name: "Source: #general:17" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-todo");
-    fireEvent.click(tasksView.getByRole("button", { name: "Done" }));
+    fireEvent.click(tasksView.getByRole("button", { name: /^Done/ }));
     expect(await tasksView.findByText(/Ship old slice/)).toBeVisible();
     expect(tasksView.queryByText(/Design claim flow/)).not.toBeInTheDocument();
-    fireEvent.click(tasksView.getByRole("button", { name: "Closed" }));
+    fireEvent.click(tasksView.getByRole("button", { name: /^Closed/ }));
     expect(await tasksView.findByText("No closed Tasks.")).toBeVisible();
   });
 

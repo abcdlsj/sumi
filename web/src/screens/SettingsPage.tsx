@@ -1,6 +1,7 @@
 import { useLocation, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import type { Member, Space, User } from "../api/client";
 import { SpaceShell } from "../components/SpaceShell";
 import {
   type FeatureConfigField,
@@ -20,12 +21,12 @@ export function SettingsPage() {
     : undefined;
   return (
     <SpaceShell spaceSlug={spaceSlug} active="settings">
-      {() => <SettingsWorkspace selectedFeatureId={selectedFeatureId} />}
+      {({ space, user, currentMember }) => <SettingsWorkspace selectedFeatureId={selectedFeatureId} space={space} user={user} currentMember={currentMember} />}
     </SpaceShell>
   );
 }
 
-export function SettingsWorkspace({ selectedFeatureId }: { selectedFeatureId?: string }) {
+export function SettingsWorkspace({ selectedFeatureId, space, user, currentMember }: { selectedFeatureId?: string; space?: Space; user?: User; currentMember?: Member }) {
   useEffect(() => {
     if (!selectedFeatureId) return;
     document.getElementById(`feature-${selectedFeatureId}`)?.scrollIntoView?.({ block: "nearest" });
@@ -34,8 +35,28 @@ export function SettingsWorkspace({ selectedFeatureId }: { selectedFeatureId?: s
     <div className="settings-page">
       <header className="settings-header">
         <h1>Settings</h1>
-        <p>Preferences for this browser.</p>
+        <p>Your account, this Space, and preferences for this browser.</p>
       </header>
+      {user || space ? (
+        <section className="settings-group" aria-labelledby="settings-account-heading">
+          <div className="settings-group-heading">
+            <h2 id="settings-account-heading">Account and Space</h2>
+          </div>
+          <dl className="settings-list settings-facts">
+            {user ? <Fact label="Name" value={user.display_name} /> : null}
+            {user ? <Fact label="Email" value={user.email} /> : null}
+            {space ? <Fact label="Space" value={space.name} /> : null}
+            {space ? <Fact label="Address" value={`/s/${space.slug}`} mono /> : null}
+            {space ? (
+              <div className="settings-fact">
+                <dt>Accent</dt>
+                <dd><span className="settings-accent" style={{ backgroundColor: space.accent }} aria-hidden="true" /> <span className="settings-mono">{space.accent.toUpperCase()}</span></dd>
+              </div>
+            ) : null}
+            {currentMember ? <Fact label="Your access" value={currentMember.access_level.charAt(0).toUpperCase() + currentMember.access_level.slice(1)} /> : null}
+          </dl>
+        </section>
+      ) : null}
       <section className="settings-group" aria-labelledby="settings-experimental-heading">
         <div className="settings-group-heading">
           <h2 id="settings-experimental-heading">Experimental features</h2>
@@ -51,6 +72,37 @@ export function SettingsWorkspace({ selectedFeatureId }: { selectedFeatureId?: s
           ))}
         </ul>
       </section>
+      <section className="settings-group" aria-labelledby="settings-shortcuts-heading">
+        <div className="settings-group-heading">
+          <h2 id="settings-shortcuts-heading">Keyboard shortcuts</h2>
+        </div>
+        <dl className="settings-list settings-facts">
+          {SHORTCUTS.map(([keys, action]) => (
+            <div className="settings-fact" key={action}>
+              <dt>{action}</dt>
+              <dd>{keys.map((key) => <kbd key={key}>{key}</kbd>)}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </div>
+  );
+}
+
+const modifier = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+const SHORTCUTS: Array<[string[], string]> = [
+  [[modifier, "K"], "Jump to a channel, DM or Agent"],
+  [[modifier, "Enter"], "Send the message"],
+  [["@"], "Mention a member or Agent"],
+  [["↑", "↓", "Enter"], "Pick a suggestion"],
+  [["Esc"], "Close the Thread or dialog"],
+];
+
+function Fact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="settings-fact">
+      <dt>{label}</dt>
+      <dd className={mono ? "settings-mono" : undefined}>{value}</dd>
     </div>
   );
 }

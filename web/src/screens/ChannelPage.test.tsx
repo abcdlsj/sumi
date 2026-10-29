@@ -608,7 +608,9 @@ describe("ChannelPage", () => {
     expect(screen.getByLabelText("Message")).toHaveStyle({ height: "42px" });
     fireEvent.change(threadInput, { target: { value: "New Thread reply" } });
     fireEvent.submit(threadInput.closest("form")!);
-    expect(await screen.findByText("New Thread reply")).toBeVisible();
+    // The reply shows at once, then the Server's copy replaces it.
+    await waitFor(() => expect(within(latestThreadPane).getByText("New Thread reply").closest(".message-row--outgoing")).toBeNull());
+    expect(within(latestThreadPane).getByText("New Thread reply")).toBeVisible();
     expect(threadInput).toHaveValue("");
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("complementary", { name: /Thread #general:1/ })).not.toBeInTheDocument());

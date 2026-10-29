@@ -49,6 +49,7 @@ import {
 } from "../featureRegistry";
 import { useSpaceEvents } from "../hooks/useSpaceEvents";
 import { saveLastConversationRoute } from "../conversationMemory";
+import { applySpaceAccent } from "../spaceAccent";
 import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
 import { PixelIdentity } from "./PixelIdentity";
@@ -207,6 +208,9 @@ export function SpaceShell({
     channels.error ??
     members.error ??
     (active === "computers" ? computers.error : undefined);
+
+  const spaceAccent = space.data?.accent;
+  useEffect(() => applySpaceAccent(spaceAccent), [spaceAccent]);
 
   useEffect(() => {
     if (routeError instanceof ApiRequestError && routeError.status === 401) {

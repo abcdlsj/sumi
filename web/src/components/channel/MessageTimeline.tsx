@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, Hash, ListTodo, LoaderCircle, MessageSquareReply, Paperclip } from "lucide-react";
+import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquareReply, Paperclip } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
@@ -12,6 +12,7 @@ import { TaskStatusIcon } from "../taskStatusIcon";
 import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
+import { provisionalMessage, type OutgoingMessage } from "./outbox";
 
 type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
 
@@ -32,6 +33,10 @@ export function MessageTimeline({
   members,
   direct = false,
   onOpenAgentDm,
+  outgoing = [],
+  selfAuthor,
+  onRetryOutgoing,
+  onDiscardOutgoing,
 }: {
   timelineRef: RefObject<HTMLDivElement | null>;
   scrollApiRef?: RefObject<MessageTimelineScrollApi | null>;
@@ -49,6 +54,10 @@ export function MessageTimeline({
   members: Member[];
   direct?: boolean;
   onOpenAgentDm?: (memberId: string) => void;
+  outgoing?: readonly OutgoingMessage[];
+  selfAuthor?: Message["author"];
+  onRetryOutgoing?: (item: OutgoingMessage) => void;
+  onDiscardOutgoing?: (key: string) => void;
 }) {
   const [newMessageAnnouncement, setNewMessageAnnouncement] = useState("");
   const announcedMessageRef = useRef<string | null>(null);
@@ -90,16 +99,12 @@ export function MessageTimeline({
   }, [page]);
 
   const selfMemberId = useSelfMemberId();
-  const timelineGroups = groupTimelineMessages(page?.messages ?? []);
-  // An Agent at work shows one quiet line under its latest Message here.
-  const workingLineMessageIds = new Map<string, string>();
-  for (const message of page?.messages ?? []) {
-    const status = activityByMemberId.get(message.author.id);
-    if (message.author.kind === "agent" && (status === "working" || status === "dispatched")) {
-      workingLineMessageIds.set(message.author.id, message.id);
-    }
-  }
-  const workingMessageIds = new Set(workingLineMessageIds.values());
+  // Outgoing messages join the same list, so grouping already matches the
+  // Server's copy and nothing shifts when it replaces them.
+  const outgoingByKey = new Map(outgoing.map((item) => [item.key, item] as const));
+  const outgoingMessages = selfAuthor ? outgoing.map((item) => provisionalMessage(item, selfAuthor, channelId)) : [];
+  const timelineGroups = groupTimelineMessages([...(page?.messages ?? []), ...outgoingMessages]);
+  const workers = workingAgents(page?.messages ?? [], members, activityByMemberId, direct);
 
   return (
     <div className="message-timeline-shell">
@@ -115,7 +120,7 @@ export function MessageTimeline({
             </div>
           </div>
         ) : null}
-        {page?.messages.length === 0 ? (
+        {page?.messages.length === 0 && outgoingMessages.length === 0 ? (
           <div className="empty-channel">
             <span className="channel-glyph" aria-hidden="true">
               <Hash />
@@ -144,16 +149,18 @@ export function MessageTimeline({
           // A day divider always restarts the visual grouping.
           const grouped = !showDivider && !message.task && message.reply_count === 0 && !startsNewGroup(message, previous);
           const forYou = isForMember(message, selfMemberId);
+          const outgoingItem = outgoingByKey.get(message.id);
+          const own = message.author.id === selfMemberId;
           return (
-            <div className="message-block" id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id}>
+            <div className={`message-block${own ? "" : " message-block--arrived"}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id}>
               {showDivider ? (
                 <div className="day-divider" role="separator">
                   <time dateTime={message.created_at}>{formatDayDivider(message.created_at)}</time>
                 </div>
               ) : null}
-              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${forYou ? " message-row--for-you" : ""}`}>
+              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${forYou ? " message-row--for-you" : ""}${outgoingItem ? ` message-row--outgoing message-row--${outgoingItem.status}` : ""}`}>
                 {grouped ? (
-                  <time className="message-gutter-time" dateTime={message.created_at}>
+                  <time className="message-gutter-time" dateTime={message.created_at} title={formatFullTime(message.created_at)}>
                     {formatMessageTime(message.created_at)}
                   </time>
                 ) : (
@@ -170,15 +177,17 @@ export function MessageTimeline({
                   {grouped ? null : (
                     <header>
                       <strong>{message.author.display_name}</strong>
-                      <time dateTime={message.created_at}>{formatMessageTime(message.created_at)}</time>
+                      <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
                       {forYou ? <span className="message-for-you">For you</span> : null}
-                      <span
-                        className="message-seq"
-                        aria-label={`Channel sequence @${message.seq}`}
-                        title={`Channel sequence @${message.seq}`}
-                      >
-                        @{message.seq}
-                      </span>
+                      {outgoingItem ? null : (
+                        <span
+                          className="message-seq"
+                          aria-label={`Channel sequence @${message.seq}`}
+                          title={`Channel sequence @${message.seq}`}
+                        >
+                          @{message.seq}
+                        </span>
+                      )}
                     </header>
                   )}
                   {grouped && forYou ? <span className="visually-hidden">For you</span> : null}
@@ -199,11 +208,11 @@ export function MessageTimeline({
                       open={(trigger) => openThread(message.thread_id!, trigger)}
                     />
                   ) : null}
-                  {workingMessageIds.has(message.id) ? (
-                    <AgentWorkingLine name={message.author.display_name} memberId={message.author.id} step={workingLabelByMemberId?.get(message.author.id)} />
+                  {outgoingItem ? (
+                    <OutgoingStatus item={outgoingItem} retry={onRetryOutgoing} discard={onDiscardOutgoing} />
                   ) : null}
                 </div>
-                {!message.deleted_at ? (
+                {!message.deleted_at && !outgoingItem ? (
                   <MessageActions
                     message={message}
                     channelId={channelId}
@@ -215,6 +224,7 @@ export function MessageTimeline({
           );
         })}
       </div>
+      <WorkingStrip workers={workers} steps={workingLabelByMemberId} />
       {showToBottom || newMessageCount > 0 ? (
         <ToBottomButton onClick={scrollToBottom} newMessageCount={newMessageCount} />
       ) : null}
@@ -275,10 +285,10 @@ function SystemNoticeGroup({
   );
 }
 
-export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void }) {
+export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm, outgoing, onRetryOutgoing, onDiscardOutgoing }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void; outgoing?: OutgoingMessage; onRetryOutgoing?: (item: OutgoingMessage) => void; onDiscardOutgoing?: (key: string) => void }) {
   const forYou = isForMember(message, useSelfMemberId());
   return (
-    <article className={`thread-message${forYou ? " message-row--for-you" : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1}>
+    <article className={`thread-message${forYou ? " message-row--for-you" : ""}${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1}>
       <MessageAvatar
         name={message.author.display_name}
         kind={message.author.kind}
@@ -290,15 +300,17 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
       <div>
         <header>
           <strong>{message.author.display_name}</strong>
-          <time dateTime={message.created_at}>{formatMessageTime(message.created_at)}</time>
+          <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
           {forYou ? <span className="message-for-you">For you</span> : null}
-          <span
-            className="message-seq"
-            aria-label={`Channel sequence @${message.seq}`}
-            title={`Channel sequence @${message.seq}`}
-          >
-            @{message.seq}
-          </span>
+          {outgoing ? null : (
+            <span
+              className="message-seq"
+              aria-label={`Channel sequence @${message.seq}`}
+              title={`Channel sequence @${message.seq}`}
+            >
+              @{message.seq}
+            </span>
+          )}
         </header>
         <MessageBody message={message} spaceSlug={spaceSlug} members={members} />
         {message.task ? <MessageTaskBadge task={message.task} spaceSlug={spaceSlug} /> : null}
@@ -306,7 +318,14 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
         {!message.deleted_at && message.attachments?.length ? (
           <AttachmentList attachments={message.attachments} />
         ) : null}
+        {outgoing ? <OutgoingStatus item={outgoing} retry={onRetryOutgoing} discard={onDiscardOutgoing} /> : null}
       </div>
+      {!message.deleted_at && !outgoing ? (
+        <div className="message-actions" role="toolbar" aria-label="Message actions">
+          <CopyAction label="Copy text" icon={<Copy aria-hidden="true" />} value={() => messagePreview(message)} />
+          <CopyAction label="Copy link" icon={<Link2 aria-hidden="true" />} value={() => messageLink(message.id)} />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -435,7 +454,7 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
       <button
         className="message-action-button"
         type="button"
-        title="Reply to thread"
+        title="Reply in Thread"
         aria-label="Reply in Thread"
         onClick={(event) => openThread(message.thread_id, event.currentTarget)}
       >
@@ -454,8 +473,45 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
       >
         {create.isPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <ListTodo aria-hidden="true" />}
       </button>
+      <span className="message-actions-divider" aria-hidden="true" />
+      <CopyAction label="Copy text" icon={<Copy aria-hidden="true" />} value={() => messagePreview(message)} />
+      <CopyAction label="Copy link" icon={<Link2 aria-hidden="true" />} value={() => messageLink(message.id)} />
       {create.error ? <span className="message-action-error" role="alert">Task creation failed. Retry.</span> : null}
     </div>
+  );
+}
+
+function messageLink(messageId: string): string {
+  return `${window.location.origin}${window.location.pathname}#message-${messageId}`;
+}
+
+/** A toolbar button that copies to the clipboard and confirms in place. */
+export function CopyAction({ label, icon, value }: { label: string; icon: ReactNode; value: () => string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const timer = window.setTimeout(() => setState("idle"), 1600);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+  const feedback = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : undefined;
+  return (
+    <button
+      type="button"
+      className={`message-action-button${state === "copied" ? " message-action-button--done" : ""}`}
+      aria-label={feedback ?? label}
+      title={feedback ?? label}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value());
+          setState("copied");
+        } catch {
+          setState("failed");
+        }
+      }}
+    >
+      {state === "copied" ? <Check aria-hidden="true" /> : icon}
+      {feedback ? <span className="message-action-feedback" role="status">{feedback}</span> : null}
+    </button>
   );
 }
 
@@ -963,16 +1019,66 @@ function isForMember(message: Message, memberId: string | undefined): boolean {
 
 // The current step is only a tooltip: Humans see that work is happening,
 // not a progress console they are expected to steer.
-function AgentWorkingLine({ name, memberId, step }: { name: string; memberId: string; step?: string }) {
-  const latest = useAgentActivity(memberId)[0];
-  const last = latest ? `Last action: ${AGENT_ACTIVITY_LABELS[latest.kind]} · ${formatMessageTime(latest.occurredAt)}` : undefined;
-  const detail = [step, last].filter(Boolean).join("\n") || `${name} is working`;
+function OutgoingStatus({ item, retry, discard }: { item: OutgoingMessage; retry?: (item: OutgoingMessage) => void; discard?: (key: string) => void }) {
+  if (item.status === "sending") return <span className="message-outgoing-status">Sending…</span>;
   return (
-    <span className="agent-working" title={detail}>
-      <span className="agent-working-dots" aria-hidden="true"><i /><i /><i /></span>
-      {name} is working on this
+    <span className="message-outgoing-status message-outgoing-status--failed" role="alert">
+      Not sent{item.error ? `: ${item.error}` : ""}
+      <button type="button" onClick={() => retry?.(item)}>Retry</button>
+      <button type="button" onClick={() => discard?.(item.key)}>Discard</button>
     </span>
   );
+}
+
+const RECENT_WINDOW = 30;
+
+/**
+ * Agents at work on this conversation: working or dispatched, and part of the
+ * recent exchange (they spoke, or someone mentioned them). In a DM the other
+ * member is always part of it.
+ */
+function workingAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, Agent["activity_status"]>, direct: boolean): Member[] {
+  const recent = messages.slice(-RECENT_WINDOW);
+  return members.filter((member) => {
+    if (member.kind !== "agent") return false;
+    const status = activity.get(member.id);
+    if (status !== "working" && status !== "dispatched") return false;
+    if (direct) return true;
+    return recent.some((message) => message.author.id === member.id || message.mention_all || message.mentions.includes(member.id));
+  });
+}
+
+/** One quiet line under the timeline while Agents work; its space is always reserved. */
+function WorkingStrip({ workers, steps }: { workers: Member[]; steps?: ReadonlyMap<string, string> }) {
+  const first = workers[0];
+  const latest = useAgentActivity(first?.id ?? "")[0];
+  let text = "";
+  if (workers.length === 1) {
+    const step = steps?.get(first.id);
+    text = `${first.display_name} is working${step ? ` · ${step}` : ""}`;
+  } else if (workers.length === 2) {
+    text = `${workers[0].display_name} and ${workers[1].display_name} are working`;
+  } else if (workers.length > 2) {
+    text = `${workers[0].display_name} and ${workers.length - 1} others are working`;
+  }
+  const detail = first && latest ? `Last action: ${AGENT_ACTIVITY_LABELS[latest.kind]} · ${formatMessageTime(latest.occurredAt)}` : undefined;
+  return (
+    <div className="timeline-working" role="status" aria-live="polite">
+      {workers.length ? (
+        <span className="agent-working" title={detail}>
+          <span className="timeline-working-faces" aria-hidden="true">
+            {workers.slice(0, 3).map((member) => <PixelIdentity key={member.id} name={member.display_name} kind="agent" seed={member.id} />)}
+          </span>
+          <span className="agent-working-dots" aria-hidden="true"><i /><i /><i /></span>
+          <span className="timeline-working-text">{text}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function formatFullTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" }).format(new Date(value));
 }
 
 function formatMessageTime(value: string): string {

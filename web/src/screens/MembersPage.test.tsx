@@ -52,7 +52,7 @@ describe("Agent directory", () => {
     expect(summary).toHaveTextContent("Computers online1");
     expect(summary).toHaveTextContent("Needs attention1");
 
-    const manageLinks = screen.getAllByRole("link", { name: "Manage" });
+    const manageLinks = screen.getAllByRole("link", { name: /^Manage/ });
     expect(manageLinks).toHaveLength(2);
     expect(manageLinks[0]).toHaveAttribute("href", `/s/sumi-lab/agents/${linId}`);
     expect(manageLinks[1]).toHaveAttribute("href", `/s/sumi-lab/agents/${reviewerId}`);
@@ -79,7 +79,7 @@ describe("Agent directory", () => {
     expect(await screen.findByRole("heading", { name: "Members", level: 1 })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Agents", level: 2 })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Humans", level: 2 })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", `/s/sumi-lab/agents/${linId}`);
+    expect(screen.getByRole("link", { name: /^Manage/ })).toHaveAttribute("href", `/s/sumi-lab/agents/${linId}`);
   });
 });
 
