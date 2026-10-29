@@ -16,6 +16,7 @@ pub(in crate::computer) struct AgentHomeAdapter {
     computer_home: PathBuf,
     codex_config_source: Option<PathBuf>,
     codex_auth_source: Option<PathBuf>,
+    pi_agent_dir_source: Option<PathBuf>,
 }
 
 impl AgentHomeAdapter {
@@ -23,11 +24,13 @@ impl AgentHomeAdapter {
         computer_home: PathBuf,
         codex_config_source: Option<PathBuf>,
         codex_auth_source: Option<PathBuf>,
+        pi_agent_dir_source: Option<PathBuf>,
     ) -> Self {
         Self {
             computer_home,
             codex_config_source,
             codex_auth_source,
+            pi_agent_dir_source,
         }
     }
 
@@ -50,6 +53,9 @@ impl AgentHomeAdapter {
         if agent.driver == DriverKind::Codex {
             self.install_codex_sources(&home.join("drivers/codex"))
                 .await?;
+        }
+        if agent.driver == DriverKind::Pi {
+            self.install_pi_sources(&home.join("drivers/pi")).await?;
         }
         let profile = serde_json::to_vec(agent).map_err(|_| ApplicationError::Internal)?;
         let profile_path = home.join("profile.json");
@@ -105,6 +111,25 @@ impl AgentHomeAdapter {
             serde_json::from_slice::<serde_json::Value>(&encoded)
                 .map_err(|_| ApplicationError::DriverUnavailable)?;
             write_private_file(&codex_home.join("auth.json"), &encoded).await?;
+        }
+        Ok(())
+    }
+
+    async fn install_pi_sources(&self, pi_home: &Path) -> Result<(), ApplicationError> {
+        let Some(source) = &self.pi_agent_dir_source else {
+            return Ok(());
+        };
+        // Only model selection and credentials; the user's AGENTS.md, skills and extensions are
+        // personal context that must not reach Agents.
+        for name in ["settings.json", "auth.json", "models.json"] {
+            let encoded = match tokio::fs::read(source.join(name)).await {
+                Ok(encoded) => encoded,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(ApplicationError::DriverUnavailable),
+            };
+            serde_json::from_slice::<serde_json::Value>(&encoded)
+                .map_err(|_| ApplicationError::DriverUnavailable)?;
+            write_private_file(&pi_home.join(name), &encoded).await?;
         }
         Ok(())
     }
@@ -576,7 +601,7 @@ mod tests {
     async fn profile_has_one_filesystem_owner_and_retire_removes_only_target_home() {
         let directory = tempfile::tempdir().unwrap();
         let computer_home = directory.path().join("computer");
-        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None);
+        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None, None);
         let agent = LocalAgent {
             agent_id: AgentId::from_uuid(Uuid::now_v7()),
             space_id: SpaceId::from_uuid(Uuid::now_v7()),
@@ -630,7 +655,7 @@ mod tests {
     async fn provision_initializes_primary_memory_without_overwriting_agent_updates() {
         let directory = tempfile::tempdir().unwrap();
         let computer_home = directory.path().join("computer");
-        let mut homes = AgentHomeAdapter::new(computer_home, None, None);
+        let mut homes = AgentHomeAdapter::new(computer_home, None, None, None);
         let mut agent = LocalAgent {
             agent_id: AgentId::from_uuid(Uuid::now_v7()),
             space_id: SpaceId::from_uuid(Uuid::now_v7()),
@@ -686,7 +711,7 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let computer_home = directory.path().join("computer");
-        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None);
+        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None, None);
         let agent = LocalAgent {
             agent_id: AgentId::from_uuid(Uuid::now_v7()),
             space_id: SpaceId::from_uuid(Uuid::now_v7()),
@@ -746,7 +771,7 @@ mod tests {
     async fn memory_listing_walks_subdirectories_and_skips_symlinks() {
         let directory = tempfile::tempdir().unwrap();
         let computer_home = directory.path().join("computer");
-        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None);
+        let mut homes = AgentHomeAdapter::new(computer_home.clone(), None, None, None);
         let agent = LocalAgent {
             agent_id: AgentId::from_uuid(Uuid::now_v7()),
             space_id: SpaceId::from_uuid(Uuid::now_v7()),
@@ -825,6 +850,7 @@ command = "must-not-copy"
             computer_home.clone(),
             Some(config_source),
             Some(auth_source),
+            None,
         );
         let agent = LocalAgent {
             agent_id: AgentId::from_uuid(Uuid::now_v7()),
@@ -859,5 +885,42 @@ command = "must-not-copy"
                 0o600
             );
         }
+    }
+
+    #[tokio::test]
+    async fn pi_agent_receives_model_settings_and_credentials_but_not_personal_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("pi-agent");
+        std::fs::create_dir_all(source.join("skills")).unwrap();
+        std::fs::write(
+            source.join("settings.json"),
+            r#"{"defaultProvider":"local"}"#,
+        )
+        .unwrap();
+        std::fs::write(source.join("auth.json"), r#"{"local":{"type":"api_key"}}"#).unwrap();
+        std::fs::write(source.join("AGENTS.md"), "personal instructions").unwrap();
+        let mut homes =
+            AgentHomeAdapter::new(directory.path().join("computer"), None, None, Some(source));
+        let agent = LocalAgent {
+            agent_id: AgentId::from_uuid(Uuid::now_v7()),
+            space_id: SpaceId::from_uuid(Uuid::now_v7()),
+            name: "agent".to_owned(),
+            role_revision: 1,
+            role: "role".to_owned(),
+            driver: DriverKind::Pi,
+            state: LocalAgentState::Active,
+        };
+
+        homes.provision(agent.clone()).await.unwrap();
+
+        let pi_home = homes.agent_home(&agent).join("drivers/pi");
+        assert_eq!(
+            std::fs::read(pi_home.join("settings.json")).unwrap(),
+            br#"{"defaultProvider":"local"}"#
+        );
+        assert!(pi_home.join("auth.json").is_file());
+        assert!(!pi_home.join("models.json").exists());
+        assert!(!pi_home.join("AGENTS.md").exists());
+        assert!(!pi_home.join("skills").exists());
     }
 }

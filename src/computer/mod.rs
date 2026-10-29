@@ -132,6 +132,7 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
         computer_home.clone(),
         config.codex_config_source.clone(),
         config.codex_auth_source.clone(),
+        config.pi_agent_dir_source.clone(),
     );
     let (yield_interrupt_tx, mut yield_interrupt_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
@@ -212,6 +213,7 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
         computer_home.clone(),
         config.codex_config_source.clone(),
         config.codex_auth_source.clone(),
+        config.pi_agent_dir_source.clone(),
     );
     let mut driver = drivers::runtime(&computer_home, &config, driver_secret, Some(usage_tx))
         .map_err(|error| anyhow::anyhow!(error))?;
@@ -354,7 +356,7 @@ async fn proxy_attachment_upload(
             false,
         );
     };
-    let homes = AgentHomeAdapter::new(computer_home.to_path_buf(), None, None);
+    let homes = AgentHomeAdapter::new(computer_home.to_path_buf(), None, None, None);
     let (name, content) = match homes
         .read_attachment_source(context.agent_id, Path::new(path))
         .await
@@ -459,7 +461,7 @@ async fn proxy_attachment_download(
         Ok(content) => content,
         Err(_) => return capability_failure(),
     };
-    let homes = AgentHomeAdapter::new(computer_home.to_path_buf(), None, None);
+    let homes = AgentHomeAdapter::new(computer_home.to_path_buf(), None, None, None);
     if let Err(error) = homes
         .write_attachment_output(context.agent_id, Path::new(output), &content)
         .await

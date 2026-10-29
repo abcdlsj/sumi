@@ -210,6 +210,9 @@ update_ready_timeout_seconds = 30
 codex_config_source = "/path/to/codex/config.toml"
 codex_auth_source = "/path/to/codex/auth.json"
 
+# Optional: give pi Agents the model settings and credentials of a local pi.
+pi_agent_dir_source = "/Users/you/.pi/agent"
+
 # Optional: enable the builtin OpenAI-compatible Driver.
 [computer.builtin]
 api_base = "https://api.example.com/v1"
