@@ -219,8 +219,6 @@
   color: inherit;
   text-decoration: none;
   transform-origin: 0 0;
-  transition-property: transform;
-  transition-timing-function: linear;
 }
 .office-agent--offline {
   opacity: .55;

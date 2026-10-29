@@ -17,6 +17,7 @@ import { activityLabel } from "../../agentActivity";
 import { PixelAgent, type AgentPose } from "../../components/company/PixelAgent";
 import { PixelIdentity } from "../../components/PixelIdentity";
 import { useSpaceEvents } from "../../hooks/useSpaceEvents";
+import { buildGrid, isMoving, routeWalker, samePoint, spawnWalker, stepWalker, type Point, type Rect, type Walker } from "./officeSim";
 import "./office.css";
 
 const HOT_WINDOW_MS = 120_000;
@@ -24,9 +25,9 @@ const HOT_THRESHOLD = 5;
 const VISIT_HOLD_MS = 45_000;
 
 const WANDER_DELAY_MS = 25_000;
-const WANDER_HOLD_MS = 5_000;
-const WANDER_ARRIVE_MS = 7_000;
+const WANDER_HOLD_MS = 6_000;
 const LEISURE_HOLD_MS = 12_000;
+const THINK_EVERY_MS = 250;
 
 interface OfficeProp {
   src: string;
@@ -46,7 +47,8 @@ interface OfficeLayout {
   wanderSpots: readonly { x: number; y: number }[];
   leisureSpots: readonly { x: number; y: number }[];
   meetingSpots: readonly { x: number; y: number }[];
-  visitorSpot: { x: number; y: number };
+  /** Furniture and walls the walkers route around. */
+  obstacles: readonly Rect[];
 }
 
 function buildOfficeLayout(count: number): OfficeLayout {
@@ -190,6 +192,14 @@ function buildOfficeLayout(count: number): OfficeLayout {
           ? [{ x: width / 2, y: 182 }]
           : [{ x: width / 2, y: height - 60 }];
 
+  const obstacles: Rect[] = [
+    { x0: 0, y0: 0, x1: width, y1: 70 },
+    ...workstations.map((station) => ({ x0: station.x - 34, y0: station.y - 34, x1: station.x + 34, y1: station.y + 14 })),
+    ...props
+      .filter((prop) => prop.src !== "chair.png")
+      .map((prop) => ({ x0: prop.x - 2, y0: prop.y - 2, x1: prop.x + prop.width + 2, y1: prop.y + prop.height + 2 })),
+  ];
+
   return {
     width,
     height,
@@ -199,8 +209,9 @@ function buildOfficeLayout(count: number): OfficeLayout {
     props,
     wanderSpots,
     leisureSpots,
-    meetingSpots,
-    visitorSpot: { x: width - 80, y: height - 48 },
+    // A single gathering point becomes a loose ring so a group never stacks.
+    meetingSpots: meetingSpots.length > 1 ? meetingSpots : ringAround(meetingSpots[0], 6),
+    obstacles,
   };
 }
 
@@ -252,15 +263,10 @@ export function CompanyOfficeView({
   const layout = useMemo(() => buildOfficeLayout(activeAgents.length), [activeAgents.length]);
   const [dmVisits, setDmVisits] = useState<ReadonlyMap<string, DmVisit>>(new Map());
   const [hotGroups, setHotGroups] = useState<ReadonlyMap<string, HotGroup>>(new Map());
-  const [settled, setSettled] = useState<ReadonlySet<string> | null>(null);
-  const [wanderByMember, setWanderByMember] = useState<
-    ReadonlyMap<string, { x: number; y: number; at: number; kind: "wander" | "leisure" | "desk" }>
-  >(new Map());
   const [governorDms, setGovernorDms] = useState<ReadonlyMap<string, { a: string; b: string }>>(
     () => new Map(),
   );
   const channelActivity = useRef<Map<string, number[]>>(new Map());
-  const lastIdleAt = useRef<Map<string, number>>(new Map());
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -300,18 +306,6 @@ export function CompanyOfficeView({
     for (const [channelId, pair] of governorDms) merged.set(channelId, pair);
     return merged;
   }, [governorDms, viewerDmDirectory]);
-  const settledSet = settled ?? new Set(activeAgents.map((agent) => agent.member_id));
-  useEffect(() => {
-    const now = Date.now();
-    const ids = new Set(activeAgents.map((agent) => agent.member_id));
-    for (const agent of activeAgents) {
-      if (!lastIdleAt.current.has(agent.member_id)) lastIdleAt.current.set(agent.member_id, now);
-    }
-    for (const memberId of [...lastIdleAt.current.keys()]) {
-      if (!ids.has(memberId)) lastIdleAt.current.delete(memberId);
-    }
-  }, [activeAgents]);
-
   async function handleDmMessage(pair: { a: string; b: string }, channelId: string) {
     let authorId: string | undefined;
     try {
@@ -335,16 +329,6 @@ export function CompanyOfficeView({
         until: now + VISIT_HOLD_MS,
       }),
     );
-    setSettled((current) => {
-      const next = new Set(current ?? activeAgents.map((agent) => agent.member_id));
-      next.delete(agentVisitor);
-      return next;
-    });
-    setWanderByMember((current) => {
-      const next = new Map(current);
-      next.delete(agentVisitor);
-      return next;
-    });
   }
 
   function recordChannelMessage(channelId: string, now: number) {
@@ -382,16 +366,6 @@ export function CompanyOfficeView({
               until: now + HOT_WINDOW_MS,
             }),
       );
-      setSettled((current) => {
-        const next = new Set(current);
-        for (const memberId of memberIds) next.delete(memberId);
-        return next;
-      });
-      setWanderByMember((current) => {
-        const next = new Map(current);
-        for (const memberId of memberIds) next.delete(memberId);
-        return next;
-      });
     } catch {
       // A channel that became unreadable between event and fetch is ignored.
     }
@@ -408,102 +382,25 @@ export function CompanyOfficeView({
   });
 
   useEffect(() => {
-    // Reduced mode ignores retained wander state while rendering and does not
-    // start the autoplay timer. Keeping that state dormant also avoids an
-    // effect-driven state cascade when the media query changes.
-    if (reduced) return;
-
     const timer = window.setInterval(() => {
       const now = Date.now();
-      const expiredVisitors = [...dmVisits.values()]
-        .filter((visit) => visit.until <= now)
-        .map((visit) => visit.visitorId);
-      const expiredGroupIds = [...hotGroups.values()]
-        .filter((group) => group.until <= now)
-        .flatMap((group) => group.memberIds);
       setDmVisits((current) => pruneByUntil(current, now));
       setHotGroups((current) => pruneByUntil(current, now));
-      const currentSettled = settled ?? new Set(activeAgents.map((agent) => agent.member_id));
-      const nextSettled = new Set(currentSettled);
-      let settledChanged = false;
-      if (expiredVisitors.length || expiredGroupIds.length) {
-        for (const memberId of [...expiredVisitors, ...expiredGroupIds]) {
-          if (nextSettled.delete(memberId)) settledChanged = true;
-        }
-      }
-      const nextWander = new Map(wanderByMember);
-      const activeVisits = [...dmVisits.values()];
-      const activeGroups = [...hotGroups.values()];
-      for (const agent of activeAgents) {
-        const memberId = agent.member_id;
-        const inVisit = activeVisits.some(
-          (visit) => visit.visitorId === memberId || visit.hostId === memberId,
-        );
-        const inGroup = activeGroups.some((group) => group.memberIds.includes(memberId));
-        const working = agent.activity_status === "working";
-        if (working || inVisit || inGroup) {
-          if (nextWander.delete(memberId)) {
-            nextSettled.delete(memberId);
-            settledChanged = true;
-          }
-          lastIdleAt.current.set(memberId, now);
-        } else {
-          const wander = nextWander.get(memberId);
-          const agentIndex = activeAgents.findIndex((candidate) => candidate.member_id === memberId);
-          const desk = layout.desks[agentIndex] ?? layout.desks[0];
-          if (!wander) {
-            const idleFor = now - (lastIdleAt.current.get(memberId) ?? now);
-            if (idleFor >= WANDER_DELAY_MS) {
-              nextWander.set(memberId, {
-                ...pickIdleTarget(layout.wanderSpots, layout.leisureSpots, desk),
-                at: now,
-              });
-              nextSettled.delete(memberId);
-              settledChanged = true;
-            }
-          } else if (
-            currentSettled.has(memberId) &&
-            now - wander.at >= (wander.kind === "leisure" ? LEISURE_HOLD_MS : WANDER_HOLD_MS)
-          ) {
-            nextWander.set(memberId, {
-              ...pickIdleTarget(layout.wanderSpots, layout.leisureSpots, desk, wander),
-              at: now,
-            });
-            nextSettled.delete(memberId);
-            settledChanged = true;
-          }
-        }
-      }
-      for (const [memberId, wander] of nextWander) {
-        if (!currentSettled.has(memberId) && now - wander.at >= WANDER_ARRIVE_MS) {
-          nextSettled.add(memberId);
-          settledChanged = true;
-        }
-      }
-      setWanderByMember((current) => {
-        const currentEntries = [...current.entries()];
-        const nextEntries = [...nextWander.entries()];
-        if (
-          currentEntries.length === nextEntries.length &&
-          currentEntries.every(
-            ([key, value], index) =>
-              nextEntries[index]?.[0] === key && nextEntries[index]?.[1] === value,
-          )
-        ) {
-          return current;
-        }
-        return nextWander;
-      });
-      if (settledChanged) setSettled(nextSettled);
       const cutoff = now - HOT_WINDOW_MS;
       for (const [channelId, times] of channelActivity.current) {
         const kept = times.filter((timestamp) => timestamp >= cutoff);
         if (kept.length) channelActivity.current.set(channelId, kept);
         else channelActivity.current.delete(channelId);
       }
-    }, 1000);
+    }, 2000);
     return () => window.clearInterval(timer);
-  }, [activeAgents, dmVisits, hotGroups, layout, reduced, settled, wanderByMember]);
+  }, []);
+
+  const deskByMember = useMemo(
+    () => new Map(activeAgents.map((agent, index) => [agent.member_id, layout.desks[index]])),
+    [activeAgents, layout.desks],
+  );
+  const scene = useOfficeScene({ activeAgents, layout, deskByMember, dmVisits, hotGroups, reduced });
 
   useEffect(() => {
     const element = stageRef.current;
@@ -519,16 +416,6 @@ export function CompanyOfficeView({
     };
   }, [layout.width]);
 
-  const deskByMember = useMemo(
-    () =>
-      new Map(
-        activeAgents.map((agent, index) => [
-          agent.member_id,
-          layout.desks[index],
-        ]),
-      ),
-    [activeAgents, layout.desks],
-  );
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.id, member])),
     [members],
@@ -571,38 +458,9 @@ export function CompanyOfficeView({
           >
             <OfficeFurniture activeAgents={activeAgents} layout={layout} />
             {activeAgents.map((agent) => {
-              const desk = deskByMember.get(agent.member_id) ?? layout.desks[0];
-              const visit = [...dmVisits.values()].find((candidate) => candidate.visitorId === agent.member_id);
-              const hosting = [...dmVisits.values()].find((candidate) => candidate.hostId === agent.member_id);
-              const group = [...hotGroups.values()].find((candidate) => candidate.memberIds.includes(agent.member_id));
+              const actor = scene.get(agent.member_id);
+              if (!actor) return null;
               const status = agent.activity_status;
-              const working = status === "working";
-              const talk = Boolean(visit || hosting);
-              const wander = reduced ? undefined : wanderByMember.get(agent.member_id);
-              const target = visit
-                ? visitHostTarget(visit.hostId, deskByMember, layout.visitorSpot)
-                : group
-                  ? meetingSpot(group, agent.member_id, layout.meetingSpots)
-                  : working
-                    ? desk
-                    : wander ?? desk;
-              const moving = !reduced && !settledSet.has(agent.member_id);
-              const pose: AgentPose = moving
-                ? "walk"
-                : visit || hosting
-                  ? "stand"
-                  : group
-                    ? "stand"
-                    : working
-                      ? "typing"
-                      : wander
-                        ? wander.kind === "leisure"
-                          ? "leisure"
-                          : "stand"
-                        : "sit";
-              const duration = reduced
-                ? 0
-                : Math.min(6000, Math.max(1200, 500 + distance(desk, target) * 5));
               const member = memberById.get(agent.member_id);
               const name = member?.display_name ?? agent.name;
               const offline = agent.computer_reachable === false;
@@ -617,30 +475,16 @@ export function CompanyOfficeView({
                   to="/s/$spaceSlug/agents/$agentId"
                   params={{ spaceSlug, agentId: agent.member_id }}
                   style={{
-                    transform: `translate(${target.x - 16}px, ${target.y - 32}px)`,
-                    transitionDuration: `${duration}ms`,
-                  }}
-                  onTransitionEnd={(event) => {
-                    if (event.propertyName !== "transform") return;
-                    setSettled((current) =>
-                      new Set(current ?? activeAgents.map((agent) => agent.member_id)).add(agent.member_id),
-                    );
-                    setWanderByMember((current) => {
-                      const wander = current.get(agent.member_id);
-                      if (!wander) return current;
-                      const next = new Map(current);
-                      next.set(agent.member_id, { ...wander, at: Date.now() });
-                      return next;
-                    });
+                    transform: `translate(${Math.round(actor.x - 16)}px, ${Math.round(actor.y - 32)}px)`,
+                    zIndex: depth(actor.y),
                   }}
                   title={`${name} · ${activityLabel(status)}`}
                 >
                   <PixelAgent
                     variant={agentVariant(agent.member_id)}
-                    pose={pose}
-                    working={working}
-                    talking={talk}
-                    flip={target.x < desk.x}
+                    pose={actor.pose}
+                    talking={actor.talking}
+                    flip={actor.facing < 0}
                   />
                   <span className="office-agent-label">
                     <i className={`office-status-dot office-status-dot--${status}`} aria-hidden="true" />
@@ -750,7 +594,7 @@ function OfficeFurniture({ activeAgents, layout }: { activeAgents: Agent[]; layo
             key={`${station.x}-${station.y}`}
             className="office-workstation"
             aria-hidden="true"
-            style={{ transform: `translate(${station.x - 64}px, ${station.y - 64}px)` }}
+            style={{ transform: `translate(${station.x - 64}px, ${station.y - 64}px)`, zIndex: depth(station.y + 14) }}
           >
             <OfficeSprite src="desk.png" x={32} y={48} width={64} height={32} />
             <OfficeSprite
@@ -788,6 +632,7 @@ function OfficeSprite({
         width,
         height,
         transform: `translate(${x}px, ${y}px)`,
+        zIndex: depth(y + height),
         backgroundImage: `url("/office/${src}")`,
       }}
       aria-hidden="true"
@@ -795,44 +640,16 @@ function OfficeSprite({
   );
 }
 
-function visitHostTarget(
-  hostId: string,
-  deskByMember: Map<string, { x: number; y: number }>,
-  visitorSpot: { x: number; y: number },
-): { x: number; y: number } {
-  const desk = deskByMember.get(hostId);
-  return desk ? { x: desk.x + 54, y: desk.y + 4 } : visitorSpot;
+function ringAround(centre: Point, count: number): Point[] {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
+    return { x: Math.round(centre.x + Math.cos(angle) * 28), y: Math.round(centre.y + Math.sin(angle) * 16) };
+  });
 }
 
-function meetingSpot(
-  group: HotGroup,
-  memberId: string,
-  spots: readonly { x: number; y: number }[],
-): { x: number; y: number } {
-  const index = group.memberIds.indexOf(memberId);
-  if (index < 0 || !spots.length) return { x: 0, y: 0 };
-  return spots[index % spots.length];
-}
-
-function distance(from: { x: number; y: number }, to: { x: number; y: number }): number {
-  return Math.hypot(to.x - from.x, to.y - from.y);
-}
-
-function pickIdleTarget(
-  spots: readonly { x: number; y: number }[],
-  leisureSpots: readonly { x: number; y: number }[],
-  desk: { x: number; y: number },
-  exclude?: { x: number; y: number },
-): { x: number; y: number; kind: "wander" | "leisure" | "desk" } {
-  const choices: { x: number; y: number; kind: "wander" | "leisure" | "desk" }[] = [
-    ...spots.map((spot) => ({ ...spot, kind: "wander" as const })),
-    ...leisureSpots.map((spot) => ({ ...spot, kind: "leisure" as const })),
-    { ...desk, kind: "desk" as const },
-  ];
-  const candidates = exclude
-    ? choices.filter((choice) => choice.x !== exclude.x || choice.y !== exclude.y)
-    : choices;
-  return candidates[Math.floor(Math.random() * candidates.length)] ?? choices[0];
+/** Stack order follows the feet: whoever stands lower in the room is in front. */
+function depth(y: number): number {
+  return 10 + Math.round(y);
 }
 
 function agentVariant(seed: string): number {
@@ -889,4 +706,265 @@ function useReducedMotion(): boolean {
     return () => query.removeEventListener("change", onChange);
   }, []);
   return reduced;
+}
+
+interface Actor {
+  x: number;
+  y: number;
+  facing: -1 | 1;
+  pose: AgentPose;
+  talking: boolean;
+}
+
+type MindKind = "desk" | "visit" | "meet" | "leisure" | "wander";
+
+interface Mind {
+  kind: MindKind;
+  target: Point;
+  /** Where to face once there (the host's desk, the meeting centre). */
+  faceToward?: Point;
+  arrivedAt?: number;
+  hold: number;
+  nextIdleAt: number;
+}
+
+interface SceneInputs {
+  activeAgents: Agent[];
+  layout: OfficeLayout;
+  deskByMember: Map<string, Point>;
+  dmVisits: ReadonlyMap<string, DmVisit>;
+  hotGroups: ReadonlyMap<string, HotGroup>;
+}
+
+/**
+ * Where each Agent stands and what it is doing. Work, DM visits and channel
+ * gatherings decide a destination; an idle Agent sits for a while, then takes
+ * a short stroll or coffee break and comes back. Walkers route around the
+ * furniture at a steady pace. Under reduced motion everyone is shown at their
+ * destination and idle Agents stay at their desks.
+ */
+function useOfficeScene(inputs: SceneInputs & { reduced: boolean }): Map<string, Actor> {
+  const { activeAgents, layout, deskByMember, dmVisits, hotGroups, reduced } = inputs;
+  const grid = useMemo(() => buildGrid(layout.width, layout.height, layout.obstacles), [layout]);
+  const inputsRef = useRef<SceneInputs>({ activeAgents, layout, deskByMember, dmVisits, hotGroups });
+  useEffect(() => {
+    inputsRef.current = { activeAgents, layout, deskByMember, dmVisits, hotGroups };
+  }, [activeAgents, layout, deskByMember, dmVisits, hotGroups]);
+  const [animated, setAnimated] = useState<{ layout: OfficeLayout; actors: Map<string, Actor> }>();
+
+  useEffect(() => {
+    if (reduced) return;
+    const walkers = new Map<string, Walker>();
+    const minds = new Map<string, Mind>();
+    let frame = 0;
+    let last = performance.now();
+    let lastThink = -Infinity;
+    let wasMoving = true;
+
+    const loop = (time: number) => {
+      const seconds = Math.min(0.1, (time - last) / 1000);
+      last = time;
+      const now = Date.now();
+      const current = inputsRef.current;
+      let changed = false;
+      if (time - lastThink >= THINK_EVERY_MS) {
+        lastThink = time;
+        changed = think(current, grid, walkers, minds, now);
+      }
+      let moving = false;
+      for (const [id, walker] of walkers) {
+        if (!isMoving(walker)) continue;
+        const next = stepWalker(walker, seconds);
+        walkers.set(id, next);
+        moving = true;
+        if (!isMoving(next)) {
+          const mind = minds.get(id);
+          if (mind) minds.set(id, { ...mind, arrivedAt: now });
+        }
+      }
+      if (changed || moving || wasMoving) {
+        setAnimated({ layout: current.layout, actors: snapshot(current, walkers, minds) });
+      }
+      wasMoving = moving;
+      frame = window.requestAnimationFrame(loop);
+    };
+    frame = window.requestAnimationFrame(loop);
+    return () => window.cancelAnimationFrame(frame);
+  }, [grid, reduced]);
+
+  if (reduced || !animated || animated.layout !== layout) {
+    return staticScene({ activeAgents, layout, deskByMember, dmVisits, hotGroups });
+  }
+  return animated.actors;
+}
+
+/** Decide every Agent's destination; returns whether anything changed. */
+function think(
+  inputs: SceneInputs,
+  grid: ReturnType<typeof buildGrid>,
+  walkers: Map<string, Walker>,
+  minds: Map<string, Mind>,
+  now: number,
+): boolean {
+  const { activeAgents, layout, deskByMember } = inputs;
+  let changed = false;
+  const ids = new Set(activeAgents.map((agent) => agent.member_id));
+  for (const id of [...walkers.keys()]) {
+    if (!ids.has(id)) {
+      walkers.delete(id);
+      minds.delete(id);
+      changed = true;
+    }
+  }
+  const reserved = (self: string) =>
+    [...minds.entries()].filter(([id]) => id !== self).map(([, mind]) => mind.target);
+
+  for (const agent of activeAgents) {
+    const id = agent.member_id;
+    const desk = deskByMember.get(id) ?? layout.desks[0];
+    if (!desk) continue;
+    let walker = walkers.get(id);
+    if (!walker) {
+      walker = spawnWalker(desk);
+      changed = true;
+    }
+    const previous = minds.get(id) ?? {
+      kind: "desk" as const,
+      target: desk,
+      arrivedAt: now,
+      hold: 0,
+      nextIdleAt: now + WANDER_DELAY_MS * (0.4 + Math.random() * 0.8),
+    };
+    const arrived = previous.arrivedAt !== undefined && !isMoving(walker);
+    const forced = forcedMind(agent, inputs, reserved(id));
+    let mind: Mind = previous;
+    if (forced) {
+      mind = { ...forced, hold: 0, nextIdleAt: now + WANDER_DELAY_MS, arrivedAt: undefined };
+    } else if (previous.kind === "visit" || previous.kind === "meet") {
+      mind = backToDesk(desk, now);
+    } else if (previous.kind === "desk" && !samePoint(previous.target, desk)) {
+      mind = backToDesk(desk, now);
+    } else if (previous.kind === "desk" && arrived && now >= previous.nextIdleAt) {
+      mind = idleOuting(layout, desk, reserved(id), now);
+    } else if ((previous.kind === "leisure" || previous.kind === "wander") && arrived && now - (previous.arrivedAt ?? now) >= previous.hold) {
+      mind = Math.random() < 0.35 ? idleOuting(layout, desk, [...reserved(id), previous.target], now) : backToDesk(desk, now);
+    }
+    if (!samePoint(mind.target, previous.target) || mind.kind !== previous.kind) {
+      if (samePoint(mind.target, previous.target)) mind = { ...mind, arrivedAt: previous.arrivedAt };
+      changed = true;
+    }
+    const routed = routeWalker(grid, walker, mind.target);
+    if (routed !== walker && !isMoving(routed) && mind.arrivedAt === undefined) mind = { ...mind, arrivedAt: now };
+    walkers.set(id, routed);
+    minds.set(id, mind);
+  }
+  return changed;
+}
+
+function forcedMind(agent: Agent, inputs: SceneInputs, reserved: Point[]): Omit<Mind, "hold" | "nextIdleAt"> | undefined {
+  const { deskByMember, dmVisits, hotGroups, layout } = inputs;
+  const id = agent.member_id;
+  const desk = deskByMember.get(id) ?? layout.desks[0];
+  if (agent.computer_reachable === false || agent.activity_status === "working" || agent.activity_status === "dispatched") {
+    return { kind: "desk", target: desk };
+  }
+  const visit = [...dmVisits.values()].find((candidate) => candidate.visitorId === id);
+  const hostDesk = visit ? deskByMember.get(visit.hostId) : undefined;
+  if (visit && hostDesk) {
+    const sides = [{ x: hostDesk.x + 34, y: hostDesk.y - 4 }, { x: hostDesk.x - 34, y: hostDesk.y - 4 }];
+    const target = sides.find((side) => !reserved.some((point) => samePoint(point, side))) ?? sides[0];
+    return { kind: "visit", target, faceToward: hostDesk };
+  }
+  if (visit && !hostDesk) return undefined;
+  const group = [...hotGroups.values()].find((candidate) => candidate.memberIds.includes(id));
+  if (group && layout.meetingSpots.length) {
+    const index = group.memberIds.filter((memberId) => deskByMember.has(memberId)).indexOf(id);
+    const spot = layout.meetingSpots[Math.max(0, index) % layout.meetingSpots.length];
+    const centre = averagePoint(layout.meetingSpots);
+    return { kind: "meet", target: spot, faceToward: centre };
+  }
+  return undefined;
+}
+
+function backToDesk(desk: Point, now: number): Mind {
+  return { kind: "desk", target: desk, hold: 0, nextIdleAt: now + 20_000 + Math.random() * 25_000 };
+}
+
+function idleOuting(layout: OfficeLayout, desk: Point, reserved: Point[], now: number): Mind {
+  const free = (spots: readonly Point[]) => spots.filter((spot) => !reserved.some((point) => samePoint(point, spot)));
+  const leisure = free(layout.leisureSpots);
+  const wander = free(layout.wanderSpots);
+  const useLeisure = leisure.length > 0 && (Math.random() < 0.45 || wander.length === 0);
+  const pool = useLeisure ? leisure : wander;
+  if (!pool.length) return backToDesk(desk, now);
+  const target = pool[Math.floor(Math.random() * pool.length)];
+  return {
+    kind: useLeisure ? "leisure" : "wander",
+    target,
+    hold: (useLeisure ? LEISURE_HOLD_MS : WANDER_HOLD_MS) * (0.7 + Math.random() * 0.6),
+    nextIdleAt: now,
+  };
+}
+
+function snapshot(inputs: SceneInputs, walkers: Map<string, Walker>, minds: Map<string, Mind>): Map<string, Actor> {
+  const actors = new Map<string, Actor>();
+  for (const agent of inputs.activeAgents) {
+    const walker = walkers.get(agent.member_id);
+    const mind = minds.get(agent.member_id);
+    if (!walker || !mind) continue;
+    const moving = isMoving(walker);
+    actors.set(agent.member_id, actorFor(agent, mind, walker, !moving, moving, inputs, walkers, minds));
+  }
+  return actors;
+}
+
+function actorFor(
+  agent: Agent,
+  mind: Mind | Omit<Mind, "hold" | "nextIdleAt">,
+  position: Point & { facing?: -1 | 1 },
+  arrived: boolean,
+  moving: boolean,
+  inputs: SceneInputs,
+  walkers?: Map<string, Walker>,
+  minds?: Map<string, Mind>,
+): Actor {
+  const working = agent.activity_status === "working" || agent.activity_status === "dispatched";
+  const pose: AgentPose = moving
+    ? "walk"
+    : mind.kind === "desk"
+      ? working ? "typing" : "sit"
+      : mind.kind === "leisure"
+        ? "leisure"
+        : "stand";
+  let facing: -1 | 1 = position.facing ?? 1;
+  if (arrived && mind.faceToward && Math.abs(mind.faceToward.x - position.x) > 2) {
+    facing = mind.faceToward.x < position.x ? -1 : 1;
+  }
+  const hosting = [...inputs.dmVisits.values()].some((visit) => {
+    if (visit.hostId !== agent.member_id) return false;
+    if (!walkers || !minds) return true;
+    const visitor = walkers.get(visit.visitorId);
+    return Boolean(visitor && !isMoving(visitor) && minds.get(visit.visitorId)?.kind === "visit");
+  });
+  const talking = (arrived && (mind.kind === "visit" || mind.kind === "meet")) || hosting;
+  return { x: position.x, y: position.y, facing, pose, talking };
+}
+
+/** Everyone at their destination, idle Agents at their desks. */
+function staticScene(inputs: SceneInputs): Map<string, Actor> {
+  const actors = new Map<string, Actor>();
+  const reservedTargets: Point[] = [];
+  for (const agent of inputs.activeAgents) {
+    const desk = inputs.deskByMember.get(agent.member_id) ?? inputs.layout.desks[0];
+    if (!desk) continue;
+    const mind = forcedMind(agent, inputs, reservedTargets) ?? { kind: "desk" as const, target: desk };
+    reservedTargets.push(mind.target);
+    actors.set(agent.member_id, actorFor(agent, mind, mind.target, true, false, inputs));
+  }
+  return actors;
+}
+
+function averagePoint(points: readonly Point[]): Point {
+  const total = points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+  return { x: total.x / points.length, y: total.y / points.length };
 }

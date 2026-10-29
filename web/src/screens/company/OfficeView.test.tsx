@@ -73,7 +73,7 @@ describe("CompanyOfficeView", () => {
 
   it("renders direct targets without movement or sprite animation under reduced motion", async () => {
     stubAgents([officeAgent(0)]);
-    const interval = vi.spyOn(window, "setInterval");
+    const frame = vi.spyOn(window, "requestAnimationFrame");
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -88,8 +88,7 @@ describe("CompanyOfficeView", () => {
     await screen.findByRole("heading", { name: "Office" });
     const worker = await screen.findByRole("img", { name: "Office worker sprite" });
     expect(worker).toHaveClass("pixel-agent--sit");
-    expect(worker.closest(".office-agent")).toHaveStyle({ transitionDuration: "0ms" });
-    expect(interval.mock.calls.some(([, delay]) => delay === 1000)).toBe(false);
+    expect(frame).not.toHaveBeenCalled();
   });
 });
 
