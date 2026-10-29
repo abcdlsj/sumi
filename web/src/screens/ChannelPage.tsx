@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { Asterisk, Check, Hash, LoaderCircle, Monitor, Plus, X } from "lucide-react";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Hash, LoaderCircle, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -19,6 +19,7 @@ import {
   type MessagePage,
 } from "../api/client";
 import { DialogFrame } from "../components/DialogFrame";
+import { GettingStarted } from "../components/onboarding/GettingStarted";
 import { MessageComposer, type ComposerInput } from "../components/channel/MessageComposer";
 import { MessageTimeline, type MessageTimelineScrollApi } from "../components/channel/MessageTimeline";
 import { SelfMemberContext } from "../components/channel/selfMember";
@@ -51,6 +52,7 @@ export function ChannelPage() {
             currentMemberId={currentMember.id}
             setup={channel.slug === "general" ? {
               canPairComputer: ["owner", "admin"].includes(currentMember.access_level),
+              isOwner: currentMember.access_level === "owner",
               canCreateAgent:
                 ["owner", "admin"].includes(currentMember.access_level) ||
                 currentMember.permissions.includes("agent.create"),
@@ -82,7 +84,7 @@ export function MessageWorkspace({
   direct?: boolean;
   spaceSlug: string;
   currentMemberId: string;
-  setup?: { canPairComputer: boolean; canCreateAgent: boolean };
+  setup?: { canPairComputer: boolean; canCreateAgent: boolean; isOwner: boolean };
 }) {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -206,7 +208,10 @@ export function MessageWorkspace({
     queryFn: () => listComputers(spaceId),
     enabled: Boolean(setup),
     retry: false,
+    // While setup waits for a Computer, check often so the guide moves on by itself.
+    refetchInterval: (query) => (query.state.data?.some((computer) => computer.status === "online") ? false : 4000),
   });
+  const [composerInsert, setComposerInsert] = useState<{ text: string; nonce: number }>();
   const latestMainMessageSeq = Math.max(
     0,
     ...(messages.data?.messages.map((message) => message.seq) ?? []),
@@ -297,15 +302,25 @@ export function MessageWorkspace({
         timelineRef={timeline}
         scrollApiRef={timelineScrollApi}
         header={setup && spaceSlug ? (
-          <SetupStrip
-            spaceSlug={spaceSlug}
-            computers={computers.data}
-            agents={agents.data}
-            loading={computers.isPending || agents.isPending}
-            unavailable={Boolean(computers.error || agents.error)}
-            canPairComputer={setup.canPairComputer}
-            canCreateAgent={setup.canCreateAgent}
-          />
+          computers.isPending || agents.isPending ? null : computers.error || agents.error ? (
+            <section className="getting-started getting-started--error" aria-label="Space setup unavailable">
+              <strong>Setup status unavailable</strong>
+              <span>Messages still work. Check the Server connection before pairing a Computer.</span>
+            </section>
+          ) : (
+            <GettingStarted
+              spaceId={spaceId}
+              channelId={channel.id}
+              computers={computers.data ?? []}
+              agents={agents.data ?? []}
+              channelMembers={channelMembers.data?.members ?? []}
+              agentHasSpoken={Boolean(messages.data?.messages.some((message) => message.author.kind === "agent"))}
+              canPairComputer={setup.canPairComputer}
+              canCreateAgent={setup.canCreateAgent}
+              isOwner={setup.isOwner}
+              onMention={(name) => setComposerInsert({ text: `@${name} `, nonce: Date.now() })}
+            />
+          )
         ) : undefined}
         page={messages.data}
         pending={messages.isPending}
@@ -335,6 +350,7 @@ export function MessageWorkspace({
         attachmentsAriaLabel="Attachments ready to send"
         send={sendMessage}
         onSent={addMessage}
+        insert={composerInsert}
       />
 
       {threadId ? (
@@ -371,66 +387,6 @@ export function MessageWorkspace({
     </SelfMemberContext.Provider>
   );
 }
-function SetupStrip({
-  spaceSlug,
-  computers,
-  agents,
-  loading,
-  unavailable,
-  canPairComputer,
-  canCreateAgent,
-}: {
-  spaceSlug: string;
-  computers?: Awaited<ReturnType<typeof listComputers>>;
-  agents?: Awaited<ReturnType<typeof listAgents>>;
-  loading: boolean;
-  unavailable: boolean;
-  canPairComputer: boolean;
-  canCreateAgent: boolean;
-}) {
-  if (loading) {
-    return <section className="setup-strip setup-strip--loading" aria-label="Loading Space setup">Preparing Space setup...</section>;
-  }
-  if (unavailable) {
-    return (
-      <section className="setup-strip setup-strip--error" aria-label="Space setup unavailable">
-        <strong>Setup status unavailable</strong>
-        <span>Messages still work. Check the Server connection before pairing a Computer.</span>
-      </section>
-    );
-  }
-
-  const hasComputer = Boolean(computers?.length);
-  const hasOnlineComputer = Boolean(computers?.some((computer) => computer.status === "online"));
-  const hasAgent = Boolean(agents?.some((agent) => agent.desired_lifecycle !== "retired"));
-  if (hasComputer && hasAgent) return null;
-
-  return (
-    <section className="setup-strip" aria-labelledby="setup-strip-title">
-      <div className="setup-strip-heading">
-        <strong id="setup-strip-title">Finish your Space setup</strong>
-        <small>#general is ready. Add local compute, then your first Agent.</small>
-      </div>
-      <ol className="setup-steps">
-        <li className={hasComputer ? "is-complete" : ""}>
-          <span className="setup-step-icon" aria-hidden="true">{hasComputer ? <Check /> : <Monitor />}</span>
-          <span><strong>Connect a Computer</strong><small>{hasComputer ? `${computers?.length} paired` : "macOS or Linux"}</small></span>
-          {!hasComputer && canPairComputer ? (
-            <Link className="setup-action" to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer">Pair</Link>
-          ) : null}
-        </li>
-        <li className={hasAgent ? "is-complete" : ""}>
-          <span className="setup-step-icon setup-step-icon--agent" aria-hidden="true">{hasAgent ? <Check /> : <Asterisk />}</span>
-          <span><strong>Create your first Agent</strong><small>{hasAgent ? `${agents?.filter((agent) => agent.desired_lifecycle !== "retired").length} created` : hasOnlineComputer ? "Choose a Role and Driver" : "Requires an online Computer"}</small></span>
-          {!hasAgent && canCreateAgent && hasOnlineComputer ? (
-            <Link className="setup-action" to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="create-agent">Create</Link>
-          ) : null}
-        </li>
-      </ol>
-    </section>
-  );
-}
-
 function AddAgentsDialog({ agents, pending, error, close, submit }: { agents: Array<Member & { role_text: string }>; pending: boolean; error?: string; close: () => void; submit: (ids: string[]) => void }) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

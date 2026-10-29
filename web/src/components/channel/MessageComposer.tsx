@@ -49,6 +49,7 @@ export function MessageComposer({
   className,
   send,
   onSent,
+  insert,
 }: {
   spaceId: string;
   draftKey: string;
@@ -63,6 +64,8 @@ export function MessageComposer({
   className?: string;
   send: (input: ComposerInput) => Promise<Message>;
   onSent: (message: Message) => void;
+  /** Text to put in the composer, e.g. a mention from the setup guide; nonce makes repeats apply. */
+  insert?: { text: string; nonce: number };
 }) {
   const [body, setBody] = useState(() => readDraft(draftKey));
   const lastDraftKeyRef = useRef<string | null>(null);
@@ -74,6 +77,21 @@ export function MessageComposer({
     }
     writeDraft(draftKey, body);
   }, [body, draftKey]);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [appliedInsert, setAppliedInsert] = useState(insert?.nonce);
+  if (insert && insert.nonce !== appliedInsert) {
+    setAppliedInsert(insert.nonce);
+    setBody((current) => (current.includes(insert.text.trim()) ? current : `${insert.text}${current}`));
+  }
+  useEffect(() => {
+    if (!insert) return;
+    window.requestAnimationFrame(() => {
+      const textarea = formRef.current?.querySelector("textarea");
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+  }, [insert]);
   const [attachments, setAttachments] = useState<Awaited<ReturnType<typeof uploadAttachment>>[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const submission = useMutation({
@@ -121,6 +139,7 @@ export function MessageComposer({
 
   return (
     <form
+      ref={formRef}
       className={`composer${dragging ? " composer--dragging" : ""}${className ? ` ${className}` : ""}`}
       onSubmit={submit}
       onDragOver={(event) => {

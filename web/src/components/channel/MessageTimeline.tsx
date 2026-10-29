@@ -11,6 +11,7 @@ import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
 import { TaskStatusIcon } from "../taskStatusIcon";
 import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
+import { TimelineSkeleton } from "../Skeleton";
 
 type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
 
@@ -105,7 +106,7 @@ export function MessageTimeline({
       <div ref={timelineRef} className="message-timeline">
         <div className="visually-hidden" role="status">{newMessageAnnouncement}</div>
         {header}
-        {pending ? <div className="timeline-status">Loading Messages...</div> : null}
+        {pending ? <TimelineSkeleton /> : null}
         {error ? (
           <div className="system-event system-event--standalone" role="alert">
             <div className="system-event-heading">

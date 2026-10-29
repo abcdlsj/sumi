@@ -15,6 +15,7 @@ import { activityLabel } from "../agentActivity";
 import { LlmUsagePanel } from "../components/LlmUsagePanel";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
 import { DialogFrame } from "../components/DialogFrame";
+import { DetailSkeleton } from "../components/Skeleton";
 
 export function ComputersPage() {
   const { spaceSlug } = useParams({ from: "/s/$spaceSlug/computers" });
@@ -126,7 +127,7 @@ function ComputersWorkspace({
 
   return (
     <section className="computers-workspace" aria-label="Computers">
-      {computers.isPending || agents.isPending ? <div className="detail-skeleton" aria-label="Loading Computers" /> : null}
+      {computers.isPending || agents.isPending ? <DetailSkeleton label="Loading Computers" /> : null}
       {computers.error || agents.error ? (
         <div className="computer-page-state">
           <p className="form-error" role="alert">Computers are unavailable. Retry after checking the Server connection.</p>

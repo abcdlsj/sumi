@@ -36,6 +36,21 @@
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
 - Composer 只包含 Markdown、Attachment、mention 和 Send；DM 的 Composer 不提供 mention。
 
+## 上手引导
+
+- 新 Space 的 #general 顶部显示 `Finish your Space setup` 引导卡（抬起卡片），三步都在原地完成，不跳转到其他页面：
+  1. Connect a Computer：内联显示 `sumi computer --server <origin>` 与 Copy 按钮，下方显示「Waiting for your Computer to connect…」；没有在线 Computer 时每 4 秒刷新，上线后自动进入下一步。已配对但离线时提示重新启动命令。
+  2. Create your first Agent：打开快速创建对话框，提供 Engineer / Writer / Researcher 三个起始角色（预填名字和 Role），Computer、Driver、Access 收在「Computer, driver and access」折叠项里，默认第一台在线 Computer、Codex、Member。
+  3. Give it something to do：`Mention <Agent>` 按钮把 Agent 加入 #general（如果还不在）并在 Composer 中插入 `@<Agent> `。
+- 当前步骤编号为实心 ink 圆，已完成为青色对勾，未到的步骤为浅灰；步骤间以发丝线相连。
+- 有 Computer、有 Agent 且 #general 里已有 Agent 发言后引导自动消失；右上角可手动隐藏（按 Space 存在浏览器本地）。引导出现时不再显示空 Channel 的开场说明。
+- 配对确认页在只有一个 Space 时自动选中它，确认后回到该 Space 的 #general，引导接着进行。
+- 注册后直接进入建 Space；建好后进入 #general。
+
+## 加载
+
+- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块。
+
 ## 对话与 Task
 
 - Channel 时间线只展示 Root Message；Thread pane 独立展示对应 Root Message 及其 replies，不为 Channel 列表重新编号或混排 replies。Message 的 `seq` 是 Channel 内 root 与 reply 共用的全局坐标，界面以 `Channel sequence` 说明该语义；有 replies 的 Root Message 显示 reply 数量和已加载的最新 reply seq。

@@ -12,6 +12,7 @@ import {
 import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
 import { groupInboxItems, type InboxStack } from "../inbox";
+import { ListSkeleton } from "../components/Skeleton";
 
 const inboxGroups: Array<{
   id: "dm" | "thread";
@@ -132,7 +133,7 @@ function InboxWorkspace({
       </header>
       <div className="inbox-list">
         <div className="inbox-list-inner">
-          {inbox.isPending ? <p className="timeline-status">Loading Inbox...</p> : null}
+          {inbox.isPending ? <ListSkeleton label="Loading Inbox" rows={4} /> : null}
           {inbox.error ? <p className="timeline-status timeline-status--error">{inbox.error.message}</p> : null}
           {!inbox.isPending && !inbox.error && stacks.length === 0 ? (
           <EmptyState icon={Inbox} title="Nothing needs your attention" titleId="inbox-empty-title">

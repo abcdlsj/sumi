@@ -21,6 +21,7 @@ import { EmptyState } from "../components/EmptyState";
 import { SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
+import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
 
 type TaskFilter = "all_open" | TaskStatus | "assigned_to_me";
 
@@ -95,7 +96,7 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
       <nav className="task-filters" aria-label="Task filters">
         {filters.map((item) => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
       </nav>
-      {tasks.isPending ? <div className="route-status">Loading Tasks…</div> : null}
+      {tasks.isPending ? <ListSkeleton label="Loading Tasks" avatar={false} /> : null}
       {tasks.error ? <div className="route-status route-status--error" role="alert">Tasks unavailable. Retry from this page.</div> : null}
       {!tasks.isPending && !tasks.error && visible.length === 0 ? (
         <EmptyState
@@ -183,7 +184,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug }: { taskId: string; spaceId: s
   const [closeReason, setCloseReason] = useState("invalid");
   const [closeNote, setCloseNote] = useState("");
 
-  if (task.isPending) return <div className="route-status">Loading Task…</div>;
+  if (task.isPending) return <DetailSkeleton label="Loading Task" />;
   if (task.error || !task.data) return <div className="route-status route-status--error" role="alert">Task unavailable or outside your visible Threads.</div>;
   const value = task.data;
 

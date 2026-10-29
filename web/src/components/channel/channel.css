@@ -123,11 +123,11 @@
 }
 
 /* Short timelines sit on the composer, like a chat, not at the top. */
-.message-timeline > :first-child:not(.setup-strip) {
+.message-timeline > :first-child:not(.getting-started) {
   margin-top: auto;
 }
 
-.message-timeline > .setup-strip + * {
+.message-timeline > .getting-started + * {
   margin-top: auto;
 }
 
@@ -972,116 +972,223 @@ details.system-event .system-event-heading {
   text-align: center;
 }
 
-/* Setup checklist on #general before the first Computer and Agent. */
-.setup-strip {
+/* First-run guide on #general: three steps, each finished in place. */
+.getting-started {
   display: grid;
   gap: 14px;
-  margin: 16px 0 8px;
-  padding: 16px 18px;
+  margin: 12px 0 8px;
+  padding: 18px 20px 20px;
   border-radius: var(--radius-lg);
-  background: var(--bg-sidebar);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-raised);
 }
 
-.setup-strip--loading,
-.setup-strip--error {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+.getting-started--error {
+  gap: 2px;
   color: var(--muted);
   font-size: var(--text-small);
 }
 
-.setup-strip--error strong {
+.getting-started--error strong {
   color: var(--ink);
-  font-weight: 550;
 }
 
-.setup-strip-heading {
-  display: grid;
-  gap: 2px;
+.getting-started-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.setup-strip-heading strong {
-  font-size: var(--text-body);
+.getting-started-heading h2 {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
 }
 
-.setup-strip-heading small {
+.getting-started-heading p {
+  margin: 2px 0 0;
   color: var(--muted);
   font-size: var(--text-small);
 }
 
-.setup-steps {
+.getting-started-heading .icon-button {
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
+  color: var(--muted);
+}
+
+.getting-started-steps {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.setup-steps li {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  box-shadow: var(--shadow-selected);
-}
-
-.setup-steps li > span:nth-child(2) {
+.getting-started-steps > li {
+  position: relative;
   display: grid;
-  min-width: 0;
-  flex: 1;
-  line-height: 1.35;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 16px;
 }
 
-.setup-steps strong {
-  font-size: var(--text-small);
-  font-weight: 550;
+.getting-started-steps > li:last-child {
+  padding-bottom: 0;
 }
 
-.setup-steps small {
+/* The rail joining step markers. */
+.getting-started-steps > li:not(:last-child)::before {
+  position: absolute;
+  top: 28px;
+  bottom: 4px;
+  left: 11.5px;
+  width: 1px;
+  background: var(--line);
+  content: "";
+}
+
+.getting-started-marker {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-subtle);
   color: var(--muted);
   font-size: var(--text-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-.setup-step-icon {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: none;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--ink-2);
+.getting-started-marker svg {
+  width: 13px;
+  height: 13px;
 }
 
-.setup-step-icon svg {
-  width: 16px;
-  height: 16px;
+.is-current > .getting-started-marker {
+  background: var(--ink);
+  color: var(--bg);
 }
 
-.setup-steps li.is-complete .setup-step-icon {
+.is-complete > .getting-started-marker {
   background: var(--live-soft);
   color: var(--live-ink);
 }
 
-.setup-action {
-  flex: none;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--ink);
-  color: var(--bg);
-  font-size: var(--text-meta);
-  font-weight: 550;
-  text-decoration: none;
+.getting-started-step-body {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: 6px;
+  padding-top: 2px;
 }
 
-.setup-action:hover {
-  background: #33312d;
+.getting-started-step-body strong {
+  font-size: var(--text-body);
+  font-weight: 550;
+}
+
+.is-upcoming .getting-started-step-body strong,
+.is-complete .getting-started-step-body strong {
+  color: var(--ink-2);
+}
+
+.getting-started-step-body p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.getting-started-step-body .pair-command {
+  width: min(100%, 560px);
+  min-width: 0;
+}
+
+.getting-started-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.getting-started-pulse {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--live);
+  animation: presence-breathe 1.6s ease-in-out infinite;
+}
+
+/* Quick Agent dialog */
+.quick-agent-form {
+  display: grid;
+  gap: 12px;
+}
+
+.quick-agent-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.quick-agent-templates legend {
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.quick-agent-templates label {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: var(--text-small);
+}
+
+.quick-agent-templates label.is-selected {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.quick-agent-templates input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.quick-agent-templates label:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.quick-agent-advanced summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--text-small);
+}
+
+.quick-agent-advanced > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.quick-agent-form footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Composer: one raised card; text on top, tools on the bottom row. */
@@ -1609,7 +1716,7 @@ details.system-event .system-event-heading {
     right: 4px;
   }
 
-  .setup-steps {
+  .quick-agent-advanced > div {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1627,4 +1734,9 @@ details.system-event .system-event-heading {
     animation: none;
     opacity: .7;
   }
+}
+
+/* The setup guide already says what to do in a fresh #general. */
+.getting-started ~ .empty-channel {
+  display: none;
 }

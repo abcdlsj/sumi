@@ -16,6 +16,7 @@ import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { MessageComposer, type ComposerInput } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
 import { ToBottomButton } from "./ToBottomButton";
+import { TimelineSkeleton } from "../Skeleton";
 
 export function ThreadPane({
   channelId,
@@ -158,7 +159,7 @@ export function ThreadPane({
               <strong>Return to latest</strong>
             </button>
           ) : null}
-          {thread.isPending ? <div className="timeline-status">Loading Thread...</div> : null}
+          {thread.isPending ? <TimelineSkeleton rows={3} label="Loading Thread" /> : null}
           {thread.error ? <div className="timeline-status timeline-status--error">{thread.error.message}</div> : null}
           {thread.data ? (
             <>

@@ -65,10 +65,8 @@ describe("ChannelPage", () => {
     expect(screen.queryByRole("link", { name: "Design lab" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sumi Lab" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Finish your Space setup" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Pair" })).toHaveAttribute(
-      "href",
-      "/s/sumi-lab/computers#pair-computer",
-    );
+    expect(screen.getByRole("button", { name: "Copy Computer command" })).toBeVisible();
+    expect(screen.getByText(/Waiting for your Computer to connect/)).toBeVisible();
     const channelComposer = screen.getByLabelText("Message");
     expect(channelComposer).toHaveAttribute("placeholder", "Message #general");
     expect(channelComposer).toHaveAttribute("rows", "1");

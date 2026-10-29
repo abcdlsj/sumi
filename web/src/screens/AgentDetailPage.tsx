@@ -9,6 +9,7 @@ import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActiv
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { formatBytes } from "../format";
+import { DetailSkeleton } from "../components/Skeleton";
 
 type AgentTab = "activity" | "overview" | "memory" | "settings";
 
@@ -99,7 +100,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
     tabRefs.current[nextIndex]?.focus();
   }
 
-  if (agent.isPending) return <div className="detail-skeleton" role="status" aria-label="Loading Agent" />;
+  if (agent.isPending) return <DetailSkeleton label="Loading Agent" />;
   if (agent.error || !agent.data) return <p className="route-status route-status--error">Agent unavailable. Check your permission and retry.</p>;
   const value = agent.data;
   const agentMember = members.data?.find((member) => member.id === value.member_id);

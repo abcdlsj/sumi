@@ -54,6 +54,7 @@ import { DialogFrame } from "./DialogFrame";
 import { PixelIdentity } from "./PixelIdentity";
 import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
+import { ShellSkeleton } from "./Skeleton";
 
 export { PixelIdentity } from "./PixelIdentity";
 
@@ -283,7 +284,7 @@ export function SpaceShell({
     channels.isPending ||
     members.isPending || (active === "computers" && computers.isPending)
   ) {
-    return <div className="route-status">Opening Space...</div>;
+    return <ShellSkeleton />;
   }
   if (routeError) {
     return <RouteFailure error={routeError} retry={() => {
@@ -291,7 +292,7 @@ export function SpaceShell({
     }} />;
   }
   if (!space.data || !user.data || !channels.data || !members.data) {
-    return <div className="route-status">Opening Space...</div>;
+    return <ShellSkeleton />;
   }
   const currentMember = members.data.find((member) => member.id === space.data.current_member_id);
   if (!currentMember) {

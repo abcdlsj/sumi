@@ -18,7 +18,8 @@ export function PairComputerPage() {
     mutationFn: (input: { space_id: string; name: string; code: string }) => confirmPairing(pairingId, input),
     onSuccess: (computer) => {
       const space = spaces.data?.find((candidate) => candidate.id === computer.space_id);
-      if (space) void navigate({ to: "/s/$spaceSlug/computers", params: { spaceSlug: space.slug } });
+      // Back to #general, where the setup guide picks up at "Create your first Agent".
+      if (space) void navigate({ to: "/s/$spaceSlug/channels/$channelSlug", params: { spaceSlug: space.slug, channelSlug: "general" } });
     },
   });
 
@@ -51,7 +52,7 @@ export function PairComputerPage() {
         </div>
         <form className="pairing-form" onSubmit={submit}>
           <label htmlFor="pair-space">Space</label>
-          <select id="pair-space" name="space_id" required defaultValue="">
+          <select id="pair-space" name="space_id" required defaultValue={spaces.data?.length === 1 ? spaces.data[0].id : ""}>
             <option value="" disabled>Select a Space</option>
             {spaces.data?.map((space) => <option key={space.id} value={space.id}>{space.name} /s/{space.slug}</option>)}
           </select>

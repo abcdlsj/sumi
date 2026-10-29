@@ -25,6 +25,7 @@ import {
 import { activityLabel } from "../agentActivity";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
+import { ListSkeleton } from "../components/Skeleton";
 
 export function MembersPage() {
   const { spaceSlug } = useParams({ from: "/s/$spaceSlug/members" });
@@ -239,7 +240,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
       ) : null}
 
       <div className="member-list" aria-live="polite">
-        {members.isPending ? <div className="members-status">Loading Members...</div> : null}
+        {members.isPending ? <ListSkeleton label="Loading Members" rows={5} /> : null}
         {members.error ? (
           <div className="members-status members-status--error">{members.error.message}</div>
         ) : null}
