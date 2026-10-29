@@ -86,6 +86,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
     },
   });
   const memberUpdate = useMutation({
+    meta: { success: "Access updated." },
     mutationFn: ({ memberId, input }: { memberId: string; input: Parameters<typeof updateMember>[2] }) =>
       updateMember(space.id, memberId, input),
     onSuccess: (updated) => {
@@ -96,6 +97,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
   });
   const directMessage = useMutation({
     mutationFn: (memberId: string) => createDirectMessage(space.id, memberId),
+    meta: { error: "Could not open the DM." },
     onSuccess: (dm) => {
       void queryClient.invalidateQueries({ queryKey: ["direct-messages", space.id] });
       void navigate({

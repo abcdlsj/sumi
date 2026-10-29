@@ -24,6 +24,7 @@ import { PairComputerPage } from "./screens/PairComputerPage";
 import { SettingsPage } from "./screens/SettingsPage";
 import { SpaceCreatePage } from "./screens/SpaceCreatePage";
 import { TaskDetailPage, TasksPage } from "./screens/TasksPage";
+import { NotFoundPage, RouteErrorPage } from "./components/RoutePages";
 
 const rootRoute = createRootRoute({ component: RouteChrome });
 const registerRoute = createRoute({
@@ -199,6 +200,8 @@ export function createAppRouter(history?: RouterHistory) {
     routeTree,
     history,
     parseSearch: (searchStr) => Object.fromEntries(new URLSearchParams(searchStr)),
+    defaultNotFoundComponent: NotFoundPage,
+    defaultErrorComponent: RouteErrorPage,
   });
 }
 

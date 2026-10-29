@@ -11,6 +11,7 @@ import {
 } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
+import { notify } from "../feedback";
 import { groupInboxItems, type InboxStack } from "../inbox";
 import { ListSkeleton } from "../components/Skeleton";
 
@@ -82,6 +83,7 @@ function InboxWorkspace({
       const failed = results.filter((result) => result.status === "rejected");
       if (failed.length > 0) {
         console.error("Inbox read failed", { failed: failed.length, total: stack.items.length });
+        notify("error", "Could not mark this item as read. It stays in your Inbox.");
       }
       void queryClient.invalidateQueries({ queryKey: ["inbox", spaceId, memberId] });
     });
@@ -105,9 +107,13 @@ function InboxWorkspace({
   function markAllRead() {
     setReadingAll(true);
     void markAllInboxRead(memberId)
-      .then(() => queryClient.invalidateQueries({ queryKey: ["inbox", spaceId, memberId] }))
+      .then(() => {
+        notify("success", "Inbox cleared.");
+        return queryClient.invalidateQueries({ queryKey: ["inbox", spaceId, memberId] });
+      })
       .catch((error: unknown) => {
         console.error("Inbox mark all read failed", error);
+        notify("error", `Could not mark everything as read.${error instanceof Error && error.message ? ` ${error.message}` : ""}`);
       })
       .finally(() => setReadingAll(false));
   }
@@ -117,7 +123,7 @@ function InboxWorkspace({
       <header className="channel-header">
         <div className="channel-title">
           <h1>Inbox</h1>
-          <p>Attention routed to you. Open the source to respond.</p>
+          <p>Mentions, replies and requests for you. Open one to respond.</p>
         </div>
         {stacks.length > 0 ? (
           <button

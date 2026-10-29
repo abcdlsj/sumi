@@ -74,8 +74,8 @@ describe("Agent detail", () => {
     expect(screen.getAllByRole("status").find((status) => status.textContent === "Working")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
     expect(await screen.findByRole("link", { name: "Rebuild WebUI" })).toHaveAttribute("href", "/s/sumi-lab/tasks/task");
-    expect(screen.getByText("Another item is waiting. It is not part of the current Focus.")).toBeVisible();
-    const channelPermission = screen.getByRole("checkbox", { name: "channel.create permission" });
+    expect(screen.getByText("More work is waiting after this.")).toBeVisible();
+    const channelPermission = screen.getByRole("checkbox", { name: "Create Channels" });
     expect(channelPermission).toBeChecked();
     fireEvent.click(channelPermission);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`/permissions/channel.create`), expect.objectContaining({ method: "DELETE" })));
@@ -96,7 +96,7 @@ describe("Agent detail", () => {
       expect.stringContaining(`/agents/${agentId}`),
       expect.objectContaining({ method: "PATCH", body: expect.stringContaining("Enforce the specification") }),
     ));
-    fireEvent.click(screen.getByLabelText(/cancel the active run now/i));
+    fireEvent.click(screen.getByLabelText(/stop what it is doing right away/i));
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(`/agents/${agentId}`),
@@ -104,8 +104,8 @@ describe("Agent detail", () => {
     ));
     fireEvent.click(screen.getByRole("button", { name: "Restart Agent" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.body === JSON.stringify({ lifecycle: { action: "restart" } }))).toHaveLength(2));
-    expect(await screen.findByRole("status", { name: "Agent error: driver_unavailable" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /retry provision/i }));
+    expect(await screen.findByRole("status", { name: "Needs attention: Driver unavailable." })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /retry setup/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(`/agents/${agentId}`),
       expect.objectContaining({ body: JSON.stringify({ lifecycle: { action: "retry" } }) }),
@@ -182,10 +182,8 @@ describe("Agent detail", () => {
     expect(screen.getByRole("link", { name: "View task" })).toHaveAttribute("href", "/s/sumi-lab/tasks/task");
     expect(screen.getByText("Sent a message")).toHaveClass("agent-activity-kind");
     expect(screen.getByRole("link", { name: "#general" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-1");
-    expect(screen.getByText("target")).toBeVisible();
-    expect(screen.getByText("#general:12")).toBeVisible();
+    expect(screen.queryByText("target")).not.toBeInTheDocument();
     expect(screen.getByText("The Agent sent this message.")).toBeVisible();
-    expect(screen.getByRole("list", { name: "Arguments" })).toHaveClass("agent-activity-arguments");
     expect(screen.getByText("The Agent sent this message.").closest("pre")).toHaveClass("agent-activity-message");
     expect(screen.queryByText("run-1")).not.toBeInTheDocument();
     const activityList = screen.getByRole("list", { name: "Agent activity" });
@@ -201,7 +199,7 @@ describe("Agent detail", () => {
     expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
   });
 
-  it("renders a DM Focus without a channel link", async () => {
+  it("renders a DM conversation without a channel link", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.includes("/spaces/by-slug/")) return json(space);
@@ -223,7 +221,7 @@ describe("Agent detail", () => {
     renderRoute(`/s/sumi-lab/agents/${agentId}`);
 
     fireEvent.click(await screen.findByRole("tab", { name: "Overview" }));
-    expect(await screen.findByText("DM · message 7")).toBeVisible();
+    expect(await screen.findByText("Direct message")).toBeVisible();
     expect(screen.queryByRole("link", { name: /#.*:7/ })).not.toBeInTheDocument();
   });
 
@@ -265,9 +263,9 @@ describe("Agent detail", () => {
 
     expect(await screen.findByRole("heading", { name: "Lin" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
-    expect(await screen.findByRole("heading", { name: "Agent DMs" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Conversations with other Agents" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Mira" })).toHaveAttribute("href", `/s/sumi-lab/agents/${peerId}`);
-    expect(screen.getByText("Private Agent DM")).toBeVisible();
+    expect(screen.getByText("Private conversation")).toBeVisible();
     expect(document.querySelectorAll(".dm-nav-item")).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledWith(`/api/v1/members/${agentId}/dms`, expect.anything());
   });

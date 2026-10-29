@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowUpRight, Check, Clock, ListTodo, MessageSquare, RotateCcw, X, XCircle } from "lucide-react";
+import { ArrowUpRight, Check, ListTodo, MessageSquare, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -10,7 +10,6 @@ import {
   listAgents,
   listTasks,
   readThread,
-  resetTaskSession,
   type Member,
   startTask,
   type Run,
@@ -122,7 +121,7 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
             </Link>
           ) : undefined}
         >
-          {filter === "all_open" ? "Create a Task from any Root Message to hand work to an Agent." : null}
+          {filter === "all_open" ? "Hover any message in a Channel and choose Create Task to hand the work to an Agent." : null}
         </EmptyState>
       ) : null}
       {groups.length ? (
@@ -198,6 +197,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
   const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: () => listAgents(spaceId) });
   const change = useMutation({
     mutationFn: async (operation: () => Promise<Task>) => operation(),
+    meta: { success: (task) => `Task !${(task as Task).seq} · ${statusLabels[(task as Task).status]}.` },
     onSuccess: (updated) => {
       queryClient.setQueryData(["task", taskId], updated);
       void queryClient.invalidateQueries({ queryKey: ["tasks", updated.space_id] });
@@ -238,8 +238,8 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
           <TaskStatusLabel status={value.status} />
         </div>
       </header>
-      {value.runtime_issue_code ? <p className="inline-notice inline-notice--error" role="alert">Task cannot run: <code>{value.runtime_issue_code}</code>. Restore compatible Thread membership or remove the Related Thread.</p> : null}
-      {change.error ? <p className="inline-notice inline-notice--error" role="alert">The Task change failed. The current Server state is unchanged.</p> : null}
+      {value.runtime_issue_code ? <p className="inline-notice inline-notice--error" role="alert">This Task cannot continue right now. Check that the assigned Agent is still in the conversation it was asked in.</p> : null}
+      {change.error ? <p className="inline-notice inline-notice--error" role="alert">Could not update this Task. Nothing was changed.</p> : null}
       <div className="task-detail-scroll">
         <div className="task-detail-primary">
         <TaskConversation thread={value.source_thread} spaceSlug={spaceSlug} members={members} />
@@ -255,14 +255,11 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
           </section>
         ) : null}
-        <section className="task-detail-section"><h2>Source Thread</h2><ThreadReferenceRow thread={value.source_thread} spaceSlug={spaceSlug} /></section>
-        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{value.result_message.content.body_markdown}</p> : <p>Result Message is unavailable.</p>}</section> : null}
+        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{value.result_message.content.body_markdown}</p> : <p>The result is not available.</p>}</section> : null}
         {value.status === "closed" ? <section className="task-detail-section"><h2>Close reason</h2><p>{closeReasonLabel(value.close_reason_code)}{value.close_reason_note ? ` — ${value.close_reason_note}` : ""}</p></section> : null}
         </div>
-        <aside className="task-detail-sidebar" aria-label="Task execution">
-        <section className="task-detail-section"><h2>Current Run and Focus</h2>{value.current_run ? <RunSummary run={value.current_run} spaceSlug={spaceSlug} /> : <p>No active Run. Task status does not imply an active Run.</p>}</section>
-        <section className="task-detail-section"><h2>Recent Run outcomes</h2>{value.recent_runs.length ? <ul className="run-history">{value.recent_runs.map((run) => <RunSummary key={run.id} run={run} spaceSlug={spaceSlug} />)}</ul> : <p>No completed Runs.</p>}</section>
-        <section className="task-detail-section session-continuity"><h2>Session continuity</h2><SessionState task={value} /><p>This state only describes the next Run's startup cost. Message, Task and Result facts remain on Server.</p>{!["done", "closed"].includes(value.status) ? <button className="command-button" type="button" disabled={change.isPending} onClick={() => change.mutate(() => resetTaskSession(value.id))}><RotateCcw /> Reset continuity</button> : null}</section>
+        <aside className="task-detail-sidebar" aria-label="Task activity">
+        <section className="task-detail-section"><h2>Activity</h2><TaskActivity task={value} spaceSlug={spaceSlug} /></section>
         </aside>
       </div>
       {closeOpen ? (
@@ -285,7 +282,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
   );
 }
 
-/** The conversation that asked for the work: the Root Message and its latest replies. */
+/** The conversation that asked for the work: the first message and its latest replies. */
 function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadReference; spaceSlug: string; members: Member[] }) {
   const read = useQuery({ queryKey: ["thread", thread.id], queryFn: () => readThread(thread.id) });
   const replies = read.data?.replies ?? [];
@@ -301,7 +298,7 @@ function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadRefere
         ) : null}
       </header>
       {read.isPending ? <ListSkeleton label="Loading request" rows={2} /> : null}
-      {read.error ? <p className="task-conversation-empty">The Source Thread is not visible to you.</p> : null}
+      {read.error ? <p className="task-conversation-empty">You cannot see the conversation this Task came from.</p> : null}
       {read.data ? (
         <div className="task-conversation-body">
           <CompactMessage message={read.data.root} spaceSlug={spaceSlug} members={members} />
@@ -317,7 +314,7 @@ function TaskStatusLabel({ status }: { status: TaskStatus }) {
   return <span className={`task-status task-status--${status}`}><TaskStatusIcon status={status} /><span>{statusLabels[status]}</span></span>;
 }
 function threadDisplayLabel(thread: ThreadReference): string {
-  return thread.channel_slug ? `#${thread.channel_slug}:${thread.root_message_seq}` : `DM · message ${thread.root_message_seq}`;
+  return thread.channel_slug ? `#${thread.channel_slug}` : "Direct message";
 }
 function ThreadLink({ thread, spaceSlug, label }: { thread: ThreadReference; spaceSlug: string; label: string }) {
   const address = threadDisplayLabel(thread);
@@ -326,20 +323,41 @@ function ThreadLink({ thread, spaceSlug, label }: { thread: ThreadReference; spa
   }
   return <Link className="task-source-link" to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: thread.channel_slug }} hash={`message-${thread.root_message_id}`} aria-label={`${label}: ${address}`}><span>{address}</span><ArrowUpRight aria-hidden="true" /></Link>;
 }
-function ThreadReferenceRow({ thread, spaceSlug }: { thread: ThreadReference; spaceSlug: string }) { return <div className="thread-reference"><div className="thread-reference-main"><ThreadLink thread={thread} spaceSlug={spaceSlug} label={thread.relation} /><small>Root message {thread.root_message_seq}</small></div></div>; }
-function RunSummary({ run, spaceSlug }: { run: Run; spaceSlug: string }) {
+const runOutcome: Record<Run["status"], string> = {
+  dispatched: "Starting",
+  working: "Working",
+  completed: "Finished",
+  yielded: "Paused",
+  failed: "Stopped on an error",
+  canceled: "Stopped",
+};
+/** Who is on the Task now and how earlier attempts ended, in plain words. */
+function TaskActivity({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
+  const current = task.current_run;
+  const past = task.recent_runs.filter((run) => run.id !== current?.id);
+  if (!current && !past.length) return <p className="task-activity-empty">No one has worked on this yet.</p>;
   return (
-    <li className="run-summary">
-      <span className={`run-status run-status--${run.status}`}><Clock aria-hidden="true" />{run.status.replace("_", " ")}</span>
-      <strong>{run.agent_name}</strong>
-      <ThreadLink thread={run.focus} spaceSlug={spaceSlug} label="Focus" />
-      {run.error_code ? <code>{run.error_code}</code> : null}
-      <time>{run.started_at ? formatTaskTime(run.started_at) : ""}{run.finished_at ? ` → ${formatTaskTime(run.finished_at)}` : ""}</time>
+    <ul className="task-activity">
+      {current ? <ActivityItem run={current} spaceSlug={spaceSlug} current /> : null}
+      {past.map((run) => <ActivityItem key={run.id} run={run} spaceSlug={spaceSlug} />)}
+    </ul>
+  );
+}
+function ActivityItem({ run, spaceSlug, current = false }: { run: Run; spaceSlug: string; current?: boolean }) {
+  const when = run.finished_at ?? run.started_at;
+  return (
+    <li className={`task-activity-item task-activity-item--${run.status}${current ? " task-activity-item--current" : ""}`}>
+      <span className="task-activity-dot" aria-hidden="true" />
+      <div>
+        <p><strong>{run.agent_name}</strong> {current ? (run.status === "dispatched" ? "is starting on this" : "is working on this") : runOutcome[run.status].toLowerCase()}</p>
+        <small>
+          {when ? <time dateTime={when}>{formatTaskTime(when)}</time> : null}
+          {run.focus.channel_slug ? <> · <ThreadLink thread={run.focus} spaceSlug={spaceSlug} label="Conversation" /></> : null}
+        </small>
+      </div>
     </li>
   );
 }
-function SessionState({ task }: { task: Task }) { const value = task.session_continuity; return <div className={`session-state session-state--${value.state}`}><strong>{sessionStateLabel(value.state)}</strong>{value.generation ? <span>Generation {value.generation}</span> : null}{value.reason_code ? <code>{value.reason_code}</code> : null}</div>; }
-function sessionStateLabel(value: Task["session_continuity"]["state"]): string { return value === "reset_required" ? "Reset required" : value.charAt(0).toUpperCase() + value.slice(1); }
 function Field({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function formatTaskTime(value: string) { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
 function closeReasonLabel(reason: Task["close_reason_code"]) { return reason ? reason.replace("_", " ").replace(/^./, (value) => value.toUpperCase()) : "Unknown"; }

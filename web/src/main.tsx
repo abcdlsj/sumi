@@ -10,9 +10,10 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { feedbackMutationCache } from "./feedback";
 import { router } from "./router";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({ mutationCache: feedbackMutationCache() });
 
 const root = document.getElementById("root");
 if (!root) {

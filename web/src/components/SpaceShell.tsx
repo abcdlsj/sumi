@@ -52,6 +52,8 @@ import { saveLastConversationRoute } from "../conversationMemory";
 import { applySpaceAccent } from "../spaceAccent";
 import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
+import { AccountMenu } from "./AccountMenu";
+import { ConnectionBanner } from "./Feedback";
 import { PixelIdentity } from "./PixelIdentity";
 import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
@@ -150,7 +152,7 @@ export function SpaceShell({
     enabled: Boolean(space.data),
     retry: false,
   });
-  useSpaceEvents(space.data?.id, ({ channelId }) => {
+  const events = useSpaceEvents(space.data?.id, ({ channelId }) => {
     if (channelId === viewingChannelId(location.pathname, channels.data?.channels, directMessages.data)) {
       return;
     }
@@ -172,6 +174,7 @@ export function SpaceShell({
   });
   const channelJoin = useMutation({
     mutationFn: joinChannel,
+    meta: { error: "Could not join the Channel." },
     onSuccess: (channel) => {
       void queryClient.invalidateQueries({ queryKey: ["channels", space.data?.id] });
       setNavigationOpen(false);
@@ -372,6 +375,7 @@ export function SpaceShell({
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
       <main id="main-content" className="space-shell">
+      <ConnectionBanner connection={events.connection} reconnect={events.reconnect} />
       <header className="space-topbar">
         <button
           ref={topbarNavigationTrigger}
@@ -578,8 +582,7 @@ export function SpaceShell({
           </section>
         </div>
         <footer className="space-self">
-          <PixelIdentity name={currentMember.display_name} kind="human" seed={currentMember.id} />
-          <span title={currentMember.display_name}>{currentMember.display_name}</span>
+          <AccountMenu memberId={currentMember.id} name={currentMember.display_name} email={user.data?.email} spaceSlug={spaceSlugValue} />
           <Link
             className={`icon-button space-settings-link${active === "settings" ? " space-settings-link--active" : ""}`}
             to="/s/$spaceSlug/settings"

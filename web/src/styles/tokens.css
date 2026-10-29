@@ -23,10 +23,10 @@
 
   /* Ink */
   --ink: #1c1b19;
-  --ink-2: #56544f;
-  --muted: #8f8c86;
-  --line: #eae8e4;
-  --line-strong: #dbd8d2;
+  --ink-2: #4f4d48;
+  --muted: #75726b;
+  --line: #e6e3de;
+  --line-strong: #d3cfc8;
   --focus: #1c1b19;
 
   /* Signals */
@@ -72,7 +72,7 @@
   --shadow-popover: 0 0 0 1px rgb(28 27 25 / 6%), 0 8px 24px rgb(28 27 25 / 10%);
 
   /* Type */
-  --text-page-title: 17px;
+  --text-page-title: 16px;
   --text-section: 13px;
   --text-body: 14px;
   --text-small: 13px;

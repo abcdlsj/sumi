@@ -51,7 +51,7 @@
   align-items: baseline;
   gap: 3px;
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-page-title);
   font-weight: 600;
   line-height: 1.3;
   letter-spacing: -.005em;
@@ -154,6 +154,23 @@
   color: var(--muted);
   font-size: var(--text-meta);
   font-weight: 500;
+}
+
+.unread-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  color: var(--danger);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.unread-divider::before {
+  height: 1px;
+  flex: 1;
+  background: color-mix(in srgb, var(--danger) 45%, transparent);
+  content: "";
 }
 
 .message-block {

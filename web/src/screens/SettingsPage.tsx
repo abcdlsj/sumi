@@ -1,7 +1,9 @@
 import { useLocation, useParams } from "@tanstack/react-router";
+import { LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Member, Space, User } from "../api/client";
+import { useSignOut } from "../components/signOut";
 import { SpaceShell } from "../components/SpaceShell";
 import {
   type FeatureConfigField,
@@ -55,6 +57,7 @@ export function SettingsWorkspace({ selectedFeatureId, space, user, currentMembe
             ) : null}
             {currentMember ? <Fact label="Your access" value={currentMember.access_level.charAt(0).toUpperCase() + currentMember.access_level.slice(1)} /> : null}
           </dl>
+          {user ? <SignOutRow /> : null}
         </section>
       ) : null}
       <section className="settings-group" aria-labelledby="settings-experimental-heading">
@@ -184,6 +187,18 @@ function FeatureField({
           window.localStorage?.setItem(storageKey, value ? "1" : "0");
         }}
       />
+    </div>
+  );
+}
+
+function SignOutRow() {
+  const { signOut, signingOut } = useSignOut();
+  return (
+    <div className="settings-signout">
+      <span>Signed in on this browser.</span>
+      <button className="command-button" type="button" disabled={signingOut} onClick={() => void signOut()}>
+        <LogOut aria-hidden="true" /> {signingOut ? "Signing out…" : "Sign out"}
+      </button>
     </div>
   );
 }

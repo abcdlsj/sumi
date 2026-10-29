@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useSpaceEvents } from "./useSpaceEvents";
@@ -7,6 +7,9 @@ import { useSpaceEvents } from "./useSpaceEvents";
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   readonly listeners = new Map<string, Set<EventListener>>();
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
 
   constructor(readonly url: string) {
     FakeEventSource.instances.push(this);
@@ -35,6 +38,36 @@ afterEach(() => {
   FakeEventSource.instances = [];
   vi.unstubAllGlobals();
 });
+
+describe("useSpaceEvents connection", () => {
+  it("reports a dropped stream and refetches everything once it is back", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ConnectionProbe spaceId="space-1" />
+      </QueryClientProvider>,
+    );
+    const source = FakeEventSource.instances[0];
+
+    act(() => { source.readyState = 1; source.onopen?.(); });
+    expect(screen.getByLabelText("Connection")).toHaveTextContent("live");
+    expect(invalidate).not.toHaveBeenCalled();
+
+    act(() => { source.readyState = 0; source.onerror?.(); });
+    expect(screen.getByLabelText("Connection")).toHaveTextContent("reconnecting");
+
+    act(() => { source.readyState = 1; source.onopen?.(); });
+    expect(screen.getByLabelText("Connection")).toHaveTextContent("live");
+    expect(invalidate).toHaveBeenCalledWith();
+  });
+});
+
+function ConnectionProbe({ spaceId }: { spaceId: string }) {
+  const { connection } = useSpaceEvents(spaceId);
+  return <span aria-label="Connection">{connection}</span>;
+}
 
 describe("useSpaceEvents", () => {
   it("refetches the affected Channel members after a membership event", async () => {

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { openSpaceEvents } from "../api/client";
 import { clearAgentActivityForChannel, recordAgentActivity, type AgentActivityEvent } from "../agentActivity";
@@ -25,11 +25,21 @@ interface SumiEvent {
   };
 }
 
+/** Whether this tab is receiving live updates for the Space. */
+export type SpaceConnection = "connecting" | "live" | "reconnecting" | "offline";
+
+const MAX_RETRY_MS = 30_000;
+// EventSource.readyState values.
+const OPEN = 1;
+const CLOSED = 2;
+
 export function useSpaceEvents(
   spaceId?: string,
   onMessage?: (event: { type: string; channelId: string }) => void,
-) {
+): { connection: SpaceConnection; reconnect: () => void } {
   const queryClient = useQueryClient();
+  const [connection, setConnection] = useState<SpaceConnection>("connecting");
+  const [attempt, setAttempt] = useState(0);
   const onMessageRef = useRef(onMessage);
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -41,7 +51,11 @@ export function useSpaceEvents(
     // message.created etc.). Only events arriving after the connection opened
     // are live; replay must not be treated as new unread activity.
     const connectedAt = Date.now();
-    const source = openSpaceEvents(spaceId);
+    let source = openSpaceEvents(spaceId);
+    let wasLive = false;
+    let lost = attempt > 0;
+    let retryDelay = 1000;
+    let retryTimer: number | undefined;
     const invalidate = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as SumiEvent;
       const isReplay =
@@ -126,7 +140,52 @@ export function useSpaceEvents(
       "task.unlinked",
       "task.finished",
     ];
-    for (const type of eventTypes) source.addEventListener(type, invalidate as EventListener);
-    return () => source.close();
-  }, [queryClient, spaceId]);
+    const attach = (target: EventSource) => {
+      for (const type of eventTypes) target.addEventListener(type, invalidate as EventListener);
+      target.onopen = () => {
+        retryDelay = 1000;
+        // Anything that changed while the stream was down has no event here;
+        // refetch what is on screen so nothing stays stale.
+        if (lost) void queryClient.invalidateQueries();
+        lost = false;
+        wasLive = true;
+        setConnection("live");
+      };
+      target.onerror = () => {
+        lost = wasLive || lost;
+        setConnection(navigator.onLine === false ? "offline" : "reconnecting");
+        // The browser retries a dropped stream by itself; a closed one needs a new connection.
+        if (target.readyState === CLOSED) {
+          lost = true;
+          window.clearTimeout(retryTimer);
+          retryTimer = window.setTimeout(() => {
+            source = openSpaceEvents(spaceId);
+            attach(source);
+          }, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+        }
+      };
+    };
+    attach(source);
+    const goOffline = () => setConnection("offline");
+    const goOnline = () => {
+      if (source.readyState === OPEN) return;
+      setConnection("reconnecting");
+      source.close();
+      lost = true;
+      window.clearTimeout(retryTimer);
+      source = openSpaceEvents(spaceId);
+      attach(source);
+    };
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.clearTimeout(retryTimer);
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+      source.close();
+    };
+  }, [attempt, queryClient, spaceId]);
+
+  return { connection, reconnect: () => setAttempt((value) => value + 1) };
 }

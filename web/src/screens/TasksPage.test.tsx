@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "../router";
@@ -39,7 +39,7 @@ describe("Task work index", () => {
     expect(tasksView.getByRole("link", { name: /Wire Agent CLI/ })).toBeVisible();
     expect(tasksView.getByRole("link", { name: /Design claim flow/ })).toBeVisible();
     expect(tasksView.queryByText(/Ship old slice/)).not.toBeInTheDocument();
-    expect(tasksView.getByRole("link", { name: "Source: #general:17" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-todo");
+    expect(within(tasksView.getByRole("link", { name: /Design claim flow/ }).closest(".task-row")! as HTMLElement).getByRole("link", { name: "Source: #general" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-todo");
     fireEvent.click(tasksView.getByRole("button", { name: /^Done/ }));
     expect(await tasksView.findByText(/Ship old slice/)).toBeVisible();
     expect(tasksView.queryByText(/Design claim flow/)).not.toBeInTheDocument();
@@ -47,34 +47,28 @@ describe("Task work index", () => {
     expect(await tasksView.findByText("No closed Tasks.")).toBeVisible();
   });
 
-  it("shows Source, Related Threads, Run, Result continuity and reset action", async () => {
+  it("describes Task activity in plain words without internal run state", async () => {
     const value = task("in_progress", "Rebuild Task detail", 21, "Lin");
-    value.related_threads = [{ ...thread("related", 31), channel_slug: "design" }];
     value.current_run = run("working", value.source_thread);
     value.recent_runs = [run("yielded", value.source_thread)];
     value.session_continuity = { state: "warm", generation: 2 };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const shell = shellResponse(path);
       if (shell) return shell;
       if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
       if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
-      if (path.endsWith(`/tasks/${value.id}/reset-session`) && init?.method === "POST") return json({ ...value, session_continuity: { state: "cold", generation: 3 } });
       throw new Error(`Unexpected request: ${path}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    }));
 
     renderRoute(`/s/sumi-lab/tasks/${value.id}`);
 
     expect(await screen.findByRole("heading", { name: value.title })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Source Thread" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "source: #general:21" })).toBeVisible();
-    expect(screen.getByText("working")).toBeVisible();
-    expect(screen.getByText("yielded")).toBeVisible();
-    expect(screen.getByText("Warm").closest("div")).toHaveTextContent("WarmGeneration 2");
-    fireEvent.click(screen.getByRole("button", { name: /Reset continuity/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/reset-session"), expect.objectContaining({ method: "POST" })));
-    expect((await screen.findByText("Cold")).closest("div")).toHaveTextContent("ColdGeneration 3");
+    const activity = within(screen.getByRole("complementary", { name: "Task activity" }));
+    expect(activity.getByText(/is working on this/)).toBeVisible();
+    expect(activity.getByText(/paused/)).toBeVisible();
+    expect(screen.queryByText(/Generation|continuity|Run\b/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reset continuity/i })).not.toBeInTheDocument();
   });
 
   it("labels a DM Source Thread without a channel link", async () => {
@@ -93,10 +87,8 @@ describe("Task work index", () => {
     renderRoute(`/s/sumi-lab/tasks/${value.id}`);
 
     expect(await screen.findByRole("heading", { name: "DM Task" })).toBeVisible();
-    expect(screen.getByText("!21 · DM · message 21")).toBeVisible();
-    expect(screen.getByLabelText("source: DM · message 21")).toBeVisible();
-    expect(screen.getByLabelText("Focus: DM · message 21")).toBeVisible();
-    expect(screen.queryAllByRole("link", { name: /#.*@21/ })).toHaveLength(0);
+    expect(screen.getByText("!21 · Direct message")).toBeVisible();
+    expect(screen.queryAllByRole("link", { name: /#general/ })).toHaveLength(0);
   });
 });
 

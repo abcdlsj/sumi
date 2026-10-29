@@ -69,6 +69,7 @@ function ComputersWorkspace({
   const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: () => listAgents(spaceId) });
   const deletion = useMutation({
     mutationFn: deleteComputer,
+    meta: { success: "Computer removed." },
     onSuccess: (deleted) => {
       queryClient.setQueryData<Computer[]>(["computers", spaceId], (current) =>
         current?.filter((computer) => computer.id !== deleted.id),
@@ -132,7 +133,7 @@ function ComputersWorkspace({
       {computers.isPending || agents.isPending ? <DetailSkeleton label="Loading Computers" /> : null}
       {computers.error || agents.error ? (
         <div className="computer-page-state">
-          <p className="form-error" role="alert">Computers are unavailable. Retry after checking the Server connection.</p>
+          <p className="form-error" role="alert">Computers could not be loaded. Check your connection and try again.</p>
         </div>
       ) : null}
       {computers.data?.length === 0 ? (
@@ -205,7 +206,7 @@ function ComputerOnboarding({ active }: { active?: boolean }) {
             <li>
               <div>
                 <strong>Run the pairing command</strong>
-                <p>Run the command in a terminal on the machine to pair. It creates the Computer Token that identifies this Space.</p>
+                <p>Run the command in a terminal on the machine to pair. It links the machine to this Space.</p>
               </div>
             </li>
             <li>

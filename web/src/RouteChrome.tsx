@@ -1,6 +1,8 @@
 import { Outlet, useLocation } from "@tanstack/react-router";
 import { useEffect } from "react";
 
+import { Toaster } from "./components/Feedback";
+
 function routeTitle(pathname: string): string | undefined {
   if (pathname === "/login") return "Sign in";
   if (pathname === "/") return "Register";
@@ -23,5 +25,10 @@ export function RouteChrome() {
     const page = routeTitle(location.pathname);
     document.title = page ? `${page} · Sumi` : "Sumi";
   }, [location.pathname]);
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <Toaster />
+    </>
+  );
 }

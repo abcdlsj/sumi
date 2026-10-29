@@ -265,6 +265,7 @@ export function MessageWorkspace({
 
   const addAgents = useMutation({
     mutationFn: (agentIds: string[]) => addChannelAgents(channel.id, agentIds),
+    meta: { success: (_data, ids) => `${(ids as string[]).length === 1 ? "Agent" : "Agents"} added to this Channel.` },
     onSuccess: (result) => {
       queryClient.setQueryData<ChannelMembers>(["channel-members", channel.id], result);
       setAgentPickerOpen(false);
@@ -272,6 +273,7 @@ export function MessageWorkspace({
   });
   const openAgentDm = useMutation({
     mutationFn: (memberId: string) => createDirectMessage(spaceId, memberId),
+    meta: { error: "Could not open the DM." },
     onSuccess: (dm) => {
       void queryClient.invalidateQueries({ queryKey: ["direct-messages", spaceId] });
       void navigate({
@@ -317,7 +319,7 @@ export function MessageWorkspace({
           computers.isPending || agents.isPending ? null : computers.error || agents.error ? (
             <section className="getting-started getting-started--error" aria-label="Space setup unavailable">
               <strong>Setup status unavailable</strong>
-              <span>Messages still work. Check the Server connection before pairing a Computer.</span>
+              <span>Messages still work. Check your connection before pairing a Computer.</span>
             </section>
           ) : (
             <GettingStarted

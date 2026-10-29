@@ -61,6 +61,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   });
   const update = useMutation({
     mutationFn: (input: Parameters<typeof updateAgent>[1]) => updateAgent(agentId, input),
+    meta: { success: "Agent updated." },
     onSuccess: (updated) => {
       queryClient.setQueryData(["agent", agentId], updated);
       void queryClient.invalidateQueries({ queryKey: ["agents", updated.space_id] });
@@ -69,6 +70,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   });
   const retirement = useMutation({
     mutationFn: () => retireAgent(agentId),
+    meta: { success: "Agent retired." },
     onSuccess: (retired) => {
       queryClient.setQueryData(["agent", agentId], retired);
       void queryClient.invalidateQueries({ queryKey: ["agents", retired.space_id] });
@@ -79,6 +81,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   const memory = useMutation({ mutationFn: (path: string) => readAgentMemory(agentId, path) });
   const permission = useMutation({
     mutationFn: ({ action, enabled }: { action: string; enabled: boolean }) => enabled ? grantMemberPermission(agentId, action) : revokeMemberPermission(agentId, action),
+    meta: { success: (_data, input) => `${(input as { action: string }).action} ${(input as { enabled: boolean }).enabled ? "allowed" : "removed"}.` },
     onSuccess: (member) => queryClient.setQueryData(["members", spaceId], (current: Awaited<ReturnType<typeof listMembers>> | undefined) => current?.map((item) => item.id === member.id ? member : item)),
   });
   function save(event: FormEvent<HTMLFormElement>) {
@@ -120,17 +123,16 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
             <i aria-hidden="true" />{value.computer_reachable ? "Computer online" : "Computer offline"}
           </span>
           {value.last_error_code ? (
-            <span className="agent-error-signal" role="status" aria-label={`Agent error: ${value.last_error_code}`} title={`Agent error: ${value.last_error_code}`}>
-              <i aria-hidden="true" />error
+            <span className="agent-error-signal" role="status" aria-label={`Needs attention: ${problemLabel(value.last_error_code)}`} title={problemLabel(value.last_error_code)}>
+              <i aria-hidden="true" />Needs attention
             </span>
           ) : null}
         </div>
       </header>
       <dl className="agent-fact-strip" aria-label="Agent summary">
-        <SummaryFact label="Lifecycle"><StateSignal tone={value.desired_lifecycle} label={humanize(value.desired_lifecycle)} /></SummaryFact>
+        <SummaryFact label="Status"><StateSignal tone={value.desired_lifecycle} label={humanize(value.desired_lifecycle)} /></SummaryFact>
         <SummaryFact label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? "Assigned Computer"}</Link> : "Unassigned"}</SummaryFact>
         <SummaryFact label="Driver"><span className="summary-value--mono">{driverLabel(value)}</span></SummaryFact>
-        <SummaryFact label="Session">{runtime.data ? <StateSignal tone={runtime.data.session_continuity.state} label={humanize(runtime.data.session_continuity.state)} /> : "Checking"}</SummaryFact>
       </dl>
       <nav className="detail-tabs" aria-label="Agent detail" role="tablist">
         {agentTabs.map(({ id, label, icon: Icon }, index) => (
@@ -163,51 +165,37 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
           <div className="agent-tab-panel" id="agent-panel-overview" role="tabpanel" aria-labelledby="agent-tab-overview" tabIndex={0}>
             <div className="agent-overview-grid">
             <DetailSection className="agent-work" title="Current work">
-              {runtime.isPending ? <p>Loading current Run…</p> : null}
-              {runtime.error ? <p className="inline-notice">Current Run is unavailable. Agent identity and Task facts remain available.</p> : null}
+              {runtime.isPending ? <p>Loading current work…</p> : null}
+              {runtime.error ? <p className="inline-notice">Current work is unavailable right now.</p> : null}
               {runtime.data ? (
                 <div className="agent-work-facts">
                   <div><span>Task</span><p>{runtime.data.current_task ? <Link to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: runtime.data.current_task.id }}>{runtime.data.current_task.title}</Link> : "None"}</p></div>
-                  <div><span>Focus</span><p>{runtime.data.focus ? runtime.data.focus.channel_slug ? <Link to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: runtime.data.focus.channel_slug }} hash={`message-${runtime.data.focus.root_message_id}`}>#{runtime.data.focus.channel_slug}:{runtime.data.focus.root_message_seq}</Link> : <span>DM · message {runtime.data.focus.root_message_seq}</span> : "None"}</p></div>
-                  <div><span>Run</span><p>{runtime.data.current_run ? humanize(runtime.data.current_run.status) : "No active Run"}</p></div>
+                  <div><span>Conversation</span><p>{runtime.data.focus ? runtime.data.focus.channel_slug ? <Link to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: runtime.data.focus.channel_slug }} hash={`message-${runtime.data.focus.root_message_id}`}>#{runtime.data.focus.channel_slug}</Link> : <span>Direct message</span> : "None"}</p></div>
+                  <div><span>Doing</span><p>{runtime.data.current_run ? runtime.data.current_run.status === "dispatched" ? "Starting" : "Working" : "Nothing right now"}</p></div>
                   <div><span>Computer</span><p><StateSignal tone={value.computer_reachable ? "warm" : "unavailable"} label={value.computer_id ? value.computer_reachable ? "Online" : "Offline" : "Unassigned"} /></p></div>
-                  <div><span>Session</span><p>{humanize(runtime.data.session_continuity.state)}</p></div>
                 </div>
               ) : null}
-              {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">Another item is waiting. It is not part of the current Focus.</p> : null}
+              {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">More work is waiting after this.</p> : null}
             </DetailSection>
             <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{new Date(value.created_at).toLocaleDateString()}</Field></dl></DetailSection>
-            <DetailSection className="agent-runtime" title="Runtime"><dl className="detail-grid"><Field label="Provision">{capitalize(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last error">{value.last_error_code ? <code>{value.last_error_code}</code> : "None recorded"}</Field></dl></DetailSection>
-            {runtime.data?.diagnostics ? <DetailSection className="agent-runtime-diagnostics" title="Live diagnostics">
-              <dl className="detail-grid">
-                <Field label="Local Run">{runtime.data.diagnostics.local_run_id ? <code title={runtime.data.diagnostics.local_run_id}>{runtime.data.diagnostics.local_run_state ? `${humanize(runtime.data.diagnostics.local_run_state)} · ${runtime.data.diagnostics.local_run_id.slice(0, 8)}` : runtime.data.diagnostics.local_run_id.slice(0, 8)}</code> : "No local Run"}</Field>
-                <Field label="Local queue" tabular>{runtime.data.diagnostics.queued_runs}</Field>
-                <Field label="Active local Runs" tabular>{runtime.data.diagnostics.active_runs}</Field>
-                <Field label="Pending commands" tabular>{runtime.data.diagnostics.pending_commands}</Field>
-                <Field label="Pending results" tabular>{runtime.data.diagnostics.pending_result_events}</Field>
-                <Field label="Sessions" tabular>{`${runtime.data.diagnostics.warm_sessions} warm · ${runtime.data.diagnostics.cold_sessions} cold · ${runtime.data.diagnostics.reset_required_sessions} reset`}</Field>
-              </dl>
-              {runtime.data.current_run && !runtime.data.diagnostics.local_run_id ? <p className="inline-notice inline-notice--error" role="alert">Server Run is active, but the Computer reports no local Run.</p> : null}
-              {runtime.data.current_run && runtime.data.diagnostics.local_run_id && runtime.data.diagnostics.local_run_id !== runtime.data.current_run.id ? <p className="inline-notice inline-notice--error" role="alert">Server and Computer report different active Runs.</p> : null}
-              {runtime.data.diagnostics.pending_result_events > 0 ? <p className="inline-notice" role="status">The Computer has result events waiting for Server receipts.</p> : null}
-            </DetailSection> : runtime.data ? <DetailSection className="agent-runtime-diagnostics" title="Live diagnostics"><p className="inline-notice">Computer-local diagnostics are unavailable.</p></DetailSection> : null}
-            {canManage ? <DetailSection className="agent-direct-messages" title="Agent DMs">
-              {agentDirectMessages.isPending ? <p>Loading Agent DMs...</p> : null}
-              {agentDirectMessages.error ? <p className="inline-notice" role="alert">Agent DMs are unavailable.</p> : null}
-              {!agentDirectMessages.isPending && !agentDirectMessages.error && agentDirectMessages.data?.length === 0 ? <p className="agent-direct-messages-empty">No Agent-Agent DMs yet.</p> : null}
+            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? problemLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
+            {canManage ? <DetailSection className="agent-direct-messages" title="Conversations with other Agents">
+              {agentDirectMessages.isPending ? <p>Loading…</p> : null}
+              {agentDirectMessages.error ? <p className="inline-notice" role="alert">These conversations are unavailable right now.</p> : null}
+              {!agentDirectMessages.isPending && !agentDirectMessages.error && agentDirectMessages.data?.length === 0 ? <p className="agent-direct-messages-empty">No conversations with other Agents yet.</p> : null}
               {agentDirectMessages.data?.length ? <ul className="agent-direct-message-list" aria-label={`Agent DMs for ${value.name}`}>
                 {agentDirectMessages.data.map((dm) => (
                   <li key={dm.channel_id}>
                     <PresenceIdentity name={dm.other_member.display_name} kind="agent" seed={dm.other_member.id} />
-                    <span><Link to="/s/$spaceSlug/agents/$agentId" params={{ spaceSlug, agentId: dm.other_member.id }}>{dm.other_member.display_name}</Link><small>Private Agent DM</small></span>
+                    <span><Link to="/s/$spaceSlug/agents/$agentId" params={{ spaceSlug, agentId: dm.other_member.id }}>{dm.other_member.display_name}</Link><small>Private conversation</small></span>
                     <time dateTime={dm.created_at}>{activityTime(dm.created_at)}</time>
                   </li>
                 ))}
               </ul> : null}
             </DetailSection> : null}
-            <DetailSection className="agent-permissions" title="Action permissions">
+            <DetailSection className="agent-permissions" title="What it can do">
               <div className="permission-list" aria-label="Agent action permissions">
-                {[{ action: "channel.create", description: "Create channels in this Space." }, { action: "channel.invite", description: "Invite Members to a Channel." }, { action: "channel.remove", description: "Remove Members from a Channel." }, { action: "agent.create", description: "Create Agents in this Space." }].map(({ action, description }) => {
+                {[{ action: "channel.create", label: "Create Channels", description: "Start new Channels in this Space." }, { action: "channel.invite", label: "Invite to Channels", description: "Add people and Agents to a Channel." }, { action: "channel.remove", label: "Remove from Channels", description: "Take people and Agents out of a Channel." }, { action: "agent.create", label: "Create Agents", description: "Set up new Agents in this Space." }].map(({ action, label, description }) => {
                   const enabled = agentMember?.permissions.includes(action) ?? false;
                   return (
                     <label key={action} className="permission-row">
@@ -215,16 +203,16 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
                         type="checkbox"
                         checked={enabled}
                         disabled={!canManage || permission.isPending || !agentMember}
-                        aria-label={`${action} permission`}
+                        aria-label={label}
                         onChange={(event) => permission.mutate({ action, enabled: event.target.checked })}
                       />
-                      <span className="permission-row-copy"><strong>{action}</strong><small>{description}</small></span>
+                      <span className="permission-row-copy"><strong>{label}</strong><small>{description}</small></span>
                     </label>
                   );
                 })}
               </div>
-              {!canManage ? <p className="permission-hint">Only Owner or Admin can change permissions.</p> : null}
-              {permission.error ? <p className="form-error" role="alert">Permission update failed.</p> : null}
+              {!canManage ? <p className="permission-hint">Only Owners and Admins can change this.</p> : null}
+              {permission.error ? <p className="form-error" role="alert">Could not change what this Agent can do.</p> : null}
             </DetailSection>
             </div>
           </div>
@@ -233,7 +221,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
           <section className="agent-tab-panel agent-memory" id="agent-panel-memory" role="tabpanel" aria-labelledby="agent-tab-memory" tabIndex={0}>
             <div className="agent-memory-heading"><Brain /><h2 id="memory-heading">Memory files</h2></div>
             <p className="inline-notice">Memory lives only on this Computer. If the Computer is lost, Sumi cannot recover it.</p>
-            {!canManage ? <p className="permission-notice" role="status">Permission denied. Only Owner or Admin can inspect Agent Memory metadata.</p> : null}
+            {!canManage ? <p className="permission-notice" role="status">Only Owners and Admins can open Memory files.</p> : null}
             {value.memory_files.length === 0 ? <div className="memory-empty" role="status"><Brain aria-hidden="true" /><span><strong>No Memory files yet</strong><small>Memory files appear here when the Agent writes them.</small></span></div> : <ul>{value.memory_files.map((file) => (
               <li key={file.path}><button className="memory-file-button" type="button" aria-label={`Read ${file.path}`} disabled={!canManage || memory.isPending} onClick={() => memory.mutate(file.path)}><Eye /><strong>{file.path}</strong></button><span>{formatBytes(file.size)}</span><time dateTime={file.updated_at}>{new Date(file.updated_at).toLocaleDateString()}</time></li>
             ))}</ul>}
@@ -243,16 +231,14 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
         ) : null}
         {tab === "settings" ? (
           <div className="agent-tab-panel" id="agent-panel-settings" role="tabpanel" aria-labelledby="agent-tab-settings" tabIndex={0}>
-            {!canManage ? <p className="permission-notice" role="status">Permission denied. Only Owner or Admin can change Agent settings.</p> : null}
+            {!canManage ? <p className="permission-notice" role="status">Only Owners and Admins can change these settings.</p> : null}
             <form className="agent-settings" onSubmit={save}>
               <label>Role<textarea name="role_text" defaultValue={value.role_text} maxLength={12000} required disabled={!canManage || value.desired_lifecycle === "retired"} /></label>
-              <div className="agent-settings-policy-heading"><h2>Attention policy</h2><span>Server managed</span></div>
-              <dl className="detail-grid"><Field label="Ambient attention">{value.attention_config.ambient_enabled ? "Enabled" : "Disabled"}</Field><Field label="Debounce" tabular>{`${value.attention_config.ambient_debounce_seconds}s`}</Field><Field label="Maximum wait" tabular>{`${value.attention_config.ambient_max_wait_seconds}s`}</Field><Field label="Maximum retries" tabular>{String(value.attention_config.max_retry_count)}</Field></dl>
               {canManage && value.desired_lifecycle !== "retired" ? <button className="command-button command-button--accent" type="submit" disabled={update.isPending}><Save /> Save configuration</button> : null}
             </form>
-            {canManage && value.desired_lifecycle !== "retired" ? <section className="agent-lifecycle" aria-label="Agent lifecycle"><h2>Lifecycle</h2>{value.desired_lifecycle === "active" || value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "restart" } })}><RotateCcw aria-hidden="true" /> Restart Agent</button> : null}{value.desired_lifecycle === "active" ? <label className="agent-check"><input type="checkbox" checked={cancelNow} onChange={(event) => setCancelNow(event.target.checked)} /> Cancel the active run now</label> : null}{value.desired_lifecycle === "active" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "suspend", mode: cancelNow ? "cancel_now" : "stop_after_current" } })}><Pause /> Suspend</button> : null}{value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "resume" } })}><Play /> Resume</button> : null}{value.provision_status === "error" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "retry" } })}><RotateCcw /> Retry provision</button> : null}<button className="danger-button" type="button" disabled={update.isPending || retirement.isPending} onClick={() => setRetireConfirmOpen(true)}><Trash2 /> Retire permanently</button></section> : null}
-            {update.error ? <p className="form-error" role="alert">The Agent update failed. Your changes remain on screen; retry when ready.</p> : null}
-            {retirement.error ? <p className="form-error" role="alert">Unable to retire the Agent. No lifecycle change was applied.</p> : null}
+            {canManage && value.desired_lifecycle !== "retired" ? <section className="agent-lifecycle" aria-label="Agent lifecycle"><h2>Lifecycle</h2>{value.desired_lifecycle === "active" || value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "restart" } })}><RotateCcw aria-hidden="true" /> Restart Agent</button> : null}{value.desired_lifecycle === "active" ? <label className="agent-check"><input type="checkbox" checked={cancelNow} onChange={(event) => setCancelNow(event.target.checked)} /> Stop what it is doing right away</label> : null}{value.desired_lifecycle === "active" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "suspend", mode: cancelNow ? "cancel_now" : "stop_after_current" } })}><Pause /> Suspend</button> : null}{value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "resume" } })}><Play /> Resume</button> : null}{value.provision_status === "error" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "retry" } })}><RotateCcw /> Retry setup</button> : null}<button className="danger-button" type="button" disabled={update.isPending || retirement.isPending} onClick={() => setRetireConfirmOpen(true)}><Trash2 /> Retire permanently</button></section> : null}
+            {update.error ? <p className="form-error" role="alert">Could not save. Your changes are still here; try again.</p> : null}
+            {retirement.error ? <p className="form-error" role="alert">Could not retire the Agent. Nothing was changed.</p> : null}
           </div>
         ) : null}
       </div>
@@ -263,7 +249,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
             <button className="icon-button" type="button" aria-label="Close retirement confirmation" title="Close retirement confirmation" onClick={() => setRetireConfirmOpen(false)}><X aria-hidden="true" /></button>
           </header>
           <p>Retirement cannot be undone. {value.name} will stop accepting new work and lose its Computer assignment.</p>
-          <p>Historical Messages, Tasks, Runs and Results remain available.</p>
+          <p>Its past messages and Tasks stay available.</p>
           <footer>
             <button className="command-button" type="button" onClick={() => setRetireConfirmOpen(false)}>Cancel</button>
             <button className="danger-button" type="button" disabled={retirement.isPending} onClick={() => retirement.mutate()}><Trash2 aria-hidden="true" /> Retire {value.name}</button>
@@ -287,13 +273,15 @@ function Field({ label, children, tabular = false, chip }: { label: string; chil
 }
 function capitalize(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function humanize(value: string): string { return value.split("_").map(capitalize).join(" "); }
+function setupLabel(value: string): string { return value === "ready" ? "Ready" : value === "error" ? "Failed" : "In progress"; }
+function problemLabel(code: string): string { const words = code.replaceAll(/[._]/g, " ").trim(); return words.charAt(0).toUpperCase() + words.slice(1) + "."; }
 
 
 function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; spaceSlug: string; channels: Channel[] }) {
   const items = useAgentActivity(agentId);
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   if (items.length === 0) {
-    return <EmptyState icon={Activity} title="No visible activity yet">Messages, Task runs and tool calls show up here as the Agent works.</EmptyState>;
+    return <EmptyState icon={Activity} title="No visible activity yet">Messages it sends and Tasks it works on show up here.</EmptyState>;
   }
   return (
     <ol className="agent-activity-list" aria-label="Agent activity">
@@ -306,16 +294,8 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
                 <span className="agent-activity-kind">{AGENT_ACTIVITY_LABELS[item.kind]}</span>
                 {link ? <span className="agent-activity-link">{link}</span> : null}
               </p>
-              {item.arguments.length || item.messagePreview ? (
+              {item.messagePreview ? (
                 <div className="agent-activity-details">
-                  {item.arguments.length ? (
-                    <ul className="agent-activity-arguments" aria-label="Arguments">
-                      {item.arguments.slice(0, 3).map((argument) => (
-                        <li key={argument.name}><code>{argument.name}</code><span>=</span><code>{argument.value}</code></li>
-                      ))}
-                      {item.arguments.length > 3 ? <li className="agent-activity-more">+{item.arguments.length - 3} more</li> : null}
-                    </ul>
-                  ) : null}
                   {item.messagePreview ? (
                     <pre className="agent-activity-message"><code>{item.messagePreview}</code>{item.messageTruncated ? <span className="agent-activity-truncated">truncated</span> : null}</pre>
                   ) : null}

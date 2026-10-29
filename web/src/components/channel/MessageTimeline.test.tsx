@@ -76,7 +76,7 @@ describe("System Notice timeline", () => {
   });
 });
 
-describe("Channel sequence semantics", () => {
+describe("Inline Thread preview", () => {
   it("keeps the Channel root list separate and labels root and latest reply coordinates", async () => {
     const root = {
       ...humanMessage(4),
@@ -121,17 +121,14 @@ describe("Channel sequence semantics", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByLabelText("Channel sequence @4")).toHaveTextContent("@4");
+    expect(container).not.toHaveTextContent("@4");
     expect(screen.getByRole("region", { name: "2 Thread replies" })).toBeVisible();
     expect(container.querySelectorAll(".message-row")).toHaveLength(1);
 
     const replySummary = screen.getByRole("button", { name: "2 replies" });
-    await waitFor(() => expect(replySummary).toHaveTextContent("latest @9"));
-    expect(replySummary).toHaveTextContent("2 replies");
-    expect(replySummary).toHaveAttribute(
-      "title",
-      "Open Thread; latest reply is Channel sequence @9",
-    );
+    await waitFor(() => expect(replySummary).toHaveTextContent("2 replies"));
+    expect(replySummary).not.toHaveTextContent("@9");
+    expect(replySummary).toHaveAttribute("title", "Open Thread");
   });
 });
 
@@ -845,5 +842,21 @@ describe("markdown rendering", () => {
     expect(link).toHaveTextContent("!3");
     expect(container).toHaveTextContent("!99");
     expect(container.querySelectorAll("a.message-task-ref")).toHaveLength(1);
+  });
+});
+
+describe("New messages divider", () => {
+  it("marks the first message that arrived since the Channel was last open", () => {
+    window.localStorage.setItem("sumi.last-read.channel-unread", "2026-07-28T00:01:00Z");
+    const older = { ...humanMessage(1), created_at: "2026-07-28T00:00:00Z" };
+    const newer = { ...agentMessage(2, "Lin"), created_at: "2026-07-28T00:02:00Z" };
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MessageTimeline timelineRef={createRef<HTMLDivElement>()} page={pageWith([older, newer])} pending={false} error={null} retry={vi.fn()} emptyTitle="No messages" channelId="channel-unread" spaceSlug="sumi-lab" openThread={vi.fn()} activityByMemberId={new Map()} members={[]} />
+      </QueryClientProvider>,
+    );
+    const divider = screen.getByRole("separator", { name: "New messages" });
+    expect(divider.closest(".message-block")).toHaveAttribute("data-message-id", "agent-message-2");
+    expect(window.localStorage.getItem("sumi.last-read.channel-unread")).toBe("2026-07-28T00:02:00Z");
   });
 });

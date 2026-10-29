@@ -72,6 +72,7 @@ export function ThreadPane({
   );
   const threadLabel = thread.data?.root.seq ?? threadId;
   const subscription = useMutation({
+    meta: { success: (_data, following) => (following ? "Following this Thread. Replies will reach your Inbox." : "Unfollowed this Thread."), error: "Could not change following." },
     mutationFn: (isFollowing: boolean) =>
       setThreadSubscription(threadId, isFollowing),
     onSuccess: (result) => {

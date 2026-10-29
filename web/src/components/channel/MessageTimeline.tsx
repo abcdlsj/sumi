@@ -13,6 +13,7 @@ import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
 import { provisionalMessage, type OutgoingMessage } from "./outbox";
+import { useUnreadMarker } from "./unreadMarker";
 
 type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
 
@@ -93,12 +94,13 @@ export function MessageTimeline({
     if (latest.id !== announcedMessageRef.current) {
       announcedMessageRef.current = latest.id;
       setNewMessageAnnouncement(
-        `New message from ${latest.author.display_name} (#${latest.seq})`,
+        `New message from ${latest.author.display_name}`,
       );
     }
   }, [page]);
 
   const selfMemberId = useSelfMemberId();
+  const firstUnreadId = useUnreadMarker(channelId, page?.messages, selfMemberId);
   // Outgoing messages join the same list, so grouping already matches the
   // Server's copy and nothing shifts when it replaces them.
   const outgoingByKey = new Map(outgoing.map((item) => [item.key, item] as const));
@@ -134,6 +136,7 @@ export function MessageTimeline({
           const previousGroup = index > 0 ? all[index - 1] : undefined;
           const previous = previousGroup?.[previousGroup.length - 1];
           const showDivider = !previous || dayKey(previous.created_at) !== dayKey(message.created_at);
+          const unreadDivider = firstUnreadId && messages.some((item) => item.id === firstUnreadId) ? <div className="unread-divider" role="separator" aria-label="New messages"><span>New</span></div> : null;
           const systemNotice = message.content.type === "system_notice";
           if (systemNotice) {
             return (
@@ -158,6 +161,7 @@ export function MessageTimeline({
                   <time dateTime={message.created_at}>{formatDayDivider(message.created_at)}</time>
                 </div>
               ) : null}
+              {unreadDivider}
               <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${forYou ? " message-row--for-you" : ""}${outgoingItem ? ` message-row--outgoing message-row--${outgoingItem.status}` : ""}`}>
                 {grouped ? (
                   <time className="message-gutter-time" dateTime={message.created_at} title={formatFullTime(message.created_at)}>
@@ -179,15 +183,6 @@ export function MessageTimeline({
                       <strong>{message.author.display_name}</strong>
                       <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
                       {forYou ? <span className="message-for-you">For you</span> : null}
-                      {outgoingItem ? null : (
-                        <span
-                          className="message-seq"
-                          aria-label={`Channel sequence @${message.seq}`}
-                          title={`Channel sequence @${message.seq}`}
-                        >
-                          @{message.seq}
-                        </span>
-                      )}
                     </header>
                   )}
                   {grouped && forYou ? <span className="visually-hidden">For you</span> : null}
@@ -302,15 +297,6 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
           <strong>{message.author.display_name}</strong>
           <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
           {forYou ? <span className="message-for-you">For you</span> : null}
-          {outgoing ? null : (
-            <span
-              className="message-seq"
-              aria-label={`Channel sequence @${message.seq}`}
-              title={`Channel sequence @${message.seq}`}
-            >
-              @{message.seq}
-            </span>
-          )}
         </header>
         <MessageBody message={message} spaceSlug={spaceSlug} members={members} />
         {message.task ? <MessageTaskBadge task={message.task} spaceSlug={spaceSlug} /> : null}
@@ -388,7 +374,6 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
     staleTime: 15_000,
   });
   const replies = thread.data?.replies.slice(-3) ?? [];
-  const latestReply = thread.data?.replies.at(-1);
   const hiddenReplyCount = Math.max(0, replyCount - replies.length);
   return (
     <section className="inline-thread-preview" aria-label={`${replyCount} Thread ${replyCount === 1 ? "reply" : "replies"}`}>
@@ -396,12 +381,11 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
         className="inline-thread-heading"
         type="button"
         aria-label={`${replyCount} ${replyCount === 1 ? "reply" : "replies"}`}
-        title={latestReply ? `Open Thread; latest reply is Channel sequence @${latestReply.seq}` : "Open Thread"}
+        title="Open Thread"
         onClick={(event) => open(event.currentTarget)}
       >
         <span>
           {hiddenReplyCount > 0 ? `${hiddenReplyCount} earlier ${hiddenReplyCount === 1 ? "reply" : "replies"}` : `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`}
-          {latestReply ? <small aria-hidden="true"> · latest @{latestReply.seq}</small> : null}
           <b aria-hidden="true">›</b>
         </span>
       </button>
@@ -425,6 +409,7 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
   const queryClient = useQueryClient();
   const create = useMutation({
     mutationFn: () => createTaskFromRootMessage(message.id, { title: textBody(message).trim().slice(0, 120) || undefined }),
+    meta: { success: (task) => `Task !${(task as { seq: number }).seq} created.` },
     onSuccess: (task) => {
       queryClient.setQueryData<MessagePage>(["messages", channelId], (page) => page ? {
         ...page,
@@ -445,7 +430,7 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
     },
   });
   const taskUnavailableReason = message.placement !== "root"
-    ? "Task can only be created from a Root Message"
+    ? "Tasks can only be created from the first message of a conversation"
     : message.task
       ? "This Message already has a Task"
       : undefined;
