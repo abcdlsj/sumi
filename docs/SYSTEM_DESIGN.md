@@ -51,6 +51,7 @@ Driver：
 - 新 daemon 完成本地数据库、sandbox、Driver recovery 和 capability socket 初始化后写 readiness 标记 `update/ready-<version>`。readiness 超时或进程提前退出时，updater 恢复旧二进制与 SQLite 备份并重启旧 daemon。
 - Computer 可由用户级服务管理器托管：macOS launchd agent `dev.sumi.computer`，Linux systemd user unit `sumi-computer.service`。服务以 `SUMI_COMPUTER_SERVICE=launchd|systemd` 声明托管方；服务只在非正常退出时重启。托管时 updater 脱离服务的进程组（launchd）或作为独立 transient unit 运行（systemd），daemon 以成功状态退出后，updater 经服务管理器启动、重启新旧 daemon，不自行 spawn。
 - Computer 在 SIGINT 与 SIGTERM 时都按正常关闭流程断开 Server。
+- Server 在 `/install.sh` 提供 Computer 安装脚本，用法为 `curl -fsSL <server>/install.sh | sh -s -- --server <server>`。脚本按平台从同一 Server 下载 stable release 并校验 sha256，安装到 `~/.sumi/bin/sumi`，缺少 `~/.sumi/config.toml` 时写入 `server_url`，再写入并启动上述用户级服务。重复执行是幂等的：已安装的二进制交给 daemon 的 updater 更新，脚本不替换；服务定义不变时只确保服务在运行，不重启。未配对时脚本从日志 `~/.sumi/logs/computer.log` 打印配对链接。
 - updater 在本地 journal 记录成功或回退。已经回退的 release 不得再次自动激活；新的 release 仍可尝试。
 - 更新发现使用独立 HTTP 接口，不依赖 Computer WebSocket 是否能完成业务协议握手。
 

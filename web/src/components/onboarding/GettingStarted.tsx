@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, LoaderCircle, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import { addChannelAgents, createAgent, type Agent, type Computer, type Member } from "../../api/client";
+import { addChannelAgents, computerInstallCommand, createAgent, type Agent, type Computer, type Member } from "../../api/client";
 import { DRIVER_CHOICES, driverInput } from "../../driver";
 import { DialogFrame } from "../DialogFrame";
 
@@ -70,7 +70,7 @@ export function GettingStarted({
   const [dismissed, setDismissed] = useState(() => readDismissed(spaceId));
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const command = `sumi computer --server ${window.location.origin}`;
+  const command = computerInstallCommand();
 
   const onlineComputers = computers.filter((computer) => computer.status === "online");
   const activeAgents = agents.filter((agent) => agent.desired_lifecycle !== "retired");

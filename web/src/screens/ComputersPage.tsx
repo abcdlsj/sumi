@@ -8,7 +8,7 @@ import {
   deleteComputer,
   listAgents,
   listComputers,
-  serverOrigin,
+  computerInstallCommand,
   type Agent,
   type Computer,
 } from "../api/client";
@@ -179,7 +179,7 @@ function ComputersWorkspace({
 }
 
 function ComputerOnboarding({ active }: { active?: boolean }) {
-  const command = `sumi computer --server ${serverOrigin()}`;
+  const command = computerInstallCommand();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   async function copyCommand() {

@@ -84,6 +84,12 @@ export function serverOrigin(): string {
   return apiOrigin || globalThis.location.origin;
 }
 
+/** The one-line command that installs and starts a Computer service for this Server. */
+export function computerInstallCommand(): string {
+  const origin = serverOrigin();
+  return `curl -fsSL ${origin}/install.sh | sh -s -- --server ${origin}`;
+}
+
 export function openSpaceEvents(spaceId: string): EventSource {
   return new EventSource(
     apiUrl(`/api/v1/spaces/${encodeURIComponent(spaceId)}/events`),

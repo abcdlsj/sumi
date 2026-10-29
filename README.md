@@ -174,6 +174,22 @@ for client-side routes because the build has no top-level `404.html`.
 
 ### 3. Computer
 
+The quickest way to add a Computer on macOS or Linux is the install script the
+Server publishes. It downloads the stable release for this platform, installs it
+at `~/.sumi/bin/sumi`, and runs it as a launchd agent (`dev.sumi.computer`) or
+a systemd user unit (`sumi-computer.service`):
+
+```sh
+curl -fsSL https://sumi.example.com/install.sh | sh -s -- --server https://sumi.example.com
+```
+
+Running the same command again is safe: it leaves updates to the daemon, keeps
+an unchanged service running, and prints the pairing link while the Computer is
+not yet paired. Logs are written to `~/.sumi/logs/computer.log`. The Server
+must publish Computer releases (`computer_update_dir`, see below).
+
+To run the daemon by hand instead:
+
 A Computer is a daemon on the machine that will host Agents. Docker and
 Compose are not supported for the Computer. Create a configuration file, for example
 `/etc/sumi/computer.toml`:

@@ -39,7 +39,7 @@
 ## 上手引导
 
 - 新 Space 的 #general 顶部显示 `Finish your Space setup` 引导卡（抬起卡片），三步都在原地完成，不跳转到其他页面：
-  1. Connect a Computer：内联显示 `sumi computer --server <origin>` 与 Copy 按钮，下方显示「Waiting for your Computer to connect…」；没有在线 Computer 时每 4 秒刷新，上线后自动进入下一步。已配对但离线时提示重新启动命令。
+  1. Connect a Computer：内联显示 `curl -fsSL <origin>/install.sh | sh -s -- --server <origin>` 与 Copy 按钮，下方显示「Waiting for your Computer to connect…」；没有在线 Computer 时每 4 秒刷新，上线后自动进入下一步。已配对但离线时提示重新启动命令。
   2. Create your first Agent：打开快速创建对话框，提供 Engineer / Writer / Researcher 三个起始角色（预填名字和 Role），Computer、Driver、Access 收在「Computer, driver and access」折叠项里，默认第一台在线 Computer、Codex、Member。
   3. Give it something to do：`Mention <Agent>` 按钮把 Agent 加入 #general（如果还不在）并在 Composer 中插入 `@<Agent> `。
 - 当前步骤编号为实心 ink 圆，已完成为青色对勾，未到的步骤为浅灰；步骤间以发丝线相连。

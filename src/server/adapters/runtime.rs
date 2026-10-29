@@ -58,11 +58,14 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let dispatcher = tokio::spawn(dispatch_available_work_forever(state.clone()));
     let space_event_listener =
         tokio::spawn(state.space_events.clone().listen_forever(pool.clone()));
-    let mut app = axum::Router::new().nest("/api/v1", api).fallback_service(
-        ServeDir::new(&config.web_dist)
-            .append_index_html_on_directories(true)
-            .not_found_service(ServeFile::new(config.web_dist.join("index.html"))),
-    );
+    let mut app = axum::Router::new()
+        .nest("/api/v1", api)
+        .route("/install.sh", axum::routing::get(computer_install_script))
+        .fallback_service(
+            ServeDir::new(&config.web_dist)
+                .append_index_html_on_directories(true)
+                .not_found_service(ServeFile::new(config.web_dist.join("index.html"))),
+        );
     if let Some(update_dir) = &config.computer_update_dir {
         app = app.nest_service("/api/v1/computer-updates/stable", ServeDir::new(update_dir));
     }
@@ -109,6 +112,21 @@ async fn dispatch_available_work_forever(state: http::RuntimeState) {
         }
     }
 }
+const COMPUTER_INSTALL_SCRIPT: &str = include_str!("install-computer.sh");
+
+async fn computer_install_script() -> impl axum::response::IntoResponse {
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/x-shellscript; charset=utf-8",
+            ),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        COMPUTER_INSTALL_SCRIPT,
+    )
+}
+
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
