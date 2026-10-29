@@ -145,11 +145,11 @@ SUMI_SERVER__DATABASE_URL=postgres://localhost/sumi \
 
 ### Web UI on a separate host
 
-The Web UI can be deployed apart from the Server, for example on Cloudflare
-Pages, while browsers and Computers still connect to the Server directly. The
+The Web UI can be deployed apart from the Server, for example as a Cloudflare
+Worker, while browsers and Computers still connect to the Server directly. The
 two hosts must share one registrable domain (for example `app.example.com` and
 `api.example.com:8443`) so the Browser Session cookie stays same-site; a
-`*.pages.dev` address does not work with a Server on your own domain.
+`*.workers.dev` address does not work with a Server on your own domain.
 
 Tell the Server where the Web UI lives. It then allows that origin through CORS
 with credentials, rejects Browser Session writes from any other origin, and
@@ -161,16 +161,15 @@ web_origin = "https://app.example.com"
 secure_cookies = true
 ```
 
-Build the Web UI with the Server origin:
+Build the Web UI with the Server origin and deploy it. `web/wrangler.jsonc`
+publishes the build as Cloudflare Worker static assets on the custom domain in
+its `routes` and serves `index.html` for client-side routes; edit the domain
+first:
 
 ```sh
 VITE_SUMI_API_ORIGIN=https://api.example.com:8443 pnpm --dir web build
+pnpm --dir web dlx wrangler deploy
 ```
-
-On Cloudflare Pages, use `web` as the root directory, `pnpm build` as the build
-command, `dist` as the output directory, set `VITE_SUMI_API_ORIGIN` as a build
-environment variable, and attach the custom domain. Pages serves `index.html`
-for client-side routes because the build has no top-level `404.html`.
 
 ### 3. Computer
 
