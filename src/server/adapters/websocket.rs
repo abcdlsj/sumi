@@ -114,7 +114,9 @@ pub(super) async fn computer_socket(
     computer_id: Uuid,
     deleted: bool,
 ) {
-    let Some(Ok(WebSocketMessage::Text(encoded))) = socket.next().await else {
+    let Ok(Some(Ok(WebSocketMessage::Text(encoded)))) =
+        tokio::time::timeout(COMPUTER_IDLE_TIMEOUT, socket.next()).await
+    else {
         return;
     };
     let Ok(hello) = serde_json::from_str::<ComputerHello>(&encoded) else {
@@ -133,8 +135,6 @@ pub(super) async fn computer_socket(
         live_run_count = hello.live_run_ids.len(),
         "Computer connected"
     );
-    let _=sqlx::query("UPDATE computers SET connection_status='online',daemon_version=$2,last_seen_at=$3 WHERE id=$1")
-        .bind(computer_id).bind(&hello.daemon_version).bind(OffsetDateTime::now_utc()).execute(&pool).await;
     // Reconcile before replaying commands. The Computer just told us which Runs it still holds; every
     // other non-terminal Run of ours died with its previous daemon process. This is the only path that
     // fails a Run the Server never heard about, and it runs because the Computer reported, not because
@@ -176,6 +176,13 @@ pub(super) async fn computer_socket(
     .await;
     let (connection, mut outbound) = queries.connect(computer_id);
     let (command_connection, mut command_wakeups) = commands.connect(computer_id);
+    // Marked online only after registering, so a superseded session's offline write below can
+    // see this connection and restore the status.
+    let _=sqlx::query("UPDATE computers SET connection_status='online',daemon_version=$2,last_seen_at=$3 WHERE id=$1")
+        .bind(computer_id).bind(&hello.daemon_version).bind(OffsetDateTime::now_utc()).execute(&pool).await;
+    // The Computer sends a heartbeat and a ping every 15 seconds; silence beyond three periods
+    // means a half-open socket.
+    let mut read_deadline = tokio::time::Instant::now() + COMPUTER_IDLE_TIMEOUT;
     loop {
         let frame = tokio::select! {
             outgoing = outbound.recv() => {
@@ -196,9 +203,16 @@ pub(super) async fn computer_socket(
                 .await;
                 continue;
             }
-            frame = socket.next() => match frame {
-                Some(frame) => frame,
-                None => break,
+            frame = tokio::time::timeout_at(read_deadline, socket.next()) => match frame {
+                Ok(Some(frame)) => {
+                    read_deadline = tokio::time::Instant::now() + COMPUTER_IDLE_TIMEOUT;
+                    frame
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    tracing::warn!(%computer_id, "Computer sent nothing within the idle timeout");
+                    break;
+                }
             },
         };
         let Ok(WebSocketMessage::Text(encoded)) = frame else {
@@ -428,7 +442,18 @@ pub(super) async fn computer_socket(
         .bind(computer_id)
         .execute(&pool)
         .await;
+    // A newer session may have registered and written online before this offline write landed.
+    // Checking after the write is ordered: a session registering later writes online after it.
+    if commands.is_connected(computer_id) {
+        let _ = sqlx::query("UPDATE computers SET connection_status='online' WHERE id=$1")
+            .bind(computer_id)
+            .execute(&pool)
+            .await;
+    }
 }
+
+const COMPUTER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Sends every pending command after `watermark` and returns the last sequence actually sent.
 async fn replay_pending_commands(
@@ -589,7 +614,12 @@ async fn send_json(
     value: &impl serde::Serialize,
 ) -> Result<(), axum::Error> {
     let encoded = serde_json::to_string(value).map_err(axum::Error::new)?;
-    socket.send(WebSocketMessage::Text(encoded.into())).await
+    tokio::time::timeout(
+        SEND_TIMEOUT,
+        socket.send(WebSocketMessage::Text(encoded.into())),
+    )
+    .await
+    .map_err(axum::Error::new)?
 }
 
 #[cfg(test)]

@@ -127,7 +127,11 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
     let capability_computer_id = secrets.computer_id;
     let capability_computer_home = computer_home.clone();
     let capability_token = secrets.token.clone();
-    let capability_client = reqwest::Client::new();
+    // A read timeout bounds a stalled transfer without capping how long a slow upload may take.
+    let capability_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build()?;
     let mut capability_homes = AgentHomeAdapter::new(
         computer_home.clone(),
         config.codex_config_source.clone(),
@@ -228,13 +232,17 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
     update::signal_ready(&computer_home).await?;
     let mut updates =
         update::start_checker(&config, config.server_url.clone(), computer_home.clone());
-    let mut reconnect = ExponentialBuilder::default()
-        .with_jitter()
-        .with_min_delay(std::time::Duration::from_secs(1))
-        .with_max_delay(std::time::Duration::from_secs(30))
-        .without_max_times()
-        .build();
+    let reconnect_backoff = || {
+        ExponentialBuilder::default()
+            .with_jitter()
+            .with_min_delay(std::time::Duration::from_secs(1))
+            .with_max_delay(std::time::Duration::from_secs(30))
+            .without_max_times()
+            .build()
+    };
+    let mut reconnect = reconnect_backoff();
     loop {
+        let connection_started = tokio::time::Instant::now();
         enum LoopEvent {
             Connection(anyhow::Result<()>),
             Update(update::StagedUpdate),
@@ -269,6 +277,10 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
         match event {
             LoopEvent::Connection(Ok(())) => return Ok(()),
             LoopEvent::Connection(Err(error)) => {
+                // A connection that lasted is not part of a failure streak.
+                if connection_started.elapsed() >= STABLE_CONNECTION {
+                    reconnect = reconnect_backoff();
+                }
                 let delay = reconnect
                     .next()
                     .expect("an unlimited reconnect backoff always yields a delay");
@@ -570,10 +582,13 @@ where
         "Authorization",
         format!("Bearer {}", secrets.token).parse()?,
     );
-    let (socket, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .context("failed to connect Computer WebSocket")?;
-    let (mut writer, mut reader) = socket.split();
+    let (socket, _) =
+        tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(request))
+            .await
+            .context("Computer WebSocket connection timed out")?
+            .context("failed to connect Computer WebSocket")?;
+    let (mut writer, reader) = socket.split();
+    let mut reader = IdleTimeout::new(reader, SERVER_IDLE_TIMEOUT);
     let daemon_session_id = DaemonSessionId::from_uuid(Uuid::now_v7());
     let hello = ComputerHello {
         supported_versions: SUPPORTED,
@@ -591,11 +606,7 @@ where
             .await
             .map_err(|error| anyhow::anyhow!(error))?,
     };
-    writer
-        .send(WebSocketMessage::Text(
-            serde_json::to_string(&hello)?.into(),
-        ))
-        .await?;
+    send_json(&mut writer, &hello).await?;
     let handshake = reader
         .next()
         .await
@@ -647,7 +658,9 @@ where
             _ = heartbeat.tick() => {
                 let active_runs=RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?.len() as u32;
                 let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,active_runs,observed_at:time::OffsetDateTime::now_utc()}};
-                writer.send(WebSocketMessage::Text(serde_json::to_string(&frame)?.into())).await?;
+                send_json(&mut writer, &frame).await?;
+                // The Server answers pings, so the idle timeout on reads detects a dead socket.
+                send_message(&mut writer, WebSocketMessage::Ping(Vec::new().into())).await?;
             }
             _ = driver_observation.tick() => {
                 let completions = driver
@@ -701,7 +714,7 @@ where
                             None
                         };
                         for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
-                            writer.send(WebSocketMessage::Text(serde_json::to_string(&frame)?.into())).await?;
+                            send_json(&mut writer, &frame).await?;
                         }
                         RunPipelineService::dispatch(
                             storage,
@@ -720,7 +733,7 @@ where
                     },
                     ServerFrame::Query{query}=>{
                         let frame=ServerConnectionAdapter::answer_query(storage,homes,query).await;
-                        writer.send(WebSocketMessage::Text(serde_json::to_string(&frame)?.into())).await?;
+                        send_json(&mut writer, &frame).await?;
                     }
                     ServerFrame::Shutdown{code}=>anyhow::bail!("Server stopped Computer connection: {code:?}"),
                     ServerFrame::ChannelActivityResult { result } => {
@@ -728,6 +741,82 @@ where
                     }
                 }
             }
+        }
+    }
+}
+
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Three heartbeat periods; the Server answers the ping sent with every heartbeat.
+const SERVER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const STABLE_CONNECTION: std::time::Duration = std::time::Duration::from_secs(60);
+
+async fn send_message<W>(writer: &mut W, message: WebSocketMessage) -> anyhow::Result<()>
+where
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    tokio::time::timeout(SEND_TIMEOUT, writer.send(message))
+        .await
+        .context("Server did not accept a frame within the send timeout")??;
+    Ok(())
+}
+
+async fn send_json<W>(writer: &mut W, value: &impl Serialize) -> anyhow::Result<()>
+where
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    send_message(
+        writer,
+        WebSocketMessage::Text(serde_json::to_string(value)?.into()),
+    )
+    .await
+}
+
+/// Ends a WebSocket stream with a timeout error once no frame of any kind arrives for `idle`.
+/// A half-open TCP connection otherwise blocks reads until the kernel gives up retransmitting.
+struct IdleTimeout<S> {
+    inner: S,
+    idle: std::time::Duration,
+    deadline: std::pin::Pin<Box<tokio::time::Sleep>>,
+}
+
+impl<S> IdleTimeout<S> {
+    fn new(inner: S, idle: std::time::Duration) -> Self {
+        Self {
+            inner,
+            idle,
+            deadline: Box::pin(tokio::time::sleep(idle)),
+        }
+    }
+}
+
+impl<S> Stream for IdleTimeout<S>
+where
+    S: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::future::Future;
+        let this = &mut *self;
+        match std::pin::Pin::new(&mut this.inner).poll_next(context) {
+            std::task::Poll::Ready(item) => {
+                let next = tokio::time::Instant::now() + this.idle;
+                this.deadline.as_mut().reset(next);
+                std::task::Poll::Ready(item)
+            }
+            std::task::Poll::Pending => match this.deadline.as_mut().poll(context) {
+                std::task::Poll::Ready(()) => std::task::Poll::Ready(Some(Err(
+                    tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Server sent nothing within the idle timeout",
+                    )),
+                ))),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
         }
     }
 }
@@ -789,22 +878,21 @@ where
     let mut messages = Vec::new();
     while next_after < request.through_sequence {
         let query_id = crate::ids::QueryId::from_uuid(Uuid::now_v7());
-        writer
-            .send(WebSocketMessage::Text(
-                serde_json::to_string(&ComputerFrame::ChannelActivityQuery {
-                    query: ChannelActivityQuery {
-                        query_id,
-                        run_id: request.run_id,
-                        agent_id: request.agent_id,
-                        channel_id: request.channel_id,
-                        after_sequence: next_after,
-                        through_sequence: request.through_sequence,
-                        limit: 256,
-                    },
-                })?
-                .into(),
-            ))
-            .await?;
+        send_json(
+            writer,
+            &ComputerFrame::ChannelActivityQuery {
+                query: ChannelActivityQuery {
+                    query_id,
+                    run_id: request.run_id,
+                    agent_id: request.agent_id,
+                    channel_id: request.channel_id,
+                    after_sequence: next_after,
+                    through_sequence: request.through_sequence,
+                    limit: 256,
+                },
+            },
+        )
+        .await?;
         let mut deferred = VecDeque::new();
         let result = if let Some(result) = pending_activity_results.remove(&query_id) {
             result
@@ -915,11 +1003,7 @@ where
     };
     let event_id = event.id();
     let frame = ServerConnectionAdapter::event_frame(event);
-    writer
-        .send(WebSocketMessage::Text(
-            serde_json::to_string(&frame)?.into(),
-        ))
-        .await?;
+    send_json(writer, &frame).await?;
     sent_events.insert(event_id);
     Ok(())
 }
@@ -964,7 +1048,10 @@ async fn pair(root: &Path, server: &url::Url) -> anyhow::Result<(PathBuf, Comput
         .context("failed to read Computer hostname")?
         .to_string_lossy()
         .into_owned();
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
     let endpoint = server.join("api/v1/computer-pairings")?;
     let started = client
         .post(endpoint)
@@ -1005,12 +1092,24 @@ async fn pair(root: &Path, server: &url::Url) -> anyhow::Result<(PathBuf, Comput
             _ = shutdown_signal() => anyhow::bail!("Computer pairing canceled"),
             _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
         }
-        let status = client
+        let response = match client
             .get(status_url.clone())
             .bearer_auth(&token)
             .send()
             .await
-            .context("failed to read Computer pairing status")?
+        {
+            Ok(response) if response.status().is_server_error() => {
+                tracing::warn!(status = %response.status(), "Computer pairing status is unavailable; retrying");
+                continue;
+            }
+            Ok(response) => response,
+            // The pairing URL stays valid across a network blip; restarting would replace it.
+            Err(error) => {
+                tracing::warn!(%error, "Computer pairing status request failed; retrying");
+                continue;
+            }
+        };
+        let status = response
             .error_for_status()
             .context("Server rejected Computer pairing status")?
             .json::<PairingStatus>()
@@ -1075,6 +1174,37 @@ async fn write_secrets(path: &Path, secrets: &ComputerSecrets) -> anyhow::Result
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn idle_timeout_ends_a_silent_stream_and_spares_an_active_one() {
+        use futures_util::StreamExt;
+
+        let idle = std::time::Duration::from_millis(50);
+        let mut silent = super::IdleTimeout::new(
+            futures_util::stream::pending::<
+                Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>,
+            >(),
+            idle,
+        );
+        assert!(matches!(
+            silent.next().await,
+            Some(Err(tokio_tungstenite::tungstenite::Error::Io(error)))
+                if error.kind() == std::io::ErrorKind::TimedOut
+        ));
+
+        // Frames arriving faster than the idle period keep the stream open for longer than it.
+        let pongs = futures_util::stream::iter(0..6).then(|_| async {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Ok(WebSocketMessage::Pong(Vec::new().into()))
+        });
+        let mut active = super::IdleTimeout::new(Box::pin(pongs), idle);
+        for _ in 0..6 {
+            assert!(matches!(
+                active.next().await,
+                Some(Ok(WebSocketMessage::Pong(_)))
+            ));
+        }
+    }
+
     use super::*;
     use application::{ports::LlmUsageStore, usage::LlmUsageRecord};
     use time::{Duration, OffsetDateTime};

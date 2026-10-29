@@ -58,6 +58,14 @@ impl CommandRegistry {
         }
     }
 
+    pub(super) fn is_connected(&self, computer_id: Uuid) -> bool {
+        self.state
+            .lock()
+            .expect("command registry lock")
+            .computers
+            .contains_key(&computer_id)
+    }
+
     pub(super) fn notify(&self, computer_id: Uuid) {
         let sender = self
             .state

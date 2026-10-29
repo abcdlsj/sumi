@@ -35,6 +35,7 @@ Driver：
 
 - 当前 Computer 协议 schema 为 v6，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
 - 双方无共同版本时拒绝连接。
+- Computer 每 15 秒发送 heartbeat 与 WebSocket ping；任一端 45 秒内未收到任何帧即判定连接失效并断开，Computer 随即重连。建连 20 秒、单帧发送 30 秒超时。连接持续 60 秒以上后，重连退避从最小间隔重新开始。Server 只在同一 Computer 没有更新的连接时把它标记为 offline。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。

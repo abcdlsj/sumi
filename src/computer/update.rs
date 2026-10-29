@@ -205,6 +205,8 @@ async fn check_and_stage(
 ) -> anyhow::Result<Option<StagedUpdate>> {
     ensure_secure_update_origin(server)?;
     let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let endpoint = server.join(&format!(
@@ -247,6 +249,8 @@ async fn check_and_stage(
         // Release hosts such as GitHub redirect to a storage host. The manifest sha256 from the
         // Server stays the integrity check, so redirects may cross hosts but not leave HTTPS.
         let artifact_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if attempt.previous().len() >= 10 {
                     attempt.error("too many redirects")
