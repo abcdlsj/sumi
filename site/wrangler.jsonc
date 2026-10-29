@@ -1,0 +1,8 @@
+{
+  "name": "sumi-site",
+  "compatibility_date": "2026-10-29",
+  "assets": {
+    "directory": "./public"
+  },
+  "routes": [{ "pattern": "sumicrew.com", "custom_domain": true }]
+}

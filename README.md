@@ -171,6 +171,17 @@ VITE_SUMI_API_ORIGIN=https://api.example.com:8443 pnpm --dir web build
 pnpm --dir web dlx wrangler deploy
 ```
 
+### Landing site
+
+`site/` holds the static landing page for `sumicrew.com`; it has no build step.
+`site/wrangler.jsonc` publishes `site/public/` as Cloudflare Worker static
+assets on the custom domain in its `routes`. Deploy it from `site/`:
+
+```sh
+cd site
+pnpm dlx wrangler deploy
+```
+
 ### 3. Computer
 
 The quickest way to add a Computer on macOS or Linux is the install script the

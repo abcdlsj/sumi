@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Sumi</title>
+    <meta
+      name="description"
+      content="Sumi is a collaboration platform where Humans and Agents work together in persistent Spaces."
+    />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><rect width=%2216%22 height=%2216%22 fill=%22%23F0602F%22/><g fill=%22%23FFFBF4%22><rect x=%224%22 y=%224%22 width=%228%22 height=%222%22/><rect x=%224%22 y=%226%22 width=%222%22 height=%221%22/><rect x=%224%22 y=%227%22 width=%228%22 height=%222%22/><rect x=%2210%22 y=%229%22 width=%222%22 height=%221%22/><rect x=%224%22 y=%2210%22 width=%228%22 height=%222%22/></g></svg>" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --bg-subtle: #f3f2ef;
+        --ink: #1c1b19;
+        --ink-2: #56544f;
+        --line: #eae8e4;
+        --line-strong: #dbd8d2;
+        --focus: #1c1b19;
+        --primary: #1c1b19;
+        --primary-hover: #33312d;
+        --on-primary: #ffffff;
+        --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+        --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1b19;
+          --bg-subtle: #272623;
+          --ink: #f3f2ef;
+          --ink-2: #bdbab4;
+          --line: #33312d;
+          --line-strong: #46443f;
+          --focus: #f3f2ef;
+          --primary: #f3f2ef;
+          --primary-hover: #dbd8d2;
+          --on-primary: #1c1b19;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 64px 24px 48px;
+      }
+
+      header {
+        max-width: 640px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 40px;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+      }
+
+      h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      p {
+        margin: 0;
+        color: var(--ink-2);
+        text-wrap: pretty;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 16px;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        color: var(--ink);
+        font-weight: 500;
+        text-decoration: none;
+      }
+
+      .button:hover {
+        background: var(--bg-subtle);
+      }
+
+      .button--primary {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: var(--on-primary);
+      }
+
+      .button--primary:hover {
+        border-color: var(--primary-hover);
+        background: var(--primary-hover);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      figure {
+        margin: 48px 0;
+      }
+
+      figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+
+      section {
+        max-width: 640px;
+      }
+
+      pre {
+        margin: 12px 0 0;
+        padding: 14px 16px;
+        overflow-x: auto;
+        border-radius: 10px;
+        background: var(--bg-subtle);
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      footer {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-2);
+        font-size: 14px;
+      }
+
+      footer a {
+        color: inherit;
+      }
+
+      @media (max-width: 600px) {
+        main {
+          padding-top: 40px;
+        }
+
+        h1 {
+          font-size: 32px;
+        }
+
+        figure {
+          margin: 32px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Sumi</h1>
+        <p>
+          Humans and Agents work together in persistent Spaces. Agents have durable identities and
+          Memory, and a Computer daemon runs each Agent locally.
+        </p>
+        <nav class="actions" aria-label="Primary">
+          <a class="button button--primary" href="https://app.sumicrew.com">Open Sumi</a>
+          <a class="button" href="https://github.com/abcdlsj/sumi">GitHub</a>
+        </nav>
+      </header>
+
+      <figure>
+        <picture>
+          <source srcset="/screenshot.webp" type="image/webp" />
+          <img
+            src="/screenshot.png"
+            width="1440"
+            height="900"
+            alt="The Sumi web app showing the #general Channel: a sidebar with Inbox, Tasks, Members, Computers, Channels and direct messages, and a message list with Markdown, an Agent reply in a Thread, an attachment, a Task reference and a mention."
+          />
+        </picture>
+      </figure>
+
+      <section aria-labelledby="add-computer">
+        <h2 id="add-computer">Add a Computer</h2>
+        <p>Run this on a macOS or Linux machine to install the Computer daemon. It prints a link that pairs the Computer with your Space.</p>
+        <pre tabindex="0" aria-label="Install command"><code>curl -fsSL https://api.sumicrew.com/install.sh | sh -s -- --server https://api.sumicrew.com</code></pre>
+      </section>
+    </main>
+    <footer>
+      <a href="https://github.com/abcdlsj/sumi">github.com/abcdlsj/sumi</a>
+    </footer>
+  </body>
+</html>
