@@ -11,6 +11,7 @@ import {
   Monitor,
   Network,
   Plus,
+  Search,
   Settings,
   Users,
   X,
@@ -51,6 +52,7 @@ import { saveLastConversationRoute } from "../conversationMemory";
 import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
 import { PixelIdentity } from "./PixelIdentity";
+import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
 
 export { PixelIdentity } from "./PixelIdentity";
@@ -82,6 +84,16 @@ export function SpaceShell({
   const [navigationTrigger, setNavigationTrigger] = useState<HTMLElement | null>(null);
   const [channelFormOpen, setChannelFormOpen] = useState(false);
   const [directMessageFormOpen, setDirectMessageFormOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setSwitcherOpen((open) => open || !document.querySelector('[role="dialog"][aria-modal="true"]'));
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, []);
   const agentInsightsEnabled = useFeatureEnabled(AGENT_INSIGHTS_FEATURE_ID);
   const companyOfficeEnabled = useFeatureEnabled(COMPANY_OFFICE_FEATURE_ID);
   const [unreadChannelIds, setUnreadChannelIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -303,6 +315,44 @@ export function SpaceShell({
         canManage={["owner", "admin"].includes(currentMember.access_level)}
       />
     ) : null;
+  const toolItem = (id: string, label: string, Icon: LucideIcon, path: string): QuickSwitcherItem => ({
+    id: `tool-${id}`,
+    label,
+    group: "Go to",
+    leading: <Icon aria-hidden="true" />,
+    href: `/s/${spaceSlugValue}/${path}`,
+  });
+  const switcherItems: QuickSwitcherItem[] = [
+    ...channels.data.channels.filter((channel) => channel.joined).map((channel) => ({
+      id: `channel-${channel.id}`,
+      label: channel.slug,
+      group: "Channels",
+      hint: channel.topic ?? undefined,
+      leading: channel.kind === "private" ? <LockKeyhole aria-hidden="true" /> : <Hash aria-hidden="true" />,
+      href: `/s/${spaceSlugValue}/channels/${channel.slug}`,
+    })),
+    ...availableDirectMessages.map((dm) => ({
+      id: `dm-${dm.channel_id}`,
+      label: dm.other_member.display_name,
+      group: "Direct messages",
+      hint: dm.other_member.kind === "agent" ? activityLabel(activityByMemberId.get(dm.other_member.id)) : undefined,
+      leading: <PixelIdentity name={dm.other_member.display_name} kind={dm.other_member.kind} seed={dm.other_member.id} />,
+      href: `/s/${spaceSlugValue}/dm/${dm.other_member.id}`,
+    })),
+    ...members.data.filter((member) => member.kind === "agent").map((member) => ({
+      id: `agent-${member.id}`,
+      label: member.display_name,
+      group: "Agents",
+      hint: roleByMemberId.get(member.id) ?? undefined,
+      leading: <PixelIdentity name={member.display_name} kind="agent" seed={member.id} />,
+      href: `/s/${spaceSlugValue}/agents/${member.id}`,
+    })),
+    toolItem("inbox", "Inbox", Inbox, "inbox"),
+    toolItem("tasks", "Tasks", ListTodo, "tasks"),
+    toolItem("members", "Members", Users, "members"),
+    toolItem("computers", "Computers", Monitor, "computers"),
+    toolItem("settings", "Settings", Settings, "settings"),
+  ];
   const page = children({
     space: space.data,
     user: user.data,
@@ -329,6 +379,9 @@ export function SpaceShell({
           <Menu />
         </button>
         <strong title={space.data.name}>{space.data.name}</strong>
+        <button className="icon-button" type="button" aria-label="Jump to" title="Jump to" onClick={() => setSwitcherOpen(true)}>
+          <Search />
+        </button>
         <Link
           className="space-topbar-inbox"
           to="/s/$spaceSlug/inbox"
@@ -361,6 +414,15 @@ export function SpaceShell({
             <span className="space-mark" aria-hidden="true"><SumiMark /></span>
             <strong>{space.data.name}</strong>
           </Link>
+          <button
+            className="icon-button space-search-button"
+            type="button"
+            aria-label="Jump to"
+            title="Jump to (⌘K)"
+            onClick={() => setSwitcherOpen(true)}
+          >
+            <Search />
+          </button>
           <button
             className="navigation-close icon-button"
             type="button"
@@ -531,6 +593,18 @@ export function SpaceShell({
           error={channelCreation.error?.message}
           close={() => setChannelFormOpen(false)}
           onSubmit={(input) => channelCreation.mutate(input)}
+        />
+      ) : null}
+
+      {switcherOpen ? (
+        <QuickSwitcher
+          items={switcherItems}
+          close={() => setSwitcherOpen(false)}
+          open={(href) => {
+            setSwitcherOpen(false);
+            dismissNavigationDrawer();
+            void navigate({ to: href });
+          }}
         />
       ) : null}
 

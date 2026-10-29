@@ -1105,6 +1105,24 @@ details.system-event .system-event-heading {
   transition: box-shadow .15s ease;
 }
 
+.composer--dragging {
+  box-shadow: 0 0 0 1.5px var(--live), 0 10px 28px rgb(28 27 25 / 7%);
+}
+
+.composer--dragging::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 88%);
+  color: var(--live-ink);
+  content: "Drop to attach";
+  font-size: var(--text-small);
+  font-weight: 550;
+  pointer-events: none;
+}
+
 .composer:focus-within {
   box-shadow: 0 0 0 1px rgb(28 27 25 / 16%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 7%);
 }

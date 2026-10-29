@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Building2, ListTodo, MessageCircle, Users } from "lucide-react";
+import { ListTodo, MessageCircle, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -15,6 +15,7 @@ import {
 } from "../../api/client";
 import { activityLabel } from "../../agentActivity";
 import { PixelAgent, type AgentPose } from "../../components/company/PixelAgent";
+import { PixelIdentity } from "../../components/PixelIdentity";
 import { useSpaceEvents } from "../../hooks/useSpaceEvents";
 import "./office.css";
 
@@ -533,11 +534,11 @@ export function CompanyOfficeView({
     [members],
   );
   const counts = useMemo(() => officeCounts(agents.data ?? []), [agents.data]);
+  const [focusedId, setFocusedId] = useState<string>();
 
   return (
     <section className="office-workspace" aria-labelledby="office-heading">
       <header className="office-header">
-        <span className="office-header-glyph" aria-hidden="true"><Building2 /></span>
         <div className="page-title">
           <h1 id="office-heading" tabIndex={-1}>Office</h1>
           <p>Live view of every Agent at work.</p>
@@ -547,32 +548,8 @@ export function CompanyOfficeView({
         </Link>
       </header>
 
-      <div className="office-status" aria-label="Agent activity">
-        <div className="office-status-counts">
-          {counts.length === 0 ? <span className="office-status-empty">No Agents paired</span> : counts.map((group) => (
-            <span className="office-status-item" key={group.status}>
-              <i className={`office-status-dot office-status-dot--${group.status}`} aria-hidden="true" />
-              {group.label} <strong>{group.count}</strong>
-            </span>
-          ))}
-        </div>
-        {hotGroups.size ? (
-          <div className="office-hot-list" aria-label="Active group conversations">
-            {[...hotGroups.values()].map((group) => (
-              <Link
-                key={group.channelId}
-                className="office-hot-chip"
-                to="/s/$spaceSlug/channels/$channelSlug"
-                params={{ spaceSlug, channelSlug: group.channelSlug }}
-                title={`#${group.channelSlug} is busy`}
-              >
-                <MessageCircle aria-hidden="true" />#{group.channelSlug} gathering
-              </Link>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
+      <div className="office-body">
+      <div className="office-stage-column">
       <div
         className="office-stage-wrap"
         ref={stageRef}
@@ -632,7 +609,11 @@ export function CompanyOfficeView({
               return (
                 <Link
                   key={agent.member_id}
-                  className={`office-agent${offline ? " office-agent--offline" : ""}`}
+                  className={`office-agent${offline ? " office-agent--offline" : ""}${focusedId === agent.member_id ? " office-agent--focused" : ""}`}
+                  onMouseEnter={() => setFocusedId(agent.member_id)}
+                  onMouseLeave={() => setFocusedId(undefined)}
+                  onFocus={() => setFocusedId(agent.member_id)}
+                  onBlur={() => setFocusedId(undefined)}
                   to="/s/$spaceSlug/agents/$agentId"
                   params={{ spaceSlug, agentId: agent.member_id }}
                   style={{
@@ -671,16 +652,77 @@ export function CompanyOfficeView({
           </div>
         )}
       </div>
-      {isGovernor ? (
-        <p className="office-privacy-note">Agent-to-Agent DMs are visible because you govern this Space.</p>
-      ) : null}
-      <p className="office-attribution">
-        Office scene &amp; sprites by{" "}
-        <a href="https://arlantr.itch.io/free-office-pixel-art" target="_blank" rel="noreferrer">
-          Arlan_TR
-        </a>{" "}
-        · Free office pixel art
-      </p>
+      </div>
+      <aside className="office-roster" aria-label="Agents in the office">
+        <header className="office-roster-heading">
+          <h2>Agents</h2>
+          <span>{rosterSummary(counts)}</span>
+        </header>
+        {activeAgents.length === 0 ? (
+          <p className="office-roster-empty">No Agents yet.</p>
+        ) : (
+          <ul className="office-roster-list">
+            {activeAgents.map((agent) => {
+              const name = memberById.get(agent.member_id)?.display_name ?? agent.name;
+              const status = agent.activity_status;
+              const offline = agent.computer_reachable === false;
+              const live = status === "working" || status === "dispatched";
+              const detail = offline
+                ? "Computer offline"
+                : live && agent.activity?.label
+                  ? agent.activity.label
+                  : activityLabel(status);
+              return (
+                <li key={agent.member_id}>
+                  <Link
+                    className={`office-roster-row${focusedId === agent.member_id ? " office-roster-row--focused" : ""}`}
+                    to="/s/$spaceSlug/agents/$agentId"
+                    params={{ spaceSlug, agentId: agent.member_id }}
+                    onMouseEnter={() => setFocusedId(agent.member_id)}
+                    onMouseLeave={() => setFocusedId(undefined)}
+                    onFocus={() => setFocusedId(agent.member_id)}
+                    onBlur={() => setFocusedId(undefined)}
+                  >
+                    <span className={`presence-identity presence-identity--${status}`}>
+                      <PixelIdentity name={name} kind="agent" seed={agent.member_id} />
+                    </span>
+                    <span className="office-roster-copy">
+                      <strong>{name}</strong>
+                      <small className={live && !offline ? "office-roster-live" : undefined}>{detail}</small>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {hotGroups.size ? (
+          <section className="office-gatherings" aria-label="Active group conversations">
+            <h3>Gathering now</h3>
+            {[...hotGroups.values()].map((group) => (
+              <Link
+                key={group.channelId}
+                className="office-hot-chip"
+                to="/s/$spaceSlug/channels/$channelSlug"
+                params={{ spaceSlug, channelSlug: group.channelSlug }}
+                title={`#${group.channelSlug} is busy`}
+              >
+                <MessageCircle aria-hidden="true" />#{group.channelSlug}
+              </Link>
+            ))}
+          </section>
+        ) : null}
+        <footer className="office-roster-footer">
+          {isGovernor ? <p>Agent-to-Agent DMs are visible because you govern this Space.</p> : null}
+          <p>
+            Scene &amp; sprites by{" "}
+            <a href="https://arlantr.itch.io/free-office-pixel-art" target="_blank" rel="noreferrer">
+              Arlan_TR
+            </a>
+          </p>
+        </footer>
+      </aside>
+      </div>
     </section>
   );
 }
@@ -811,6 +853,14 @@ function pruneByUntil<T extends { until: number }>(current: ReadonlyMap<string, 
     }
   }
   return changed ? next : current;
+}
+
+function rosterSummary(counts: Array<{ status: string; count: number }>): string {
+  const total = counts.reduce((sum, group) => sum + group.count, 0);
+  const busy = counts
+    .filter((group) => group.status === "working" || group.status === "dispatched")
+    .reduce((sum, group) => sum + group.count, 0);
+  return busy ? `${total} · ${busy} working` : String(total);
 }
 
 function officeCounts(agents: Agent[]): Array<{ status: string; label: string; count: number }> {

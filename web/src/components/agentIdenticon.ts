@@ -29,33 +29,60 @@ export interface AgentIdenticon {
 }
 
 export function buildAgentIdenticon(memberId: string): AgentIdenticon {
-  const shapeHash = stableHash(memberId, 0x9e3779b9);
-  const detailHash = stableHash(memberId, 0x85ebca6b);
   const palette = {
     background: AGENT_SEAL_BACKGROUND,
     foreground: AGENT_INKS[stableHash(memberId, 0xc2b2ae35) % AGENT_INKS.length],
   };
-  const cells = new Set<string>();
-
-  for (let row = 0; row < 6; row += 1) {
-    const rowHash = mix(shapeHash ^ Math.imul(detailHash, row + 1));
-    const width = 1 + (rowHash % 3);
-    const offset = (rowHash >>> 8) % (4 - width);
-    for (let column = offset; column < offset + width; column += 1) {
-      addMirroredCell(cells, column + 1, row + 1);
-    }
-  }
-
-  // A short central bridge keeps the generated mark visually coherent at 22px.
-  const bridgeRow = 2 + (shapeHash % 3);
-  addMirroredCell(cells, 3, bridgeRow);
-  addMirroredCell(cells, 3, bridgeRow + 1);
-
+  const cells = pickSealCells(memberId);
   const orderedCells = [...cells]
     .map((cell) => cell.split(",").map(Number) as [number, number])
     .sort(([leftX, leftY], [rightX, rightY]) => leftY - rightY || leftX - rightX);
   const signature = `${palette.foreground}:${orderedCells.map(([x, y]) => `${x}${y}`).join("")}`;
   return { ...palette, cells: orderedCells, signature };
+}
+
+// A seal is an 8x8 grid mirrored around its centre: each of the 32 cells on
+// the left half is filled about half the time. Draws that come out too sparse,
+// too heavy or split in two are rejected so every seal reads as one mark.
+function pickSealCells(memberId: string): Set<string> {
+  let fallback = new Set<string>();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let state = stableHash(memberId, 0x9e3779b9 + attempt) || 1;
+    const next = () => {
+      state ^= state << 13;
+      state >>>= 0;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      state >>>= 0;
+      return state;
+    };
+    const cells = new Set<string>();
+    let filled = 0;
+    let centre = 0;
+    let rows = 0;
+    for (let y = 0; y < 8; y += 1) {
+      let rowFilled = false;
+      for (let x = 0; x < 4; x += 1) {
+        if (next() % 100 >= 52) continue;
+        addMirroredCell(cells, x, y);
+        filled += 1;
+        rowFilled = true;
+        if (x === 3) centre += 1;
+      }
+      if (rowFilled) rows += 1;
+    }
+    // Lone pixels read as noise at 22px; drop any cell with no edge neighbour.
+    for (const cell of [...cells]) {
+      const [x, y] = cell.split(",").map(Number);
+      if (![[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]].some(([nx, ny]) => cells.has(`${nx},${ny}`))) {
+        cells.delete(cell);
+        if (x < 4) filled -= 1;
+      }
+    }
+    if (attempt === 0) fallback = cells;
+    if (filled >= 12 && filled <= 22 && centre >= 3 && rows >= 6) return cells;
+  }
+  return fallback;
 }
 
 export function identityPalette(memberId: string) {

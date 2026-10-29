@@ -16,7 +16,7 @@
 - 字号层级：页面标题 17px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。
 - 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 ink（主要 CTA），圆角 7px。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
 - 选中态全站统一：白色抬起卡片（`--shadow-selected`），用于导航当前项、筛选 tab、分段控件。hover 只换极浅底色。
-- 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 由 member ID 生成的 8×8 对称像素）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。
+- 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。
 - Task 状态由图形形状承载：TODO 虚线圆、In Progress 半满圆、In Review 圆点环、Done 对勾、Closed 斜线；同时带状态文字或 `aria-label`，颜色不是唯一线索。
 - 附件以浅底小条展示（subtle 底 + 圆角），不画边框。
 - 所有图形信号带 `aria-label` 和 `title`。
@@ -25,13 +25,14 @@
 
 - 桌面布局为 Sidebar、Channel、可选 Thread pane 三栏；不再有 Space rail。Thread pane 只在打开时存在（默认 360px），展开时 Channel 自适应收缩。
 - Sidebar 宽 256px，自上而下：Space 头（标识 + 名称）、Space tools（Inbox 带待读计数、Tasks、Members、Computers；开启实验功能后出现 Agent insights、Company）、Channels、Discover、Direct messages，底部固定为当前身份与 Settings 齿轮。
+- Sidebar 头部有搜索按钮，`⌘K` / `Ctrl+K` 在任何页面打开快速跳转：按名字筛选 Channels、DM、Agents 和 Space 工具页，方向键选择、Enter 打开、Esc 关闭。
 - Sidebar 结构固定：点击任何入口只改变选中项，不在 Sidebar 内插入或移除内容。页面自己的二级列表放在页面内：Computers 的已配对列表是页面左侧 232px 分栏（标题行与页面 header 同高、共用分隔线；低于 700px 变为顶部横向滚动条），Insights 用页内 tab，Settings 是单页。
 - 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用 subtle 底槽 + 白色抬起选中块。
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。
 - DM 列表中 Agent 正在工作时显示青色 `Working`，否则显示 Role 摘要。
 - 1100px 及以上保持三栏；低于 1100px 出现顶栏（`Open navigation` 菜单按钮、Space 名称、Inbox 计数），Sidebar 变为抽屉，Thread 覆盖 Channel；低于 700px 使用单列，Thread 和 Task 详情为全屏路由。
 - Header 高 56px。Message 内容占满 Channel 可用宽度；消息较少时时间线贴近 Composer，像聊天一样从底部开始。
-- Composer 是抬起的白色卡片（`--shadow-raised`、圆角 14px），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。
+- Composer 是抬起的白色卡片（`--shadow-raised`、圆角 14px），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
 - Composer 只包含 Markdown、Attachment、mention 和 Send；DM 的 Composer 不提供 mention。
 
@@ -65,7 +66,7 @@
 ## Company 页面
 
 - Company 是 Space 的公司形态入口，默认进入 Company Office；Sidebar 的 Company 入口直接打开 Office。
-- Company Office 是像素化办公区：每个 Agent 一个工位，按 activity 状态显示坐姿、打字或空闲；不同 Agent 使用不同配色区分，名字固定在头顶。Agent 空闲一段时间后会随机游走、去茶水角喝水/喝咖啡或站到游戏桌，移动速度缓慢；一旦转为工作状态就走回工位（不瞬移）；Agent 参与 DM 活跃时，发起方走到对方工位讨论；群组频道在数分钟窗口内消息达到阈值时，频道内 Agent 聚集到会议区。动画遵循 `prefers-reduced-motion`；静止模式下停止随机游走与定时位置更换，工作、DM 和群组事件直接呈现目标位置。
+- Company Office 是像素化办公区：每个 Agent 一个工位，按 activity 状态显示坐姿、打字或空闲；不同 Agent 使用不同配色区分，名字以白色小胶囊固定在头顶（状态点：工作中为青色）。页面右侧是 Agent 名单（印章头像、名字、工作中显示当前步骤），名单行与场景中的小人悬停/聚焦时互相高亮，点击进入 Agent 详情；聚集中的频道以青色胶囊列在名单下方。窄屏时名单移到场景下方。Agent 空闲一段时间后会随机游走、去茶水角喝水/喝咖啡或站到游戏桌，移动速度缓慢；一旦转为工作状态就走回工位（不瞬移）；Agent 参与 DM 活跃时，发起方走到对方工位讨论；群组频道在数分钟窗口内消息达到阈值时，频道内 Agent 聚集到会议区。动画遵循 `prefers-reduced-motion`；静止模式下停止随机游走与定时位置更换，工作、DM 和群组事件直接呈现目标位置。
 - Office 场景与小人使用 Arlan_TR 的 [Free office pixel art](https://arlantr.itch.io/free-office-pixel-art)（itch.io 免费素材包）：场景由包内独立物件拼装（隔断、工位、电脑、椅子、绿植、水冷机等），地板为平铺像素砖；Agent 使用包内 Julia 的 idle / walk 动画，工作状态使用 Julia 的背面帧并对应电脑亮屏；页面底部展示作者署名。
 - 办公室画布随 Agent 数量成长：0 人显示空办公室、1-3 人 480×270 单排、4-6 人 640×360 两排、7-9 人 800×450 三排、10-12 人 960×540 三排四列；超过 12 人后保持四列并通过增加行数向下扩展画布。只给实际 Agent 生成工位与电脑，每个 Agent 使用独立工位；人少时桌子挨在一起，画布也更小。
 

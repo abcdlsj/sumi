@@ -107,8 +107,43 @@ export function MessageComposer({
     event.target.value = "";
   }
 
+  const [dragging, setDragging] = useState(false);
+  async function attachFiles(files: File[]) {
+    for (const file of files) {
+      try {
+        await upload.mutateAsync(file);
+      } catch {
+        // The mutation keeps the error for the composer's alert line.
+        return;
+      }
+    }
+  }
+
   return (
-    <form className={`composer${className ? ` ${className}` : ""}`} onSubmit={submit}>
+    <form
+      className={`composer${dragging ? " composer--dragging" : ""}${className ? ` ${className}` : ""}`}
+      onSubmit={submit}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        setDragging(false);
+        void attachFiles([...event.dataTransfer.files]);
+      }}
+      onPaste={(event) => {
+        const files = [...event.clipboardData.files];
+        if (!files.length) return;
+        event.preventDefault();
+        void attachFiles(files);
+      }}
+    >
       <input
         ref={fileInput}
         className="visually-hidden"

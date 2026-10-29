@@ -17,16 +17,16 @@ describe("PixelIdentity", () => {
     expect(reviewer.signature).not.toBe(first.signature);
   });
 
-  it("keeps every Agent pixel inside the inset 8x8 canvas and mirrors it horizontally", () => {
+  it("keeps every Agent pixel inside the 8x8 canvas and mirrors it horizontally", () => {
     const identicon = buildAgentIdenticon(linId);
     const cells = new Set(identicon.cells.map(([x, y]) => `${x},${y}`));
 
     expect(identicon.cells.length).toBeGreaterThanOrEqual(12);
     for (const [x, y] of identicon.cells) {
-      expect(x).toBeGreaterThanOrEqual(1);
-      expect(x).toBeLessThanOrEqual(6);
-      expect(y).toBeGreaterThanOrEqual(1);
-      expect(y).toBeLessThanOrEqual(6);
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(7);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(7);
       expect(cells).toContain(`${7 - x},${y}`);
     }
   });
