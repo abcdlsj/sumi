@@ -73,17 +73,18 @@ chmod 700 "$SUMI_DIR"
 if [ ! -x "$BIN" ]; then
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
-  release="$server/api/v1/computer-updates/stable/$target"
-  curl -fsSL "$release/manifest.json" -o "$work/manifest.json" \
+  curl -fsSL "$server/api/v1/computer-updates/stable/$target/manifest.json" -o "$work/manifest.json" \
     || fail "$server does not publish a Computer release for $target"
   version=$(json_field version "$work/manifest.json")
-  artifact=$(json_field artifact "$work/manifest.json")
+  url=$(json_field url "$work/manifest.json")
   expected=$(json_field sha256 "$work/manifest.json")
-  case "$artifact" in
-    ''|*/*|.|..) fail "the release manifest names an invalid artifact" ;;
+  case "$url" in
+    https://*) ;;
+    *) fail "the release manifest has no HTTPS download URL" ;;
   esac
   [ -n "$expected" ] || fail "the release manifest has no sha256"
-  curl -fsSL "$release/$artifact" -o "$work/sumi"
+  say "Downloading Sumi Computer $version for $target"
+  curl -fL --proto '=https' --proto-redir '=https' --progress-bar "$url" -o "$work/sumi"
   [ "$(sha256 "$work/sumi")" = "$expected" ] || fail "downloaded Computer does not match its sha256"
   chmod 700 "$work/sumi"
   mv "$work/sumi" "$BIN"

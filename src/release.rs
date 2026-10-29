@@ -37,19 +37,21 @@ pub(crate) async fn computer(args: ComputerReleaseArgs) -> anyhow::Result<()> {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
         "Computer release target is invalid"
     );
-    let artifact_name = format!("sumi-{}-{target}", args.version);
+    ensure!(
+        args.url.scheme() == "https",
+        "Computer release URL must use HTTPS"
+    );
     let release = ComputerRelease {
         version: args.version,
         protocol_version: CURRENT.value(),
         target,
-        artifact: artifact_name.clone(),
+        url: args.url,
         sha256: hex::encode(Sha256::digest(&artifact_content)),
     };
 
     let target_dir = args.output_dir.join(&release.target);
     ensure_private_directory(&args.output_dir).await?;
     ensure_private_directory(&target_dir).await?;
-    write_release_file(&target_dir.join(&artifact_name), &artifact_content).await?;
     write_atomically(
         &target_dir.join("manifest.json"),
         &serde_json::to_vec_pretty(&release)?,
@@ -69,36 +71,6 @@ async fn ensure_private_directory(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn write_release_file(path: &Path, content: &[u8]) -> anyhow::Result<()> {
-    match tokio::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .await
-    {
-        Ok(mut file) => {
-            file.write_all(content).await?;
-            file.sync_all().await?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                file.set_permissions(std::fs::Permissions::from_mode(0o700))
-                    .await?;
-            }
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let existing = tokio::fs::read(path).await?;
-            ensure!(
-                existing == content,
-                "an immutable Computer release artifact already exists with different content"
-            );
-            Ok(())
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
 async fn write_atomically(path: &Path, content: &[u8]) -> anyhow::Result<()> {
     let pending = path.with_extension("json.new");
     let mut file = tokio::fs::File::create(&pending).await?;
@@ -115,17 +87,21 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn computer_release_command_writes_an_immutable_release() {
+    async fn computer_release_command_writes_a_manifest_for_the_published_artifact() {
         let directory = tempdir().unwrap();
         let artifact = directory.path().join("sumi");
         tokio::fs::write(&artifact, b"computer binary")
             .await
             .unwrap();
         let output = directory.path().join("stable");
+        let url: url::Url = "https://github.com/abcdlsj/sumi/releases/download/v1.2.3/sumi"
+            .parse()
+            .unwrap();
         computer(ComputerReleaseArgs {
             artifact,
             version: "1.2.3".into(),
             target: Some("x86_64-unknown-linux-gnu".into()),
+            url: url.clone(),
             output_dir: output.clone(),
         })
         .await
@@ -138,16 +114,16 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            tokio::fs::read(target_dir.join(&manifest.artifact))
-                .await
-                .unwrap(),
-            b"computer binary"
-        );
+        assert_eq!(manifest.url, url);
         assert_eq!(
             manifest.sha256,
             hex::encode(Sha256::digest(b"computer binary"))
         );
         assert_eq!(manifest.protocol_version, CURRENT.value());
+        assert_eq!(
+            std::fs::read_dir(target_dir).unwrap().count(),
+            1,
+            "only the manifest is written"
+        );
     }
 }

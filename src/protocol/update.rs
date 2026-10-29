@@ -6,7 +6,7 @@ pub(crate) struct ComputerRelease {
     pub(crate) version: String,
     pub(crate) protocol_version: u16,
     pub(crate) target: String,
-    pub(crate) artifact: String,
+    pub(crate) url: url::Url,
     pub(crate) sha256: String,
 }
 
@@ -46,13 +46,13 @@ mod tests {
             version: "1.2.3".into(),
             protocol_version: 4,
             target: "aarch64-apple-darwin".into(),
-            artifact: "sumi".into(),
+            url: "https://example.com/sumi".parse().unwrap(),
             sha256: "abc".into(),
         };
 
         assert_eq!(
             serde_json::to_string(&release).unwrap(),
-            r#"{"version":"1.2.3","protocol_version":4,"target":"aarch64-apple-darwin","artifact":"sumi","sha256":"abc"}"#
+            r#"{"version":"1.2.3","protocol_version":4,"target":"aarch64-apple-darwin","url":"https://example.com/sumi","sha256":"abc"}"#
         );
     }
 }

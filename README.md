@@ -186,7 +186,8 @@ curl -fsSL https://sumi.example.com/install.sh | sh -s -- --server https://sumi.
 Running the same command again is safe: it leaves updates to the daemon, keeps
 an unchanged service running, and prints the pairing link while the Computer is
 not yet paired. Logs are written to `~/.sumi/logs/computer.log`. The Server
-must publish Computer releases (`computer_update_dir`, see below).
+must publish Computer release manifests (`computer_update_dir`, see below); the
+executable is downloaded from the GitHub Release.
 
 To run the daemon by hand instead:
 
@@ -232,21 +233,23 @@ You can override the Server URL on the command line:
 
 ### 4. Computer releases
 
-Build and package one target:
+The Server publishes only release manifests; the executables live on the GitHub
+Release. Write the manifest for one target:
 
 ```sh
 sumi release computer \
   --artifact ./target/release/sumi \
   --version 0.2.0 \
   --target aarch64-apple-darwin \
+  --url https://github.com/abcdlsj/sumi/releases/download/v0.2.0/sumi-0.2.0-aarch64-apple-darwin \
   --output-dir /var/lib/sumi/releases/stable
 ```
 
-The command writes `<target>/manifest.json` and an immutable, versioned
-artifact under the output directory. Run it once per target into the same
-directory; the Server serves every target from it, so one Server updates macOS
-and Linux Computers alike. A Computer downloads releases only from its
-configured Server and verifies the SHA-256 digest before staging an artifact.
+The command writes `<target>/manifest.json` with the download URL and the
+artifact's SHA-256 digest. Run it once per target into the same directory; one
+Server then updates macOS and Linux Computers alike. A Computer reads the
+manifest only from its configured Server, downloads the artifact from the URL
+in it, and verifies the digest before staging it.
 Production deployments must expose the Server over HTTPS. The Computer
 activates a release only after local Runs finish.
 
@@ -257,8 +260,9 @@ run the release command.
 
 Pushing a tag that matches the Cargo package version, such as `v0.2.0`, builds
 Linux x86_64, macOS Intel, and macOS Apple Silicon Computer executables and
-`sumi-computer-releases-<version>.tar.gz`, a `stable` directory holding all
-three targets. Extract it as `computer_update_dir` on the Server. The GitHub
+`sumi-computer-releases-<version>.tar.gz`, a `stable` directory holding the
+manifests of all three targets. Extract it as `computer_update_dir` on the
+Server. The GitHub
 Actions run stores them as workflow artifacts and attaches them with
 `SHA256SUMS` to the GitHub Release.
 

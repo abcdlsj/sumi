@@ -42,8 +42,8 @@ Driver：
 
 ## Computer 更新
 
-- Server 从配置的 stable release 目录公开不可变 manifest 与二进制。目录按 target 分子目录，每个 `<target>/manifest.json` 包含 daemon version、protocol version、target、artifact 和 sha256；Computer 读取 `/api/v1/computer-updates/stable/<target>/manifest.json`，再下载同目录下的 artifact。一台 Server 因此可以同时服务多个平台的 Computer。
-- Computer 只从已连接 Server 的同一 origin 下载 manifest 与 artifact；生产传输使用 HTTPS，sha256 检测损坏或不一致的 artifact。Server 是其所承载 Computer 的更新信任边界，不增加全局发行密钥。
+- Server 从配置的 stable release 目录只公开 manifest，不托管二进制。目录按 target 分子目录，Server 只响应 `/api/v1/computer-updates/stable/<target>/manifest.json`。manifest 包含 daemon version、protocol version、target、artifact 下载 URL 和 sha256；artifact 由发布流程上传到 GitHub Release。一台 Server 因此可以同时服务多个平台的 Computer。
+- Computer 只从已连接 Server 读取 manifest，再从 manifest 中的 HTTPS URL 下载 artifact，并以 manifest 的 sha256 校验；sha256 不符的 artifact 不得写入 staging。生产传输使用 HTTPS。Server 是其所承载 Computer 的更新信任边界，不增加全局发行密钥。
 - release Computer 首次从稳定路径之外运行时，把自身原子复制到 `~/.sumi/bin/sumi` 并从该路径重新执行；已存在的稳定副本优先，防止旧下载文件覆盖已更新版本。debug 构建不自动安装。
 - Computer 在启动后检查更新，此后按配置周期检查。Update Policy 关闭自动更新时，Computer 不自动安装或检查发布物。
 - Computer 在本地校验 target、版本和 sha256，再把 artifact 写入私有 staging 目录。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
@@ -51,7 +51,7 @@ Driver：
 - 新 daemon 完成本地数据库、sandbox、Driver recovery 和 capability socket 初始化后写 readiness 标记 `update/ready-<version>`。readiness 超时或进程提前退出时，updater 恢复旧二进制与 SQLite 备份并重启旧 daemon。
 - Computer 可由用户级服务管理器托管：macOS launchd agent `dev.sumi.computer`，Linux systemd user unit `sumi-computer.service`。服务以 `SUMI_COMPUTER_SERVICE=launchd|systemd` 声明托管方；服务只在非正常退出时重启。托管时 updater 脱离服务的进程组（launchd）或作为独立 transient unit 运行（systemd），daemon 以成功状态退出后，updater 经服务管理器启动、重启新旧 daemon，不自行 spawn。
 - Computer 在 SIGINT 与 SIGTERM 时都按正常关闭流程断开 Server。
-- Server 在 `/install.sh` 提供 Computer 安装脚本，用法为 `curl -fsSL <server>/install.sh | sh -s -- --server <server>`。脚本按平台从同一 Server 下载 stable release 并校验 sha256，安装到 `~/.sumi/bin/sumi`，缺少 `~/.sumi/config.toml` 时写入 `server_url`，再写入并启动上述用户级服务。重复执行是幂等的：已安装的二进制交给 daemon 的 updater 更新，脚本不替换；服务定义不变时只确保服务在运行，不重启。未配对时脚本从日志 `~/.sumi/logs/computer.log` 打印配对链接。
+- Server 在 `/install.sh` 提供 Computer 安装脚本，用法为 `curl -fsSL <server>/install.sh | sh -s -- --server <server>`。脚本按平台从同一 Server 读取 stable manifest，从其中的 URL 下载 artifact 并校验 sha256，安装到 `~/.sumi/bin/sumi`，缺少 `~/.sumi/config.toml` 时写入 `server_url`，再写入并启动上述用户级服务。重复执行是幂等的：已安装的二进制交给 daemon 的 updater 更新，脚本不替换；服务定义不变时只确保服务在运行，不重启。未配对时脚本从日志 `~/.sumi/logs/computer.log` 打印配对链接。
 - updater 在本地 journal 记录成功或回退。已经回退的 release 不得再次自动激活；新的 release 仍可尝试。
 - 更新发现使用独立 HTTP 接口，不依赖 Computer WebSocket 是否能完成业务协议握手。
 

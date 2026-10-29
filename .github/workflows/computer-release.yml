@@ -71,6 +71,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_TARGET: ${{ matrix.target }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           host="$(rustc -vV | sed -n 's/^host: //p')"
           artifact="target/release/sumi"
@@ -81,8 +82,9 @@ jobs:
             --artifact "$artifact" \
             --version "$RELEASE_VERSION" \
             --target "$RELEASE_TARGET" \
+            --url "https://github.com/$REPOSITORY/releases/download/v$RELEASE_VERSION/sumi-$RELEASE_VERSION-$RELEASE_TARGET" \
             --output-dir dist/stable
-          cp "dist/stable/$RELEASE_TARGET/sumi-$RELEASE_VERSION-$RELEASE_TARGET" dist/
+          cp "$artifact" "dist/sumi-$RELEASE_VERSION-$RELEASE_TARGET"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

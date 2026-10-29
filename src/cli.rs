@@ -109,6 +109,9 @@ pub(crate) struct ComputerReleaseArgs {
     pub(crate) version: String,
     #[arg(long)]
     pub(crate) target: Option<String>,
+    /// HTTPS URL the artifact is published at, such as a GitHub Release asset.
+    #[arg(long)]
+    pub(crate) url: Url,
     #[arg(long)]
     pub(crate) output_dir: PathBuf,
 }

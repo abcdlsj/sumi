@@ -66,8 +66,11 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
                 .append_index_html_on_directories(true)
                 .not_found_service(ServeFile::new(config.web_dist.join("index.html"))),
         );
-    if let Some(update_dir) = &config.computer_update_dir {
-        app = app.nest_service("/api/v1/computer-updates/stable", ServeDir::new(update_dir));
+    if let Some(update_dir) = config.computer_update_dir.clone() {
+        app = app.route(
+            "/api/v1/computer-updates/stable/{target}/manifest.json",
+            axum::routing::get(move |target| computer_release_manifest(update_dir.clone(), target)),
+        );
     }
     let app = app.layer(TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(config.bind)
@@ -112,6 +115,33 @@ async fn dispatch_available_work_forever(state: http::RuntimeState) {
         }
     }
 }
+/// Serves only `<target>/manifest.json`; artifacts are downloaded from the URL inside it.
+async fn computer_release_manifest(
+    update_dir: std::path::PathBuf,
+    axum::extract::Path(target): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let valid_target = !target.is_empty()
+        && target
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+    if !valid_target {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    match tokio::fs::read(update_dir.join(&target).join("manifest.json")).await {
+        Ok(manifest) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "application/json"),
+                (axum::http::header::CACHE_CONTROL, "no-cache"),
+            ],
+            manifest,
+        )
+            .into_response(),
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 const COMPUTER_INSTALL_SCRIPT: &str = include_str!("install-computer.sh");
 
 async fn computer_install_script() -> impl axum::response::IntoResponse {

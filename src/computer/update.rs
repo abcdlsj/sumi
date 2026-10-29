@@ -1,5 +1,5 @@
 use std::{
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
@@ -207,11 +207,10 @@ async fn check_and_stage(
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let release_root = server.join(&format!(
-        "api/v1/computer-updates/stable/{}/",
+    let endpoint = server.join(&format!(
+        "api/v1/computer-updates/stable/{}/manifest.json",
         current_target()
     ))?;
-    let endpoint = release_root.join("manifest.json")?;
     let response = client.get(endpoint).send().await?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -225,10 +224,7 @@ async fn check_and_stage(
         release.target == current_target(),
         "release target does not match this Computer"
     );
-    ensure!(
-        valid_artifact_name(&release.artifact),
-        "release artifact name is invalid"
-    );
+    ensure_secure_update_origin(&release.url)?;
 
     let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
     let candidate = Version::parse(&release.version)?;
@@ -248,8 +244,24 @@ async fn check_and_stage(
     ensure_private_directory(&staged_dir).await?;
     let staged = staged_dir.join("sumi");
     if file_sha256(&staged).await.as_deref() != Some(release.sha256.as_str()) {
-        let artifact_url = release_root.join(&release.artifact)?;
-        let response = client.get(artifact_url).send().await?.error_for_status()?;
+        // Release hosts such as GitHub redirect to a storage host. The manifest sha256 from the
+        // Server stays the integrity check, so redirects may cross hosts but not leave HTTPS.
+        let artifact_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 10 {
+                    attempt.error("too many redirects")
+                } else if ensure_secure_update_origin(attempt.url()).is_err() {
+                    attempt.error("redirect leaves HTTPS")
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()?;
+        let response = artifact_client
+            .get(release.url.clone())
+            .send()
+            .await?
+            .error_for_status()?;
         if let Some(length) = response.content_length() {
             ensure!(
                 length <= MAX_ARTIFACT_BYTES as u64,
@@ -289,11 +301,6 @@ fn ensure_secure_update_origin(server: &url::Url) -> anyhow::Result<()> {
         "Computer automatic updates require HTTPS except on localhost"
     );
     Ok(())
-}
-
-fn valid_artifact_name(value: &str) -> bool {
-    let mut components = Path::new(value).components();
-    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
 }
 
 async fn local_runs_are_inactive(database: &Path) -> bool {
@@ -666,14 +673,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn artifact_name_cannot_escape_the_release_directory() {
-        assert!(valid_artifact_name("sumi-aarch64-apple-darwin"));
-        assert!(!valid_artifact_name("../sumi"));
-        assert!(!valid_artifact_name("nested/sumi"));
-        assert!(!valid_artifact_name("/tmp/sumi"));
-    }
-
-    #[test]
     fn update_origin_requires_https_except_on_loopback() {
         for value in [
             "https://sumi.example.test/",
@@ -721,47 +720,64 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn same_origin_release_is_downloaded_verified_and_staged() {
-        let artifact = b"computer binary".to_vec();
+    /// Serves a manifest whose artifact URL redirects, the way GitHub Release assets do.
+    async fn release_server(published: &'static [u8], served: &'static [u8]) -> url::Url {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
         let release = crate::protocol::update::ComputerRelease {
             version: "9.9.9".into(),
             protocol_version: 4,
             target: current_target().into(),
-            artifact: "sumi-test".into(),
-            sha256: hex::encode(Sha256::digest(&artifact)),
+            url: format!("http://{address}/releases/download/sumi")
+                .parse()
+                .unwrap(),
+            sha256: hex::encode(Sha256::digest(published)),
         };
-        let release_root = format!("/api/v1/computer-updates/stable/{}", current_target());
         let app = Router::new()
             .route(
-                &format!("{release_root}/manifest.json"),
-                get({
-                    let release = release.clone();
-                    move || async move { Json(release) }
-                }),
+                &format!(
+                    "/api/v1/computer-updates/stable/{}/manifest.json",
+                    current_target()
+                ),
+                get(move || async move { Json(release) }),
             )
             .route(
-                &format!("{release_root}/sumi-test"),
-                get({
-                    let artifact = artifact.clone();
-                    move || async move { artifact }
-                }),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
+                "/releases/download/sumi",
+                get(|| async { axum::response::Redirect::to("/storage/sumi") }),
+            )
+            .route("/storage/sumi", get(move || async move { served }));
         tokio::spawn(axum::serve(listener, app).into_future());
+        url::Url::parse(&format!("http://{address}/")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn release_is_downloaded_from_the_manifest_url_verified_and_staged() {
+        let server = release_server(b"computer binary", b"computer binary").await;
         let directory = tempdir().unwrap();
 
-        let staged = check_and_stage(
-            &url::Url::parse(&format!("http://{address}/")).unwrap(),
-            directory.path(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let staged = check_and_stage(&server, directory.path())
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(staged.version, "9.9.9");
-        assert_eq!(tokio::fs::read(staged.candidate).await.unwrap(), artifact);
+        assert_eq!(
+            tokio::fs::read(staged.candidate).await.unwrap(),
+            b"computer binary"
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_that_does_not_match_the_manifest_sha256_is_not_staged() {
+        let server = release_server(b"computer binary", b"tampered binary").await;
+        let directory = tempdir().unwrap();
+
+        let error = check_and_stage(&server, directory.path())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("hash mismatch"));
+        assert!(!directory.path().join("update/staged/9.9.9/sumi").exists());
     }
 
     #[tokio::test]
