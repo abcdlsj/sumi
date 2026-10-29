@@ -15,6 +15,9 @@ use cli::{Cli, Command, ReleaseCommand, SchemaCommand};
 #[tokio::main]
 async fn main() -> ExitCode {
     init_tracing();
+    // Dependencies enable both the ring and aws-lc-rs rustls providers, so rustls cannot pick a
+    // process default on its own and panics on the first TLS connection that relies on it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
