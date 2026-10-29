@@ -223,7 +223,7 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
     )
     .await
     .map_err(|error| anyhow::anyhow!(error))?;
-    update::signal_ready_from_environment().await?;
+    update::signal_ready(&computer_home).await?;
     let mut updates =
         update::start_checker(&config, config.server_url.clone(), computer_home.clone());
     let mut reconnect = ExponentialBuilder::default()
@@ -292,6 +292,29 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
                 return Ok(());
             }
         }
+    }
+}
+
+/// Resolves on SIGINT or, on Unix, SIGTERM, which service managers send to stop a daemon.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 
@@ -600,7 +623,7 @@ where
     let mut pending_activity_results = BTreeMap::new();
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
+            _ = shutdown_signal() => {
                 tracing::info!(
                     computer_id = %secrets.computer_id,
                     "Computer disconnected from Server on shutdown"
@@ -977,7 +1000,7 @@ async fn pair(root: &Path, server: &url::Url) -> anyhow::Result<(PathBuf, Comput
     ))?;
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => anyhow::bail!("Computer pairing canceled"),
+            _ = shutdown_signal() => anyhow::bail!("Computer pairing canceled"),
             _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
         }
         let status = client

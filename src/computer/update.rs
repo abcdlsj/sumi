@@ -11,12 +11,73 @@ use sha2::{Digest, Sha256};
 use tokio::{io::AsyncWriteExt, process::Command, sync::mpsc};
 
 use crate::{
-    cli::{ComputerArgs, UpdaterArgs},
+    cli::{ComputerArgs, Supervisor, UpdaterArgs},
     config::{ComputerConfig, default_sumi_dir},
     protocol::update::{ComputerRelease, current_target},
 };
 
 const MAX_ARTIFACT_BYTES: usize = 200 * 1024 * 1024;
+const LAUNCHD_LABEL: &str = "dev.sumi.computer";
+const SYSTEMD_UNIT: &str = "sumi-computer.service";
+const SERVICE_ENV: &str = "SUMI_COMPUTER_SERVICE";
+
+impl Supervisor {
+    fn from_environment() -> Option<Self> {
+        match std::env::var(SERVICE_ENV).ok()?.as_str() {
+            "launchd" => Some(Self::Launchd),
+            "systemd" => Some(Self::Systemd),
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "unknown {SERVICE_ENV}; treating the Computer as unsupervised"
+                );
+                None
+            }
+        }
+    }
+
+    fn as_arg(self) -> &'static str {
+        match self {
+            Self::Launchd => "launchd",
+            Self::Systemd => "systemd",
+        }
+    }
+
+    /// Starts the service, killing a running instance first when `replace` is set.
+    async fn start(self, replace: bool) -> anyhow::Result<()> {
+        let mut command = match self {
+            Self::Launchd => {
+                let mut command = Command::new("launchctl");
+                command.arg("kickstart");
+                if replace {
+                    command.arg("-k");
+                }
+                // SAFETY: getuid has no preconditions and cannot fail.
+                let uid = unsafe { libc::getuid() };
+                command.arg(format!("gui/{uid}/{LAUNCHD_LABEL}"));
+                command
+            }
+            Self::Systemd => {
+                let mut command = Command::new("systemctl");
+                command
+                    .arg("--user")
+                    .arg(if replace { "restart" } else { "start" })
+                    .arg(SYSTEMD_UNIT);
+                command
+            }
+        };
+        let status = command
+            .stdin(Stdio::null())
+            .status()
+            .await
+            .context("failed to run the Computer service manager")?;
+        ensure!(
+            status.success(),
+            "Computer service manager exited with {status}"
+        );
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct StagedUpdate {
@@ -262,7 +323,26 @@ pub(crate) async fn launch_updater(
     let helper = computer_home.join("update").join("updater");
     tokio::fs::copy(&current_exe, &helper).await?;
     make_executable(&helper).await?;
-    let mut command = Command::new(&helper);
+    let supervisor = Supervisor::from_environment();
+    let mut command = match supervisor {
+        // systemd stops every process in the service cgroup once the daemon exits, so the
+        // updater must run in its own transient unit to outlive the daemon it replaces.
+        Some(Supervisor::Systemd) => {
+            let mut command = Command::new("systemd-run");
+            command
+                .arg("--user")
+                .arg("--collect")
+                .arg("--quiet")
+                .arg("--unit=sumi-computer-update")
+                .arg(&helper);
+            command
+        }
+        _ => Command::new(&helper),
+    };
+    // launchd kills the job's process group when the daemon exits; a new group keeps the
+    // updater alive.
+    #[cfg(unix)]
+    command.process_group(0);
     command
         .arg("updater")
         .arg("--parent-pid")
@@ -284,9 +364,17 @@ pub(crate) async fn launch_updater(
     if let Some(server) = &args.server {
         command.arg("--server").arg(server.as_str());
     }
-    command
+    if let Some(supervisor) = supervisor {
+        command.arg("--supervisor").arg(supervisor.as_arg());
+    }
+    let mut updater = command
         .spawn()
         .context("failed to start Computer updater")?;
+    if supervisor == Some(Supervisor::Systemd) {
+        // systemd-run returns once the transient unit has started.
+        let status = updater.wait().await?;
+        ensure!(status.success(), "systemd-run exited with {status}");
+    }
     tracing::info!(target_version = %update.version, "Computer updater started");
     Ok(())
 }
@@ -317,18 +405,16 @@ pub(crate) async fn run_updater(args: UpdaterArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let ready = update_root.join(format!("ready-{}", args.version));
+    let ready = ready_file(&args.computer_home, &args.version);
     let _ = tokio::fs::remove_file(&ready).await;
-    let mut child =
-        match spawn_computer(&args.current_exe, &args.config, &args.server, Some(&ready)) {
-            Ok(child) => child,
-            Err(error) => {
-                rollback_and_restart(&args, &previous, &database, &backup_dir, &update_root)
-                    .await?;
-                return Err(error);
-            }
-        };
-    let healthy = wait_for_ready(&mut child, &ready, args.ready_timeout_seconds).await;
+    let mut child = match start_computer(&args, false).await {
+        Ok(child) => child,
+        Err(error) => {
+            rollback_and_restart(&args, &previous, &database, &backup_dir, &update_root).await?;
+            return Err(error);
+        }
+    };
+    let healthy = wait_for_ready(child.as_mut(), &ready, args.ready_timeout_seconds).await;
     if healthy {
         write_journal(
             &update_root.join("journal.json"),
@@ -343,8 +429,10 @@ pub(crate) async fn run_updater(args: UpdaterArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let _ = child.kill().await;
-    let _ = child.wait().await;
+    if let Some(child) = child.as_mut() {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
     rollback_and_restart(&args, &previous, &database, &backup_dir, &update_root).await?;
     Ok(())
 }
@@ -364,8 +452,7 @@ async fn restart_after_prepare_failure(
         },
     )
     .await;
-    let restarted = spawn_computer(&args.current_exe, &args.config, &args.server, None);
-    restarted?;
+    start_computer(args, false).await?;
     journal
 }
 
@@ -390,16 +477,20 @@ async fn rollback_and_restart(
         },
     )
     .await?;
-    spawn_computer(&args.current_exe, &args.config, &args.server, None)?;
+    // Under a supervisor the failed candidate may still be running or crash-looping.
+    start_computer(args, true).await?;
     tracing::warn!(target_version = %args.version, "Computer update rolled back");
     Ok(())
 }
 
-pub(crate) async fn signal_ready_from_environment() -> anyhow::Result<()> {
-    let Some(path) = std::env::var_os("SUMI_UPDATE_READY_FILE") else {
-        return Ok(());
-    };
-    let path = PathBuf::from(path);
+fn ready_file(computer_home: &Path, version: &str) -> PathBuf {
+    computer_home
+        .join("update")
+        .join(format!("ready-{version}"))
+}
+
+pub(crate) async fn signal_ready(computer_home: &Path) -> anyhow::Result<()> {
+    let path = ready_file(computer_home, env!("CARGO_PKG_VERSION"));
     if let Some(parent) = path.parent() {
         ensure_private_directory(parent).await?;
     }
@@ -422,37 +513,47 @@ async fn wait_for_parent(parent_pid: u32) -> anyhow::Result<()> {
     anyhow::bail!("Computer daemon did not exit for update")
 }
 
-fn spawn_computer(
-    executable: &Path,
-    config: &Option<PathBuf>,
-    server: &Option<url::Url>,
-    ready: Option<&Path>,
-) -> anyhow::Result<tokio::process::Child> {
-    let mut command = Command::new(executable);
+/// Starts the daemon through its supervisor, or as a child when it runs unsupervised.
+async fn start_computer(
+    args: &UpdaterArgs,
+    replace: bool,
+) -> anyhow::Result<Option<tokio::process::Child>> {
+    if let Some(supervisor) = args.supervisor {
+        supervisor.start(replace).await?;
+        return Ok(None);
+    }
+    let mut command = Command::new(&args.current_exe);
     command.arg("computer").stdin(Stdio::null());
-    if let Some(config) = config {
+    if let Some(config) = &args.config {
         command.arg("--config").arg(config);
     }
-    if let Some(server) = server {
+    if let Some(server) = &args.server {
         command.arg("--server").arg(server.as_str());
     }
-    if let Some(ready) = ready {
-        command.env("SUMI_UPDATE_READY_FILE", ready);
-    } else {
-        command.env_remove("SUMI_UPDATE_READY_FILE");
-    }
-    command.spawn().context("failed to restart Computer daemon")
+    let child = command
+        .spawn()
+        .context("failed to restart Computer daemon")?;
+    Ok(Some(child))
 }
 
-async fn wait_for_ready(child: &mut tokio::process::Child, ready: &Path, seconds: u64) -> bool {
+async fn wait_for_ready(
+    mut child: Option<&mut tokio::process::Child>,
+    ready: &Path,
+    seconds: u64,
+) -> bool {
+    let mut exited = move || {
+        child
+            .as_mut()
+            .is_some_and(|child| child.try_wait().ok().flatten().is_some())
+    };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
     while tokio::time::Instant::now() < deadline {
-        if child.try_wait().ok().flatten().is_some() {
+        if exited() {
             return false;
         }
         if ready.is_file() {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            return child.try_wait().ok().flatten().is_none();
+            return !exited();
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

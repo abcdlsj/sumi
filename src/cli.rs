@@ -78,6 +78,15 @@ pub(crate) struct UpdaterArgs {
     pub(crate) config: Option<PathBuf>,
     #[arg(long)]
     pub(crate) server: Option<Url>,
+    #[arg(long, value_enum)]
+    pub(crate) supervisor: Option<Supervisor>,
+}
+
+/// User-level service manager that keeps a Computer daemon running.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub(crate) enum Supervisor {
+    Launchd,
+    Systemd,
 }
 
 #[derive(Debug, Args)]
