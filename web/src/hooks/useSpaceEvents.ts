@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
+import { openSpaceEvents } from "../api/client";
 import { clearAgentActivityForChannel, recordAgentActivity, type AgentActivityEvent } from "../agentActivity";
 
 interface SumiEvent {
@@ -40,7 +41,7 @@ export function useSpaceEvents(
     // message.created etc.). Only events arriving after the connection opened
     // are live; replay must not be treated as new unread activity.
     const connectedAt = Date.now();
-    const source = new EventSource(`/api/v1/spaces/${encodeURIComponent(spaceId)}/events`);
+    const source = openSpaceEvents(spaceId);
     const invalidate = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as SumiEvent;
       const isReplay =

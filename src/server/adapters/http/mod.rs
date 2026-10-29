@@ -163,6 +163,8 @@ pub(super) struct RuntimeState {
     pub(super) attachment_max_bytes: u64,
     pub(super) queries: QueryRegistry,
     pub(super) agent_graph_cache: AgentGraphCache,
+    /// Origin of a separately deployed Web UI; pairing links point there when it is set.
+    pub(super) web_origin: Option<String>,
 }
 
 mod agent_graph;
@@ -173,6 +175,7 @@ mod dto;
 mod error;
 mod execution;
 mod identity;
+mod origin;
 mod task;
 
 #[cfg(test)]
@@ -186,6 +189,7 @@ pub(super) use dto::*;
 pub(super) use error::*;
 pub(super) use execution::*;
 pub(super) use identity::*;
+pub(super) use origin::allow_web_origin;
 pub(super) use task::*;
 
 pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> Router {

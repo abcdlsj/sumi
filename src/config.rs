@@ -22,6 +22,8 @@ pub(crate) struct ServerConfig {
     pub(crate) bind: SocketAddr,
     pub(crate) database_url: String,
     pub(crate) web_dist: PathBuf,
+    /// Origin of a Web UI deployed apart from the Server, such as `https://app.example.com`.
+    pub(crate) web_origin: Option<Url>,
     pub(crate) attachment_dir: PathBuf,
     pub(crate) attachment_s3: Option<AttachmentS3Config>,
     pub(crate) attachment_max_bytes: u64,
@@ -145,6 +147,7 @@ impl Default for ServerConfig {
                 .expect("valid default bind address"),
             database_url: "postgres://localhost/sumi_prod".to_owned(),
             web_dist: PathBuf::from("web/dist"),
+            web_origin: None,
             attachment_dir: default_sumi_dir().join("server/attachments"),
             attachment_s3: None,
             attachment_max_bytes: 100 * 1024 * 1024,
@@ -229,6 +232,16 @@ fn validate(config: &SumiConfig) -> Result<()> {
         (1..=100 * 1024 * 1024).contains(&config.server.attachment_max_bytes),
         "server.attachment_max_bytes must be between 1 and 104857600"
     );
+    if let Some(origin) = &config.server.web_origin {
+        ensure!(
+            matches!(origin.scheme(), "http" | "https")
+                && origin.host().is_some()
+                && origin.path() == "/"
+                && origin.query().is_none()
+                && origin.username().is_empty(),
+            "server.web_origin must be an origin such as https://app.example.com"
+        );
+    }
     if let Some(s3) = &config.server.attachment_s3 {
         ensure!(
             !s3.bucket.trim().is_empty(),

@@ -69,24 +69,46 @@ interface DynamicOperation {
 
 type DynamicPaths = Record<string, Record<"get" | "post" | "put" | "patch" | "delete", DynamicOperation>>;
 
+// A Web UI deployed apart from the Server (for example on Cloudflare Pages) is built with the
+// Server origin in `VITE_SUMI_API_ORIGIN`. Left empty, every request stays on the page's origin.
+const apiOrigin = (import.meta.env.VITE_SUMI_API_ORIGIN ?? "").replace(/\/+$/, "");
+const credentials: RequestCredentials = apiOrigin ? "include" : "same-origin";
+
+/** Absolute or page-relative URL of a Server path such as `/api/v1/...`. */
+export function apiUrl(path: string): string {
+  return `${apiOrigin}${path}`;
+}
+
+/** The Server origin a Computer connects to. */
+export function serverOrigin(): string {
+  return apiOrigin || globalThis.location.origin;
+}
+
+export function openSpaceEvents(spaceId: string): EventSource {
+  return new EventSource(
+    apiUrl(`/api/v1/spaces/${encodeURIComponent(spaceId)}/events`),
+    apiOrigin ? { withCredentials: true } : undefined,
+  );
+}
+
 // `openapi-fetch` builds a `Request`, which rejects a relative URL, so the client needs an absolute
 // base. The wrapper then calls the global `fetch` in `(url, init)` form, resolving it per request:
 // reading the global at call time honours a replaced implementation, and passing the path keeps each
 // request identifiable instead of opaque behind a Request object.
 const browserApi: Client<DynamicPaths> = createClient({
   baseUrl: globalThis.location?.origin ?? "http://localhost",
-  credentials: "same-origin",
+  credentials,
   fetch: async (request) => {
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     const body = hasBody ? await request.text() : undefined;
     const { pathname, search } = new URL(request.url);
-    return globalThis.fetch(`${pathname}${search}`, {
+    return globalThis.fetch(apiUrl(`${pathname}${search}`), {
       // A read passes no `method`, leaving `fetch` to default to GET, so a caller inspecting the
       // init can tell reads from writes.
       method: request.method === "GET" ? undefined : request.method,
       headers: Object.fromEntries(request.headers),
       body: body === "" ? undefined : body,
-      credentials: "same-origin",
+      credentials,
     });
   },
 });
@@ -106,9 +128,9 @@ export async function login(input: LoginInput): Promise<User> {
 }
 
 export async function logout(): Promise<void> {
-  const response = await fetch("/api/v1/auth/logout", {
+  const response = await fetch(apiUrl("/api/v1/auth/logout"), {
     method: "POST",
-    credentials: "same-origin",
+    credentials,
     headers: { "Idempotency-Key": uuidv7() },
   });
   if (!response.ok && response.status !== 401) {
@@ -303,10 +325,10 @@ export async function uploadAttachment(spaceId: string, file: File): Promise<Att
     throw new ApiRequestError(500, "upload_path_missing", "Attachment upload path is missing");
   }
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  const uploaded = await fetch(attachment.upload_path, {
+  const uploaded = await fetch(apiUrl(attachment.upload_path), {
     method: "PUT",
     body: file,
-    credentials: "same-origin",
+    credentials,
     headers: { "Idempotency-Key": uuidv7() },
   });
   if (!uploaded.ok) await throwResponseError(uploaded);

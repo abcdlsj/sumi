@@ -63,6 +63,8 @@ struct PairingStarted {
     pairing_id: Uuid,
     code: String,
     expires_at: String,
+    /// Set when the Web UI is deployed apart from the Server.
+    web_origin: Option<url::Url>,
 }
 
 #[derive(Deserialize)]
@@ -959,10 +961,14 @@ async fn pair(root: &Path, server: &url::Url) -> anyhow::Result<(PathBuf, Comput
         .json::<PairingStarted>()
         .await
         .context("invalid Computer pairing response")?;
-    let pairing_url = server.join(&format!(
-        "pair-computer/{}/?code={}",
-        started.pairing_id, started.code
-    ))?;
+    let pairing_url = started
+        .web_origin
+        .as_ref()
+        .unwrap_or(server)
+        .join(&format!(
+            "pair-computer/{}/?code={}",
+            started.pairing_id, started.code
+        ))?;
     tracing::info!(url=%pairing_url, expires_at=%started.expires_at, "Confirm this Computer in Sumi");
 
     let status_url = server.join(&format!(

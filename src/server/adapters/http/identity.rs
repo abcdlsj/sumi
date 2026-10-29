@@ -108,7 +108,8 @@ pub(super) async fn begin_pairing(
         Json(json!({
             "pairing_id": started.pairing_id,
             "code": started.code,
-            "expires_at": timestamp(started.expires_at)
+            "expires_at": timestamp(started.expires_at),
+            "web_origin": state.web_origin
         })),
     ))
 }

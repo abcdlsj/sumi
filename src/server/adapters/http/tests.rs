@@ -103,6 +103,7 @@ impl CapabilityFixture {
             attachment_max_bytes: 100 * 1024 * 1024,
             queries: QueryRegistry::default(),
             agent_graph_cache: AgentGraphCache::default(),
+            web_origin: None,
         };
         let mut headers = HeaderMap::new();
         headers.insert(

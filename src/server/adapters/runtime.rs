@@ -31,6 +31,10 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let object_store =
         object_store::local::LocalFileSystem::new_with_prefix(&config.attachment_dir)
             .context("failed to open Attachment directory")?;
+    let web_origin = config
+        .web_origin
+        .as_ref()
+        .map(|origin| origin.origin().ascii_serialization());
     let state = http::RuntimeState {
         #[cfg(test)]
         pool: pool.clone(),
@@ -44,8 +48,12 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         attachment_max_bytes: config.attachment_max_bytes,
         queries: QueryRegistry::default(),
         agent_graph_cache: http::AgentGraphCache::default(),
+        web_origin: web_origin.clone(),
     };
-    let api = http::api_router(state.clone(), 100 * 1024 * 1024);
+    let mut api = http::api_router(state.clone(), 100 * 1024 * 1024);
+    if let Some(web_origin) = &web_origin {
+        api = http::allow_web_origin(api, web_origin);
+    }
     let dispatcher = tokio::spawn(dispatch_available_work_forever(state.clone()));
     let mut app = axum::Router::new().nest("/api/v1", api).fallback_service(
         ServeDir::new(&config.web_dist)

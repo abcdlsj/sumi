@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, Hash, ListTodo, LoaderCircle, MessageSquareReply, Paperclip } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
+import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
@@ -941,7 +941,7 @@ function AttachmentList({ attachments }: { attachments: Attachment[] }) {
       {attachments.map((attachment) => (
         <a
           key={attachment.id}
-          href={attachment.download_path ?? undefined}
+          href={attachment.download_path ? apiUrl(attachment.download_path) : undefined}
           download={attachment.original_name}
         >
           <Paperclip aria-hidden="true" />
