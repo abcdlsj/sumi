@@ -46,11 +46,6 @@ export function LoginPage() {
           <p className="eyebrow">Return to the room</p>
           <h1 id="login-title">Sign in.</h1>
           <p className="stage-note">Your Spaces are waiting where you left them.</p>
-          <div className="member-signal" aria-hidden="true">
-            <span className="pixel-face pixel-face--cyan" />
-            <span className="pixel-face pixel-face--pink" />
-            <span className="signal-line" />
-          </div>
         </div>
 
         <form className="register-form" onSubmit={submit}>

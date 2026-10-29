@@ -424,7 +424,7 @@ export function SpaceShell({
             type="button"
             aria-label="Jump to"
             title="Jump to (⌘K)"
-            onClick={() => setSwitcherOpen(true)}
+            onClick={() => { dismissNavigationDrawer(); setSwitcherOpen(true); }}
           >
             <Search />
           </button>
@@ -491,6 +491,7 @@ export function SpaceShell({
                   aria-label="Create Channel"
                   title="Create Channel"
                   onClick={() => {
+                    dismissNavigationDrawer();
                     setChannelFormOpen(true);
                     channelCreation.reset();
                   }}
@@ -547,6 +548,7 @@ export function SpaceShell({
                 aria-label="Start DM"
                 title="Start DM"
                 onClick={() => {
+                  dismissNavigationDrawer();
                   setDirectMessageFormOpen(true);
                   directMessageCreation.reset();
                 }}

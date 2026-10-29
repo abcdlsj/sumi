@@ -106,9 +106,12 @@
 
 .message-timeline-shell {
   position: relative;
+  display: grid;
   min-width: 0;
   min-height: 0;
   grid-column: 1;
+  /* The working strip has its own row, so it never sits on top of a message. */
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .message-timeline {
@@ -116,8 +119,7 @@
   height: 100%;
   flex-direction: column;
   overflow-y: auto;
-  /* The bottom keeps room for the working strip, so it never covers a message. */
-  padding: 8px var(--page-gutter) 30px;
+  padding: 8px var(--page-gutter) 12px;
   overscroll-behavior: contain;
   scrollbar-color: var(--line-strong) transparent;
   scrollbar-width: thin;
@@ -536,24 +538,16 @@ a.message-mention--agent:hover {
 
 /* Agents at work on this conversation, pinned above the composer. */
 .timeline-working {
-  position: absolute;
-  z-index: 1;
-  right: var(--page-gutter);
-  bottom: 4px;
-  left: var(--page-gutter);
   display: flex;
-  height: 22px;
+  min-width: 0;
+  height: 24px;
   align-items: center;
-  pointer-events: none;
+  padding: 0 var(--page-gutter);
 }
 
 .timeline-working .agent-working {
   max-width: 100%;
-  padding: 2px 10px 2px 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(6px);
-  pointer-events: auto;
+  min-width: 0;
   animation: timeline-working-in .2s ease-out;
 }
 
@@ -1783,7 +1777,8 @@ details.system-event .system-event-heading {
 
 @media (max-width: 1099px) {
   .channel-header,
-  .message-timeline {
+  .message-timeline,
+  .timeline-working {
     padding-right: var(--page-gutter-compact);
     padding-left: var(--page-gutter-compact);
   }

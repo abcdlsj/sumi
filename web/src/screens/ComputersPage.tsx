@@ -263,7 +263,7 @@ function ComputerDetail({
         <div><span>Busy Agents</span><strong>{String(busyAgents)}</strong></div>
         <div><span>Platform</span><strong>{computer.os === "macos" ? "macOS" : "Linux"}</strong></div>
         <div><span>Daemon</span><strong className="tabular">v{computer.daemon_version}</strong></div>
-        <div><span>Last seen</span><strong className="tabular">{computer.last_seen_at ? new Date(computer.last_seen_at).toLocaleString() : "Never connected"}</strong></div>
+        <div><span>Last seen</span><strong className="tabular">{computer.last_seen_at ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(computer.last_seen_at)) : "Never connected"}</strong></div>
       </div>
       {canManage ? <LlmUsagePanel computerId={computer.id} online={computer.status === "online"} /> : null}
           <section className="detail-panel computer-agents">

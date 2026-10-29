@@ -2964,7 +2964,9 @@ a.task-source-link:hover {
 }
 
 .fact-band {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* Facts wrap onto a second row on narrow panes instead of truncating. */
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  row-gap: 14px;
 }
 
 .agent-fact-strip > div,
@@ -3925,14 +3927,12 @@ a.task-source-link:hover {
 }
 
 /* A small Humans-and-Agents group in place of an illustration. */
-.member-signal,
 .onboarding-identities {
   display: flex;
   align-items: center;
   margin-top: 22px;
 }
 
-.member-signal > span:not(.signal-line),
 .onboarding-identities > span:not(.signal-line) {
   display: grid;
   width: 34px;
@@ -3947,19 +3947,16 @@ a.task-source-link:hover {
   font-weight: 600;
 }
 
-.member-signal > span:first-child,
 .onboarding-identities > span:first-child {
   margin-left: 0;
 }
 
-.pixel-face--cyan,
 .onboarding-agent-mark {
   border-radius: var(--radius-agent) !important;
   background: #f1f0ec !important;
   color: #3a5fc8 !important;
 }
 
-.pixel-face--pink,
 .onboarding-agent-mark--cyan {
   color: #a8592c !important;
 }
@@ -4012,8 +4009,10 @@ a.task-source-link:hover {
 
 .slug-input {
   display: flex;
+  width: 100%;
   align-items: center;
   border-radius: 9px;
+  background: var(--bg-raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
@@ -4025,7 +4024,10 @@ a.task-source-link:hover {
 }
 
 .slug-input input:not([type]) {
+  min-width: 0;
+  flex: 1;
   padding-left: 2px;
+  background: transparent;
   box-shadow: none !important;
   font-family: var(--font-mono);
   font-size: 13px;

@@ -49,6 +49,22 @@ describe("MessageComposer draft", () => {
   });
 });
 
+describe("MessageComposer keys", () => {
+  it("sends on Enter, keeps Shift+Enter and IME confirmation as typing", async () => {
+    const send = vi.fn().mockResolvedValue(message());
+    renderComposer("channel:keys", send);
+    const input = screen.getByLabelText("Message");
+    fireEvent.change(input, { target: { value: "hello" } });
+
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(send).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  });
+});
+
 function renderComposer(draftKey: string, send = vi.fn().mockResolvedValue(message())) {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>

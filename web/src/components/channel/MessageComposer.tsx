@@ -209,7 +209,7 @@ export function MessageComposer({
         {submission.isPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}
         <span>Send</span>
       </button>
-      <span className="composer-shortcut" aria-hidden="true">⌘ Enter to send</span>
+      <span className="composer-shortcut" aria-hidden="true">Enter to send · Shift Enter for a new line</span>
       {attachments.length ? (
         <div className="composer-attachments" aria-label={attachmentsAriaLabel}>
           {attachments.map((attachment) => (
@@ -298,13 +298,22 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
   }
 
   function handleKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // An IME (Chinese, Japanese, ...) uses Enter to confirm a candidate.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
       return;
     }
-    if (direct) return;
-    if (!suggestions.length && !allSuggestion) return;
+    if (direct || (!suggestions.length && !allSuggestion)) {
+      // Enter sends and Shift+Enter starts a new line; on touch keyboards
+      // Enter stays a new line and the send button sends.
+      if (event.key === "Enter" && !event.shiftKey && !event.altKey && !touchKeyboard()) {
+        event.preventDefault();
+        event.currentTarget.form?.requestSubmit();
+      }
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
@@ -360,6 +369,10 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
       />
     </div>
   );
+}
+
+function touchKeyboard(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 }
 
 function mentionMatch(value: string, cursor: number): { start: number; query: string } | undefined {

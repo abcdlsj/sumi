@@ -92,7 +92,8 @@ export function SettingsWorkspace({ selectedFeatureId, space, user, currentMembe
 const modifier = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 const SHORTCUTS: Array<[string[], string]> = [
   [[modifier, "K"], "Jump to a channel, DM or Agent"],
-  [[modifier, "Enter"], "Send the message"],
+  [["Enter"], "Send the message"],
+  [["Shift", "Enter"], "Start a new line"],
   [["@"], "Mention a member or Agent"],
   [["↑", "↓", "Enter"], "Pick a suggestion"],
   [["Esc"], "Close the Thread or dialog"],

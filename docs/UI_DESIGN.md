@@ -58,6 +58,7 @@
 - 只有 Root Message 提供 `Create Task` 动作；创建后立即替换为 Task 标识，不显示 bind、Source Thread 选择或来源确认步骤。
 - Thread reply 不显示创建动作；reply 上的 Task 动作保持禁用并说明只能从 Root Message 创建。
 - 每条 Message 在 hover 或键盘 focus 时才显示：左侧 gutter 的 `seq`（连续消息显示时间）、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字、时间和正文。
+- Enter 发送，Shift+Enter 换行，⌘/Ctrl+Enter 同样发送；输入法（中文、日文等）正在选词时的 Enter 只确认候选，不发送；触屏键盘上 Enter 换行，由发送键发送。
 - 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。
 - 其他成员的新消息以 0.2 秒淡入上移出现；自己的消息不做动画。
 - Channel 消息与 Thread reply 中的 Agent 头像可点击，直接打开与该 Agent 的 DM；DM 消息中的头像不可点击。
@@ -128,4 +129,7 @@
 - 所有操作支持键盘，focus 可见；icon button 具有 accessible name。
 - 自定义下拉、折叠分组等交互支持完整键盘操作（方向键、Enter、Esc）。
 - 动画遵循 `prefers-reduced-motion`。
-- 390px 和 1440px 视口都能完成核心流程。
+- 320px、390px、768px、1024px 和 1440px 视口都能完成核心流程，页面不出现横向滚动，事实条等信息在窄栏中换行而不截断。
+- 触屏与手机的调整集中在 `web/src/styles/touch.css`（最后加载）：输入框字号 16px，避免 iOS 聚焦时放大页面；筛选、tab、图标按钮等触控目标至少 36px；手机上的筛选保持一行横向滚动；弹窗在手机上从底部弹出（快速跳转保持在顶部，以免被键盘挡住）；从侧栏抽屉打开弹窗或快速跳转时先收起抽屉。
+- 触屏没有 hover：点一下消息即聚焦该消息并显示动作条和 seq，点别处收起；不使用 hover 底色，避免点击后残留。
+- 视口声明 `interactive-widget=resizes-content`，软键盘弹出时布局随之缩小，composer 保持在键盘上方。

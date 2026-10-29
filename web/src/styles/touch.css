@@ -1,0 +1,144 @@
+/* Touch screens and phones. Loaded after every other stylesheet so it can
+   adjust any component without raising specificity elsewhere. */
+
+@media (hover: none), (pointer: coarse) {
+  /* 16px keeps iOS Safari from zooming the page when a field takes focus. */
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Comfortable targets for fingers. */
+  .task-filters button,
+  .member-filter button,
+  .llm-usage-range button,
+  .detail-tabs button,
+  .page-tabs a {
+    min-height: 36px;
+  }
+
+  .icon-button,
+  .member-message-button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .inline-thread-heading,
+  .inline-reply {
+    min-height: 32px;
+  }
+
+  .task-source-link,
+  .message-task-badge {
+    min-height: 30px;
+  }
+
+  .settings-switch::after {
+    position: absolute;
+    inset: -12px -10px;
+    content: "";
+  }
+
+  /* There is no hover on touch, and a tap leaves a sticky one behind. A tap
+     focuses the message instead, and the actions follow focus. */
+  .message-row:hover,
+  .thread-message:hover {
+    background: transparent;
+  }
+
+  .message-row--for-you:hover {
+    background: var(--you-row);
+  }
+
+  .message-row:hover .message-actions,
+  .thread-message:hover .message-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .message-block:focus-within .message-actions,
+  .thread-message:focus-within .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .message-block:focus-within .message-row:not(.message-row--for-you),
+  .thread-message:focus-within:not(.message-row--for-you) {
+    background: var(--bg-hover);
+  }
+
+  .message-action-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .message-row:hover .message-seq,
+  .message-row:hover .message-gutter-time {
+    opacity: 0;
+  }
+
+  .message-block:focus-within .message-seq,
+  .message-block:focus-within .message-gutter-time {
+    opacity: 1;
+  }
+
+  .composer-shortcut {
+    display: none;
+  }
+}
+
+@media (max-width: 699px) {
+  /* Filters stay one row and scroll sideways instead of wrapping into three. */
+  .task-filters,
+  .member-filter {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .task-filters::-webkit-scrollbar,
+  .member-filter::-webkit-scrollbar {
+    display: none;
+  }
+
+  .task-filters button,
+  .member-filter button {
+    flex: none;
+  }
+}
+
+@media (max-width: 699px) {
+  /* Dialogs open as bottom sheets, within thumb reach. The quick switcher
+     stays at the top, where the keyboard does not cover its results. */
+  .dialog-backdrop:not(:has(.quick-switcher)) {
+    place-items: end stretch;
+    padding: 12px 0 0;
+  }
+
+  .dialog-backdrop:not(:has(.quick-switcher)) > .dialog-surface {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    padding-bottom: max(22px, env(safe-area-inset-bottom));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-in .2s ease-out;
+  }
+
+  .dialog-surface footer {
+    flex-wrap: wrap;
+  }
+
+  .dialog-surface footer > * {
+    flex: 1 1 auto;
+  }
+}
+
+@keyframes sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-backdrop > .dialog-surface {
+    animation: none;
+  }
+}

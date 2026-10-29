@@ -3,6 +3,7 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/noto-sans-sc";
 import "./styles.css";
 import "./components/channel/channel.css";
+import "./styles/touch.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";

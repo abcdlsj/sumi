@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquareReply, Paperclip } from "lucide-react";
-import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
@@ -152,7 +152,7 @@ export function MessageTimeline({
           const outgoingItem = outgoingByKey.get(message.id);
           const own = message.author.id === selfMemberId;
           return (
-            <div className={`message-block${own ? "" : " message-block--arrived"}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id}>
+            <div className={`message-block${own ? "" : " message-block--arrived"}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id} onClick={focusMessage}>
               {showDivider ? (
                 <div className="day-divider" role="separator">
                   <time dateTime={message.created_at}>{formatDayDivider(message.created_at)}</time>
@@ -288,7 +288,7 @@ function SystemNoticeGroup({
 export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm, outgoing, onRetryOutgoing, onDiscardOutgoing }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void; outgoing?: OutgoingMessage; onRetryOutgoing?: (item: OutgoingMessage) => void; onDiscardOutgoing?: (key: string) => void }) {
   const forYou = isForMember(message, useSelfMemberId());
   return (
-    <article className={`thread-message${forYou ? " message-row--for-you" : ""}${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1}>
+    <article className={`thread-message${forYou ? " message-row--for-you" : ""}${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} onClick={focusMessage}>
       <MessageAvatar
         name={message.author.display_name}
         kind={message.author.kind}
@@ -479,6 +479,14 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
       {create.error ? <span className="message-action-error" role="alert">Task creation failed. Retry.</span> : null}
     </div>
   );
+}
+
+/** A tap on a message focuses it, which reveals its actions on touch screens. */
+function focusMessage(event: MouseEvent<HTMLElement>) {
+  const target = event.target as HTMLElement;
+  if (target.closest("a, button, input, textarea, summary, label")) return;
+  if (window.getSelection()?.toString()) return;
+  event.currentTarget.focus({ preventScroll: true });
 }
 
 function messageLink(messageId: string): string {
