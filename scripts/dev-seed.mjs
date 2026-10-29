@@ -28,7 +28,8 @@ const BASE_CONFIG = process.env.SUMI_SEED_BASE_CONFIG ?? join(homedir(), ".sumi"
 const OWNER_EMAIL = process.env.SUMI_SEED_EMAIL ?? "dev@example.test";
 const OWNER_PASSWORD = process.env.SUMI_SEED_PASSWORD ?? "correct horse battery staple";
 const SEED_MARKER = "[dev-seed]";
-export const CODEX_COMMAND = process.env.SUMI_SEED_CODEX_COMMAND || "codex";
+// Optional replacement for the pinned codex ACP adapter command, e.g. a local codex-acp build.
+export const CODEX_COMMAND = process.env.SUMI_SEED_CODEX_COMMAND ?? "";
 export const DEV_SPACE = Object.freeze({ name: "Sumi Dev", slug: "sumi-dev", accent: "#F0602F" });
 export const DEV_CHANNEL_SLUG = "general";
 export const DEV_COMPUTER_ROOT = process.env.SUMI_SEED_COMPUTER_ROOT ?? join(homedir(), ".sumi-dev-seed", "computer");
@@ -309,7 +310,7 @@ function spawnComputerDaemon(stateDir, expectPairing) {
     {
       env: {
         ...process.env,
-        SUMI_CODEX_COMMAND: CODEX_COMMAND,
+        ...(CODEX_COMMAND ? { SUMI_ACP_CODEX_COMMAND: CODEX_COMMAND } : {}),
         RUST_LOG:
           process.env.SUMI_SEED_RUST_LOG ??
           "sumi=warn,sumi::computer=info,tower_http=warn",

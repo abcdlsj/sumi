@@ -36,7 +36,9 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是持续在
 | Computer Release | 由 Computer 所连接的 Server 分发、面向一个受支持平台且版本不可变的 daemon 发布物 | Latest Binary、Update Package |
 | Update Policy | Computer 本地持久化的自动更新选择；Server 不得覆盖 | Force Update |
 | Agent Home | 归属于一个 Agent，保存 Memory、workspace 和 Driver 私有状态的本地边界 | Workspace、Computer Home |
-| Driver | Agent 用于推理和行动的可替换执行能力 | Engine、Model |
+| Driver | Agent 用于推理和行动的可替换执行能力，取 ACP Driver 或 Builtin Driver | Engine、Model |
+| ACP Driver | 经 Agent Client Protocol 驱动外部 coding agent 的 Driver，provider 取 codex、claude、pi | Codex Driver、app-server |
+| Builtin Driver | Computer 进程内由 `sumi-builtin-agent` harness 执行的 Driver，不依赖外部 coding agent | Fake Driver |
 | Provider Session | Computer 为一个 Agent 处理一个 Thread 或 Task 时保存的 Driver 对话缓存 | Agent Session |
 | Run | Agent 围绕一个 Focus 完成一次有界处理的执行 | Job、Turn |
 | Trigger | 要求某个 Agent 开始工作的事件，产生 Run，本身不是队列项 | Inbox Item、Claim |
@@ -70,7 +72,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是持续在
 - Agent 对需要跨 Run 长时间跟踪状态的工作必须创建 Task，并持续用 Source Thread、Linked Threads 和状态流转记录流程与进展；单次回复或同一 Run 内完成的工作不创建 Task。
 - Channel 的 `channel_seq` 是该 Channel 内所有 Message（Root、reply、Action Message 和 System Notice）共用的唯一递增坐标。Thread 保持独立的 `thread_id`，由 Root Message 建立并包含该 Root 及其 replies；Channel 主时间线只展示 Root，Thread 视图展示该 Thread 的完整内容。`channel_seq` 是引用坐标，不是当前列表行号。
 - Agent Run 的动态 Channel Activity 按 Agent + Channel 以 `through_seq` 做增量摄入；Computer 通过独立系统 query 在冻结的 `channel_snapshot_seq` 内读取增量。当前 Focus Thread 和 claimed Hard Item 保留原文，已摄入的普通活动不得在后续 Run 中重复追加。只有 Completed 或 Yielded Run 推进 `through_seq`；Failed 或 Canceled Run 保留待摄入活动。
-- 运行中到达的 Hard Item 必须获得明确 delivery outcome。Builtin Driver 在模型调用、工具批次和最终完成屏障之间通过有序 mailbox 接收新 Item；返回 Accepted 后该 Item 必须进入当前 Run，否则返回 TooLate。TooLate 或 Unsupported 不使原 Run Failed，并自动释放该 Item。
+- 运行中到达的 Hard Item 必须获得明确 delivery outcome。Builtin Driver 在模型调用、工具批次和最终完成屏障之间通过有序 mailbox 接收新 Item；返回 Accepted 后该 Item 必须进入当前 Run，否则返回 TooLate。ACP 没有回合内追加输入的能力，ACP Driver 对运行中的回合返回 Unsupported，不取消当前回合重发。TooLate 或 Unsupported 不使原 Run Failed，并自动释放该 Item，由下一个 Run 处理。
 - Computer 默认从所连接的 Server 安装 stable Computer Release；普通使用者不配置密钥或安装目录。
 - Computer 首次从临时下载路径运行时，把自身安装到用户级稳定路径并从该路径继续运行；更新只替换稳定路径中的 daemon 二进制，不修改或删除 Memory、workspace、Provider Session 与 Computer 身份。
 - Computer Release 可以在 Run 活跃期间下载，但只能在没有活跃 Run 时激活；失败的同一 Release 不得自动重复激活。

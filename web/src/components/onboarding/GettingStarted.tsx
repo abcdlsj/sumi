@@ -3,6 +3,7 @@ import { Check, Copy, LoaderCircle, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
 import { addChannelAgents, createAgent, type Agent, type Computer, type Member } from "../../api/client";
+import { DRIVER_CHOICES, driverInput } from "../../driver";
 import { DialogFrame } from "../DialogFrame";
 
 /** Starter roles so a first Agent takes one click instead of a blank form. */
@@ -266,7 +267,7 @@ function QuickAgentDialog({
       name: name.trim(),
       role_text: role.trim(),
       access_level: String(form.get("access_level") ?? "member") as "member" | "admin",
-      driver_kind: String(form.get("driver_kind") ?? "codex") as "codex" | "builtin",
+      ...driverInput(String(form.get("driver") ?? "codex")),
     });
   }
 
@@ -292,7 +293,7 @@ function QuickAgentDialog({
           <summary>Computer, driver and access</summary>
           <div>
             <label className="agent-field">Computer<select name="computer_id" defaultValue={computers[0]?.id}>{computers.map((computer) => <option key={computer.id} value={computer.id}>{computer.name}</option>)}</select></label>
-            <label className="agent-field">Driver<select name="driver_kind" defaultValue="codex"><option value="codex">Codex</option><option value="builtin">Builtin</option></select></label>
+            <label className="agent-field">Driver<select name="driver" defaultValue="codex">{DRIVER_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></label>
             <label className="agent-field">Access level<select name="access_level" defaultValue="member"><option value="member">Member</option>{isOwner ? <option value="admin">Admin</option> : null}</select></label>
           </div>
         </details>

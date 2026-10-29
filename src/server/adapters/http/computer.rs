@@ -272,11 +272,17 @@ pub(super) async fn create_agent(
         || name.chars().count() > 40
         || role.is_empty()
         || role.chars().count() > 12_000
-        || !matches!(body.driver_kind.as_str(), "codex" | "builtin")
         || !matches!(body.access_level.as_str(), "member" | "admin")
     {
         return Err(ApiError::invalid("Agent configuration is invalid"));
     }
+    let driver_kind = match (body.driver_kind.as_str(), body.driver_provider.as_deref()) {
+        ("acp", Some("codex")) => DriverKind::Acp(AcpProvider::Codex),
+        ("acp", Some("claude")) => DriverKind::Acp(AcpProvider::Claude),
+        ("acp", Some("pi")) => DriverKind::Acp(AcpProvider::Pi),
+        ("builtin", None) => DriverKind::Builtin,
+        _ => return Err(ApiError::invalid("Agent configuration is invalid")),
+    };
     let agent_id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     let mut storage = state.storage.clone();
@@ -289,11 +295,7 @@ pub(super) async fn create_agent(
             access_level: requested_access,
             role_text: role.to_owned(),
             computer_id: ComputerId::from_uuid(body.computer_id),
-            driver_kind: if body.driver_kind == "codex" {
-                DriverKind::Codex
-            } else {
-                DriverKind::Builtin
-            },
+            driver_kind,
             actor_member_id: MemberId::from_uuid(actor_id),
             idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now,
@@ -406,9 +408,16 @@ pub(super) fn agent_row(row: &AgentRow) -> Result<AgentResponse, ApiError> {
         activity_status,
         computer_reachable,
         driver_kind: match row.driver_kind.as_str() {
-            "codex" => DriverKindCode::Codex,
+            "acp" => DriverKindCode::Acp,
             "builtin" => DriverKindCode::Builtin,
             _ => return Err(ApiError::internal()),
+        },
+        driver_provider: match row.driver_provider.as_deref() {
+            None => None,
+            Some("codex") => Some(AcpProviderCode::Codex),
+            Some("claude") => Some(AcpProviderCode::Claude),
+            Some("pi") => Some(AcpProviderCode::Pi),
+            Some(_) => return Err(ApiError::internal()),
         },
         attention_config: attention_policy(),
         activity: agent_activity(row, activity_status),

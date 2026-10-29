@@ -7,7 +7,7 @@ CREATE TABLE schema_meta (
 ) STRICT;
 
 INSERT INTO schema_meta (version, applied_at)
-VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE local_commands (
     command_id TEXT PRIMARY KEY,
@@ -41,7 +41,7 @@ CREATE TABLE provider_sessions (
     scope_kind TEXT NOT NULL CHECK (scope_kind IN ('thread', 'task')),
     scope_id TEXT NOT NULL,
     generation INTEGER NOT NULL CHECK (generation > 0),
-    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'builtin')),
+    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'claude', 'pi', 'builtin')),
     provider_locator TEXT NOT NULL,
     workspace_fingerprint TEXT NOT NULL,
     role_revision INTEGER NOT NULL CHECK (role_revision >= 0),
@@ -82,7 +82,7 @@ CREATE TABLE llm_usage (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
-    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'builtin')),
+    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'claude', 'pi', 'builtin')),
     model TEXT,
     input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
     output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),

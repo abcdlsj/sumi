@@ -6,8 +6,15 @@ use super::DomainError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::server) enum DriverKind {
-    Codex,
+    Acp(AcpProvider),
     Builtin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::server) enum AcpProvider {
+    Codex,
+    Claude,
+    Pi,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -248,7 +255,7 @@ mod tests {
             role_text: "review boundaries".into(),
             role_revision: 4,
             lifecycle,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         }
     }

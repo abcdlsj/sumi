@@ -275,9 +275,41 @@ pub(super) fn channel_kind_from_str(value: &str) -> Result<ChannelKind, Applicat
 text_enum!(agent_lifecycle_str, agent_lifecycle_from_str, AgentLifecycle, {
     AgentLifecycle::Provisioning => "provisioning", AgentLifecycle::Active => "active", AgentLifecycle::Suspended => "suspended", AgentLifecycle::Retired => "retired", AgentLifecycle::Error => "error"
 });
-text_enum!(driver_kind_str, driver_kind_from_str, DriverKind, {
-    DriverKind::Codex => "codex", DriverKind::Builtin => "builtin"
+text_enum!(acp_provider_str, acp_provider_from_str, AcpProvider, {
+    AcpProvider::Codex => "codex", AcpProvider::Claude => "claude", AcpProvider::Pi => "pi"
 });
+
+pub(super) fn driver_kind_str(value: DriverKind) -> &'static str {
+    match value {
+        DriverKind::Acp(_) => "acp",
+        DriverKind::Builtin => "builtin",
+    }
+}
+
+/// `driver_config_json` for a Driver; the ACP provider lives here so a new provider needs no
+/// CHECK constraint change.
+pub(super) fn driver_config(value: DriverKind) -> serde_json::Value {
+    match value {
+        DriverKind::Acp(provider) => json!({"provider": acp_provider_str(provider)}),
+        DriverKind::Builtin => json!({}),
+    }
+}
+
+pub(super) fn driver_kind_from_columns(
+    kind: &str,
+    config: &serde_json::Value,
+) -> Result<DriverKind, ApplicationError> {
+    match kind {
+        "acp" => config
+            .get("provider")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(ApplicationError::Internal)
+            .and_then(acp_provider_from_str)
+            .map(DriverKind::Acp),
+        "builtin" => Ok(DriverKind::Builtin),
+        _ => Err(ApplicationError::Internal),
+    }
+}
 
 pub(super) fn permission_str(value: PermissionAction) -> &'static str {
     value.code()

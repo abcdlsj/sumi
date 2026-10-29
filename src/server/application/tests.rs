@@ -21,8 +21,8 @@ use crate::server::domain::{
         RunTrigger,
     },
     identity::{
-        AccessLevel, Agent, AgentLifecycle, Computer, ComputerLifecycle, DriverKind, Member,
-        PermissionAction,
+        AccessLevel, AcpProvider, Agent, AgentLifecycle, Computer, ComputerLifecycle, DriverKind,
+        Member, PermissionAction,
     },
     invitation::{Invitation, InvitationStatus},
     pairing::{ComputerOs, Pairing, PairingStatus},
@@ -427,7 +427,7 @@ async fn command_result_updates_only_its_target_agent_through_the_domain() {
                 role_text: "test".into(),
                 role_revision: 1,
                 lifecycle,
-                driver_kind: DriverKind::Codex,
+                driver_kind: DriverKind::Acp(AcpProvider::Codex),
                 retired_at: None,
             },
         );
@@ -2283,7 +2283,7 @@ async fn source_override_task_activity_item_drives_bound_run_after_current_run_e
             role_text: "run".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -2575,7 +2575,7 @@ async fn claim_rejects_parallel_active_run_and_task_focus_outside_links() {
             role_text: "run".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -2630,7 +2630,7 @@ async fn ambient_item_can_be_leased_by_a_new_run() {
             role_text: "observe".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -3504,7 +3504,7 @@ async fn computer_delete_requires_explicit_agent_retirement() {
             role_text: "实现".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -3728,7 +3728,7 @@ async fn agent_creation_and_action_message_share_permission_and_transaction() {
         display_name: "Implementer".into(),
         role_text: "Implement code".into(),
         computer_id,
-        driver_kind: DriverKind::Codex,
+        driver_kind: DriverKind::Acp(AcpProvider::Codex),
         action_message_id,
         actor_member_id: actor,
         idempotency_key: idempotency(215),
@@ -5439,7 +5439,7 @@ async fn a_member_reads_only_their_own_inbox_unless_the_target_is_an_agent() {
             role_text: "assist".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -5519,7 +5519,7 @@ async fn only_a_governor_requeues_a_dead_item_and_the_queue_hides_it_until_then(
             role_text: "assist".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );
@@ -5616,7 +5616,7 @@ async fn a_human_marks_all_their_pending_inbox_items_read_in_one_transaction() {
             role_text: "assist".into(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Active,
-            driver_kind: DriverKind::Codex,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
             retired_at: None,
         },
     );

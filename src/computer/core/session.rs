@@ -9,7 +9,12 @@ use super::CoreError;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(in crate::computer) enum DriverKind {
+    /// ACP Driver with the codex provider.
     Codex,
+    /// ACP Driver with the claude provider.
+    Claude,
+    /// ACP Driver with the pi provider.
+    Pi,
     Builtin,
 }
 

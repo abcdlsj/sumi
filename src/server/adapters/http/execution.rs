@@ -1149,9 +1149,17 @@ pub(super) async fn execute_agent_action(
             }
             let activity_name = name.clone();
             let activity_role = bounded_activity_text(&role).0;
-            let activity_driver = match driver {
-                capability::DriverKind::Codex => "codex",
-                capability::DriverKind::Builtin => "builtin",
+            let (driver_kind, activity_driver) = match driver {
+                capability::DriverKind::Acp {
+                    provider: capability::AcpProvider::Codex,
+                } => (DriverKind::Acp(AcpProvider::Codex), "codex"),
+                capability::DriverKind::Acp {
+                    provider: capability::AcpProvider::Claude,
+                } => (DriverKind::Acp(AcpProvider::Claude), "claude"),
+                capability::DriverKind::Acp {
+                    provider: capability::AcpProvider::Pi,
+                } => (DriverKind::Acp(AcpProvider::Pi), "pi"),
+                capability::DriverKind::Builtin => (DriverKind::Builtin, "builtin"),
             };
             let activity_computer = activity_computer_label(&state.read, target_computer_id)
                 .await
@@ -1166,10 +1174,7 @@ pub(super) async fn execute_agent_action(
                     display_name: name.clone(),
                     role_text: role,
                     computer_id: target_computer_id,
-                    driver_kind: match driver {
-                        capability::DriverKind::Codex => DriverKind::Codex,
-                        capability::DriverKind::Builtin => DriverKind::Builtin,
-                    },
+                    driver_kind,
                     action_message_id: MessageId::from_uuid(Uuid::now_v7()),
                     actor_member_id: MemberId::from_uuid(context.agent_id.into_uuid()),
                     idempotency_key: request.idempotency_key.ok_or_else(|| {
@@ -1572,7 +1577,9 @@ async fn discover_operation(
                     "value_type": "driver_kind",
                     "required": true,
                     "available": [
-                        { "value": "codex", "label": "Codex" },
+                        { "value": "codex", "label": "Codex (ACP)" },
+                        { "value": "claude", "label": "Claude (ACP)" },
+                        { "value": "pi", "label": "Pi (ACP)" },
                         { "value": "builtin", "label": "Builtin" }
                     ]
                 }

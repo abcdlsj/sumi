@@ -4,6 +4,7 @@ import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Se
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
 import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
+import { driverLabel } from "../driver";
 import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { DialogFrame } from "../components/DialogFrame";
@@ -128,7 +129,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
       <dl className="agent-fact-strip" aria-label="Agent summary">
         <SummaryFact label="Lifecycle"><StateSignal tone={value.desired_lifecycle} label={humanize(value.desired_lifecycle)} /></SummaryFact>
         <SummaryFact label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? "Assigned Computer"}</Link> : "Unassigned"}</SummaryFact>
-        <SummaryFact label="Driver"><span className="summary-value--mono">{humanize(value.driver_kind)}</span></SummaryFact>
+        <SummaryFact label="Driver"><span className="summary-value--mono">{driverLabel(value)}</span></SummaryFact>
         <SummaryFact label="Session">{runtime.data ? <StateSignal tone={runtime.data.session_continuity.state} label={humanize(runtime.data.session_continuity.state)} /> : "Checking"}</SummaryFact>
       </dl>
       <nav className="detail-tabs" aria-label="Agent detail" role="tablist">

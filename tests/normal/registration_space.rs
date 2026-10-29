@@ -377,7 +377,7 @@ async fn run_registration_space_flow(database: &TestDatabase) -> Result<()> {
         .bind(created.id)
         .execute(&pool)
         .await?;
-    sqlx::query("INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES($1,$2,$3,'Review changes',1,'active','codex',now())")
+    sqlx::query("INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES($1,$2,$3,'Review changes',1,'active','builtin',now())")
         .bind(agent_id)
         .bind(created.id)
         .bind(computer_id)

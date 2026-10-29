@@ -5,6 +5,8 @@ export interface components {
     schemas: {
         /** @enum {string} */
         AccessLevel: "owner" | "admin" | "member";
+        /** @enum {string} */
+        AcpProvider: "codex" | "claude" | "pi";
         ActionAgentResponse: {
             available: boolean;
             lifecycle: components["schemas"]["AgentLifecycle"];
@@ -95,6 +97,7 @@ export interface components {
             created_at: string;
             desired_lifecycle: components["schemas"]["AgentLifecycle"];
             driver_kind: components["schemas"]["DriverKind"];
+            driver_provider?: null | components["schemas"]["AcpProvider"];
             last_error_code?: string | null;
             /** Format: uuid */
             member_id: string;
@@ -220,6 +223,7 @@ export interface components {
             /** Format: uuid */
             computer_id: string;
             driver_kind: components["schemas"]["DriverKind"];
+            driver_provider?: null | components["schemas"]["AcpProvider"];
             name: string;
             role_text: string;
         };
@@ -289,7 +293,7 @@ export interface components {
             space_id: string;
         };
         /** @enum {string} */
-        DriverKind: "codex" | "builtin";
+        DriverKind: "acp" | "builtin";
         ErrorBody: {
             code: string;
             message: string;

@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::{
-    DriverAdapter, builtin::BuiltinAdapter, codex::CodexAdapter, contract::StructuredProviderClient,
+    DriverAdapter, acp::AcpAdapter, builtin::BuiltinAdapter, contract::StructuredProviderClient,
 };
 use crate::{
     computer::{
@@ -55,7 +55,11 @@ impl StructuredProviderClient for FakeClient {
         Ok(())
     }
 
-    async fn create_session(&mut self, _: AgentId) -> Result<String, ApplicationError> {
+    async fn create_session(
+        &mut self,
+        _: AgentId,
+        _: DriverKind,
+    ) -> Result<String, ApplicationError> {
         let locator = format!("{}-{}", self.prefix, self.sessions.len() + 1);
         self.sessions.insert(locator.clone());
         Ok(locator)
@@ -64,6 +68,7 @@ impl StructuredProviderClient for FakeClient {
     async fn resume_session(
         &mut self,
         _: AgentId,
+        _: DriverKind,
         locator: &str,
     ) -> Result<bool, ApplicationError> {
         Ok(self.sessions.contains(locator))
@@ -128,7 +133,7 @@ impl StructuredProviderClient for FakeClient {
 
 #[tokio::test]
 async fn codex_session_resumes_and_lost_locator_is_reported() {
-    let codex = CodexAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
+    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
     let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
     let mut driver = DriverAdapter::new(codex, builtin);
     let request = open_request(DriverKind::Codex, None);
@@ -153,7 +158,7 @@ async fn codex_session_resumes_and_lost_locator_is_reported() {
 
 #[tokio::test]
 async fn builtin_session_resumes_without_crossing_driver_boundary() {
-    let codex = CodexAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
+    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
     let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
     let mut driver = DriverAdapter::new(codex, builtin);
     let opened = driver
@@ -174,7 +179,7 @@ async fn builtin_session_resumes_without_crossing_driver_boundary() {
 
 #[tokio::test]
 async fn unsupported_steer_does_not_start_a_second_turn() {
-    let codex = CodexAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
+    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
     let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
     let mut driver = DriverAdapter::new(codex, builtin);
     let opened = driver
@@ -199,12 +204,12 @@ async fn unsupported_steer_does_not_start_a_second_turn() {
         driver.steer(&run, 1).await.unwrap(),
         SteerOutcome::Unsupported
     );
-    assert_eq!(driver.codex.client.turns_started, 1);
+    assert_eq!(driver.acp.client.turns_started, 1);
 }
 
 #[tokio::test]
 async fn waiting_for_one_completion_preserves_other_runs() {
-    let codex = CodexAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
+    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
     let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
     let mut driver = DriverAdapter::new(codex, builtin);
     let target = RunId::from_uuid(Uuid::now_v7());

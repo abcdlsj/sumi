@@ -57,6 +57,8 @@ pub(super) struct CreateAgentBody {
     pub(super) name: String,
     pub(super) role_text: String,
     pub(super) driver_kind: String,
+    #[serde(default)]
+    pub(super) driver_provider: Option<String>,
     pub(super) access_level: String,
 }
 

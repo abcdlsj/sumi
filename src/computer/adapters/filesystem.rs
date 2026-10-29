@@ -38,6 +38,8 @@ impl AgentHomeAdapter {
             "memory",
             "workspace",
             "drivers/codex",
+            "drivers/claude",
+            "drivers/pi",
             "drivers/builtin",
             "sessions",
             "runs",

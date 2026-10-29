@@ -24,8 +24,8 @@ use uuid::Uuid;
 
 use support::{
     SumiProcess, TestDatabase, default_codex_home, register_with, reserve_local_port,
-    short_temp_root, spawn_default_codex_computer, spawn_server, wait_for_computer_status_for,
-    wait_for_health, write_default_codex_computer_config, write_server_config,
+    short_temp_root, spawn_server, wait_for_computer_status_for, wait_for_health,
+    write_default_codex_computer_config, write_server_config,
 };
 
 const AGENT_READY_TIMEOUT: Duration = Duration::from_secs(120);
@@ -440,7 +440,7 @@ async fn run_werewolf_game(database: &TestDatabase) -> Result<()> {
     let computer_config = root.path().join("computer.toml");
     let agent_count = PLAYER_PROFILES.len() + 1;
     write_default_codex_computer_config(&computer_config, &server_url, &state_dir, agent_count)?;
-    let mut computer = spawn_default_codex_computer(&computer_config)?;
+    let mut computer = support::spawn_computer(&computer_config)?;
     let pairing_url = support::pairing_url_from_daemon(&mut computer).await?;
     let computer_identity =
         support::confirm_pairing(&client, &server_url, &owner, space.id, &pairing_url).await?;
@@ -551,7 +551,8 @@ async fn create_agent(
             "name": profile.name,
             "role_text": role_text(profile),
             "access_level": "member",
-            "driver_kind": profile.driver,
+            "driver_kind": support::driver_fields(profile.driver).0,
+            "driver_provider": support::driver_fields(profile.driver).1,
         }))
         .send()
         .await?;
@@ -564,7 +565,7 @@ async fn create_agent(
     let body: Value = response.json().await?;
     let member_id = uuid_field(&body, "member_id")?;
     ensure!(
-        body["driver_kind"] == profile.driver,
+        support::agent_has_driver(&body, profile.driver),
         "Agent {} has an unexpected Driver",
         profile.name
     );
@@ -611,7 +612,7 @@ async fn wait_for_agents_ready(
             listed.iter().any(|candidate| {
                 candidate["member_id"].as_str() == Some(member_id.as_str())
                     && candidate["provision_status"] == "ready"
-                    && candidate["driver_kind"] == agent.profile.driver
+                    && support::agent_has_driver(candidate, agent.profile.driver)
             })
         });
         if all_ready {

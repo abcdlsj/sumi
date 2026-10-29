@@ -25,6 +25,7 @@ use crate::{
         core::{
             home::LocalAgent,
             input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
+            session::DriverKind,
         },
     },
     config::{ComputerConfig, daemon_socket_path},
@@ -150,7 +151,11 @@ impl StructuredProviderClient for BuiltinRuntimeClient {
             .map_err(Self::map_error)
     }
 
-    async fn create_session(&mut self, agent_id: AgentId) -> Result<String, ApplicationError> {
+    async fn create_session(
+        &mut self,
+        agent_id: AgentId,
+        _: DriverKind,
+    ) -> Result<String, ApplicationError> {
         self.runtime_mut()?
             .create_session(agent_id.into_uuid())
             .await
@@ -160,6 +165,7 @@ impl StructuredProviderClient for BuiltinRuntimeClient {
     async fn resume_session(
         &mut self,
         agent_id: AgentId,
+        _: DriverKind,
         locator: &str,
     ) -> Result<bool, ApplicationError> {
         self.runtime_mut()?
@@ -375,7 +381,10 @@ mod tests {
         let config = builtin_config(&format!("http://{address}/v1"));
         let mut client =
             BuiltinRuntimeClient::new(computer_home.clone(), &config, [7_u8; 32]).unwrap();
-        let locator = client.create_session(agent_id).await.unwrap();
+        let locator = client
+            .create_session(agent_id, DriverKind::Builtin)
+            .await
+            .unwrap();
         let input = run_input(agent_id);
         let run_id = RunId::from_uuid(Uuid::now_v7());
 
@@ -432,7 +441,12 @@ mod tests {
         assert!(!stored.contains("focus_messages"));
         assert!(!stored.contains("provider-secret"));
         let mut resumed = BuiltinRuntimeClient::new(computer_home, &config, [7_u8; 32]).unwrap();
-        assert!(resumed.resume_session(agent_id, &locator).await.unwrap());
+        assert!(
+            resumed
+                .resume_session(agent_id, DriverKind::Builtin, &locator)
+                .await
+                .unwrap()
+        );
         resumed.delete_session(&locator).await.unwrap();
         assert!(!session_path.exists());
     }
@@ -448,7 +462,10 @@ mod tests {
         }
         let config = builtin_config("http://127.0.0.1:9/v1");
         let mut client = BuiltinRuntimeClient::new(computer_home, &config, [7_u8; 32]).unwrap();
-        let locator = client.create_session(agent_id).await.unwrap();
+        let locator = client
+            .create_session(agent_id, DriverKind::Builtin)
+            .await
+            .unwrap();
         let run_id = RunId::from_uuid(Uuid::now_v7());
         client
             .start_turn(run_id, &locator, &run_input(agent_id))

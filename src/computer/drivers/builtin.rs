@@ -8,6 +8,7 @@ use crate::computer::{
     core::{
         home::LocalAgent,
         input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
+        session::DriverKind,
     },
 };
 use crate::ids::{AgentId, RunId};
@@ -30,9 +31,13 @@ impl<C: StructuredProviderClient> ProviderBackend for BuiltinAdapter<C> {
         self.client.validate(agent).await
     }
 
-    async fn open(&mut self, agent_id: AgentId) -> Result<ProviderOpen, ApplicationError> {
+    async fn open(
+        &mut self,
+        agent_id: AgentId,
+        driver: DriverKind,
+    ) -> Result<ProviderOpen, ApplicationError> {
         self.client
-            .create_session(agent_id)
+            .create_session(agent_id, driver)
             .await
             .map(ProviderOpen::Opened)
     }
@@ -40,9 +45,14 @@ impl<C: StructuredProviderClient> ProviderBackend for BuiltinAdapter<C> {
     async fn resume(
         &mut self,
         agent_id: AgentId,
+        driver: DriverKind,
         locator: &str,
     ) -> Result<ProviderOpen, ApplicationError> {
-        if self.client.resume_session(agent_id, locator).await? {
+        if self
+            .client
+            .resume_session(agent_id, driver, locator)
+            .await?
+        {
             Ok(ProviderOpen::Resumed(locator.to_owned()))
         } else {
             Ok(ProviderOpen::Lost)

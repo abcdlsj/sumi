@@ -6,7 +6,7 @@ use crate::{
         ThreadId,
     },
     protocol::capability::{
-        Action, CloseReason, DriverKind, MessageSend, MessageTarget, Page, PostTarget,
+        AcpProvider, Action, CloseReason, DriverKind, MessageSend, MessageTarget, Page, PostTarget,
     },
 };
 
@@ -518,9 +518,17 @@ impl AgentCli {
                     .await
                     .map_err(|_| "--role-file could not be read")?;
                 let driver = match driver.as_str() {
-                    "codex" => DriverKind::Codex,
+                    "codex" => DriverKind::Acp {
+                        provider: AcpProvider::Codex,
+                    },
+                    "claude" => DriverKind::Acp {
+                        provider: AcpProvider::Claude,
+                    },
+                    "pi" => DriverKind::Acp {
+                        provider: AcpProvider::Pi,
+                    },
                     "builtin" => DriverKind::Builtin,
-                    _ => return Err("--driver must be codex or builtin"),
+                    _ => return Err("--driver must be codex, claude, pi or builtin"),
                 };
                 (
                     Action::AgentCreate {
@@ -916,7 +924,9 @@ mod tests {
             action,
             Action::AgentCreate {
                 computer_id: selected,
-                driver: DriverKind::Codex,
+                driver: DriverKind::Acp {
+                    provider: AcpProvider::Codex
+                },
                 ..
             } if selected == computer_id
         ));

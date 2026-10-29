@@ -1,6 +1,7 @@
 use super::*;
 use crate::protocol::computer::{
-    AgentConfiguration, ChannelMemberSnapshot, DriverKind, RoleSnapshot,
+    AcpProvider as WireAcpProvider, AgentConfiguration, ChannelMemberSnapshot, DriverKind,
+    RoleSnapshot,
 };
 
 /// Maps the Inbox Item kind that produced the work onto the Run's Trigger. Both `direct` and `reply`
@@ -639,7 +640,7 @@ impl PostgresTransaction {
     ) -> Result<AgentConfiguration, ApplicationError> {
         let row = sqlx::query(
             "SELECT agents.space_id,agents.role_text,agents.role_revision,agents.driver_kind, \
-             members.display_name FROM agents JOIN members \
+             agents.driver_config_json,members.display_name FROM agents JOIN members \
              ON members.id=agents.member_id WHERE agents.member_id=$1",
         )
         .bind(agent_id.into_uuid())
@@ -655,10 +656,18 @@ impl PostgresTransaction {
                     .map_err(|_| ApplicationError::Internal)?,
                 text: row.get("role_text"),
             },
-            driver: match row.get::<&str, _>("driver_kind") {
-                "codex" => DriverKind::Codex,
-                "builtin" => DriverKind::Builtin,
-                _ => return Err(ApplicationError::Internal),
+            driver: match driver_kind_from_columns(
+                row.get("driver_kind"),
+                &row.get::<serde_json::Value, _>("driver_config_json"),
+            )? {
+                crate::server::domain::identity::DriverKind::Acp(provider) => DriverKind::Acp {
+                    provider: match provider {
+                        AcpProvider::Codex => WireAcpProvider::Codex,
+                        AcpProvider::Claude => WireAcpProvider::Claude,
+                        AcpProvider::Pi => WireAcpProvider::Pi,
+                    },
+                },
+                crate::server::domain::identity::DriverKind::Builtin => DriverKind::Builtin,
             },
         })
     }

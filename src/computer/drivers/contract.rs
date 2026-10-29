@@ -8,6 +8,7 @@ use crate::computer::{
     core::{
         home::LocalAgent,
         input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
+        session::DriverKind,
     },
 };
 use crate::ids::{AgentId, RunId};
@@ -22,10 +23,15 @@ pub(in crate::computer) enum ProviderOpen {
 #[async_trait(?Send)]
 pub(in crate::computer) trait ProviderBackend {
     async fn validate(&mut self, agent: &LocalAgent) -> Result<(), ApplicationError>;
-    async fn open(&mut self, agent_id: AgentId) -> Result<ProviderOpen, ApplicationError>;
+    async fn open(
+        &mut self,
+        agent_id: AgentId,
+        driver: DriverKind,
+    ) -> Result<ProviderOpen, ApplicationError>;
     async fn resume(
         &mut self,
         agent_id: AgentId,
+        driver: DriverKind,
         locator: &str,
     ) -> Result<ProviderOpen, ApplicationError>;
     async fn start_turn(
@@ -58,10 +64,15 @@ pub(in crate::computer) trait ProviderBackend {
 #[async_trait(?Send)]
 pub(in crate::computer) trait StructuredProviderClient {
     async fn validate(&mut self, agent: &LocalAgent) -> Result<(), ApplicationError>;
-    async fn create_session(&mut self, agent_id: AgentId) -> Result<String, ApplicationError>;
+    async fn create_session(
+        &mut self,
+        agent_id: AgentId,
+        driver: DriverKind,
+    ) -> Result<String, ApplicationError>;
     async fn resume_session(
         &mut self,
         agent_id: AgentId,
+        driver: DriverKind,
         locator: &str,
     ) -> Result<bool, ApplicationError>;
     async fn start_turn(

@@ -7,7 +7,7 @@ use crate::ids::{
     RunId, SpaceId, TaskId, ThreadId,
 };
 
-pub(crate) const SCHEMA_VERSION: u16 = 2;
+pub(crate) const SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -245,10 +245,18 @@ pub(crate) enum CloseReason {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum DriverKind {
-    Codex,
+    Acp { provider: AcpProvider },
     Builtin,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AcpProvider {
+    Codex,
+    Claude,
+    Pi,
 }
 
 /// Identifies which Run a capability call belongs to. Carries no credential: the Computer's own token

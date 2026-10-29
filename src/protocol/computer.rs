@@ -229,10 +229,18 @@ pub(crate) struct RoleSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum DriverKind {
-    Codex,
+    Acp { provider: AcpProvider },
     Builtin,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AcpProvider {
+    Codex,
+    Claude,
+    Pi,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -987,8 +995,8 @@ mod tests {
         };
         let value = serde_json::to_value(hello).unwrap();
 
-        assert_eq!(value["supported_versions"]["minimum"], 5);
-        assert_eq!(value["supported_versions"]["maximum"], 5);
+        assert_eq!(value["supported_versions"]["minimum"], 6);
+        assert_eq!(value["supported_versions"]["maximum"], 6);
         assert_eq!(value["capabilities"][0], "active_turn_steer");
     }
 

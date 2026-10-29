@@ -86,9 +86,9 @@ pub fn turn_instruction(encoded_view: &str) -> String {
     )
 }
 
-/// Codex turn text: the contracts have no system-message channel in the app-server protocol,
-/// so they are prepended to the run instruction.
-pub fn codex_turn_instruction(encoded_view: &str) -> String {
+/// ACP turn text: ACP v1 has no system-message channel, so the contracts are prepended to the
+/// run instruction.
+pub fn acp_turn_instruction(encoded_view: &str) -> String {
     format!(
         "{}\n\n{}\n\n{}",
         product_contract(),

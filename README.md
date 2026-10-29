@@ -30,8 +30,9 @@ Computer daemon runs each Agent's Driver locally.
 - Node.js 24 and pnpm 10 (the repository uses `mise`; run `mise install` to
   activate the pinned toolchain)
 - PostgreSQL 17
-- A Driver for Agents: either the Codex CLI with an existing Codex home, or an
-  OpenAI-compatible provider configured as the builtin Driver
+- A Driver for Agents: either the ACP Driver (Node.js `npx` launches the pinned
+  codex, claude or pi ACP adapter; see `docs/SYSTEM_DESIGN.md` for credentials),
+  or an OpenAI-compatible provider configured as the builtin Driver
 - macOS (`sandbox-exec`) or Linux (`bwrap`) for the Computer sandbox
 
 ## Development quick start
@@ -189,7 +190,7 @@ auto_update = true
 update_check_interval_seconds = 21600
 update_ready_timeout_seconds = 30
 
-# Optional: point Codex Agents at an existing Codex home.
+# Optional: point ACP codex Agents at an existing Codex home.
 codex_config_source = "/path/to/codex/config.toml"
 codex_auth_source = "/path/to/codex/auth.json"
 
@@ -264,8 +265,8 @@ SUMI_COMPUTER__OPEN_PAIRING_BROWSER=false \
 
 `tests/builtin_harness_benchmark.rs` is a live benchmark for the Builtin driver
 that measures prompt cache rate, context compression, and long-conversation
-focus, and compares the result against the codex CLI harness (driven through
-Sumi's codex driver). Both legs run the same scripted conversation with the
+focus, and compares the result against codex (driven through Sumi's ACP Driver
+with the codex provider). Both legs run the same scripted conversation with the
 same OpenAI-compatible provider and model.
 
 ```sh

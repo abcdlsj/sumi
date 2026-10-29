@@ -70,7 +70,7 @@ impl CapabilityFixture {
                  INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES ('{agent_id}','{space_id}','agent','Agent','member',now());
                  INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES ('{peer_agent_id}','{space_id}','agent','PeerAgent','member',now());
                  INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','{}','online',1,now());
-                 INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Test',1,'active','codex',now());
+                 INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Test',1,'active','builtin',now());
                  INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel_id}','{space_id}','private','general',2,now());
                  INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{owner_id}',now(),0);
                  INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{agent_id}',now(),0);
@@ -258,7 +258,9 @@ async fn agent_capability_creation_rejects_an_unavailable_computer() {
         .execute(capability::Action::AgentCreate {
             name: "Coder".into(),
             role: "Write code".into(),
-            driver: capability::DriverKind::Codex,
+            driver: capability::DriverKind::Acp {
+                provider: capability::AcpProvider::Codex,
+            },
             computer_id: crate::ids::ComputerId::from_uuid(Uuid::now_v7()),
         })
         .await
@@ -1045,7 +1047,7 @@ async fn agent_channel_membership_commands_commit_notices_and_replay_idempotentl
     let fixture = CapabilityFixture::create().await;
     sqlx::query(
         "INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) \
-         VALUES($1,$2,$3,'Peer role',1,'active','codex',now())",
+         VALUES($1,$2,$3,'Peer role',1,'active','builtin',now())",
     )
     .bind(fixture.peer_agent_id)
     .bind(fixture.context.space_id.into_uuid())
@@ -1948,7 +1950,9 @@ async fn agent_write_actions_emit_agent_activity_events() {
         .execute(capability::Action::AgentCreate {
             name: "Coder".into(),
             role: "Write code".into(),
-            driver: capability::DriverKind::Codex,
+            driver: capability::DriverKind::Acp {
+                provider: capability::AcpProvider::Codex,
+            },
             computer_id: crate::ids::ComputerId::from_uuid(fixture.computer_id),
         })
         .await

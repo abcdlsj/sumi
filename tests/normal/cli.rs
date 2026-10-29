@@ -88,7 +88,7 @@ fn agent_cli_uses_stable_exit_codes_and_keeps_json_errors_structured() {
         let socket = root.path().join("daemon.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let response = serde_json::json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "ok": false,
             "data": null,
             "error": {
@@ -128,7 +128,7 @@ fn agent_cli_uses_stable_exit_codes_and_keeps_json_errors_structured() {
 
 fn assert_json_error(stdout: &[u8], code: &str, retryable: bool) {
     let envelope: serde_json::Value = serde_json::from_slice(stdout).unwrap();
-    assert_eq!(envelope["schema_version"], 2);
+    assert_eq!(envelope["schema_version"], 3);
     assert_eq!(envelope["ok"], false);
     assert!(envelope["data"].is_null());
     assert_eq!(envelope["error"]["code"], code);

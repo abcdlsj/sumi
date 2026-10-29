@@ -72,6 +72,7 @@ name = "werewolf_communication"
 path = "tests/werewolf_communication.rs"
 
 [dependencies]
+agent-client-protocol-schema = { version = "1.13", default-features = false }
 anyhow = "1.0"
 async-trait = "0.1"
 async-openai = { version = "0.41", default-features = false, features = ["byot", "chat-completion", "rustls"] }

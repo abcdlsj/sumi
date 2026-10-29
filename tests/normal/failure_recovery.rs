@@ -442,13 +442,13 @@ async fn a_lost_workspace_and_corrupt_locator_do_not_resume_a_stale_session() ->
 /// the workspace and corrupting the stored locator must both retire that cache rather than resume it,
 /// and the Server's Run, Item and Message facts must stay consistent throughout.
 ///
-/// This scenario needs a real Agent Home, so it runs a paired daemon that validates its Driver against
-/// the local `codex` executable. Without that executable the daemon cannot bring an Agent to `active`,
-/// and the scenario has nothing to corrupt.
+/// This scenario needs a real Agent Home, so it runs a paired daemon whose ACP Driver validates
+/// against the local `npx` executable that launches the codex adapter. Without that executable the
+/// daemon cannot bring an Agent to `active`, and the scenario has nothing to corrupt.
 async fn workspace_loss_and_locator_corruption(database: &TestDatabase) -> Result<()> {
-    if !codex_executable_available() {
+    if !npx_executable_available() {
         eprintln!(
-            "skipping workspace loss acceptance: no `codex` executable on PATH, so a Driver cannot \
+            "skipping workspace loss acceptance: no `npx` executable on PATH, so a Driver cannot \
              validate and no Agent Home is prepared"
         );
         return Ok(());
@@ -498,7 +498,8 @@ async fn workspace_loss_and_locator_corruption(database: &TestDatabase) -> Resul
             "name": "Nia",
             "role_text": "Investigate failures",
             "access_level": "member",
-            "driver_kind": "codex",
+            "driver_kind": "acp",
+            "driver_provider": "codex",
         }))
         .send()
         .await?;
@@ -626,11 +627,11 @@ async fn workspace_loss_and_locator_corruption(database: &TestDatabase) -> Resul
     fixture.finish().await
 }
 
-/// Whether a `codex` executable resolves on PATH, which is how the Codex Driver validates an Agent.
-fn codex_executable_available() -> bool {
+/// Whether an `npx` executable resolves on PATH, which is how the ACP Driver validates an Agent.
+fn npx_executable_available() -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| {
-            let candidate = directory.join("codex");
+            let candidate = directory.join("npx");
             candidate.is_file() || candidate.is_symlink()
         })
     })
@@ -812,7 +813,7 @@ async fn insert_agent(
         sqlx::query(
             "INSERT INTO agents \
              (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) \
-             VALUES ($1,$2,$3,'Assist',1,'active','codex',now())",
+             VALUES ($1,$2,$3,'Assist',1,'active','builtin',now())",
         )
         .bind(agent_id)
         .bind(space_id)

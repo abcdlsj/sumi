@@ -79,7 +79,7 @@ async fn run_dm_focus_flow(database: &TestDatabase) -> Result<()> {
     sqlx::query(
         "INSERT INTO agents \
          (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) \
-         VALUES ($1,$2,$3,'Assist',1,'active','codex',now())",
+         VALUES ($1,$2,$3,'Assist',1,'active','builtin',now())",
     )
     .bind(agent_id)
     .bind(space_id)

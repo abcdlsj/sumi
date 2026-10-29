@@ -2,7 +2,7 @@
 //!
 //! The benchmark runs the same scripted long conversation through Sumi once per driver:
 //! - `builtin`: the in-process Builtin driver backed by an OpenAI-compatible provider.
-//! - `codex`: the installed codex CLI (app-server mode) driven through Sumi's codex driver.
+//! - `codex`: the codex ACP adapter driven through Sumi's ACP Driver.
 //!
 //! Both legs use the same provider endpoint and the same model (`deepseek-v4-flash` by
 //! default), the same Sumi product flow, and the same scripted conversation. The first
@@ -60,9 +60,9 @@ use uuid::Uuid;
 
 use support::{
     HarnessBuiltinConfig, SumiProcess, TestDatabase, confirm_pairing, create_space,
-    pairing_url_from_daemon, register_with, reserve_local_port, short_temp_root,
-    spawn_default_codex_computer, spawn_server, wait_for_computer_status_for, wait_for_health,
-    write_harness_computer_config, write_server_config,
+    pairing_url_from_daemon, register_with, reserve_local_port, short_temp_root, spawn_server,
+    wait_for_computer_status_for, wait_for_health, write_harness_computer_config,
+    write_server_config,
 };
 
 const AGENT_READY_TIMEOUT: Duration = Duration::from_secs(300);
@@ -242,7 +242,7 @@ async fn run_harness(database: &TestDatabase) -> Result<()> {
         &builtin,
         codex_home.as_deref(),
     )?;
-    let mut computer = spawn_default_codex_computer(&computer_config)?;
+    let mut computer = support::spawn_computer(&computer_config)?;
     let pairing_url = pairing_url_from_daemon(&mut computer)
         .await
         .context("computer daemon did not emit a pairing URL")?;
@@ -624,7 +624,8 @@ async fn create_agent(
             "name": profile.name,
             "role_text": role_text(profile),
             "access_level": "member",
-            "driver_kind": profile.driver,
+            "driver_kind": support::driver_fields(profile.driver).0,
+            "driver_provider": support::driver_fields(profile.driver).1,
         }))
         .send()
         .await?;
@@ -681,7 +682,7 @@ async fn wait_for_agent_ready(
         let ready = listed.iter().any(|candidate| {
             candidate["member_id"].as_str() == Some(target.as_str())
                 && candidate["provision_status"] == "ready"
-                && candidate["driver_kind"] == profile.driver
+                && support::agent_has_driver(candidate, profile.driver)
         });
         if ready {
             return Ok(());

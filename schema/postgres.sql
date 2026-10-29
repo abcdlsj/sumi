@@ -2,7 +2,7 @@ CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TIMESTAMPTZ NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (11, now());
+INSERT INTO schema_meta (version, applied_at) VALUES (12, now());
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -138,8 +138,9 @@ CREATE TABLE agents (
     role_text TEXT NOT NULL,
     role_revision BIGINT NOT NULL CHECK (role_revision > 0),
     lifecycle TEXT NOT NULL CHECK (lifecycle IN ('provisioning', 'active', 'suspended', 'retired', 'error')),
-    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'builtin')),
+    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('acp', 'builtin')),
     driver_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT agents_driver_provider_check CHECK ((driver_kind = 'acp') = (driver_config_json ? 'provider')),
     created_at TIMESTAMPTZ NOT NULL,
     retired_at TIMESTAMPTZ,
     FOREIGN KEY (member_id, space_id) REFERENCES members(id, space_id) ON DELETE RESTRICT,

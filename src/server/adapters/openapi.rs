@@ -210,13 +210,22 @@ pub(super) struct CreateAgentRequest {
     name: String,
     role_text: String,
     driver_kind: DriverKind,
+    /// Required when `driver_kind` is `acp`; omitted for `builtin`.
+    driver_provider: Option<AcpProvider>,
     access_level: AgentAccessLevel,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum DriverKind {
-    Codex,
+    Acp,
     Builtin,
+}
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AcpProvider {
+    Codex,
+    Claude,
+    Pi,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -246,6 +255,8 @@ pub(super) struct AgentResponse {
     /// `activity_status` so a Run in progress is not relabelled as unreachable.
     pub(super) computer_reachable: bool,
     pub(super) driver_kind: DriverKind,
+    /// Set when `driver_kind` is `acp`.
+    pub(super) driver_provider: Option<AcpProvider>,
     pub(super) attention_config: AttentionConfig,
     pub(super) activity: Option<AgentActivityResponse>,
     pub(super) last_error_code: Option<String>,

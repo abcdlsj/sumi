@@ -572,7 +572,15 @@ fn local_agent(configuration: wire::AgentConfiguration) -> LocalAgent {
         role_revision: configuration.role.revision,
         role: configuration.role.text,
         driver: match configuration.driver {
-            wire::DriverKind::Codex => DriverKind::Codex,
+            wire::DriverKind::Acp {
+                provider: wire::AcpProvider::Codex,
+            } => DriverKind::Codex,
+            wire::DriverKind::Acp {
+                provider: wire::AcpProvider::Claude,
+            } => DriverKind::Claude,
+            wire::DriverKind::Acp {
+                provider: wire::AcpProvider::Pi,
+            } => DriverKind::Pi,
             wire::DriverKind::Builtin => DriverKind::Builtin,
         },
         state: LocalAgentState::Active,
@@ -1023,7 +1031,9 @@ mod tests {
                             revision: 3,
                             text: "role".to_owned(),
                         },
-                        driver: WireDriverKind::Codex,
+                        driver: WireDriverKind::Acp {
+                            provider: crate::protocol::computer::AcpProvider::Codex,
+                        },
                     }),
                 },
             )

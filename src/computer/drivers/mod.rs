@@ -1,9 +1,9 @@
+mod acp;
+mod acp_runtime;
 mod builtin;
 mod builtin_agent;
-mod codex;
 mod contract;
 pub(in crate::computer) mod prompt;
-mod runtime;
 
 #[cfg(test)]
 mod tests;
@@ -35,9 +35,9 @@ use crate::{
 };
 
 use self::{
+    acp_runtime::AcpRuntimeClient,
     builtin_agent::BuiltinRuntimeClient,
     contract::{ProviderBackend, ProviderOpen},
-    runtime::CodexRuntimeClient,
 };
 
 pub(in crate::computer) fn agent_home(computer_home: &Path, agent_id: AgentId) -> PathBuf {
@@ -55,7 +55,7 @@ pub(in crate::computer) fn runtime(
         builtin.set_usage_sink(sink);
     }
     Ok(DriverAdapter::new(
-        codex::CodexAdapter::new(CodexRuntimeClient::new(
+        acp::AcpAdapter::new(AcpRuntimeClient::new(
             computer_home.to_owned(),
             driver_secret,
         )),
@@ -63,8 +63,8 @@ pub(in crate::computer) fn runtime(
     ))
 }
 
-pub(in crate::computer) struct DriverAdapter<C, B> {
-    codex: C,
+pub(in crate::computer) struct DriverAdapter<A, B> {
+    acp: A,
     builtin: B,
     turns: BTreeMap<RunId, ActiveTurn>,
     completions: std::collections::VecDeque<DriverCompletion>,
@@ -76,10 +76,10 @@ struct ActiveTurn {
     locator: String,
 }
 
-impl<C, B> DriverAdapter<C, B> {
-    pub(in crate::computer) fn new(codex: C, builtin: B) -> Self {
+impl<A, B> DriverAdapter<A, B> {
+    pub(in crate::computer) fn new(acp: A, builtin: B) -> Self {
         Self {
-            codex,
+            acp,
             builtin,
             turns: BTreeMap::new(),
             completions: std::collections::VecDeque::new(),
@@ -88,18 +88,18 @@ impl<C, B> DriverAdapter<C, B> {
 
     fn backend_mut(&mut self, kind: DriverKind) -> &mut dyn ProviderBackend
     where
-        C: ProviderBackend,
+        A: ProviderBackend,
         B: ProviderBackend,
     {
         match kind {
-            DriverKind::Codex => &mut self.codex,
+            DriverKind::Codex | DriverKind::Claude | DriverKind::Pi => &mut self.acp,
             DriverKind::Builtin => &mut self.builtin,
         }
     }
 }
 
 #[async_trait(?Send)]
-impl<C: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<C, B> {
+impl<A: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<A, B> {
     async fn validate(&mut self, agent: &LocalAgent) -> Result<(), ApplicationError> {
         self.backend_mut(agent.driver).validate(agent).await
     }
@@ -108,11 +108,12 @@ impl<C: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<C, B> 
         &mut self,
         request: OpenSessionRequest,
     ) -> Result<OpenedSession, ApplicationError> {
-        let backend = self.backend_mut(request.fingerprint.driver);
+        let driver = request.fingerprint.driver;
+        let backend = self.backend_mut(driver);
         let opened = if let Some(locator) = request.resume_locator.as_deref() {
-            backend.resume(request.agent_id, locator).await?
+            backend.resume(request.agent_id, driver, locator).await?
         } else {
-            backend.open(request.agent_id).await?
+            backend.open(request.agent_id, driver).await?
         };
         match opened {
             ProviderOpen::Opened(locator) => Ok(OpenedSession {
@@ -198,7 +199,7 @@ impl<C: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<C, B> 
         agent_id: crate::ids::AgentId,
     ) -> Result<(), ApplicationError> {
         self.turns.retain(|_, turn| turn.agent_id != agent_id);
-        self.codex.restart_agent(agent_id).await?;
+        self.acp.restart_agent(agent_id).await?;
         self.builtin.restart_agent(agent_id).await
     }
 
@@ -227,7 +228,7 @@ impl<C: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<C, B> 
     }
 
     async fn poll_completions(&mut self) -> Result<Vec<DriverCompletion>, ApplicationError> {
-        let mut completed = self.codex.poll_completions().await?;
+        let mut completed = self.acp.poll_completions().await?;
         completed.extend(self.builtin.poll_completions().await?);
         for completion in &completed {
             self.turns.remove(&completion.run_id);
@@ -253,7 +254,7 @@ impl<C: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<C, B> 
                     .remove(index)
                     .map(|completion| completion.outcome));
             }
-            let mut completed = self.codex.poll_completions().await?;
+            let mut completed = self.acp.poll_completions().await?;
             completed.extend(self.builtin.poll_completions().await?);
             for completion in completed {
                 self.turns.remove(&completion.run_id);

@@ -535,15 +535,20 @@ pub fn spawn_computer(config: &Path) -> Result<SumiProcess> {
     )
 }
 
-pub fn spawn_default_codex_computer(config: &Path) -> Result<SumiProcess> {
-    SumiProcess::spawn(
-        [
-            OsStr::new("computer"),
-            OsStr::new("--config"),
-            config.as_os_str(),
-        ],
-        [("SUMI_CODEX_COMMAND", OsStr::new("codex"))].as_slice(),
-    )
+/// Browser API `driver_kind` and `driver_provider` for a profile Driver name: `builtin` or an ACP
+/// provider such as `codex`.
+pub fn driver_fields(driver: &str) -> (&'static str, Option<&str>) {
+    if driver == "builtin" {
+        ("builtin", None)
+    } else {
+        ("acp", Some(driver))
+    }
+}
+
+/// Whether a listed Agent carries the Driver named by a profile.
+pub fn agent_has_driver(agent: &Value, driver: &str) -> bool {
+    let (kind, provider) = driver_fields(driver);
+    agent["driver_kind"] == kind && agent["driver_provider"].as_str() == provider
 }
 
 pub async fn register_human(client: &Client, server: &Url) -> Result<String> {

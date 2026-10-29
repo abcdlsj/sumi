@@ -46,8 +46,8 @@ use crate::{
                 RunSnapshot as DomainRunSnapshot, RunStatus, RunTrigger,
             },
             identity::{
-                AccessLevel, Agent, AgentLifecycle, Computer, ComputerLifecycle, DriverKind,
-                Member, PermissionAction,
+                AccessLevel, AcpProvider, Agent, AgentLifecycle, Computer, ComputerLifecycle,
+                DriverKind, Member, PermissionAction,
             },
             invitation::{Invitation, InvitationDraft, InvitationStatus},
             pairing::{ComputerOs, Pairing, PairingRequest, PairingStatus},
@@ -381,6 +381,37 @@ impl PostgresAdapter {
                  CREATE TRIGGER outbox_events_notify AFTER INSERT ON outbox_events \
                     FOR EACH ROW EXECUTE FUNCTION notify_space_event(); \
                  INSERT INTO schema_meta (version, applied_at) VALUES (11, now());",
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
+        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if version < 12 {
+            if version != 11 {
+                return Err(sqlx::Error::Protocol(format!(
+                    "unsupported schema baseline version {version}"
+                )));
+            }
+            // Codex Agents move to the ACP Driver; queued configuration commands are rewritten to
+            // the protocol v6 Driver shape.
+            sqlx::raw_sql(
+                "ALTER TABLE agents DROP CONSTRAINT agents_driver_kind_check; \
+                 UPDATE agents SET driver_kind='acp', \
+                    driver_config_json=driver_config_json || '{\"provider\":\"codex\"}'::jsonb \
+                    WHERE driver_kind='codex'; \
+                 ALTER TABLE agents ADD CONSTRAINT agents_driver_kind_check \
+                    CHECK (driver_kind IN ('acp', 'builtin')); \
+                 ALTER TABLE agents ADD CONSTRAINT agents_driver_provider_check \
+                    CHECK ((driver_kind = 'acp') = (driver_config_json ? 'provider')); \
+                 UPDATE computer_commands SET payload_json=jsonb_set(payload_json, '{payload,driver}', \
+                    CASE payload_json #>> '{payload,driver}' \
+                        WHEN 'codex' THEN '{\"kind\":\"acp\",\"provider\":\"codex\"}'::jsonb \
+                        ELSE '{\"kind\":\"builtin\"}'::jsonb END) \
+                    WHERE kind IN ('agent.provision', 'agent.configure') \
+                    AND jsonb_typeof(payload_json #> '{payload,driver}') = 'string'; \
+                 INSERT INTO schema_meta (version, applied_at) VALUES (12, now());",
             )
             .execute(&mut *transaction)
             .await?;

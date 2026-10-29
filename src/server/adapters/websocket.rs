@@ -627,7 +627,7 @@ mod tests {
                 ..
             }
         ));
-        let future = ProtocolVersionRange::new(ProtocolVersion::new(6), ProtocolVersion::new(6));
+        let future = ProtocolVersionRange::new(ProtocolVersion::new(7), ProtocolVersion::new(7));
         assert!(matches!(
             negotiate(&hello(future), false, true),
             ServerHandshake::Rejected {

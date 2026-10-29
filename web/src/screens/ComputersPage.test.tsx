@@ -63,7 +63,7 @@ describe("Computer flows", () => {
       if (path.endsWith("/members") && !init?.method) return json([{ id: space.owner_member_id, kind: "human", display_name: "Ada", access_level: "owner", permissions: [] }]);
       if (path.endsWith("/computers") && !init?.method) return json([{ id: computerId, space_id: space.id, name: "Studio", hostname: "studio.local", os: "macos", status: "online", daemon_version: "0.1.0", last_seen_at: "2026-07-25T00:00:00Z", created_at: "2026-07-25T00:00:00Z" }]);
       if (path.endsWith("/agents") && !init?.method) return json([hostedAgent]);
-      if (path.endsWith("/agents") && init?.method === "POST") return json({ member_id: "agent", space_id: space.id, computer_id: computerId, name: "Lin", access_level: "member", role_text: "Review boundaries.", role_revision: 1, desired_lifecycle: "active", provision_status: "provisioning", activity_status: "idle", driver_kind: "codex", created_at: "2026-07-25T00:00:00Z" }, 201);
+      if (path.endsWith("/agents") && init?.method === "POST") return json({ member_id: "agent", space_id: space.id, computer_id: computerId, name: "Lin", access_level: "member", role_text: "Review boundaries.", role_revision: 1, desired_lifecycle: "active", provision_status: "provisioning", activity_status: "idle", driver_kind: "acp", driver_provider: "codex", created_at: "2026-07-25T00:00:00Z" }, 201);
       if (path.endsWith(`/computers/${computerId}`) && init?.method === "DELETE") return json({ id: computerId, space_id: space.id, name: "Studio", hostname: "studio.local", os: "macos", status: "revoked", daemon_version: "0.1.0", last_seen_at: "2026-07-25T00:00:00Z", created_at: "2026-07-25T00:00:00Z" });
       throw new Error(`Unexpected request: ${path}`);
     });

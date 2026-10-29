@@ -23,10 +23,16 @@ Agent CLI：
 Driver：
 
 - 只把 Run 和 Session 语义映射到 provider；Driver 输出不能直接成为 Message、Result 或 Memory。
+- Agent 的 Driver 配置为 `{kind: acp, provider}` 或 `{kind: builtin}`。Server 以 `agents.driver_kind`（acp、builtin）和 `driver_config_json.provider` 保存；新增 provider 不改 CHECK 约束。
+- ACP Driver 为每个 Agent 常驻一个 ACP agent 进程（stdio JSON-RPC，协议 v1），Provider Session locator 是 ACP `sessionId`。provider 对应的进程命令固定版本：codex 为 `@zed-industries/codex-acp@0.16.0`，claude 为 `@zed-industries/claude-code-acp@0.16.2`，pi 为 `pi-acp@0.0.34`，经 `npx` 启动；`SUMI_ACP_<PROVIDER>_COMMAND` 可替换命令。
+- ACP 进程环境只含 `HOME`（Agent Home）、`PATH`、`LANG`、`SUMI_SOCKET`、`SUMI_DRIVER_TOKEN` 与 provider 私有项：codex 为 `CODEX_HOME=drivers/codex` 及 config 声明的 env_key；claude 为 `CLAUDE_CONFIG_DIR=drivers/claude` 及 daemon 环境中的 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN`；pi 为 `PI_CODING_AGENT_DIR=drivers/pi` 及 daemon 环境中的 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`OPENROUTER_API_KEY`。
+- ACP Driver 以全权限运行：session 建立后若 agent 提供全权限 mode（codex `full-access`、claude `bypassPermissions`）则切换到该 mode；`session/request_permission` 选择 allow 选项。Computer 不宣告 fs 与 terminal client capability。
+- ACP 恢复 Provider Session 时，agent 宣告 `sessionCapabilities.resume` 则用 `session/resume`，否则宣告 `loadSession` 则用 `session/load` 并丢弃重放的 `session/update`；两者都不支持或请求失败时 Session 丢失。关闭 Session 仅在宣告 `sessionCapabilities.close` 时发送 `session/close`。
+- ACP 回合以 `session/prompt` 响应结束：`end_turn` 为 Completed，`cancelled` 为 Interrupted，其余 stop reason 与错误为 Failed。interrupt 发送 `session/cancel`。
 
 ## 协议与投递
 
-- 当前 Computer 协议 schema 为 v4，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
+- 当前 Computer 协议 schema 为 v6，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
 - 双方无共同版本时拒绝连接。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
@@ -132,7 +138,7 @@ Driver：
 - Server 对每个读取和写入执行 Space、Channel membership、资源关系校验；Admin 不自动获得 private Channel 读取权。
 - Task 不引入独立 ACL；可见范围由兼容的 Linked Threads 成员集合决定。
 - Permission 只控制一个特定 Action；Agent Permission 包含 channel.create、channel.invite、channel.remove 和 agent.create；只有 Human Owner/Admin 可授予或撤销。
-- 模型凭据只存在于 Computer 受限文件和必要进程内存；Driver token 只存在于 daemon 内存与该 Agent 的 app-server 环境，工具子进程不能读取其他 Agent 的凭据。
+- 模型凭据只存在于 Computer 受限文件和必要进程内存；Driver token 只存在于 daemon 内存与该 Agent 的 Driver 进程环境，工具子进程不能读取其他 Agent 的凭据。
 - Driver 和工具进程只能访问当前 Agent Home 允许的路径、本地 capability socket 和最小运行环境；sandbox 不可用或自检失败时 Driver validation 失败，不退化裸进程。
 - Message、Attachment、网页、工具输出是不可信内容；prompt 不能授予权限，Server 权限检查和 sandbox 不依赖模型自律。
 - 日志、audit、error details、metrics label 不得包含 Message、Attachment、Memory、workspace 文件、Task Result、Provider transcript、Secret 或完整环境变量；诊断使用稳定 ID、错误码、计数、时间和 hash。
@@ -165,7 +171,7 @@ Driver：
 
 ## LLM usage 本地遥测
 
-- Computer 在本地 daemon 数据库（`llm_usage` 表）记录每次 LLM 调用的 token 用量：run_id、agent_id、driver_kind、model、input/output/cached/cache_write tokens、耗时与时间；Agent runtime 返回当前 Run 内每次 provider 调用的独立 usage（包含上下文压缩调用），builtin Driver 逐条写入，Codex Driver 暂不暴露 token 用量。
+- Computer 在本地 daemon 数据库（`llm_usage` 表）记录每次 LLM 调用的 token 用量：run_id、agent_id、driver_kind、model、input/output/cached/cache_write tokens、耗时与时间；Agent runtime 返回当前 Run 内每次 provider 调用的独立 usage（包含上下文压缩调用），builtin Driver 逐条写入；ACP v1 只提供上下文占用（`usage_update`），不提供每次调用的 token 用量，ACP Driver 不写入。
 - 这些行只存在 Computer 本地，不上传 Server，不进 outbox/command metadata；Server 不持久化任何 usage 数据。
 - `GET /api/v1/computers/{computer_id}/llm-usage?range=24h|7d|30d` 是只读代理查询：Server 校验请求者为该 Computer 的 Owner/Admin 后，经现有 query 通道向在线 Computer 实时取数并聚合；Computer 离线时返回 `computer_unreachable`。
 - 聚合在 Computer 侧完成：总量、cache hit rate（cached / input）、按小时（≤48h）或按天的曲线 bucket、按 model 与按 agent 的分组，以及按 agent 的独立曲线序列（`by_agent_series`）和 model 分组（`by_agent_model`），供 Agent 维度统计页使用。

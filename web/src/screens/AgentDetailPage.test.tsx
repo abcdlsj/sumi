@@ -288,7 +288,7 @@ function agent(
     desired_lifecycle: desiredLifecycle,
     provision_status: provisionStatus,
     activity_status: provisionStatus === "error" ? "error" : desiredLifecycle === "active" ? "working" : "suspended",
-    driver_kind: "codex",
+    driver_kind: "acp", driver_provider: "codex",
     attention_config: { dm_immediate: true, mention_immediate: true, ambient_enabled: true, ambient_debounce_seconds: 5, ambient_max_wait_seconds: 30, max_retry_count: 3 },
     created_at: "2026-07-25T00:00:00Z",
     updated_at: "2026-07-25T00:00:00Z",

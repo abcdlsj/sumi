@@ -8,31 +8,36 @@ use crate::computer::{
     core::{
         home::LocalAgent,
         input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
+        session::DriverKind,
     },
 };
 use crate::ids::{AgentId, RunId};
 
 use super::contract::{ProviderBackend, ProviderOpen, StructuredProviderClient};
 
-pub(in crate::computer) struct CodexAdapter<C> {
+pub(in crate::computer) struct AcpAdapter<C> {
     pub(super) client: C,
 }
 
-impl<C> CodexAdapter<C> {
+impl<C> AcpAdapter<C> {
     pub(in crate::computer) fn new(client: C) -> Self {
         Self { client }
     }
 }
 
 #[async_trait(?Send)]
-impl<C: StructuredProviderClient> ProviderBackend for CodexAdapter<C> {
+impl<C: StructuredProviderClient> ProviderBackend for AcpAdapter<C> {
     async fn validate(&mut self, agent: &LocalAgent) -> Result<(), ApplicationError> {
         self.client.validate(agent).await
     }
 
-    async fn open(&mut self, agent_id: AgentId) -> Result<ProviderOpen, ApplicationError> {
+    async fn open(
+        &mut self,
+        agent_id: AgentId,
+        driver: DriverKind,
+    ) -> Result<ProviderOpen, ApplicationError> {
         self.client
-            .create_session(agent_id)
+            .create_session(agent_id, driver)
             .await
             .map(ProviderOpen::Opened)
     }
@@ -40,9 +45,14 @@ impl<C: StructuredProviderClient> ProviderBackend for CodexAdapter<C> {
     async fn resume(
         &mut self,
         agent_id: AgentId,
+        driver: DriverKind,
         locator: &str,
     ) -> Result<ProviderOpen, ApplicationError> {
-        if self.client.resume_session(agent_id, locator).await? {
+        if self
+            .client
+            .resume_session(agent_id, driver, locator)
+            .await?
+        {
             Ok(ProviderOpen::Resumed(locator.to_owned()))
         } else {
             Ok(ProviderOpen::Lost)

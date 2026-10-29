@@ -9,6 +9,6 @@ pub mod prompt;
 
 pub use compaction::{BuiltinContext, CompactionConfig};
 pub use prompt::{
-    codex_turn_instruction, driver_contract, driver_contract_hash, product_contract,
-    system_messages, turn_instruction,
+    acp_turn_instruction, driver_contract, driver_contract_hash, product_contract, system_messages,
+    turn_instruction,
 };

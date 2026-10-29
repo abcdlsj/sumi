@@ -614,7 +614,8 @@ impl PostgresQueries {
     ) -> Result<Vec<AgentRow>, ApplicationError> {
         let query = format!(
             "SELECT a.member_id,a.space_id,a.computer_id,a.role_text,a.role_revision,
-                    a.lifecycle,a.driver_kind,a.created_at,a.retired_at,
+                    a.lifecycle,a.driver_kind,a.driver_config_json->>'provider' AS driver_provider,
+                    a.created_at,a.retired_at,
                     m.display_name,m.access_level,c.connection_status,
                     c.deleted_at AS computer_deleted_at,
                     active_run.status AS run_status,active_run.task_id AS run_task_id,
@@ -1157,6 +1158,7 @@ pub(in crate::server::adapters) struct AgentRow {
     pub(in crate::server::adapters) role_revision: i64,
     pub(in crate::server::adapters) lifecycle: String,
     pub(in crate::server::adapters) driver_kind: String,
+    pub(in crate::server::adapters) driver_provider: Option<String>,
     pub(in crate::server::adapters) created_at: OffsetDateTime,
     pub(in crate::server::adapters) retired_at: Option<OffsetDateTime>,
     pub(in crate::server::adapters) display_name: String,

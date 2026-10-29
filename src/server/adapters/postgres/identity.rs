@@ -300,7 +300,7 @@ impl PostgresTransaction {
         .map_err(map_sqlx)?;
         sqlx::query(
             "INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle, \
-             driver_kind,driver_config_json,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}',$8)",
+             driver_kind,driver_config_json,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
         )
         .bind(agent.member_id.into_uuid())
         .bind(agent.space_id.into_uuid())
@@ -309,6 +309,7 @@ impl PostgresTransaction {
         .bind(i64::try_from(agent.role_revision).map_err(|_| ApplicationError::Conflict)?)
         .bind(agent_lifecycle_str(agent.lifecycle))
         .bind(driver_kind_str(agent.driver_kind))
+        .bind(driver_config(agent.driver_kind))
         .bind(member.created_at)
         .execute(&mut *self.connection)
         .await
@@ -617,7 +618,10 @@ impl PostgresTransaction {
             role_revision: u64::try_from(row.get::<i64, _>("role_revision"))
                 .map_err(|_| ApplicationError::Internal)?,
             lifecycle: agent_lifecycle_from_str(row.get("lifecycle"))?,
-            driver_kind: driver_kind_from_str(row.get("driver_kind"))?,
+            driver_kind: driver_kind_from_columns(
+                row.get("driver_kind"),
+                &row.get::<serde_json::Value, _>("driver_config_json"),
+            )?,
             retired_at: row.get("retired_at"),
         })
     }

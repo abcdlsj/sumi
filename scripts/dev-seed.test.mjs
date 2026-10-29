@@ -22,7 +22,6 @@ import {
 
 test("development seed exposes a codex command override for optional codex use", () => {
   assert.equal(typeof CODEX_COMMAND, "string");
-  assert.ok(CODEX_COMMAND.length > 0);
   assert.equal(typeof CODEX_HOME, "string");
   assert.ok(CODEX_HOME.length > 0);
 
@@ -33,7 +32,7 @@ test("development seed exposes a codex command override for optional codex use",
   );
   assert.match(taskScript, /SUMI_SEED_CODEX_COMMAND="\$1" run_dev/);
   assert.match(taskScript, /SUMI_SEED_CODEX_HOME=\/path\/to\/codex-home/);
-  assert.match(readFileSync(new URL("./dev-seed.mjs", import.meta.url), "utf8"), /SUMI_CODEX_COMMAND: CODEX_COMMAND/);
+  assert.match(readFileSync(new URL("./dev-seed.mjs", import.meta.url), "utf8"), /SUMI_ACP_CODEX_COMMAND: CODEX_COMMAND/);
   assert.match(
     readFileSync(new URL("./dev-seed.mjs", import.meta.url), "utf8"),
     /SUMI_SEED_CODEX_HOME \?\? join\(homedir\(\), "\.codex"\)/,

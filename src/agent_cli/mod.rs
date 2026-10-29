@@ -77,11 +77,11 @@ pub(crate) fn classify_error(
                 "create the file with the `write` tool, then pass the path relative to the shell's current directory (run `pwd` if unsure); do not retry with guessed prefixes",
             ),
         )
-    } else if normalized.contains("--driver must be codex or builtin") {
+    } else if normalized.contains("--driver must be codex, claude, pi or builtin") {
         (
-            "`--driver` must be `codex` or `builtin`".to_owned(),
+            "`--driver` must be `codex`, `claude`, `pi` or `builtin`".to_owned(),
             "invalid_driver",
-            Some("rerun with `--driver codex` or `--driver builtin`"),
+            Some("rerun with one of the allowed `--driver` values"),
         )
     } else if normalized.contains("agent display name or role is invalid") {
         (
@@ -227,7 +227,7 @@ pub(crate) fn classify_error(
         "invalid_driver" => {
             details.insert(
                 "allowed_values".to_owned(),
-                serde_json::json!(["codex", "builtin"]),
+                serde_json::json!(["codex", "claude", "pi", "builtin"]),
             );
         }
         "invalid_post_target" => {
