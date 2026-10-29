@@ -98,9 +98,22 @@ impl SqliteAdapter {
             .await
             .map_err(map_sqlx)?;
         if version == 1 {
+            // A v1 database written before `run_secret` existed has nothing to drop, and SQLite
+            // has no `DROP COLUMN IF EXISTS`; drop only when the column is actually there.
+            let has_run_secret: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pragma_table_info('local_runs') WHERE name='run_secret'",
+            )
+            .fetch_one(&mut connection)
+            .await
+            .map_err(map_sqlx)?;
+            if has_run_secret > 0 {
+                sqlx::raw_sql("ALTER TABLE local_runs DROP COLUMN run_secret;")
+                    .execute(&mut connection)
+                    .await
+                    .map_err(map_sqlx)?;
+            }
             sqlx::raw_sql(
-                "ALTER TABLE local_runs DROP COLUMN run_secret; \
-                 INSERT INTO schema_meta (version, applied_at) \
+                "INSERT INTO schema_meta (version, applied_at) \
                  VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
             )
             .execute(&mut connection)
