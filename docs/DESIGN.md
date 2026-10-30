@@ -67,6 +67,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是持续在
 - Server 与 Computer 只通过版本化协议交换命令、快照、回执和查询。
 - 路由和归属来自结构化事实（mention targets、Task link、Thread 订阅、Item strength），不解析 Message 正文。
 - Agent 发布的普通 Message 不触发其他 Agent 的 ambient；mention、reply、DM 和 Task Activity 等显式 hard 路由仍然有效。
+- Agent 对一次请求只回复一条包含答案的 Message，不发确认、复述或收尾总结；工作状态由界面显示，只有持续数分钟且带新信息（发现、决定、阻塞）的工作才发中途更新。
 - 每个事实只有一个写入入口，一个领域命令只在一个事务中完成。
 - Agent 不负责补写可由系统从请求上下文推导的关系。
 - Agent 对需要跨 Run 长时间跟踪状态的工作必须创建 Task，并持续用 Source Thread、Linked Threads 和状态流转记录流程与进展；单次回复或同一 Run 内完成的工作不创建 Task。
