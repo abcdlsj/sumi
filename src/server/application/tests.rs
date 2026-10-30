@@ -75,7 +75,8 @@ use super::{
     task::{
         CreateTaskFromRootMessage, CreateTaskInput, LinkThreadInput, LinkThreadToTask,
         OutcomeMessage, OutcomeRunContext, RecordTaskOutcome, RecordTaskOutcomeInput, TaskAction,
-        TaskOutcome, TaskOutcomeScope, TaskPostTarget, TaskSource, UpdateTask, UpdateTaskInput,
+        TaskOutcome, TaskOutcomeScope, TaskPostTarget, TaskResult, TaskSource, UpdateTask,
+        UpdateTaskInput,
     },
 };
 
@@ -2366,11 +2367,11 @@ async fn source_override_task_activity_item_drives_bound_run_after_current_run_e
             actor_member_id: agent,
             idempotency_key: idempotency(47),
             outcome: TaskOutcome::Done {
-                result: OutcomeMessage {
+                result: TaskResult::Publish(OutcomeMessage {
                     message_id: message(48),
                     body_markdown: "完成".into(),
                     post_to: TaskPostTarget::Source,
-                },
+                }),
             },
             now,
         },
@@ -3569,11 +3570,11 @@ async fn result_message_failure_rolls_back_task_completion() {
             actor_member_id: assignee,
             idempotency_key: idempotency(203),
             outcome: TaskOutcome::Done {
-                result: OutcomeMessage {
+                result: TaskResult::Publish(OutcomeMessage {
                     message_id: result_id,
                     body_markdown: "完成".into(),
                     post_to: TaskPostTarget::Thread(focus),
-                },
+                }),
             },
             now: OffsetDateTime::UNIX_EPOCH,
         },
@@ -3642,11 +3643,11 @@ async fn agent_task_done_atomically_finishes_run_items_and_replays() {
         actor_member_id: agent,
         idempotency_key: key,
         outcome: TaskOutcome::Done {
-            result: OutcomeMessage {
+            result: TaskResult::Publish(OutcomeMessage {
                 message_id: result_id,
                 body_markdown: "完成".into(),
                 post_to: TaskPostTarget::Focus,
-            },
+            }),
         },
         now,
     };
@@ -3676,6 +3677,74 @@ async fn agent_task_done_atomically_finishes_run_items_and_replays() {
     assert_eq!(replayed, completed);
     assert_eq!(port.state.messages.len(), 1);
     assert_eq!(port.state.task_audits.len(), 1);
+}
+
+#[tokio::test]
+async fn agent_task_done_can_name_its_existing_reply_as_the_result() {
+    let agent = member(180);
+    let human = member(181);
+    let focus = thread(182);
+    let task_id = task(183);
+    let run_id = run(184);
+    let reply_id = message(185);
+    let human_reply_id = message(186);
+    let computer_id = computer(999);
+    let now = OffsetDateTime::UNIX_EPOCH;
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[agent, human]);
+    port.state.computer_assignments.insert((computer_id, agent));
+    port.state.tasks.insert(
+        task_id,
+        make_task(task_id, focus, agent, TaskStatus::InProgress),
+    );
+    port.state.runs.insert(
+        run_id,
+        running_run(run_id, agent, focus, Some(task_id), Vec::new()),
+    );
+    for (id, author) in [(reply_id, agent), (human_reply_id, human)] {
+        port.state.messages.insert(
+            id,
+            Message {
+                id,
+                thread_id: focus,
+                author_member_id: author,
+                placement: MessagePlacement::Reply,
+                content: MessageContent::Text("结论".into()),
+                created_at: now,
+                edited_at: None,
+                deleted_at: None,
+            },
+        );
+    }
+    let input = |message_id, key| RecordTaskOutcomeInput {
+        scope: TaskOutcomeScope::AgentRun(OutcomeRunContext {
+            run_id,
+            computer_id,
+        }),
+        actor_member_id: agent,
+        idempotency_key: idempotency(key),
+        outcome: TaskOutcome::Done {
+            result: TaskResult::Existing(message_id),
+        },
+        now,
+    };
+
+    let error = RecordTaskOutcome::execute(&mut port, input(human_reply_id, 187))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ApplicationError::PermissionDenied));
+    assert_eq!(
+        port.state.tasks[&task_id].view().status,
+        TaskStatus::InProgress
+    );
+
+    let completed = RecordTaskOutcome::execute(&mut port, input(reply_id, 188))
+        .await
+        .unwrap();
+    assert_eq!(completed.view().status, TaskStatus::Done);
+    assert_eq!(completed.view().result_message_id, Some(reply_id));
+    assert_eq!(port.state.messages.len(), 2);
+    assert_eq!(port.state.runs[&run_id].view().status, RunStatus::Completed);
 }
 
 #[tokio::test]

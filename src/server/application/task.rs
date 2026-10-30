@@ -187,12 +187,19 @@ pub(in crate::server) struct OutcomeMessage {
     pub(in crate::server) post_to: TaskPostTarget,
 }
 
+/// A Done Task's Result: a new Message, or a reply its finisher already posted, so a conclusion
+/// that was already said is not repeated.
+pub(in crate::server) enum TaskResult {
+    Publish(OutcomeMessage),
+    Existing(MessageId),
+}
+
 pub(in crate::server) enum TaskOutcome {
     SubmitReview {
         message: Option<OutcomeMessage>,
     },
     Done {
-        result: OutcomeMessage,
+        result: TaskResult,
     },
     Close {
         reason: CloseReason,
@@ -298,7 +305,9 @@ impl RecordTaskOutcome {
                     task.request_review(input.actor_member_id, input.now)?;
                     message
                 }
-                TaskOutcome::Done { result } => {
+                TaskOutcome::Done {
+                    result: TaskResult::Publish(result),
+                } => {
                     let result_id = result.message_id;
                     let message = resolve_outcome_message(
                         transaction,
@@ -311,6 +320,20 @@ impl RecordTaskOutcome {
                     .await?;
                     task.finish(input.actor_member_id, true, result_id, input.now)?;
                     message
+                }
+                TaskOutcome::Done {
+                    result: TaskResult::Existing(message_id),
+                } => {
+                    let message = transaction.message(message_id).await?;
+                    if message.author_member_id != input.actor_member_id
+                        || message.deleted_at.is_some()
+                        || !matches!(message.content, MessageContent::Text(_))
+                        || !task.linked_to(message.thread_id)
+                    {
+                        return Err(ApplicationError::PermissionDenied);
+                    }
+                    task.finish(input.actor_member_id, true, message_id, input.now)?;
+                    None
                 }
                 TaskOutcome::Close { reason, note } => {
                     let task_view = task.view();

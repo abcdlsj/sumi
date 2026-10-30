@@ -129,8 +129,10 @@ enum TaskCommand {
         post_to: String,
     },
     Done {
-        #[arg(long)]
-        result_file: std::path::PathBuf,
+        #[arg(long, required_unless_present = "result_message")]
+        result_file: Option<std::path::PathBuf>,
+        #[arg(long, conflicts_with_all = ["result_file", "post_to"])]
+        result_message: Option<MessageId>,
         #[arg(long, default_value = "focus")]
         post_to: String,
     },
@@ -401,16 +403,23 @@ impl AgentCli {
                 command:
                     TaskCommand::Done {
                         result_file,
+                        result_message,
                         post_to,
                     },
             }) => {
-                let result = tokio::fs::read_to_string(result_file)
-                    .await
-                    .map_err(|_| "--result-file could not be read")?;
+                let result = match result_file {
+                    Some(path) => Some(
+                        tokio::fs::read_to_string(path)
+                            .await
+                            .map_err(|_| "--result-file could not be read")?,
+                    ),
+                    None => None,
+                };
                 (
                     Action::TaskDone {
                         result,
                         post_to: parse_post_target(&post_to)?,
+                        result_message,
                     },
                     true,
                 )

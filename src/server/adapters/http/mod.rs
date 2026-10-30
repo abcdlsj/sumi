@@ -76,7 +76,7 @@ use crate::{
         application::task::{
             CreateTaskFromRootMessage, CreateTaskInput, LinkThreadInput, LinkThreadToTask,
             OutcomeMessage, OutcomeRunContext, RecordTaskOutcome, RecordTaskOutcomeInput,
-            TaskAction, TaskOutcome, TaskOutcomeScope, TaskPostTarget, TaskSource,
+            TaskAction, TaskOutcome, TaskOutcomeScope, TaskPostTarget, TaskResult, TaskSource,
             UnlinkThreadFromTask, UpdateTask, UpdateTaskInput,
         },
         application::{

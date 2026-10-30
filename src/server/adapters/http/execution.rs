@@ -890,19 +890,32 @@ pub(super) async fn execute_agent_action(
             )
             .await
         }
-        capability::Action::TaskDone { result, post_to } => {
+        capability::Action::TaskDone {
+            result,
+            post_to,
+            result_message,
+        } => {
+            let result = match (result, result_message) {
+                (Some(body), None) => TaskResult::Publish(OutcomeMessage {
+                    message_id: MessageId::from_uuid(Uuid::now_v7()),
+                    body_markdown: body,
+                    post_to: task_post_target(post_to),
+                }),
+                (None, Some(message_id)) => TaskResult::Existing(message_id),
+                _ => {
+                    return Err(capability_error(
+                        capability::ErrorCode::InvalidArgument,
+                        "task done needs exactly one of a result body and a result message",
+                        false,
+                    ));
+                }
+            };
             finish_agent_task(
                 state,
                 computer_id,
                 context,
                 request.idempotency_key,
-                TaskOutcome::Done {
-                    result: OutcomeMessage {
-                        message_id: MessageId::from_uuid(Uuid::now_v7()),
-                        body_markdown: result,
-                        post_to: task_post_target(post_to),
-                    },
-                },
+                TaskOutcome::Done { result },
             )
             .await
         }
@@ -1406,7 +1419,9 @@ pub(super) async fn finish_agent_task(
                 post_to,
             )
         }
-        TaskOutcome::Done { result } => (
+        TaskOutcome::Done {
+            result: TaskResult::Publish(result),
+        } => (
             "task.done",
             vec![(
                 "post_to",
@@ -1414,6 +1429,14 @@ pub(super) async fn finish_agent_task(
             )],
             Some(agent_activity_preview(&result.body_markdown)),
             Some(result.post_to),
+        ),
+        TaskOutcome::Done {
+            result: TaskResult::Existing(_),
+        } => (
+            "task.done",
+            vec![("result", "existing_message".to_owned())],
+            None,
+            None,
         ),
         TaskOutcome::Close { reason, note } => {
             let reason = match reason {

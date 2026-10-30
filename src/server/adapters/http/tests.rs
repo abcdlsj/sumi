@@ -1196,8 +1196,9 @@ async fn capability_task_done_commits_collaboration_facts_and_replays() {
     let task_id = fixture.bind_task().await;
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let action = capability::Action::TaskDone {
-        result: "Task Result".into(),
+        result: Some("Task Result".into()),
         post_to: capability::PostTarget::Focus,
+        result_message: None,
     };
 
     sqlx::raw_sql(
@@ -1599,8 +1600,9 @@ async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
 
     let stale_done = fixture
         .execute(capability::Action::TaskDone {
-            result: "must not finish".into(),
+            result: Some("must not finish".into()),
             post_to: capability::PostTarget::Focus,
+            result_message: None,
         })
         .await
         .unwrap_err();
@@ -1798,8 +1800,9 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
     insert_focus_message(&fixture, channel_id, "moved before first read").await;
     let stale = fixture
         .execute(capability::Action::TaskDone {
-            result: "stale first".into(),
+            result: Some("stale first".into()),
             post_to: capability::PostTarget::Focus,
+            result_message: None,
         })
         .await
         .unwrap_err();
@@ -1816,8 +1819,9 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
         .unwrap();
     fixture
         .execute(capability::Action::TaskDone {
-            result: "first done".into(),
+            result: Some("first done".into()),
             post_to: capability::PostTarget::Focus,
+            result_message: None,
         })
         .await
         .unwrap();
@@ -1994,8 +1998,9 @@ async fn agent_write_actions_emit_agent_activity_events() {
         .unwrap();
     fixture
         .execute(capability::Action::TaskDone {
-            result: "Agent Result".into(),
+            result: Some("Agent Result".into()),
             post_to: capability::PostTarget::Focus,
+            result_message: None,
         })
         .await
         .unwrap();

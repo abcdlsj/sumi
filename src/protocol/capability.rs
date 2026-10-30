@@ -75,9 +75,13 @@ pub(crate) enum Action {
         body: String,
         post_to: PostTarget,
     },
+    /// Exactly one of `result` (publish a new Result Message to `post_to`) and `result_message`
+    /// (name a reply the Agent already posted) is present.
     TaskDone {
-        result: String,
+        result: Option<String>,
         post_to: PostTarget,
+        #[serde(default)]
+        result_message: Option<MessageId>,
     },
     TaskClose {
         reason: CloseReason,

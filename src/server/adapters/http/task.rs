@@ -285,11 +285,11 @@ pub(super) async fn complete_task(
         &headers,
         task_id,
         TaskOutcome::Done {
-            result: OutcomeMessage {
+            result: TaskResult::Publish(OutcomeMessage {
                 message_id: MessageId::from_uuid(Uuid::now_v7()),
                 body_markdown: body.result_markdown,
                 post_to: TaskPostTarget::Thread(ThreadId::from_uuid(body.result_thread_id)),
-            },
+            }),
         },
     )
     .await
