@@ -268,7 +268,8 @@ describe("ChannelPage", () => {
     renderRoute("/s/sumi-lab/channels/general");
 
     expect(await screen.findByText("Can you review?")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Open DM with Lin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lin options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Message" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

@@ -176,13 +176,17 @@ describe("agent avatar DM shortcut", () => {
       </QueryClientProvider>,
     );
 
-    const avatar = screen.getByRole("button", { name: "Open DM with Lin" });
+    const avatar = screen.getByRole("button", { name: "Lin options" });
     expect(within(avatar).getByRole("img", { name: "Lin avatar" })).toBeVisible();
     fireEvent.click(avatar);
+    const menu = screen.getByRole("menu", { name: "Lin" });
+    expect(within(menu).getByRole("menuitem", { name: "Agent settings" })).toHaveAttribute("href", "/s/sumi-lab/agents/agent-lin");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Message" }));
     expect(onOpenAgentDm).toHaveBeenCalledWith("agent-lin");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("keeps avatars inert for human authors, in DMs, and without a handler", () => {
+  it("limits the Agent avatar menu to settings in DMs and keeps human avatars inert", () => {
     const onOpenAgentDm = vi.fn();
     const { rerender } = render(
       <QueryClientProvider client={new QueryClient()}>
@@ -202,7 +206,7 @@ describe("agent avatar DM shortcut", () => {
         />
       </QueryClientProvider>,
     );
-    expect(screen.queryByRole("button", { name: /Open DM with/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /options/ })).not.toBeInTheDocument();
 
     rerender(
       <QueryClientProvider client={new QueryClient()}>
@@ -223,7 +227,10 @@ describe("agent avatar DM shortcut", () => {
         />
       </QueryClientProvider>,
     );
-    expect(screen.queryByRole("button", { name: /Open DM with/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Lin options" }));
+    expect(screen.getByRole("menuitem", { name: "Agent settings" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Message" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
 
     rerender(
       <QueryClientProvider client={new QueryClient()}>
@@ -242,7 +249,9 @@ describe("agent avatar DM shortcut", () => {
         />
       </QueryClientProvider>,
     );
-    expect(screen.queryByRole("button", { name: /Open DM with/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Lin options" }));
+    expect(screen.getByRole("menuitem", { name: "Agent settings" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Message" })).not.toBeInTheDocument();
   });
 });
 

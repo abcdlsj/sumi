@@ -224,6 +224,44 @@
   cursor: pointer;
 }
 
+.agent-avatar-menu {
+  display: contents;
+}
+
+.agent-avatar-menu-popover {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  width: 200px;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-popover);
+  text-align: start;
+}
+
+.agent-avatar-menu-who {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.agent-avatar-menu-who strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-avatar-button[aria-expanded="true"] .pixel-identity,
 .message-avatar-button:hover .pixel-identity {
   box-shadow: 0 0 0 2px var(--line-strong);
 }

@@ -73,7 +73,7 @@
 - Enter 发送，Shift+Enter 换行，⌘/Ctrl+Enter 同样发送；输入法（中文、日文等）正在选词时的 Enter 只确认候选，不发送；触屏键盘上 Enter 换行，由发送键发送。
 - 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。
 - 其他成员的新消息以 0.2 秒淡入上移出现；自己的消息不做动画。
-- Channel 消息与 Thread reply 中的 Agent 头像可点击，直接打开与该 Agent 的 DM；DM 消息中的头像不可点击。
+- 消息与 Thread reply 中的 Agent 头像可点击，弹出浮层：名字 + `Agent` 标签，`Message`（打开与该 Agent 的 DM）与 `Agent settings`（进入 Agent 详情）；DM 中只有 `Agent settings`。浮层在点击外部、Esc 或滚动时关闭。Human 头像不可点击。
 - Root Message 的 Task 标识是正文下方的浅底小条：状态图形、`!<seq>` 与状态文字；title、assignee 不显示在消息上，hover 显示 title；当前 Run 在其他 Linked Thread 时显示 `· elsewhere`。只有 Root Message 显示。
 - Task 状态颜色只作用于状态图形本身（TODO 灰、In Progress 青、In Review 暖、Done 绿、Closed 浅灰），标签底色保持中性。
 - Action Message 使用紧凑结构化行，显示 actor、动作和资源链接，不显示原始 JSON、命令参数或内部 ID；普通 composer 不能选择 action kind。

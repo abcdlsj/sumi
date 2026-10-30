@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquareReply, Paperclip } from "lucide-react";
+import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
 import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
@@ -173,8 +173,8 @@ export function MessageTimeline({
                     kind={message.author.kind}
                     seed={message.author.id}
                     activityStatus={activityByMemberId.get(message.author.id)}
-                    clickable={!direct}
-                    onOpenAgentDm={onOpenAgentDm}
+                    spaceSlug={spaceSlug}
+                    onOpenAgentDm={direct ? undefined : onOpenAgentDm}
                   />
                 )}
                 <div className="message-content">
@@ -289,8 +289,8 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
         kind={message.author.kind}
         seed={message.author.id}
         activityStatus={activityStatus}
-        clickable={!direct}
-        onOpenAgentDm={onOpenAgentDm}
+        spaceSlug={spaceSlug}
+        onOpenAgentDm={direct ? undefined : onOpenAgentDm}
       />
       <div>
         <header>
@@ -321,30 +321,93 @@ function MessageAvatar({
   kind,
   seed,
   activityStatus,
-  clickable,
+  spaceSlug,
   onOpenAgentDm,
 }: {
   name: string;
   kind: Member["kind"];
   seed: string;
   activityStatus?: Agent["activity_status"];
-  clickable: boolean;
+  spaceSlug: string;
   onOpenAgentDm?: (memberId: string) => void;
 }) {
   const identity = (
     <PresenceIdentity name={name} kind={kind} seed={seed} activityStatus={activityStatus} />
   );
-  if (kind !== "agent" || !clickable || !onOpenAgentDm) return identity;
+  if (kind !== "agent") return identity;
+  return <AgentAvatarMenu name={name} memberId={seed} spaceSlug={spaceSlug} onOpenAgentDm={onOpenAgentDm}>{identity}</AgentAvatarMenu>;
+}
+
+function AgentAvatarMenu({ name, memberId, spaceSlug, onOpenAgentDm, children }: { name: string; memberId: string; spaceSlug: string; onOpenAgentDm?: (memberId: string) => void; children: ReactNode }) {
+  const [position, setPosition] = useState<{ top: number; left: number }>();
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const open = Boolean(position);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setPosition(undefined);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setPosition(undefined);
+      triggerRef.current?.focus();
+    }
+    // The menu is fixed to the viewport, so any scroll would detach it from the avatar.
+    function onScroll() {
+      setPosition(undefined);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  function toggle(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (open) {
+      setPosition(undefined);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuHeight = onOpenAgentDm ? 116 : 84;
+    const below = rect.bottom + 6;
+    setPosition({ top: below + menuHeight > window.innerHeight ? Math.max(8, rect.top - 6 - menuHeight) : below, left: rect.left });
+  }
+
   return (
-    <button
-      className="message-avatar-button"
-      type="button"
-      aria-label={`Open DM with ${name}`}
-      title={`Open DM with ${name}`}
-      onClick={() => onOpenAgentDm(seed)}
-    >
-      {identity}
-    </button>
+    <span className="agent-avatar-menu" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        className="message-avatar-button"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${name} options`}
+        title={name}
+        onClick={toggle}
+      >
+        {children}
+      </button>
+      {position ? (
+        <span className="agent-avatar-menu-popover" role="menu" aria-label={name} style={{ top: position.top, left: position.left }}>
+          <span className="agent-avatar-menu-who"><strong>{name}</strong><span className="agent-label">Agent</span></span>
+          {onOpenAgentDm ? (
+            <button role="menuitem" className="account-menu-item" type="button" onClick={() => { setPosition(undefined); onOpenAgentDm(memberId); }}>
+              <MessageSquare aria-hidden="true" /> Message
+            </button>
+          ) : null}
+          <a role="menuitem" className="account-menu-item" href={`/s/${spaceSlug}/agents/${memberId}`}>
+            <Settings aria-hidden="true" /> Agent settings
+          </a>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
