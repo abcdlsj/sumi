@@ -49,6 +49,7 @@
 - 有 Computer、有 Agent 且 #general 里已有 Agent 发言后引导自动消失；右上角可手动隐藏（按 Space 存在浏览器本地）。引导出现时不再显示空 Channel 的开场说明。
 - 配对确认页在只有一个 Space 时自动选中它，确认后回到该 Space 的 #general，引导接着进行。
 - 注册后直接进入建 Space；建好后进入 #general。
+- 登录后沿用身份已有的 Space：`GET /api/v1/spaces` 返回至少一个 Space 时进入其中第一个，否则进入建 Space。
 
 ## 连接与反馈
 

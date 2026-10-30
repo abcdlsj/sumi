@@ -1,19 +1,26 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 import type { FormEvent } from "react";
 
-import { login } from "../api/client";
+import { listSpaces, login } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { redirect } = useSearch({ from: "/login" });
   const authentication = useMutation({
     mutationFn: login,
-    onSuccess: () => {
+    onSuccess: async () => {
       if (isSafeRedirect(redirect)) {
         void navigate({ href: redirect });
+        return;
+      }
+      const spaces = await queryClient.fetchQuery({ queryKey: ["spaces"], queryFn: listSpaces });
+      const space = spaces[0];
+      if (space) {
+        void navigate({ to: "/s/$spaceSlug", params: { spaceSlug: space.slug } });
       } else {
         void navigate({ to: "/spaces/new" });
       }
