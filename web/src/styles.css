@@ -3871,6 +3871,7 @@ a.task-source-link:hover {
 
 .pair-command {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
   padding: 10px 10px 10px 14px;
