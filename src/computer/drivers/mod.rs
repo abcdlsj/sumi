@@ -57,6 +57,7 @@ pub(in crate::computer) fn runtime(
     Ok(DriverAdapter::new(
         acp::AcpAdapter::new(AcpRuntimeClient::new(
             computer_home.to_owned(),
+            &config.acp,
             driver_secret,
         )),
         builtin::BuiltinAdapter::new(builtin),

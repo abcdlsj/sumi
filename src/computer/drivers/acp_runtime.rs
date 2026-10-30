@@ -37,7 +37,7 @@ use crate::{
             session::DriverKind,
         },
     },
-    config::daemon_socket_path,
+    config::{AcpConfig, AcpProcessConfig, daemon_socket_path},
     ids::{AgentId, RunId},
 };
 
@@ -76,11 +76,11 @@ impl Provider {
         }
     }
 
-    fn command_variable(self) -> &'static str {
+    fn configured(self, config: &AcpConfig) -> Option<&AcpProcessConfig> {
         match self {
-            Self::Codex => "SUMI_ACP_CODEX_COMMAND",
-            Self::Claude => "SUMI_ACP_CLAUDE_COMMAND",
-            Self::Pi => "SUMI_ACP_PI_COMMAND",
+            Self::Codex => config.codex.as_ref(),
+            Self::Claude => config.claude.as_ref(),
+            Self::Pi => config.pi.as_ref(),
         }
     }
 
@@ -128,9 +128,16 @@ impl Provider {
     }
 }
 
+/// How one provider's ACP agent is started: argv plus the configured extra environment.
+#[derive(Clone)]
+struct AcpLaunch {
+    command: Vec<OsString>,
+    env: Vec<(String, OsString)>,
+}
+
 pub(super) struct AcpRuntimeClient {
     computer_home: PathBuf,
-    commands: BTreeMap<Provider, Vec<OsString>>,
+    launches: BTreeMap<Provider, AcpLaunch>,
     driver_secret: [u8; 32],
     processes: BTreeMap<AgentId, AcpProcess>,
     locator_owners: BTreeMap<String, AgentId>,
@@ -146,15 +153,16 @@ struct AcpRunInput {
 }
 
 impl AcpRuntimeClient {
-    pub(super) fn new(computer_home: PathBuf, driver_secret: [u8; 32]) -> Self {
-        let commands = Provider::ALL
+    pub(super) fn new(computer_home: PathBuf, config: &AcpConfig, driver_secret: [u8; 32]) -> Self {
+        let launches = Provider::ALL
             .into_iter()
             .map(|provider| {
-                let command = std::env::var(provider.command_variable())
-                    .ok()
-                    .map(|value| {
-                        value
-                            .split_whitespace()
+                let configured = provider.configured(config);
+                let command = configured
+                    .map(|process| {
+                        process
+                            .command
+                            .iter()
                             .map(OsString::from)
                             .collect::<Vec<_>>()
                     })
@@ -166,20 +174,29 @@ impl AcpRuntimeClient {
                             .map(OsString::from)
                             .collect()
                     });
-                (provider, command)
+                let env = configured
+                    .map(|process| {
+                        process
+                            .env
+                            .iter()
+                            .map(|(name, value)| (name.clone(), OsString::from(value.expose())))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (provider, AcpLaunch { command, env })
             })
             .collect();
-        Self::with_commands(computer_home, commands, driver_secret)
+        Self::with_launches(computer_home, launches, driver_secret)
     }
 
-    fn with_commands(
+    fn with_launches(
         computer_home: PathBuf,
-        commands: BTreeMap<Provider, Vec<OsString>>,
+        launches: BTreeMap<Provider, AcpLaunch>,
         driver_secret: [u8; 32],
     ) -> Self {
         Self {
             computer_home,
-            commands,
+            launches,
             driver_secret,
             processes: BTreeMap::new(),
             locator_owners: BTreeMap::new(),
@@ -192,11 +209,10 @@ impl AcpRuntimeClient {
         agent_home(&self.computer_home, agent_id)
     }
 
-    fn command(&self, provider: Provider) -> Result<&[OsString], ApplicationError> {
-        self.commands
+    fn launch(&self, provider: Provider) -> Result<&AcpLaunch, ApplicationError> {
+        self.launches
             .get(&provider)
-            .map(Vec::as_slice)
-            .filter(|command| !command.is_empty())
+            .filter(|launch| !launch.command.is_empty())
             .ok_or(ApplicationError::DriverUnavailable)
     }
 
@@ -241,7 +257,7 @@ impl AcpRuntimeClient {
             let driver_token = CapabilityService::driver_token(&self.driver_secret, agent_id);
             let process = AcpProcess::spawn(
                 provider,
-                self.command(provider)?,
+                self.launch(provider)?,
                 self.agent_home(agent_id),
                 &socket_path,
                 &driver_token,
@@ -296,7 +312,7 @@ struct AcpProcess {
 impl AcpProcess {
     async fn spawn(
         provider: Provider,
-        command: &[OsString],
+        launch: &AcpLaunch,
         agent_home: PathBuf,
         socket: &Path,
         driver_token: &str,
@@ -306,7 +322,8 @@ impl AcpProcess {
         if !provider_home.is_dir() || !workspace.is_dir() {
             return Err(ApplicationError::DriverUnavailable);
         }
-        let (program, arguments) = command
+        let (program, arguments) = launch
+            .command
             .split_first()
             .ok_or(ApplicationError::DriverUnavailable)?;
         let mut process = Command::new(program);
@@ -331,6 +348,11 @@ impl AcpProcess {
             if let Some(value) = std::env::var_os(variable).filter(|value| !value.is_empty()) {
                 process.env(variable, value);
             }
+        }
+        // Configuration validation rejects the Sumi variables set above, so these cannot replace
+        // the Agent's home, socket or Driver token.
+        for (name, value) in &launch.env {
+            process.env(name, value);
         }
         process.env("PATH", executable_path()?);
         if let Some(language) = std::env::var_os("LANG") {
@@ -729,8 +751,8 @@ impl StructuredProviderClient for AcpRuntimeClient {
         if !agent_home.join("workspace").is_dir() || !agent_home.join(provider.home()).is_dir() {
             return Err(ApplicationError::DriverUnavailable);
         }
-        let command = self.command(provider)?;
-        if resolvable(&command[0]) {
+        let launch = self.launch(provider)?;
+        if resolvable(&launch.command[0]) {
             Ok(())
         } else {
             Err(ApplicationError::DriverUnavailable)
@@ -1120,14 +1142,14 @@ done
         let executable = directory.path().join("fake-acp");
         std::fs::write(&executable, FAKE_AGENT).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let commands = BTreeMap::from([(
-            Provider::Codex,
-            vec![
-                OsString::from("/usr/bin/env"),
-                OsString::from(format!("LOG_DIR={}", logs.display())),
-                executable.into_os_string(),
-            ],
-        )]);
+        // LOG_DIR reaches the fake agent only through the configured environment.
+        let config = AcpConfig {
+            codex: Some(AcpProcessConfig {
+                command: vec![executable.display().to_string()],
+                env: BTreeMap::from([("LOG_DIR".to_owned(), logs.display().to_string().into())]),
+            }),
+            ..AcpConfig::default()
+        };
         let agent = LocalAgent {
             agent_id,
             space_id: SpaceId::from_uuid(Uuid::now_v7()),
@@ -1137,7 +1159,7 @@ done
             driver: DriverKind::Codex,
             state: LocalAgentState::Active,
         };
-        let mut client = AcpRuntimeClient::with_commands(computer_home, commands, [7_u8; 32]);
+        let mut client = AcpRuntimeClient::new(computer_home, &config, [7_u8; 32]);
         client.validate(&agent).await.unwrap();
         assert_eq!(
             client

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{collections::BTreeMap, net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use figment::{
@@ -41,6 +41,63 @@ pub(crate) struct AttachmentS3Config {
     pub(crate) endpoint: Option<String>,
     pub(crate) allow_http: bool,
 }
+
+/// Per-provider overrides for the ACP agent process.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct AcpConfig {
+    pub(crate) codex: Option<AcpProcessConfig>,
+    pub(crate) claude: Option<AcpProcessConfig>,
+    pub(crate) pi: Option<AcpProcessConfig>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct AcpProcessConfig {
+    /// argv of the ACP agent; empty keeps the pinned default command.
+    pub(crate) command: Vec<String>,
+    /// Variables added to the process environment. Values may be credentials.
+    pub(crate) env: BTreeMap<String, ConfigSecret>,
+}
+
+impl std::fmt::Debug for AcpProcessConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AcpProcessConfig")
+            .field("command", &self.command)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl AcpConfig {
+    fn processes(&self) -> impl Iterator<Item = (&'static str, &AcpProcessConfig)> {
+        [
+            ("codex", self.codex.as_ref()),
+            ("claude", self.claude.as_ref()),
+            ("pi", self.pi.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(name, process)| process.map(|process| (name, process)))
+    }
+
+    fn has_env(&self) -> bool {
+        self.processes().any(|(_, process)| !process.env.is_empty())
+    }
+}
+
+/// Variables Sumi sets for every ACP agent process; configuration cannot replace them because they
+/// carry the Agent's identity, home and capability channel.
+pub(crate) const ACP_RESERVED_VARIABLES: [&str; 8] = [
+    "HOME",
+    "PATH",
+    "LANG",
+    "SUMI_SOCKET",
+    "SUMI_DRIVER_TOKEN",
+    "CODEX_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "PI_CODING_AGENT_DIR",
+];
 
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct BuiltinOpenAiConfig {
@@ -169,6 +226,7 @@ pub(crate) struct ComputerConfig {
     pub(crate) codex_config_source: Option<PathBuf>,
     pub(crate) codex_auth_source: Option<PathBuf>,
     pub(crate) pi_agent_dir_source: Option<PathBuf>,
+    pub(crate) acp: AcpConfig,
     pub(crate) builtin: Option<BuiltinOpenAiConfig>,
     pub(crate) max_concurrent_runs: usize,
     pub(crate) per_agent_timeout_seconds: u64,
@@ -187,6 +245,7 @@ impl Default for ComputerConfig {
             codex_config_source: None,
             codex_auth_source: None,
             pi_agent_dir_source: None,
+            acp: AcpConfig::default(),
             builtin: None,
             max_concurrent_runs: 1000,
             per_agent_timeout_seconds: 30 * 60,
@@ -274,6 +333,27 @@ fn validate(config: &SumiConfig) -> Result<()> {
         config.computer.update_ready_timeout_seconds > 0,
         "computer.update_ready_timeout_seconds must be positive"
     );
+    for (provider, process) in config.computer.acp.processes() {
+        ensure!(
+            process
+                .command
+                .first()
+                .is_none_or(|program| !program.trim().is_empty()),
+            "computer.acp.{provider}.command must start with a program"
+        );
+        for name in process.env.keys() {
+            ensure!(
+                !name.is_empty()
+                    && !name.starts_with(|first: char| first.is_ascii_digit())
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "computer.acp.{provider}.env has an invalid variable name"
+            );
+            ensure!(
+                !ACP_RESERVED_VARIABLES.contains(&name.as_str()),
+                "computer.acp.{provider}.env must not set {name}; Sumi sets it for every ACP agent"
+            );
+        }
+    }
     if let Some(builtin) = &config.computer.builtin {
         ensure!(
             matches!(builtin.api_base.scheme(), "http" | "https"),
@@ -320,18 +400,20 @@ fn validate(config: &SumiConfig) -> Result<()> {
 fn validate_config_file_permissions(path: Option<&PathBuf>, config: &SumiConfig) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    let Some(path) = path.filter(|_| config.computer.builtin.is_some()) else {
+    let Some(path) =
+        path.filter(|_| config.computer.builtin.is_some() || config.computer.acp.has_env())
+    else {
         return Ok(());
     };
     let metadata = std::fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect Sumi configuration at {}", path.display()))?;
     ensure!(
         metadata.file_type().is_file(),
-        "Sumi configuration must be a regular file when it contains computer.builtin.token"
+        "Sumi configuration must be a regular file when it contains credentials (computer.builtin.token or computer.acp.*.env)"
     );
     ensure!(
         metadata.permissions().mode() & 0o077 == 0,
-        "Sumi configuration containing computer.builtin.token must not be accessible by group or other users"
+        "Sumi configuration containing credentials (computer.builtin.token or computer.acp.*.env) must not be accessible by group or other users"
     );
     Ok(())
 }
@@ -428,6 +510,48 @@ mod tests {
         assert_eq!(builtin.compaction_trigger_tokens(), 96_000);
         assert_eq!(builtin.compaction_keep_recent_tokens(), 20_000);
         assert!(!format!("{:?}", config.computer).contains("provider-secret"));
+    }
+
+    #[test]
+    fn acp_process_configuration_is_private_redacted_and_keeps_sumi_variables() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("sumi.toml");
+        let write = |body: &str| {
+            fs::write(&path, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+        };
+        let private = || {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+        };
+
+        write(
+            "[computer.acp.claude]\ncommand = ['ak', 'acp', 'claude']\nenv = { AK_CONFIG_DIR = '/home/you/.config/ak', ANTHROPIC_AUTH_TOKEN = 'provider-secret' }\n",
+        );
+        let error = load(Some(&path)).unwrap_err();
+        assert!(error.to_string().contains("group or other users"));
+        private();
+        let config = load(Some(&path)).unwrap();
+        let claude = config.computer.acp.claude.as_ref().unwrap();
+        assert_eq!(claude.command, ["ak", "acp", "claude"]);
+        assert_eq!(claude.env["AK_CONFIG_DIR"].expose(), "/home/you/.config/ak");
+        assert!(!format!("{:?}", config.computer).contains("provider-secret"));
+
+        write("[computer.acp.claude]\nenv = { SUMI_DRIVER_TOKEN = 'forged' }\n");
+        private();
+        let error = load(Some(&path)).unwrap_err();
+        assert!(format!("{error:#}").contains("must not set SUMI_DRIVER_TOKEN"));
+
+        write("[computer.acp.claude]\ncommand = ['']\n");
+        let error = load(Some(&path)).unwrap_err();
+        assert!(format!("{error:#}").contains("must start with a program"));
     }
 
     #[test]

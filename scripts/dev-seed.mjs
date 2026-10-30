@@ -148,7 +148,7 @@ export function extractComputerPairingUrl(line) {
 
 export function buildSeedComputerConfig(
   source,
-  { server, stateDir, codexHome, codexHomeFromEnv = false },
+  { server, stateDir, codexHome, codexHomeFromEnv = false, codexCommand = "" },
 ) {
   const forced = new Map([
     ["server_url", JSON.stringify(server)],
@@ -169,6 +169,8 @@ export function buildSeedComputerConfig(
   const seen = new Set();
   let inComputer = false;
   let foundComputer = false;
+  // A seed codex command replaces the base config's own [computer.acp.codex] table.
+  let skipping = false;
   const appendMissing = () => {
     for (const [key, value] of [...forced, ...defaults]) {
       if (!seen.has(key)) output.push(`${key} = ${value}`);
@@ -178,12 +180,15 @@ export function buildSeedComputerConfig(
   for (const line of lines) {
     const section = line.match(/^\s*\[([^\]]+)]\s*$/)?.[1];
     if (section !== undefined) {
+      skipping = codexCommand !== "" && section === "computer.acp.codex";
+      if (skipping) continue;
       if (inComputer) appendMissing();
       inComputer = section === "computer";
       foundComputer ||= inComputer;
       output.push(line);
       continue;
     }
+    if (skipping) continue;
     if (inComputer) {
       const key = line.match(/^\s*([A-Za-z0-9_-]+)\s*=/)?.[1];
       if (key) {
@@ -201,6 +206,10 @@ export function buildSeedComputerConfig(
     if (output.some((line) => line.trim() !== "")) output.push("");
     output.push("[computer]");
     appendMissing();
+  }
+  if (codexCommand !== "") {
+    const argv = codexCommand.split(/\s+/).filter(Boolean);
+    output.push("", "[computer.acp.codex]", `command = ${JSON.stringify(argv)}`);
   }
   return `${output.join("\n").replace(/^\n+/, "")}\n`;
 }
@@ -300,6 +309,7 @@ function spawnComputerDaemon(stateDir, expectPairing) {
       stateDir,
       codexHome: CODEX_HOME,
       codexHomeFromEnv: CODEX_HOME_FROM_ENV,
+      codexCommand: CODEX_COMMAND,
     }),
     { mode: 0o600 },
   );
@@ -310,7 +320,6 @@ function spawnComputerDaemon(stateDir, expectPairing) {
     {
       env: {
         ...process.env,
-        ...(CODEX_COMMAND ? { SUMI_ACP_CODEX_COMMAND: CODEX_COMMAND } : {}),
         RUST_LOG:
           process.env.SUMI_SEED_RUST_LOG ??
           "sumi=warn,sumi::computer=info,tower_http=warn",

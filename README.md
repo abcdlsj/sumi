@@ -224,6 +224,13 @@ codex_auth_source = "/path/to/codex/auth.json"
 # Optional: give pi Agents the model settings and credentials of a local pi.
 pi_agent_dir_source = "/Users/you/.pi/agent"
 
+# Optional: replace a provider's ACP command and add environment variables.
+# Here claude Agents resolve their credentials through ak. A file with `env`
+# must be readable only by you (chmod 600).
+[computer.acp.claude]
+command = ["ak", "acp", "claude"]
+env = { AK_CONFIG_DIR = "/Users/you/.config/ak" }
+
 # Optional: enable the builtin OpenAI-compatible Driver.
 [computer.builtin]
 api_base = "https://api.example.com/v1"

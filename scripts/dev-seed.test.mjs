@@ -32,7 +32,6 @@ test("development seed exposes a codex command override for optional codex use",
   );
   assert.match(taskScript, /SUMI_SEED_CODEX_COMMAND="\$1" run_dev/);
   assert.match(taskScript, /SUMI_SEED_CODEX_HOME=\/path\/to\/codex-home/);
-  assert.match(readFileSync(new URL("./dev-seed.mjs", import.meta.url), "utf8"), /SUMI_ACP_CODEX_COMMAND: CODEX_COMMAND/);
   assert.match(
     readFileSync(new URL("./dev-seed.mjs", import.meta.url), "utf8"),
     /SUMI_SEED_CODEX_HOME \?\? join\(homedir\(\), "\.codex"\)/,
@@ -73,6 +72,25 @@ test("development seed env Codex home overrides explicit base config sources", (
 
   assert.match(config, /codex_config_source = "\/env\/codex\/config\.toml"/);
   assert.match(config, /codex_auth_source = "\/env\/codex\/auth\.json"/);
+});
+
+test("development seed codex command replaces the base ACP codex table", () => {
+  const config = buildSeedComputerConfig(
+    `[computer]\nserver_url = "https://sumi.example.test"\n\n[computer.acp.codex]\ncommand = ["old-codex"]\n\n[computer.acp.pi]\ncommand = ["pi-acp"]\n`,
+    {
+      server: "http://127.0.0.1:3000",
+      stateDir: "/tmp/sumi-seed/computer",
+      codexHome: "/fallback/codex",
+      codexCommand: "/usr/bin/env FAKE=1 fake-codex-acp",
+    },
+  );
+
+  assert.doesNotMatch(config, /old-codex/);
+  assert.match(config, /\[computer\.acp\.pi\]\ncommand = \["pi-acp"\]/);
+  assert.match(
+    config,
+    /\[computer\.acp\.codex\]\ncommand = \["\/usr\/bin\/env","FAKE=1","fake-codex-acp"\]\n$/,
+  );
 });
 
 test("development seed extracts the Computer pairing URL without depending on log prose", () => {
