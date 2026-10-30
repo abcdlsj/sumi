@@ -437,8 +437,14 @@ pub(super) async fn publish_message(
     if let PublishOutcome::Published(published) = &outcome {
         for item_id in published.hard_item_ids.iter().copied() {
             let mut storage = state.storage.clone();
-            if let Err(error) =
-                RouteHardItem::execute(&mut storage, RouteHardItemInput { item_id }).await
+            if let Err(error) = RouteHardItem::execute(
+                &mut storage,
+                RouteHardItemInput {
+                    item_id,
+                    now: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
             {
                 tracing::warn!(%item_id, error = %error, "hard Inbox Item remains pending after immediate routing failed");
             }

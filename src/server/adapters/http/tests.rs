@@ -524,6 +524,7 @@ async fn message_hard_items_attach_same_focus_and_notice_different_focus() {
         &mut storage,
         RouteHardItemInput {
             item_id: InboxItemId::from_uuid(same_focus.0),
+            now: OffsetDateTime::now_utc(),
         },
     )
     .await

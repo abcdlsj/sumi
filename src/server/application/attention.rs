@@ -1,13 +1,16 @@
+use time::OffsetDateTime;
+
 use crate::ids::{InboxItemId, MemberId, SpaceId};
 
 use crate::server::domain::{
-    attention::{AttentionStrength, InboxItemStatus},
-    execution::RunStatus,
+    attention::{AttentionStrength, InboxItem, InboxItemStatus},
+    execution::{Run, RunStatus},
+    task::TaskStatus,
 };
 
 use super::ports::{
     ApplicationError, CollaborationTransaction, Effect, EffectSink, ExecutionTransaction,
-    IdentityTransaction, InboxItemView, InboxScope, MemberKind, TransactionPort,
+    IdentityTransaction, InboxItemView, InboxScope, MemberKind, ServerTransaction, TransactionPort,
 };
 
 pub(in crate::server) struct ReadMemberInbox;
@@ -181,6 +184,7 @@ pub(in crate::server) enum HardItemRoute {
 
 pub(in crate::server) struct RouteHardItemInput {
     pub(in crate::server) item_id: InboxItemId,
+    pub(in crate::server) now: OffsetDateTime,
 }
 
 pub(in crate::server) struct RouteHardItem;
@@ -191,13 +195,14 @@ impl RouteHardItem {
         input: RouteHardItemInput,
     ) -> Result<HardItemRoute, ApplicationError> {
         port.transact(async |transaction| {
-            let mut item = transaction.inbox_item(input.item_id).await?;
+            let item = transaction.inbox_item(input.item_id).await?;
             let item_view = item.view();
             if item_view.strength != AttentionStrength::Hard
                 || item_view.status != InboxItemStatus::Pending
             {
                 return Ok(HardItemRoute::Pending);
             }
+            let (item_id, thread_id) = (item_view.id, item_view.thread_id);
             let Some(run_id) = transaction
                 .active_run_for_agent(item_view.member_id)
                 .await?
@@ -206,34 +211,84 @@ impl RouteHardItem {
             };
             let mut run = transaction.run(run_id).await?;
             let run_view = run.view();
-            let run_id = run_view.id;
+            let (run_id, agent_id) = (run_view.id, run_view.agent_id);
             if run_view.status != RunStatus::Working {
                 return Ok(HardItemRoute::Pending);
             }
-            if run_view.task_id == item_view.task_id
-                && run_view.focus_thread_id == item_view.thread_id
+            if let Some(sequence) =
+                attach_to_working_run(transaction, &mut run, item, input.now).await?
             {
-                let sequence = run.attach(&item)?;
-                item.attach_to_active_run(run_id)?;
-                transaction.save_run(run.clone()).await?;
-                transaction.save_inbox_item(item).await?;
-                transaction.emit(Effect::ItemAttached {
-                    run_id,
-                    item_id: input.item_id,
-                    sequence,
-                });
                 return Ok(HardItemRoute::Attached { sequence });
             }
-            let location_visible = transaction
-                .can_read_thread(run_view.agent_id, item_view.thread_id)
-                .await?;
+            let location_visible = transaction.can_read_thread(agent_id, thread_id).await?;
             transaction.emit(Effect::RunNotice {
                 run_id,
-                item_id: item_view.id,
+                item_id,
                 location_visible,
             });
             Ok(HardItemRoute::Notice)
         })
         .await
     }
+}
+
+/// Attaches a pending hard Item to the Agent's working Run on the same Focus Thread, so one
+/// conversation is answered by one Run. When only one side carries a Task, the other side is
+/// bound to it first. Returns `None` when Focus or Task scope cannot be merged.
+pub(in crate::server) async fn attach_to_working_run<T: ServerTransaction>(
+    transaction: &mut T,
+    run: &mut Run,
+    mut item: InboxItem,
+    now: OffsetDateTime,
+) -> Result<Option<u64>, ApplicationError> {
+    let run_view = run.view();
+    let item_view = item.view();
+    if item_view.strength != AttentionStrength::Hard
+        || item_view.status != InboxItemStatus::Pending
+        || run_view.status != RunStatus::Working
+        || run_view.agent_id != item_view.member_id
+        || run_view.focus_thread_id != item_view.thread_id
+    {
+        return Ok(None);
+    }
+    let (run_id, agent_id) = (run_view.id, run_view.agent_id);
+    match (run_view.task_id, item_view.task_id) {
+        (Some(run_task), Some(item_task)) if run_task != item_task => return Ok(None),
+        (Some(run_task), None) => item.bind_task(run_task)?,
+        (None, Some(item_task)) => {
+            let mut task = transaction.task(item_task).await?;
+            if run.bind_task(&task).is_err() {
+                return Ok(None);
+            }
+            for run_item in run.items() {
+                let mut bound = transaction.inbox_item(run_item.inbox_item_id).await?;
+                bound.bind_task(item_task)?;
+                transaction.save_inbox_item(bound).await?;
+            }
+            transaction.emit(Effect::RunTaskBound {
+                run_id,
+                task_id: item_task,
+            });
+            let task_view = task.view();
+            if task_view.status == TaskStatus::Todo
+                && task_view.assignee_agent_member_id == Some(agent_id)
+            {
+                task.start(agent_id, now)?;
+                transaction.save_task(task).await?;
+                transaction.emit(Effect::TaskUpdated(item_task));
+            }
+        }
+        _ => {}
+    }
+    let item_id = item.view().id;
+    let sequence = run.attach(&item)?;
+    item.attach_to_active_run(run_id)?;
+    transaction.save_run(run.clone()).await?;
+    transaction.save_inbox_item(item).await?;
+    transaction.emit(Effect::ItemAttached {
+        run_id,
+        item_id,
+        sequence,
+    });
+    Ok(Some(sequence))
 }

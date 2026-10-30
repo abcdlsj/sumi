@@ -3218,9 +3218,15 @@ async fn hard_item_created_after_a_terminal_run_stays_pending_without_effect() {
         inbox(item_id, agent, focus, None, InboxItemStatus::Pending),
     );
 
-    let route = RouteHardItem::execute(&mut port, RouteHardItemInput { item_id })
-        .await
-        .unwrap();
+    let route = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(route, HardItemRoute::Pending);
     assert_eq!(
@@ -3246,9 +3252,15 @@ async fn hard_item_routes_to_same_focus_once_and_assigns_to_the_run() {
         inbox(item_id, agent, focus, None, InboxItemStatus::Pending),
     );
 
-    let route = RouteHardItem::execute(&mut port, RouteHardItemInput { item_id })
-        .await
-        .unwrap();
+    let route = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(route, HardItemRoute::Attached { sequence: 1 });
     assert_eq!(
         port.state.items[&item_id].view().status,
@@ -3267,11 +3279,181 @@ async fn hard_item_routes_to_same_focus_once_and_assigns_to_the_run() {
         }] if *effect_run == run_id && *effect_item == item_id
     ));
 
-    let duplicate = RouteHardItem::execute(&mut port, RouteHardItemInput { item_id })
-        .await
-        .unwrap();
+    let duplicate = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(duplicate, HardItemRoute::Pending);
     assert_eq!(port.state.effects.len(), 1);
+}
+
+#[tokio::test]
+async fn hard_item_with_a_task_binds_the_working_run_to_it_and_attaches() {
+    let agent = member(60);
+    let focus = thread(61);
+    let task_id = task(62);
+    let run_id = run(63);
+    let ambient_id = item(64);
+    let item_id = item(65);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[agent]);
+    let mut todo = make_task(task_id, focus, agent, TaskStatus::InProgress).snapshot();
+    todo.status = TaskStatus::Todo;
+    port.state.tasks.insert(
+        task_id,
+        Task::rehydrate(todo).expect("an assigned TODO Task is valid"),
+    );
+    port.state.runs.insert(
+        run_id,
+        running_run(run_id, agent, focus, None, vec![ambient_id]),
+    );
+    port.state.items.insert(
+        ambient_id,
+        inbox(ambient_id, agent, focus, None, InboxItemStatus::Pending),
+    );
+    port.state.items.insert(
+        item_id,
+        inbox(
+            item_id,
+            agent,
+            focus,
+            Some(task_id),
+            InboxItemStatus::Pending,
+        ),
+    );
+
+    let route = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(route, HardItemRoute::Attached { sequence: 2 });
+    assert_eq!(port.state.runs[&run_id].view().task_id, Some(task_id));
+    assert_eq!(port.state.items[&ambient_id].view().task_id, Some(task_id));
+    assert_eq!(
+        port.state.items[&item_id].view().assigned_run_id,
+        Some(run_id)
+    );
+    assert_eq!(
+        port.state.tasks[&task_id].view().status,
+        TaskStatus::InProgress
+    );
+    assert!(matches!(
+        port.state.effects.as_slice(),
+        [
+            Effect::RunTaskBound { run_id: bound_run, task_id: bound_task },
+            Effect::TaskUpdated(updated),
+            Effect::ItemAttached { item_id: attached, sequence: 2, .. },
+        ] if *bound_run == run_id && *bound_task == task_id && *updated == task_id && *attached == item_id
+    ));
+}
+
+#[tokio::test]
+async fn hard_item_for_another_task_on_the_same_focus_stays_pending() {
+    let agent = member(66);
+    let focus = thread(67);
+    let run_id = run(68);
+    let item_id = item(69);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[agent]);
+    port.state.runs.insert(
+        run_id,
+        running_run(run_id, agent, focus, Some(task(70)), Vec::new()),
+    );
+    port.state.items.insert(
+        item_id,
+        inbox(
+            item_id,
+            agent,
+            focus,
+            Some(task(71)),
+            InboxItemStatus::Pending,
+        ),
+    );
+
+    let route = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(route, HardItemRoute::Notice);
+    assert_eq!(
+        port.state.items[&item_id].view().status,
+        InboxItemStatus::Pending
+    );
+    assert_eq!(port.state.runs[&run_id].view().task_id, Some(task(70)));
+}
+
+#[tokio::test]
+async fn starting_a_run_attaches_same_focus_hard_items_that_arrived_while_dispatched() {
+    let agent = member(72);
+    let focus = thread(73);
+    let elsewhere = thread(74);
+    let run_id = run(75);
+    let same_focus = item(76);
+    let other_focus = item(77);
+    let mut dispatched = running_run(run_id, agent, focus, None, Vec::new());
+    update_test_run(&mut dispatched, |snapshot| {
+        snapshot.status = RunStatus::Dispatched;
+        snapshot.started_at = None;
+    });
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[agent]);
+    insert_thread(&mut port, elsewhere, &[agent]);
+    port.state.runs.insert(run_id, dispatched);
+    port.state
+        .computer_assignments
+        .insert((computer(999), agent));
+    port.state.items.insert(
+        same_focus,
+        inbox(same_focus, agent, focus, None, InboxItemStatus::Pending),
+    );
+    port.state.items.insert(
+        other_focus,
+        inbox(
+            other_focus,
+            agent,
+            elsewhere,
+            None,
+            InboxItemStatus::Pending,
+        ),
+    );
+
+    let started = StartRun::execute(
+        &mut port,
+        StartRunInput {
+            run_id,
+            computer_id: computer(999),
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(started.items().count(), 1);
+    assert_eq!(
+        port.state.items[&same_focus].view().assigned_run_id,
+        Some(run_id)
+    );
+    assert_eq!(
+        port.state.items[&other_focus].view().status,
+        InboxItemStatus::Pending
+    );
 }
 
 #[tokio::test]
@@ -3292,9 +3474,15 @@ async fn different_focus_hard_item_stays_pending_and_emits_notice() {
         inbox(item_id, agent, waiting, None, InboxItemStatus::Pending),
     );
 
-    let route = RouteHardItem::execute(&mut port, RouteHardItemInput { item_id })
-        .await
-        .unwrap();
+    let route = RouteHardItem::execute(
+        &mut port,
+        RouteHardItemInput {
+            item_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(route, HardItemRoute::Notice);
     assert_eq!(

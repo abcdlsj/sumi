@@ -74,7 +74,8 @@ Driver：
 - ambient Item 来源：Agent 订阅的 Thread 更新和所在 Channel 的活动。按 Agent + Thread 或 Agent + Channel 聚合，用 debounce 和 force 上限防止无限推迟。
 - 同一 Message 对同一 Member 只生成一个最高强度 Item；发送者不为自己生成 Message Item。
 - Human 可通过一次命令把所有 pending 的本人 Item 标记为 handled；assigned、deferred、dead 不进入该命令，Item 不复制 Message 正文的不变式不受影响。
-- 与 active Run 的 Agent、Task scope、Focus 一致的 hard Item 尝试 attach；不一致的保持 pending 并发送 notice，notice 不泄露正文。
+- 一段对话只由一个 Run 回应：hard Item 与 working Run 属于同一 Agent 且同一 Focus Thread 时 attach 到该 Run。两者只有一方带 Task 时，在同一事务把另一方绑定到该 Task（Run 绑定时下发 RunTaskBound，TODO Task 按首个 Task Run 规则推进为 In Progress）；两者带不同 Task 或 Focus 不同时保持 pending 并发送 notice，notice 不泄露正文。
+- Run 进入 working 时，同一 Agent、同一 Focus Thread 上 pending 的 hard Item 按同一规则 attach，补上 dispatched 期间到达的 Item。
 - Run 失败时未处理 Items 返回 pending 并增加 retry_count；超过 max_retry_count 进入 dead，并创建不含正文的 system Item。system Item 自身进入 dead 时不再创建新的 system Item：一个无法处理的 notice 只终结一次，不自行续链。
 - Agent 显式 release 的 Item 不增加 retry_count；重复 command、receipt 丢失和重复 result 不重复计数。
 - 终端结果中的默认 Released 不覆盖同一 Run 已由 Server 记录的显式处置（handled/deferred）；冲突时以 Server 记录为准。

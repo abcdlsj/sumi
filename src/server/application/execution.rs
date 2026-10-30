@@ -12,6 +12,7 @@ use crate::server::domain::{
     task::TaskStatus,
 };
 
+use super::attention::attach_to_working_run;
 use super::ports::{
     ApplicationError, CollaborationTransaction, Effect, EffectSink, ExecutionTransaction,
     IdentityTransaction, RunCapabilityProof, TaskTransaction, TransactionPort,
@@ -297,6 +298,21 @@ impl StartRun {
                     task.start(run_view.agent_id, input.now)?;
                     transaction.save_task(task.clone()).await?;
                     transaction.emit(Effect::TaskUpdated(task.view().id));
+                }
+            }
+            // Hard Items for this conversation that arrived while the Run was dispatched would
+            // otherwise wait for a second Run and be answered twice.
+            let (agent_id, space_id, focus) = (
+                run_view.agent_id,
+                run_view.space_id,
+                run_view.focus_thread_id,
+            );
+            for item in transaction
+                .pending_inbox_items_for_member(agent_id, space_id)
+                .await?
+            {
+                if item.view().thread_id == focus {
+                    attach_to_working_run(transaction, &mut run, item, input.now).await?;
                 }
             }
             Ok(run)
