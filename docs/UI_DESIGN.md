@@ -10,7 +10,7 @@
 
 - 视觉语言是“清晰”：中性底色、发丝线分隔、单一的选中态。界面不靠颜色营造层次；颜色只保留给两个注意力信号和 Task 状态。不使用渐变、玻璃、模糊、硬偏移阴影或大写标题。
 - 注意力只有两种信号，任何页面都不新增第三种：
-  - **For you**（暖色）：有人在等你。提到我或 `@all`、且作者不是我的 Message 整行使用 `--you-row` 浅暖底，作者行显示 `For you`；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
+  - **For you**（暖色）：有人在等你。时间线不高亮整条 Message；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
   - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
 - 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #75726B`（白底对比度 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
@@ -69,7 +69,7 @@
 - Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。
 - 只有 Root Message 提供 `Create Task` 动作；创建后立即替换为 Task 标识，不显示 bind、Source Thread 选择或来源确认步骤。
 - Thread reply 不显示创建动作；reply 上的 Task 动作保持禁用并说明只能从 Root Message 创建。
-- 每条 Message 在 hover 或键盘 focus 时才显示：连续消息左侧 gutter 的时间、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字、时间和正文。
+- 每条 Message 在 hover 或键盘 focus 时才显示：右下角的时间、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。同一时刻只有一条 Message 显示动作面板，鼠标点击过的按钮不会让面板保持显示。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字和正文；Thread 预览占满消息宽度，不显示 reply 时间。
 - Enter 发送，Shift+Enter 换行，⌘/Ctrl+Enter 同样发送；输入法（中文、日文等）正在选词时的 Enter 只确认候选，不发送；触屏键盘上 Enter 换行，由发送键发送。
 - 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。
 - 其他成员的新消息以 0.2 秒淡入上移出现；自己的消息不做动画。

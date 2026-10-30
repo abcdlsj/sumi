@@ -47,10 +47,6 @@
     background: transparent;
   }
 
-  .message-row--for-you:hover {
-    background: var(--you-row);
-  }
-
   .message-row:hover .message-actions,
   .thread-message:hover .message-actions {
     opacity: 0;
@@ -63,8 +59,8 @@
     pointer-events: auto;
   }
 
-  .message-block:focus-within .message-row:not(.message-row--for-you),
-  .thread-message:focus-within:not(.message-row--for-you) {
+  .message-block:focus-within .message-row,
+  .thread-message:focus-within {
     background: var(--bg-hover);
   }
 
@@ -74,12 +70,14 @@
   }
 
   .message-row:hover .message-seq,
-  .message-row:hover .message-gutter-time {
+  .message-row:hover .message-hover-time,
+  .thread-message:hover .message-hover-time {
     opacity: 0;
   }
 
   .message-block:focus-within .message-seq,
-  .message-block:focus-within .message-gutter-time {
+  .message-block:focus-within .message-hover-time,
+  .thread-message:focus-within .message-hover-time {
     opacity: 1;
   }
 

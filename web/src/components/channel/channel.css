@@ -202,11 +202,6 @@
   padding-top: 1px;
 }
 
-.message-row--for-you,
-.message-row--for-you:hover {
-  background: var(--you-row);
-}
-
 .message-row > .pixel-identity,
 .message-row > .presence-identity,
 .message-avatar-button {
@@ -266,21 +261,29 @@
   box-shadow: 0 0 0 2px var(--line-strong);
 }
 
-.message-gutter-time {
-  align-self: start;
-  padding-top: 3px;
+/* Time sits in the bottom-right corner and appears only with the toolbar. */
+.message-hover-time {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-hover);
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 18px;
-  text-align: right;
+  line-height: 16px;
   white-space: nowrap;
   opacity: 0;
+  pointer-events: none;
   transition: opacity .12s ease;
 }
 
-.message-row:hover .message-gutter-time {
+.message-row:hover .message-hover-time,
+.thread-message:hover .message-hover-time,
+.message-block:focus-visible .message-hover-time {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .message-content {
@@ -306,21 +309,6 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.message-content > header time,
-.thread-message header time {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.message-for-you {
-  flex: none;
-  color: var(--you-ink);
-  font-size: var(--text-meta);
-  font-weight: 600;
 }
 
 /* The sequence is a coordinate for Agents; Humans see it on hover. */
@@ -783,7 +771,7 @@ a.message-mention--agent:hover {
 
 .message-row:hover .message-actions,
 .thread-message:hover .message-actions,
-.message-actions:focus-within {
+.message-actions:has(:focus-visible) {
   opacity: 1;
   pointer-events: auto;
 }
@@ -864,7 +852,6 @@ a.message-mention--agent:hover {
 /* Inline Thread preview: avatars of the latest replies and one summary line. */
 .inline-thread-preview {
   display: grid;
-  max-width: 560px;
   justify-items: start;
   gap: 2px;
 }
@@ -907,7 +894,7 @@ a.message-mention--agent:hover {
 .inline-reply {
   display: grid;
   width: 100%;
-  grid-template-columns: 18px auto minmax(0, 1fr) auto;
+  grid-template-columns: 18px auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 2px 6px;
@@ -937,12 +924,6 @@ a.message-mention--agent:hover {
   color: var(--ink-2);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.inline-reply time {
-  color: var(--muted);
-  font-size: var(--text-meta);
-  font-variant-numeric: tabular-nums;
 }
 
 .inline-thread-status {
@@ -1850,10 +1831,6 @@ details.system-event .system-event-heading {
   background: var(--bg-hover);
 }
 
-.thread-message.message-row--for-you {
-  background: var(--you-row);
-}
-
 .thread-message > div {
   display: grid;
   min-width: 0;
@@ -1938,10 +1915,6 @@ details.system-event .system-event-heading {
     padding-top: 1px;
   }
 
-  .message-gutter-time {
-    display: none;
-  }
-
   .message-seq,
   .composer-shortcut {
     display: none;
@@ -1956,7 +1929,7 @@ details.system-event .system-event-heading {
   }
 
   .inline-reply {
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    grid-template-columns: 18px minmax(0, 1fr);
   }
 
   .inline-reply-author {

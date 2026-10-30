@@ -156,7 +156,6 @@ export function MessageTimeline({
           }
           // A day divider always restarts the visual grouping.
           const grouped = !showDivider && !message.task && message.reply_count === 0 && !startsNewGroup(message, previous);
-          const forYou = isForMember(message, selfMemberId);
           const outgoingItem = outgoingByKey.get(message.id);
           const own = message.author.id === selfMemberId;
           return (
@@ -167,12 +166,8 @@ export function MessageTimeline({
                 </div>
               ) : null}
               {unreadDivider}
-              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${forYou ? " message-row--for-you" : ""}${outgoingItem ? ` message-row--outgoing message-row--${outgoingItem.status}` : ""}`}>
-                {grouped ? (
-                  <time className="message-gutter-time" dateTime={message.created_at} title={formatFullTime(message.created_at)}>
-                    {formatMessageTime(message.created_at)}
-                  </time>
-                ) : (
+              <article className={`message-row${grouped ? " message-row--grouped" : ""}${message.reply_count > 0 ? " message-row--has-thread" : ""}${outgoingItem ? ` message-row--outgoing message-row--${outgoingItem.status}` : ""}`}>
+                {grouped ? <span aria-hidden="true" /> : (
                   <MessageAvatar
                     name={message.author.display_name}
                     kind={message.author.kind}
@@ -186,11 +181,8 @@ export function MessageTimeline({
                   {grouped ? null : (
                     <header>
                       <strong>{message.author.display_name}</strong>
-                      <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
-                      {forYou ? <span className="message-for-you">For you</span> : null}
                     </header>
                   )}
-                  {grouped && forYou ? <span className="visually-hidden">For you</span> : null}
                   <MessageBody
                     message={message}
                     spaceSlug={spaceSlug}
@@ -212,6 +204,7 @@ export function MessageTimeline({
                     <OutgoingStatus item={outgoingItem} retry={onRetryOutgoing} discard={onDiscardOutgoing} />
                   ) : null}
                 </div>
+                <MessageTime value={message.created_at} />
                 {!message.deleted_at && !outgoingItem ? (
                   <MessageActions
                     message={message}
@@ -287,9 +280,8 @@ function SystemNoticeGroup({
 }
 
 export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm, outgoing, onRetryOutgoing, onDiscardOutgoing }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void; outgoing?: OutgoingMessage; onRetryOutgoing?: (item: OutgoingMessage) => void; onDiscardOutgoing?: (key: string) => void }) {
-  const forYou = isForMember(message, useSelfMemberId());
   return (
-    <article className={`thread-message${forYou ? " message-row--for-you" : ""}${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} onClick={focusMessage}>
+    <article className={`thread-message${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} onClick={focusMessage}>
       <MessageAvatar
         name={message.author.display_name}
         kind={message.author.kind}
@@ -301,8 +293,6 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
       <div>
         <header>
           <strong>{message.author.display_name}</strong>
-          <time dateTime={message.created_at} title={formatFullTime(message.created_at)}>{formatMessageTime(message.created_at)}</time>
-          {forYou ? <span className="message-for-you">For you</span> : null}
         </header>
         <MessageBody message={message} spaceSlug={spaceSlug} members={members} />
         {message.task ? <MessageTaskBadge task={message.task} spaceSlug={spaceSlug} /> : null}
@@ -312,6 +302,7 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
         ) : null}
         {outgoing ? <OutgoingStatus item={outgoing} retry={onRetryOutgoing} discard={onDiscardOutgoing} /> : null}
       </div>
+      <MessageTime value={message.created_at} />
       {!message.deleted_at && !outgoing ? (
         <div className="message-actions" role="toolbar" aria-label="Message actions">
           <CopyAction label="Copy text" icon={<Copy aria-hidden="true" />} value={() => messagePreview(message)} />
@@ -320,6 +311,11 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
       ) : null}
     </article>
   );
+}
+
+// Shown only on hover or focus; the title keeps the full date for pointer users.
+function MessageTime({ value }: { value: string }) {
+  return <time className="message-hover-time" dateTime={value} title={formatFullTime(value)}>{formatMessageTime(value)}</time>;
 }
 
 function MessageAvatar({
@@ -467,7 +463,6 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
             <strong>{reply.author.display_name}</strong>
           </span>
           <span className="inline-reply-body">{reply.deleted_at ? "Message deleted" : messagePreview(reply)}</span>
-          <time dateTime={reply.created_at}>{formatMessageTime(reply.created_at)}</time>
         </button>
       ))}
     </section>
@@ -1071,12 +1066,6 @@ function AttachmentList({ attachments }: { attachments: Attachment[] }) {
       ))}
     </div>
   );
-}
-
-function isForMember(message: Message, memberId: string | undefined): boolean {
-  if (!memberId || message.deleted_at || message.author.id === memberId) return false;
-  if (message.content.type !== "text") return false;
-  return message.mention_all || message.mentions.includes(memberId);
 }
 
 // The current step is only a tooltip: Humans see that work is happening,
