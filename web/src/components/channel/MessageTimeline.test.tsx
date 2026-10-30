@@ -556,6 +556,50 @@ describe("timeline position", () => {
   });
 });
 
+describe("Agent failure line", () => {
+  const lin = { id: "agent-lin", kind: "agent" as const, display_name: "Lin", access_level: "member" as const, permissions: [] };
+
+  function renderWithAgent(activityStatus: "idle" | "working", errorCode?: string) {
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MessageTimeline
+          timelineRef={createRef<HTMLDivElement>()}
+          page={pageWith([agentMessage(1, "Lin")])}
+          pending={false}
+          error={null}
+          retry={vi.fn()}
+          emptyTitle="No messages"
+          channelId="channel-1"
+          spaceSlug="sumi-lab"
+          openThread={vi.fn()}
+          activityByMemberId={new Map([[lin.id, activityStatus]])}
+          errorByMemberId={errorCode ? new Map([[lin.id, errorCode]]) : undefined}
+          members={[lin]}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("reports the failed Run's reason under the timeline while the Agent is idle", () => {
+    renderWithAgent("idle", "unhandled_items");
+
+    expect(screen.getByText("stopped on an error", { exact: false })).toBeVisible();
+    expect(screen.getByText("unhandled_items")).toBeVisible();
+  });
+
+  it("drops the line once the Agent is working again", () => {
+    renderWithAgent("working", "unhandled_items");
+
+    expect(screen.queryByText("stopped on an error", { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("stays quiet when the latest Run did not fail", () => {
+    renderWithAgent("idle");
+
+    expect(screen.queryByText("stopped on an error", { exact: false })).not.toBeInTheDocument();
+  });
+});
+
 function mockScrollMetrics(scrollHeight: number, clientHeight: number) {
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(scrollHeight);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(clientHeight);

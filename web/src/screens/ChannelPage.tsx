@@ -234,6 +234,9 @@ export function MessageWorkspace({
   const activityByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
   );
+  const errorByMemberId = new Map(
+    (agents.data ?? []).flatMap((agent) => agent.last_error_code ? [[agent.member_id, agent.last_error_code] as const] : []),
+  );
   const workingLabelByMemberId = new Map(
     (agents.data ?? []).flatMap((agent) => agent.activity?.label ? [[agent.member_id, agent.activity.label] as const] : []),
   );
@@ -346,6 +349,7 @@ export function MessageWorkspace({
         openThread={openThread}
         activityByMemberId={activityByMemberId}
         workingLabelByMemberId={workingLabelByMemberId}
+        errorByMemberId={errorByMemberId}
         members={channelMembers.data?.members ?? []}
         direct={direct}
         onOpenAgentDm={direct ? undefined : (memberId) => openAgentDm.mutate(memberId)}

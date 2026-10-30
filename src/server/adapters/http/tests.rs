@@ -328,6 +328,33 @@ async fn agent_activity_and_last_error_code_come_from_run_and_inbox_facts() {
     );
     assert!(failed.activity.is_none());
 
+    // The code describes the Agent's latest Run. A Run that finished later without failing
+    // replaces it instead of leaving a stale problem on the Agent; a pending Item's own dispatch
+    // error is a separate fact and is cleared here so only the Run's code is left to compare.
+    sqlx::query("UPDATE inbox_items SET last_error_code=NULL WHERE id=$1")
+        .bind(item_id)
+        .execute(&fixture.state.pool)
+        .await
+        .unwrap();
+    let later_run = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO agent_runs(id,space_id,agent_id,focus_thread_id,status,trigger_kind,\
+             outcome_code,created_at,started_at,finished_at) \
+         VALUES($1,$2,$3,$4,'completed','mention','completed',now(),now(),now() + interval '1 minute')",
+    )
+    .bind(later_run)
+    .bind(fixture.context.space_id.into_uuid())
+    .bind(agent_id)
+    .bind(focus_id)
+    .execute(&fixture.state.pool)
+    .await
+    .unwrap();
+    let recovered = read_agent(&fixture, agent_id).await;
+    assert_eq!(
+        recovered.last_error_code, None,
+        "a later non-failing Run clears the stale error"
+    );
+
     fixture.destroy().await;
 }
 

@@ -631,6 +631,31 @@ a.message-mention--agent:hover {
   from { opacity: 0; transform: translateY(4px); }
 }
 
+/* A failed Run is a fact about the last attempt, not a live state: same quiet row, error ink. */
+.timeline-stopped {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px var(--page-gutter) 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.timeline-stopped p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-stopped code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  opacity: .8;
+}
+
 /* Messages from others ease in; your own replace their outgoing copy in place. */
 .message-block--arrived {
   animation: message-arrive .22s ease-out;

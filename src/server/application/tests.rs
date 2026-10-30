@@ -2858,24 +2858,34 @@ async fn syncing_a_reconnected_computer_fails_runs_it_no_longer_holds() {
     let live_run = run(263);
     let retryable = item(264);
     let exhausted = item(265);
+    let exhausted_notice = item(267);
     let now = OffsetDateTime::UNIX_EPOCH + time::Duration::hours(5);
     let mut port = MemoryPort::default();
     insert_thread(&mut port, focus, &[agent]);
 
     port.state.runs.insert(
         lost_run,
-        running_run(lost_run, agent, focus, None, vec![retryable, exhausted]),
+        running_run(
+            lost_run,
+            agent,
+            focus,
+            None,
+            vec![retryable, exhausted, exhausted_notice],
+        ),
     );
     // A Run the Computer still holds must survive the sync untouched.
     port.state.runs.insert(
         live_run,
         running_run(live_run, member(266), focus, None, Vec::new()),
     );
-    for (item_id, retry_count) in [(retryable, 0), (exhausted, 2)] {
+    for (item_id, retry_count) in [(retryable, 0), (exhausted, 2), (exhausted_notice, 2)] {
         let mut assigned = inbox(item_id, agent, focus, None, InboxItemStatus::Assigned);
         update_test_item(&mut assigned, |snapshot| {
             snapshot.assigned_run_id = Some(lost_run);
             snapshot.retry_count = retry_count;
+            if item_id == exhausted_notice {
+                snapshot.kind = InboxItemKind::System;
+            }
         });
         port.state.items.insert(item_id, assigned);
     }
@@ -2897,7 +2907,7 @@ async fn syncing_a_reconnected_computer_fails_runs_it_no_longer_holds() {
         SyncedComputerRuns {
             runs_failed: 1,
             items_released: 1,
-            items_dead: 1,
+            items_dead: 2,
         }
     );
     assert_eq!(port.state.runs[&lost_run].view().status, RunStatus::Failed);
@@ -2916,6 +2926,10 @@ async fn syncing_a_reconnected_computer_fails_runs_it_no_longer_holds() {
     );
     assert_eq!(
         port.state.items[&exhausted].view().status,
+        InboxItemStatus::Dead
+    );
+    assert_eq!(
+        port.state.items[&exhausted_notice].view().status,
         InboxItemStatus::Dead
     );
     assert_eq!(
@@ -4161,6 +4175,92 @@ async fn failed_run_without_reported_disposition_releases_item_and_counts_retry(
     assert_eq!(
         port.state.runs[&run_id].view().error_code,
         Some(RunErrorCode::DriverError)
+    );
+}
+
+#[tokio::test]
+async fn a_dead_notice_does_not_spawn_another_notice() {
+    let run_id = run(1645);
+    let notice_id = item(1646);
+    let source_id = item(1647);
+    let agent_id = member(1648);
+    let focus = thread(1649);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[agent_id]);
+    port.state
+        .computer_assignments
+        .insert((computer(999), agent_id));
+    let mut notice = inbox(notice_id, agent_id, focus, None, InboxItemStatus::Assigned);
+    update_test_item(&mut notice, |snapshot| {
+        snapshot.kind = InboxItemKind::System;
+        snapshot.assigned_run_id = Some(run_id);
+        snapshot.retry_count = 5;
+    });
+    port.state.items.insert(notice_id, notice);
+    port.state.runs.insert(
+        run_id,
+        running_run(run_id, agent_id, focus, None, vec![notice_id]),
+    );
+
+    CompleteRun::execute(
+        &mut port,
+        CompleteRunInput {
+            max_retry_count: 5,
+            event_id: event(1650),
+            run_id,
+            computer_id: computer(999),
+            outcome: RunOutcome::Failed,
+            error_code: Some(RunErrorCode::UnhandledItems),
+            item_dispositions: Vec::new(),
+            continuation_note: None,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        port.state.items[&notice_id].view().status,
+        InboxItemStatus::Dead
+    );
+    assert!(
+        port.state.dead_item_notices.is_empty(),
+        "retiring a notice reports nothing, or one unprocessable notice would keep spawning Runs"
+    );
+
+    // A real source still reports itself once it is retired.
+    let second_run = run(1651);
+    let mut source = inbox(source_id, agent_id, focus, None, InboxItemStatus::Assigned);
+    update_test_item(&mut source, |snapshot| {
+        snapshot.assigned_run_id = Some(second_run);
+        snapshot.retry_count = 5;
+    });
+    port.state.items.insert(source_id, source);
+    port.state.runs.insert(
+        second_run,
+        running_run(second_run, agent_id, focus, None, vec![source_id]),
+    );
+
+    CompleteRun::execute(
+        &mut port,
+        CompleteRunInput {
+            max_retry_count: 5,
+            event_id: event(1652),
+            run_id: second_run,
+            computer_id: computer(999),
+            outcome: RunOutcome::Failed,
+            error_code: Some(RunErrorCode::UnhandledItems),
+            item_dispositions: Vec::new(),
+            continuation_note: None,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        port.state.dead_item_notices,
+        vec![(agent_id, "inbox_item_dead")]
     );
 }
 

@@ -6,6 +6,7 @@ import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEf
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
+import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
 import { TaskStatusIcon } from "../taskStatusIcon";
@@ -31,6 +32,7 @@ export function MessageTimeline({
   openThread,
   activityByMemberId,
   workingLabelByMemberId,
+  errorByMemberId,
   members,
   direct = false,
   onOpenAgentDm,
@@ -52,6 +54,8 @@ export function MessageTimeline({
   openThread: (threadId: string, trigger?: HTMLButtonElement) => void;
   activityByMemberId: ReadonlyMap<string, Agent["activity_status"]>;
   workingLabelByMemberId?: ReadonlyMap<string, string>;
+  /** The failed Run's stable error code per Agent, reported while that Run is the Agent's latest. */
+  errorByMemberId?: ReadonlyMap<string, string>;
   members: Member[];
   direct?: boolean;
   onOpenAgentDm?: (memberId: string) => void;
@@ -107,6 +111,7 @@ export function MessageTimeline({
   const outgoingMessages = selfAuthor ? outgoing.map((item) => provisionalMessage(item, selfAuthor, channelId)) : [];
   const timelineGroups = groupTimelineMessages([...(page?.messages ?? []), ...outgoingMessages]);
   const workers = workingAgents(page?.messages ?? [], members, activityByMemberId, direct);
+  const stopped = stoppedAgents(page?.messages ?? [], members, activityByMemberId, errorByMemberId, direct);
 
   return (
     <div className="message-timeline-shell">
@@ -220,6 +225,7 @@ export function MessageTimeline({
         })}
       </div>
       <WorkingStrip workers={workers} steps={workingLabelByMemberId} />
+      <StoppedStrip stopped={stopped} errors={errorByMemberId} />
       {showToBottom || newMessageCount > 0 ? (
         <ToBottomButton onClick={scrollToBottom} newMessageCount={newMessageCount} />
       ) : null}
@@ -1102,6 +1108,39 @@ function workingAgents(messages: readonly Message[], members: readonly Member[],
     if (direct) return true;
     return recent.some((message) => message.author.id === member.id || message.mention_all || message.mentions.includes(member.id));
   });
+}
+
+/**
+ * Agents whose latest Run failed: idle now, but the failure is newer than anything
+ * they said here. A new Run clears it because the Server recomputes the code.
+ */
+function stoppedAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, Agent["activity_status"]>, errors: ReadonlyMap<string, string> | undefined, direct: boolean): Member[] {
+  if (!errors?.size) return [];
+  const recent = messages.slice(-RECENT_WINDOW);
+  return members.filter((member) => {
+    if (member.kind !== "agent" || !errors.has(member.id)) return false;
+    const status = activity.get(member.id);
+    if (status === "working" || status === "dispatched") return false;
+    if (direct) return true;
+    return recent.some((message) => message.author.id === member.id || message.mentions.includes(member.id));
+  });
+}
+
+function StoppedStrip({ stopped, errors }: { stopped: Member[]; errors?: ReadonlyMap<string, string> }) {
+  if (stopped.length === 0) return null;
+  return (
+    <div className="timeline-stopped" role="status">
+      {stopped.slice(0, 3).map((member) => {
+        const code = errors?.get(member.id);
+        return (
+          <p key={member.id} title={code ? runErrorLabel(code) : undefined}>
+            <strong>{member.display_name}</strong> stopped on an error
+            {code ? <> <code>{code}</code></> : null}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 /** One quiet line under the timeline while Agents work; its space is always reserved. */

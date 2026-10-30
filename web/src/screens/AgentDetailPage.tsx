@@ -7,6 +7,7 @@ import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMe
 import { driverLabel } from "../driver";
 import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
+import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { formatBytes } from "../format";
@@ -123,7 +124,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
             <i aria-hidden="true" />{value.computer_reachable ? "Computer online" : "Computer offline"}
           </span>
           {value.last_error_code ? (
-            <span className="agent-error-signal" role="status" aria-label={`Needs attention: ${problemLabel(value.last_error_code)}`} title={problemLabel(value.last_error_code)}>
+            <span className="agent-error-signal" role="status" aria-label={`Needs attention: ${runErrorLabel(value.last_error_code)}`} title={runErrorLabel(value.last_error_code)}>
               <i aria-hidden="true" />Needs attention
             </span>
           ) : null}
@@ -178,7 +179,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
               {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">More work is waiting after this.</p> : null}
             </DetailSection>
             <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{new Date(value.created_at).toLocaleDateString()}</Field></dl></DetailSection>
-            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? problemLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
+            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
             {canManage ? <DetailSection className="agent-direct-messages" title="Conversations with other Agents">
               {agentDirectMessages.isPending ? <p>Loading…</p> : null}
               {agentDirectMessages.error ? <p className="inline-notice" role="alert">These conversations are unavailable right now.</p> : null}
@@ -274,8 +275,6 @@ function Field({ label, children, tabular = false, chip }: { label: string; chil
 function capitalize(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function humanize(value: string): string { return value.split("_").map(capitalize).join(" "); }
 function setupLabel(value: string): string { return value === "ready" ? "Ready" : value === "error" ? "Failed" : "In progress"; }
-function problemLabel(code: string): string { const words = code.replaceAll(/[._]/g, " ").trim(); return words.charAt(0).toUpperCase() + words.slice(1) + "."; }
-
 
 function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; spaceSlug: string; channels: Channel[] }) {
   const items = useAgentActivity(agentId);

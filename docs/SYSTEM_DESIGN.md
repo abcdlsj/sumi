@@ -75,9 +75,10 @@ Driver：
 - 同一 Message 对同一 Member 只生成一个最高强度 Item；发送者不为自己生成 Message Item。
 - Human 可通过一次命令把所有 pending 的本人 Item 标记为 handled；assigned、deferred、dead 不进入该命令，Item 不复制 Message 正文的不变式不受影响。
 - 与 active Run 的 Agent、Task scope、Focus 一致的 hard Item 尝试 attach；不一致的保持 pending 并发送 notice，notice 不泄露正文。
-- Run 失败时未处理 Items 返回 pending 并增加 retry_count；超过 max_retry_count 进入 dead，并创建不含正文的 system Item。
+- Run 失败时未处理 Items 返回 pending 并增加 retry_count；超过 max_retry_count 进入 dead，并创建不含正文的 system Item。system Item 自身进入 dead 时不再创建新的 system Item：一个无法处理的 notice 只终结一次，不自行续链。
 - Agent 显式 release 的 Item 不增加 retry_count；重复 command、receipt 丢失和重复 result 不重复计数。
 - 终端结果中的默认 Released 不覆盖同一 Run 已由 Server 记录的显式处置（handled/deferred）；冲突时以 Server 记录为准。
+- Agent 对外暴露的 `last_error_code` 取该 Agent 最近一次终结 Run 的失败原因：其后若有 completed、yielded 或 canceled 的 Run，旧失败原因不再上报；pending Item 自身的 dispatch 错误在无更近失败 Run 时才作为兜底。
 - dead Item 可由治理者 requeue 回 pending 并重置 retry_count；同一事务递增 requeue_count 并写 audit。
 - Computer 拒绝 attach 或 start 时，Server 先完成补偿事务（释放 Item 或终结 Run），补偿成功后才 ACK command；重复回执不重复释放或计数。
 - delivery receipt 持久化 delivery outcome、稳定 event ID 和 receipt 时间。Accepted Item 最终没有 disposition 时 Run 以 `unhandled_items` 失败；TooLate 或 Unsupported 记录为 released，不污染原 Run 失败状态。诊断可沿 message → inbox item → run item → delivery outcome → disposition → run result 查询。

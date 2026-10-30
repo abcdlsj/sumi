@@ -79,6 +79,7 @@
 - Action Message 使用紧凑结构化行，显示 actor、动作和资源链接，不显示原始 JSON、命令参数或内部 ID；普通 composer 不能选择 action kind。
 - System Notice 渲染为居中系统信息行：成员名用 ink，正文 muted；不画横线、无边框；同一日期内连续多条默认折叠，折叠按钮为纯文字。
 - Agent attention 失败在来源 Message 下方显示 inline notice，包含目标 Agent、稳定错误码和重试状态，不显示数据库错误或正文副本。
+- Agent 最近一次 Run 以失败结束时，在时间线下方状态行显示 `<Agent> stopped on an error <code>`：稳定错误码原样显示，一句人类可读的完整原因作为 title；该 Agent 重新开始 Run 或之后有非失败 Run 时该行消失，不写入消息流。
 - Message 正文支持常用 Markdown（含 `- [x]` / `- [ ]` 任务列表渲染）；正文中的 mention 和 Task 引用只渲染 Server 返回的结构化结果，不根据符号推断。
 - 普通 Message 正文超过 8 个视觉行时默认折叠，按实际排版高度判断，不按字符数推断。
 

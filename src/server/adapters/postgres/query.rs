@@ -626,6 +626,11 @@ impl PostgresQueries {
                         (SELECT r.error_code FROM agent_runs r
                          WHERE r.agent_id=a.member_id AND r.outcome_code='failed'
                            AND r.error_code IS NOT NULL
+                           AND r.finished_at > COALESCE(
+                               (SELECT MAX(r2.finished_at) FROM agent_runs r2
+                                WHERE r2.agent_id=a.member_id
+                                  AND r2.outcome_code IN ('completed','yielded','canceled')),
+                               '-infinity'::timestamptz)
                          ORDER BY r.finished_at DESC NULLS LAST,r.id DESC LIMIT 1),
                         (SELECT i.last_error_code FROM inbox_items i
                          WHERE i.member_id=a.member_id AND i.status='pending'

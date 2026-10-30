@@ -7,7 +7,7 @@ use crate::ids::{
 
 use crate::server::domain::{
     DomainError,
-    attention::{InboxItemDisposition, InboxItemStatus},
+    attention::{InboxItemDisposition, InboxItemKind, InboxItemStatus},
     execution::{DeliveryOutcome, Run, RunErrorCode, RunOutcome, RunStatus, RunTrigger},
     task::TaskStatus,
 };
@@ -531,17 +531,23 @@ impl SyncComputerRuns {
                             let item_view = item.view();
                             let agent_id = item_view.member_id;
                             let thread_id = item_view.thread_id;
+                            // A dead notice reports a source the Agent could not process. Retiring
+                            // the notice itself must not create another one, or one unprocessable
+                            // notice keeps spawning Runs forever.
+                            let report = retired && item_view.kind != InboxItemKind::System;
                             transaction.save_inbox_item(item).await?;
                             if retired {
                                 dead += 1;
-                                transaction
-                                    .insert_dead_item_notice(
-                                        agent_id,
-                                        thread_id,
-                                        "inbox_item_dead",
-                                        input.now,
-                                    )
-                                    .await?;
+                                if report {
+                                    transaction
+                                        .insert_dead_item_notice(
+                                            agent_id,
+                                            thread_id,
+                                            "inbox_item_dead",
+                                            input.now,
+                                        )
+                                        .await?;
+                                }
                             } else {
                                 released += 1;
                             }
@@ -689,10 +695,13 @@ impl CompleteRun {
                         InboxItemStatus::Dead
                     );
                     let item_view = item.view();
+                    // Retiring a dead notice must not spawn another notice: the Agent already
+                    // failed to process the first one.
+                    let report = retired && item_view.kind != InboxItemKind::System;
                     let agent_id = item_view.member_id;
                     let thread_id = item_view.thread_id;
                     transaction.save_inbox_item(item).await?;
-                    if retired {
+                    if report {
                         transaction
                             .insert_dead_item_notice(
                                 agent_id,
