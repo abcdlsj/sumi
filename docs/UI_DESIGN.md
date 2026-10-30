@@ -37,6 +37,7 @@
 - Composer 是抬起的白色卡片（`--shadow-raised`、圆角 14px），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
 - Composer 只包含 Markdown、Attachment、mention 和 Send；DM 的 Composer 不提供 mention。
+- 输入 `@` 弹出 mention 面板：首项 `Everyone`（`@all`，人群图标），其后最多 6 位成员，名字以输入开头者排前；每行左侧 22px 图标、名字、Agent 标签右对齐；↑↓ 选择，Enter/Tab 插入，Esc 关闭。
 
 ## 上手引导
 

@@ -1566,13 +1566,29 @@ details.system-event .system-event-heading {
   background: var(--bg-subtle);
 }
 
-.mention-suggestions .pixel-identity {
+.mention-suggestions .pixel-identity,
+.mention-suggestion-icon {
+  display: inline-flex;
   width: 22px;
   height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
   font-size: 10px;
 }
 
-.mention-suggestions span {
+.mention-suggestion-icon {
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--ink-2);
+}
+
+.mention-suggestion-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mention-suggestion-name {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -1592,10 +1608,6 @@ details.system-event .system-event-heading {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-meta);
-}
-
-.mention-suggestion-all {
-  padding-left: 40px !important;
 }
 
 /* Thread pane ----------------------------------------------------------- */

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
-import { ArrowUp, LoaderCircle, Paperclip, X } from "lucide-react";
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ArrowUp, LoaderCircle, Paperclip, Users, X } from "lucide-react";
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 import { uploadAttachment, type Member, type Message } from "../../api/client";
 import { PixelIdentity } from "../SpaceShell";
@@ -243,13 +243,12 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
   const [cursor, setCursor] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const match = direct ? undefined : mentionMatch(value, cursor);
-  const suggestions = !direct && match ? members.filter((member) => {
-    const query = match.query.toLowerCase();
-    return member.display_name.toLowerCase().includes(query);
-  }).slice(0, 6) : [];
+  const suggestions = !direct && match ? mentionSuggestions(members, match.query) : [];
   const allSuggestion = !direct && Boolean(match && "all".startsWith(match.query.toLowerCase()));
-  const listboxId = "mention-suggestions";
-  const allOptionId = "mention-option-all";
+  const idPrefix = useId();
+  const listboxId = `${idPrefix}-mention-suggestions`;
+  const allOptionId = `${idPrefix}-mention-option-all`;
+  const optionId = (member: Member) => `${idPrefix}-mention-option-${member.id}`;
   const listboxOpen = suggestions.length > 0 || allSuggestion;
   let activeDescendant: string | undefined;
   if (listboxOpen) {
@@ -258,7 +257,7 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
     } else {
       const optionIndex = Math.max(0, activeIndex - (allSuggestion ? 1 : 0));
       const member = suggestions[Math.min(optionIndex, suggestions.length - 1)];
-      activeDescendant = member ? `mention-option-${member.id}` : undefined;
+      activeDescendant = member ? optionId(member) : undefined;
     }
   }
 
@@ -336,14 +335,15 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
       {!direct && (suggestions.length || allSuggestion) ? (
         <div className="mention-suggestions" id={listboxId} role="listbox" aria-label="Mention suggestions">
           {allSuggestion ? (
-            <button className="mention-suggestion-all" id={allOptionId} type="button" role="option" tabIndex={-1} aria-selected={activeIndex === 0} onMouseDown={(event) => event.preventDefault()} onClick={chooseAll}>
-              <span><strong>Everyone</strong><small>@all</small></span>
+            <button id={allOptionId} type="button" role="option" tabIndex={-1} aria-selected={activeIndex === 0} onMouseDown={(event) => event.preventDefault()} onClick={chooseAll}>
+              <span className="mention-suggestion-icon" aria-hidden="true"><Users /></span>
+              <span className="mention-suggestion-name"><strong>Everyone</strong><small>@all</small></span>
             </button>
           ) : null}
           {suggestions.map((member, index) => (
-            <button key={member.id} id={`mention-option-${member.id}`} type="button" role="option" tabIndex={-1} aria-selected={index + (allSuggestion ? 1 : 0) === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(member)}>
+            <button key={member.id} id={optionId(member)} type="button" role="option" tabIndex={-1} aria-selected={index + (allSuggestion ? 1 : 0) === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(member)}>
               <PixelIdentity name={member.display_name} kind={member.kind} seed={member.id} />
-              <span><strong>{member.display_name}</strong></span>
+              <span className="mention-suggestion-name"><strong>{member.display_name}</strong></span>
               {member.kind === "agent" ? <span className="agent-label">Agent</span> : null}
             </button>
           ))}
@@ -373,6 +373,15 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
 
 function touchKeyboard(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
+function mentionSuggestions(members: Member[], rawQuery: string): Member[] {
+  const query = rawQuery.toLowerCase();
+  const rank = (name: string) => (name.startsWith(query) ? 0 : 1);
+  return members
+    .filter((member) => member.display_name.toLowerCase().includes(query))
+    .sort((a, b) => rank(a.display_name.toLowerCase()) - rank(b.display_name.toLowerCase()))
+    .slice(0, 6);
 }
 
 function mentionMatch(value: string, cursor: number): { start: number; query: string } | undefined {
