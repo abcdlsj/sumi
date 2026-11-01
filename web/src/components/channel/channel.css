@@ -338,6 +338,10 @@
 .message-body {
   display: grid;
   width: 100%;
+  /* A message is read, not scanned: cap the measure so a wide window does not
+     turn one sentence into a 120-character line. Attachments and Task badges
+     below it keep the column width. */
+  max-width: var(--measure-text);
   min-width: 0;
   gap: 8px;
   color: var(--ink);
@@ -852,6 +856,8 @@ a.message-mention--agent:hover {
 /* Inline Thread preview: avatars of the latest replies and one summary line. */
 .inline-thread-preview {
   display: grid;
+  width: 100%;
+  max-width: var(--measure-text);
   justify-items: start;
   gap: 2px;
 }

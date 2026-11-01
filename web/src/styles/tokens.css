@@ -24,7 +24,7 @@
   /* Ink */
   --ink: #1c1b19;
   --ink-2: #4f4d48;
-  --muted: #75726b;
+  --muted: #6f6c65;
   --line: #e6e3de;
   --line-strong: #d3cfc8;
   --focus: #1c1b19;
@@ -83,6 +83,7 @@
   --sidebar-width: 256px;
   --control-height: 34px;
   --control-height-compact: 30px;
+  --measure-text: 68ch;
   --page-gutter: 28px;
   --page-gutter-compact: 16px;
 }

@@ -42,7 +42,6 @@ export function PairComputerPage() {
       <section className="pairing-stage" aria-labelledby="pairing-title">
         <div className="pairing-machine">
           <MonitorCheck aria-hidden="true" />
-          <p className="eyebrow">Confirm this machine</p>
           <h1 id="pairing-title">{details.data.hostname}</h1>
           <dl>
             <div><dt>Operating system</dt><dd>{details.data.os}</dd></div>

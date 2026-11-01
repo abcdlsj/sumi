@@ -13,26 +13,17 @@ import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
 import { notify } from "../feedback";
 import { groupInboxItems, type InboxStack } from "../inbox";
+import { plainTextPreview } from "../markdownText";
 import { ListSkeleton } from "../components/Skeleton";
+import { formatDateTime } from "../time";
 
 const inboxGroups: Array<{
   id: "dm" | "thread";
   label: string;
-  description: string;
   kind: "dm" | "thread";
 }> = [
-  {
-    id: "dm",
-    label: "Direct messages",
-    description: "One row per direct conversation",
-    kind: "dm",
-  },
-  {
-    id: "thread",
-    label: "Threads",
-    description: "One row per Thread with new attention",
-    kind: "thread",
-  },
+  { id: "dm", label: "Direct messages", kind: "dm" },
+  { id: "thread", label: "Threads", kind: "thread" },
 ];
 
 export function InboxPage() {
@@ -151,7 +142,6 @@ function InboxWorkspace({
             key={group.id}
             id={group.id}
             label={group.label}
-            description={group.description}
             count={group.stacks.reduce((total, stack) => total + stack.items.length, 0)}
           >
             {group.stacks.map((stack) => <InboxStackRow key={stack.id} stack={stack} members={members} open={open} />)}
@@ -185,10 +175,10 @@ function InboxStackRow({ stack, members, open }: {
           <span className="inbox-item-meta">
             <strong>{senderName}</strong>
             <span className="inbox-address">{address}</span>
-            <time dateTime={item.created_at}>{formatInboxTime(item.created_at)}</time>
+            <time dateTime={item.created_at}>{formatDateTime(item.created_at)}</time>
           </span>
           <span className="inbox-message-preview">
-            {formatInboxMessagePreview(item.message_preview) || item.summary || "Attention required"}
+            {plainTextPreview(item.message_preview ?? "") || item.summary || "Attention required"}
           </span>
           <span className="inbox-kind" aria-label={countLabel}>{countLabel}</span>
         </span>
@@ -197,10 +187,9 @@ function InboxStackRow({ stack, members, open }: {
   );
 }
 
-function InboxGroup({ id, label, description, count, icon: Icon = Inbox, children }: {
+function InboxGroup({ id, label, count, icon: Icon = Inbox, children }: {
   id: string;
   label: string;
-  description: string;
   count: number;
   icon?: LucideIcon;
   children: ReactNode;
@@ -209,26 +198,10 @@ function InboxGroup({ id, label, description, count, icon: Icon = Inbox, childre
     <section className="inbox-group" aria-labelledby={`inbox-group-${id}`}>
       <header className="inbox-group-heading">
         <Icon aria-hidden="true" />
-        <span>
-          <h2 id={`inbox-group-${id}`}>{label}</h2>
-          <p>{description}</p>
-        </span>
-        <b aria-label={`${count} new messages`}>{String(count).padStart(2, "0")}</b>
+        <h2 id={`inbox-group-${id}`}>{label}</h2>
+        <span className="inbox-group-count">{count} new</span>
       </header>
       <div className="inbox-group-items">{children}</div>
     </section>
   );
-}
-
-function formatInboxMessagePreview(value: string | null | undefined): string {
-  return value?.replace(/\\n/g, "\n").replace(/\s+/g, " ").trim() ?? "";
-}
-
-function formatInboxTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

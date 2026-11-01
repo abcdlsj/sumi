@@ -23,6 +23,8 @@ import { SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
 import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
+import { plainText } from "../markdownText";
+import { formatDateTime } from "../time";
 import { CompactMessage } from "../components/channel/MessageTimeline";
 import { PixelIdentity } from "../components/PixelIdentity";
 
@@ -255,7 +257,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
           </section>
         ) : null}
-        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{value.result_message.content.body_markdown}</p> : <p>The result is not available.</p>}</section> : null}
+        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{plainText(value.result_message.content.body_markdown)}</p> : <p>The result is not available.</p>}</section> : null}
         {value.status === "closed" ? <section className="task-detail-section"><h2>Close reason</h2><p>{closeReasonLabel(value.close_reason_code)}{value.close_reason_note ? ` — ${value.close_reason_note}` : ""}</p></section> : null}
         </div>
         <aside className="task-detail-sidebar" aria-label="Task activity">
@@ -338,20 +340,44 @@ function TaskActivity({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
   if (!current && !past.length) return <p className="task-activity-empty">No one has worked on this yet.</p>;
   return (
     <ul className="task-activity">
-      {current ? <ActivityItem run={current} spaceSlug={spaceSlug} current /> : null}
-      {past.map((run) => <ActivityItem key={run.id} run={run} spaceSlug={spaceSlug} />)}
+      {current ? <ActivityItem runs={[current]} spaceSlug={spaceSlug} current /> : null}
+      {groupRuns(past).map((runs) => <ActivityItem key={runs[0].id} runs={runs} spaceSlug={spaceSlug} />)}
     </ul>
   );
 }
-function ActivityItem({ run, spaceSlug, current = false }: { run: Run; spaceSlug: string; current?: boolean }) {
+
+/** One attempt per row, unless the same Agent ended the same way in the same Thread again:
+ *  eleven identical "finished" rows say less than one row that names the count. */
+function groupRuns(runs: readonly Run[]): Run[][] {
+  const groups: Run[][] = [];
+  for (const run of runs) {
+    const group = groups[groups.length - 1];
+    const head = group?.[0];
+    if (
+      head &&
+      head.agent_name === run.agent_name &&
+      head.status === run.status &&
+      head.focus.id === run.focus.id
+    ) {
+      group.push(run);
+      continue;
+    }
+    groups.push([run]);
+  }
+  return groups;
+}
+
+function ActivityItem({ runs, spaceSlug, current = false }: { runs: Run[]; spaceSlug: string; current?: boolean }) {
+  const run = runs[0];
   const when = run.finished_at ?? run.started_at;
+  const repeats = runs.length > 1 ? `${runs.length} runs · ` : "";
   return (
     <li className={`task-activity-item task-activity-item--${run.status}${current ? " task-activity-item--current" : ""}`}>
       <span className="task-activity-dot" aria-hidden="true" />
       <div>
         <p><strong>{run.agent_name}</strong> {current ? (run.status === "dispatched" ? "is starting on this" : "is working on this") : runOutcome[run.status].toLowerCase()}</p>
         <small>
-          {when ? <time dateTime={when}>{formatTaskTime(when)}</time> : null}
+          {when ? <time dateTime={when}>{repeats}{formatTaskTime(when)}</time> : null}
           {run.focus.channel_slug ? <> · <ThreadLink thread={run.focus} spaceSlug={spaceSlug} label="Conversation" /></> : null}
         </small>
       </div>
@@ -359,5 +385,5 @@ function ActivityItem({ run, spaceSlug, current = false }: { run: Run; spaceSlug
   );
 }
 function Field({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
-function formatTaskTime(value: string) { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
+function formatTaskTime(value: string) { return formatDateTime(value); }
 function closeReasonLabel(reason: Task["close_reason_code"]) { return reason ? reason.replace("_", " ").replace(/^./, (value) => value.toUpperCase()) : "Unknown"; }

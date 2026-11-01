@@ -64,7 +64,6 @@ export function InvitationPage() {
 
       <section className="register-stage invitation-stage" aria-labelledby="invitation-title">
         <div className="stage-copy stage-copy--invite">
-          <p className="eyebrow">A seat in</p>
           <h1 id="invitation-title">{invitation.data.space_name}</h1>
           <p className="space-address">/s/{invitation.data.space_slug}</p>
           <KeyRound className="invitation-key" aria-hidden="true" />

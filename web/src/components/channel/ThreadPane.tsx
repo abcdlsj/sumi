@@ -17,6 +17,7 @@ import { MessageComposer, type ComposerInput } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
 import { provisionalMessage, useOutbox } from "./outbox";
 import { useSelfMemberId } from "./selfMember";
+import { TaskStatusIcon } from "../taskStatusIcon";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
 
@@ -141,7 +142,14 @@ export function ThreadPane({
           <span>{direct ? channelSlug : `#${channelSlug}`}{channelHasNewMessages ? <i className="thread-unread-dot" aria-label="New messages" /> : null}</span>
         </div>
         {thread.data?.task && thread.data.task_relation ? (
-          <Link className="thread-task-context" to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: thread.data.task.id }} aria-label={`${thread.data.task.title} ${thread.data.task_relation.toUpperCase()}`}>
+          <Link
+            className="thread-task-context"
+            to="/s/$spaceSlug/tasks/$taskId"
+            params={{ spaceSlug, taskId: thread.data.task.id }}
+            aria-label={`Task !${thread.data.task.seq}, ${taskRelationLabel(thread.data.task_relation)}, ${thread.data.task.title}`}
+            title={`Task !${thread.data.task.seq} · ${taskRelationLabel(thread.data.task_relation)} · ${thread.data.task.title}`}
+          >
+            <TaskStatusIcon status={thread.data.task.status} />
             <b>!{thread.data.task.seq}</b>
             <span>{thread.data.task.title}</span>
           </Link>
@@ -212,4 +220,9 @@ export function ThreadPane({
       />
     </aside>
   );
+}
+
+/** The Source Thread asked for the work; a related Thread carries part of it. */
+function taskRelationLabel(relation: "source" | "related"): string {
+  return relation === "source" ? "Source Thread" : "Linked Thread";
 }
