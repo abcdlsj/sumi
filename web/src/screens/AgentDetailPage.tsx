@@ -11,6 +11,8 @@ import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { formatBytes } from "../format";
+import { plainTextPreview } from "../markdownText";
+import { formatDay, formatLongDate, formatRecent } from "../time";
 import { DetailSkeleton } from "../components/Skeleton";
 
 type AgentTab = "activity" | "overview" | "memory" | "settings";
@@ -157,9 +159,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
         {!value.computer_id ? <p className="inline-notice">No Computer is assigned. Pair a Computer before starting work.</p> : !value.computer_reachable ? <p className="inline-notice">Computer unreachable. Work already in progress keeps its status until the Computer reports the outcome.</p> : null}
         {tab === "activity" ? (
           <div className="agent-tab-panel agent-activity-panel" id="agent-panel-activity" role="tabpanel" aria-labelledby="agent-tab-activity" tabIndex={0}>
-            <DetailSection className="agent-activity" title="Activity">
-              <AgentActivityFeed agentId={value.member_id} spaceSlug={spaceSlug} channels={channels} />
-            </DetailSection>
+            <AgentActivityFeed agentId={value.member_id} spaceSlug={spaceSlug} channels={channels} />
           </div>
         ) : null}
         {tab === "overview" ? (
@@ -178,7 +178,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
               ) : null}
               {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">More work is waiting after this.</p> : null}
             </DetailSection>
-            <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{new Date(value.created_at).toLocaleDateString()}</Field></dl></DetailSection>
+            <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{formatLongDate(value.created_at)}</Field></dl></DetailSection>
             <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
             {canManage ? <DetailSection className="agent-direct-messages" title="Conversations with other Agents">
               {agentDirectMessages.isPending ? <p>Loading…</p> : null}
@@ -224,7 +224,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
             <p className="inline-notice">Memory lives only on this Computer. If the Computer is lost, Sumi cannot recover it.</p>
             {!canManage ? <p className="permission-notice" role="status">Only Owners and Admins can open Memory files.</p> : null}
             {value.memory_files.length === 0 ? <div className="memory-empty" role="status"><Brain aria-hidden="true" /><span><strong>No Memory files yet</strong><small>Memory files appear here when the Agent writes them.</small></span></div> : <ul>{value.memory_files.map((file) => (
-              <li key={file.path}><button className="memory-file-button" type="button" aria-label={`Read ${file.path}`} disabled={!canManage || memory.isPending} onClick={() => memory.mutate(file.path)}><Eye /><strong>{file.path}</strong></button><span>{formatBytes(file.size)}</span><time dateTime={file.updated_at}>{new Date(file.updated_at).toLocaleDateString()}</time></li>
+              <li key={file.path}><button className="memory-file-button" type="button" aria-label={`Read ${file.path}`} disabled={!canManage || memory.isPending} onClick={() => memory.mutate(file.path)}><Eye /><strong>{file.path}</strong></button><span>{formatBytes(file.size)}</span><time dateTime={file.updated_at}>{formatDay(file.updated_at)}</time></li>
             ))}</ul>}
             {memory.data ? <section className="memory-reader" aria-label={`${memory.data.path} contents`}><header><strong>{memory.data.path}</strong><button className="icon-button" type="button" aria-label="Close Memory file" onClick={() => memory.reset()}><X /></button></header><pre>{memory.data.content}</pre></section> : null}
             {memory.error ? <p className="form-error" role="alert">Memory unavailable. The Computer may be offline or you may lack permission.</p> : null}
@@ -295,9 +295,7 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
               </p>
               {item.messagePreview ? (
                 <div className="agent-activity-details">
-                  {item.messagePreview ? (
-                    <pre className="agent-activity-message"><code>{item.messagePreview}</code>{item.messageTruncated ? <span className="agent-activity-truncated">truncated</span> : null}</pre>
-                  ) : null}
+                  <p className="agent-activity-message">{plainTextPreview(item.messagePreview, 400)}</p>
                 </div>
               ) : null}
             </div>
@@ -329,10 +327,5 @@ function activityLink(item: AgentActivityItem, spaceSlug: string, channelById: M
 }
 
 function activityTime(occurredAt: string): string {
-  const date = new Date(occurredAt);
-  if (Number.isNaN(date.getTime())) return "";
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return new Date().toDateString() === date.toDateString()
-    ? time
-    : `${date.toLocaleDateString()} ${time}`;
+  return formatRecent(occurredAt);
 }

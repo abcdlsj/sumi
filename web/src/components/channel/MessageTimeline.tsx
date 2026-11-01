@@ -5,6 +5,8 @@ import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEf
 
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
+import { plainTextPreview } from "../../markdownText";
+import { formatClock, formatFullDateTime } from "../../time";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
 import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
@@ -462,7 +464,7 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
           <span className="inline-reply-author">
             <strong>{reply.author.display_name}</strong>
           </span>
-          <span className="inline-reply-body">{reply.deleted_at ? "Message deleted" : messagePreview(reply)}</span>
+          <span className="inline-reply-body">{reply.deleted_at ? "Message deleted" : plainTextPreview(messagePreview(reply))}</span>
         </button>
       ))}
     </section>
@@ -1162,13 +1164,11 @@ function WorkingStrip({ workers, steps }: { workers: Member[]; steps?: ReadonlyM
 }
 
 function formatFullTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" }).format(new Date(value));
+  return formatFullDateTime(value);
 }
 
 function formatMessageTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(
-    new Date(value),
-  );
+  return formatClock(value);
 }
 
 const MESSAGE_GROUP_GAP_MS = 5 * 60 * 1000;

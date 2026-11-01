@@ -177,14 +177,15 @@ describe("Agent detail", () => {
 
     expect(await screen.findByRole("heading", { name: "Lin" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
+    // The tab names the view; the panel does not repeat it as a second heading.
+    expect(screen.queryByRole("heading", { name: "Activity" })).not.toBeInTheDocument();
     expect(screen.getByText("Completed task")).toBeVisible();
     expect(screen.getByRole("link", { name: "View task" })).toHaveAttribute("href", "/s/sumi-lab/tasks/task");
     expect(screen.getByText("Sent a message")).toHaveClass("agent-activity-kind");
     expect(screen.getByRole("link", { name: "#general" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-1");
     expect(screen.queryByText("target")).not.toBeInTheDocument();
     expect(screen.getByText("The Agent sent this message.")).toBeVisible();
-    expect(screen.getByText("The Agent sent this message.").closest("pre")).toHaveClass("agent-activity-message");
+    expect(screen.getByText("The Agent sent this message.").closest("p")).toHaveClass("agent-activity-message");
     expect(screen.queryByText("run-1")).not.toBeInTheDocument();
     const activityList = screen.getByRole("list", { name: "Agent activity" });
     expect(activityList).toHaveClass("agent-activity-list");
@@ -196,7 +197,7 @@ describe("Agent detail", () => {
     expect(screen.getByRole("heading", { name: "Current work" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
+    expect(screen.getByRole("list", { name: "Agent activity" })).toBeVisible();
   });
 
   it("renders a DM conversation without a channel link", async () => {

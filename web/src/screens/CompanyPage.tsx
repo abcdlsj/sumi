@@ -13,9 +13,8 @@ export function CompanyOfficePage() {
         {() => (
           <div className="route-status">
             <section className="route-status-panel">
-              <p className="section-kicker">Experimental</p>
               <h1>Company office is disabled.</h1>
-              <p>Enable experimental features in Settings to show this entry in the rail.</p>
+              <p>This experimental feature is off. Turn it on in Settings to add it to the sidebar.</p>
               <Link
                 className="command-button command-button--accent"
                 to="/s/$spaceSlug/settings"

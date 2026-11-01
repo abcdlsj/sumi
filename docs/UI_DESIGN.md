@@ -4,7 +4,9 @@
 
 本文件只记录已采用的规范，不保存候选方案。界面截图演示数据见 `scripts/ui-demo/`。
 
-界面只用用户能理解的词：不显示消息 `seq`、Run、Session continuity、Generation、Focus、Provision、本地诊断计数、原始权限名或原始错误码。内部状态需要露出时，翻译成一句人话（例如 `Lin is working on this`、`Needs attention`）。
+- 界面只用用户能理解的词：不显示消息 `seq`、Run、Session continuity、Generation、Focus、Provision、本地诊断计数、原始权限名或原始错误码。内部状态需要露出时，翻译成一句人话（例如 `Lin is working on this`、`Needs attention`）。
+- 只显示文字的界面（Inbox 行、Thread 回复预览、Agent 活动预览、Task Result）用 `web/src/markdownText.ts` 去掉 Markdown 记号，读者看不到 `**`、列表符号或反引号；需要保留格式的正文仍走 Markdown 渲染。
+- 时间只有一种写法，由 `web/src/time.ts` 统一提供：同一天内为时钟（`11:47 AM`），跨天为月日加时钟（`Oct 29, 11:47 AM`），更早的日期带年份（`Oct 29, 2026`）；日期分隔条和「今天／昨天」用同一套标签，页面不自行拼 `Intl` 选项。
 
 ## 视觉（Clarity）
 
@@ -12,7 +14,7 @@
 - 注意力只有两种信号，任何页面都不新增第三种：
   - **For you**（暖色）：有人在等你。时间线不高亮整条 Message；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
   - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
-- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #75726B`（白底对比度 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
+- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
 - 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。
 - 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。
@@ -85,7 +87,7 @@
 
 ## Task 页面
 
-- Tasks 页面使用 list/detail 布局，是对话的辅助入口，不是项目管理页面；入口保留在侧边栏。
+- Tasks 页面使用 list/detail 布局，是对话的辅助入口，不是项目管理页面；入口保留在侧边栏。列表内容最宽 960px，标题列吸收多余宽度，Assignee、Source Thread 与更新时间保持右对齐。
 - 筛选固定为 All open、To do、In progress、In review、Done、Closed、Created by me，每个筛选带数量；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee（Agent 小印章 + 名字）、Source Thread、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
 - Task 详情 header 副标题为 `!seq · #channel`（DM 为 `Direct message`）。正文依次显示：Request（白底卡片，来源对话的第一条消息与最新 3 条 reply，右上角 Open Thread）、Task facts（Created by、Created、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Result（仅 Done）、Close reason（仅 Closed）；侧栏只有 Activity。
 - Actions 只有两个操作：Mark done（直接完成，不需要理由）与 Close Task（弹窗选择理由 + 可选备注）。TODO 时说明需要先指派 Agent。不提供其它状态操作按钮。
@@ -103,15 +105,15 @@
 ## Inbox、Members、Computers、Agent
 
 - Channel header 的 Member strip 使用与 Agent 头像相同尺寸的加号按钮，并在 Agent 选择浮层中显示 Display Name 与 Role。
-- Human Inbox 按 DM 和 Thread 聚合，每组使用 For you 暖底，同一组只显示最新来源 Message 的预览、时间和组内 Item 数；打开聚合行即标记已读。
+- Human Inbox 按 DM 和 Thread 聚合，每组使用 For you 暖底，组标题只写组名与组内 Item 总数，不写解释性说明句；同一组只显示最新来源 Message 的纯文本预览、时间和组内 Item 数；打开聚合行即标记已读。
 - Inbox 页 header 提供 Mark all read，一次将当前 Human 全部 pending Item 标记为已读；没有待读 Item 时不显示按钮。
 - Agent Inbox 不向普通 Member 公开；Owner/Admin 只能读取来源摘要和错误代码。
 - Members 页面按 Agents、Humans 分组显示扁平列表行：身份（头像 + 名字 + 行内状态点；Agent 工作中时跟当前步骤，否则跟 Role 的第一行；自己显示 You）、Access 控制（自定义下拉）、右侧固定列的 30px 轻量图标（Agent 的 Manage 与 Message）。Channel 的 Add Agents 浮层在没有可加 Agent 时提供 Create an Agent。Permission 在 Agent 详情逐项管理，分区名为 `What it can do`，每项用人话命名（Create Channels、Invite to Channels、Remove from Channels、Create Agents）并附一句说明，不显示 `channel.create` 等原始名，不提供 Role 套餐。
-- Computers 页面左侧分栏为已配对列表和配对入口；没有已配对 Computer 时不显示分栏，整页为配对 onboarding。
+- Computers 页面左侧分栏为已配对列表和配对入口；没有已配对 Computer 时不显示分栏，整页为配对 onboarding。配对命令整条换行显示，任何视口都读得到完整命令，不横向截断。
 - Computer 更新状态在 Server 持久化协议完成前不进入 UI；第一期只通过 Computer 本地结构化日志和 update journal 诊断，禁止从在线或离线状态推断更新结果。
 - Agent 详情头部只显示安静信号（Activity、Computer 可达性、出错时 `Needs attention`，hover 看原因的人话），不提供 DM 按钮；facts 条为 Status、Computer、Driver，值使用 13px 并截断超长文本。
 - Agent 详情 Overview：Current work（Task、Conversation `#channel`、Doing `Working / Starting / Nothing right now`、Computer）、Identity、Setup（Ready / In progress / Failed、Computer、Last problem）、Conversations with other Agents（仅 Owner/Admin）、What it can do。不显示 Session、Provision、本地 Run 诊断；Settings tab 不显示 attention 参数。
-- Agent 详情 Activity feed 按时间倒序；不显示工具参数，message preview 为 subtle 底 + 左侧细线的截断块，时间右对齐；字号统一。
+- Agent 详情 Activity feed 按时间倒序；不显示工具参数，message preview 为 subtle 底的纯文本块（正文样式，不用等宽字体），截断以省略号结尾，时间右对齐；字号统一。Activity 页签已经是这个视图的名字，页面不再重复一个 Activity 标题。
 - 详情分区使用扁平布局：不绘制卡片边框、底色或阴影，用 1px `--line` 分隔线组织。
 
 ## Agent insights
@@ -136,6 +138,8 @@
 - Computer 详情页为 Owner/Admin 显示 `LLM usage` 面板；数据只来自该 Computer 本地存储，Server 不保存。
 - 面板包含请求数、input/output tokens、cache hit rate 四张统计卡；SVG 曲线展示 input/cached input/output 随时间的走势（24h 按小时、7d/30d 按天）；`By model` 与 `By agent` 两张分组表。
 - 提供 24h / 7d / 30d 周期切换；Computer 离线显示离线说明，无数据显示空态，daemon 不可用显示重试提示。图表有 aria-label 与图例，控件可键盘操作。
+
+- Members 在 700px 以下把 Access 下拉放到身份行的下一行，不隐藏：手机上仍然可以改成员权限；隐藏控件只在确实无处安放时使用。
 
 ## 响应式与无障碍
 

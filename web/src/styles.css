@@ -2010,31 +2010,17 @@ body > #root > .route-status {
   display: none;
 }
 
-.inbox-group-heading > span {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: baseline;
-  gap: 10px;
-}
-
 .inbox-group-heading h2 {
+  flex: 1;
   margin: 0;
   color: var(--you-ink);
   font-size: var(--text-meta);
   font-weight: 600;
 }
 
-.inbox-group-heading p {
-  margin: 0;
+.inbox-group-count {
   color: var(--muted);
   font-size: var(--text-meta);
-}
-
-.inbox-group-heading b {
-  color: var(--muted);
-  font-size: var(--text-meta);
-  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2184,6 +2170,7 @@ body > #root > .route-status {
 
 .task-groups {
   display: grid;
+  max-width: 960px;
   gap: 18px;
   padding: 10px calc(var(--page-gutter) - 10px) 40px;
 }
@@ -2888,8 +2875,11 @@ a.task-source-link:hover {
   font-size: var(--text-meta);
 }
 
+/* The Role is a summary under the name, not a paragraph: keep it short enough to
+   read as a second line instead of a wall of grey. */
 .member-status-detail {
   overflow: hidden;
+  max-width: 56ch;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3392,24 +3382,13 @@ a.task-source-link:hover {
 
 .agent-activity-message {
   position: relative;
-  max-height: 96px;
   margin: 0;
-  overflow: hidden;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  background: var(--code-bg);
+  background: var(--bg-subtle);
   color: var(--ink-2);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-.agent-activity-truncated {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  color: var(--muted);
-  font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: var(--text-small);
+  line-height: 1.5;
 }
 
 .agent-activity-row time {
@@ -3883,9 +3862,10 @@ a.task-source-link:hover {
 .pair-command code {
   min-width: 0;
   flex: 1;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
   font-size: 12.5px;
-  white-space: nowrap;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .pair-command .compact-action {
@@ -4524,10 +4504,28 @@ a.task-source-link:hover {
 
   .member-row {
     grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+    padding: 10px 8px;
+  }
+
+  .member-group {
+    gap: 10px;
+  }
+
+  /* Access level stays reachable on a phone: it moves under the identity instead of
+     disappearing, so a phone can still change what a member may do. */
+  .member-identity,
+  .member-controls {
+    grid-column: 1;
   }
 
   .member-controls {
-    display: none;
+    padding-left: 44px;
+  }
+
+  .member-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 
   .agent-directory-summary,

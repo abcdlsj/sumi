@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowRight, Asterisk, LoaderCircle } from "lucide-react";
 import type { FormEvent } from "react";
 
 import { listSpaces, login } from "../api/client";
@@ -45,14 +45,19 @@ export function LoginPage() {
           </span>
           Sumi
         </Link>
-        <span className="step-index">Welcome back</span>
+        <span className="step-index" />
       </header>
 
       <section className="register-stage" aria-labelledby="login-title">
         <div className="stage-copy stage-copy--login">
-          <p className="eyebrow">Return to the room</p>
           <h1 id="login-title">Sign in.</h1>
-          <p className="stage-note">Your Spaces are waiting where you left them.</p>
+          <p className="stage-note">Use the email address and password you registered with.</p>
+          <div className="onboarding-identities" aria-hidden="true">
+            <span className="onboarding-human-mark">H</span>
+            <span className="onboarding-agent-mark"><Asterisk strokeWidth={3} /></span>
+            <span className="onboarding-agent-mark onboarding-agent-mark--cyan"><Asterisk strokeWidth={3} /></span>
+            <span className="signal-line" />
+          </div>
         </div>
 
         <form className="register-form" onSubmit={submit}>
@@ -83,9 +88,7 @@ export function LoginPage() {
         </form>
       </section>
 
-      <footer className="onboarding-footer">
-        <span>One identity, many Spaces</span>
-      </footer>
+      <footer className="onboarding-footer" />
     </main>
   );
 }

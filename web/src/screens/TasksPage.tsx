@@ -23,6 +23,8 @@ import { SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
 import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
+import { plainText } from "../markdownText";
+import { formatDateTime } from "../time";
 import { CompactMessage } from "../components/channel/MessageTimeline";
 import { PixelIdentity } from "../components/PixelIdentity";
 
@@ -255,7 +257,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
           </section>
         ) : null}
-        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{value.result_message.content.body_markdown}</p> : <p>The result is not available.</p>}</section> : null}
+        {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{plainText(value.result_message.content.body_markdown)}</p> : <p>The result is not available.</p>}</section> : null}
         {value.status === "closed" ? <section className="task-detail-section"><h2>Close reason</h2><p>{closeReasonLabel(value.close_reason_code)}{value.close_reason_note ? ` — ${value.close_reason_note}` : ""}</p></section> : null}
         </div>
         <aside className="task-detail-sidebar" aria-label="Task activity">
@@ -359,5 +361,5 @@ function ActivityItem({ run, spaceSlug, current = false }: { run: Run; spaceSlug
   );
 }
 function Field({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
-function formatTaskTime(value: string) { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
+function formatTaskTime(value: string) { return formatDateTime(value); }
 function closeReasonLabel(reason: Task["close_reason_code"]) { return reason ? reason.replace("_", " ").replace(/^./, (value) => value.toUpperCase()) : "Unknown"; }

@@ -80,7 +80,7 @@ function renderWorkspace(graph: AgentGraph) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <AgentGraphWorkspace spaceId={spaceId} spaceSlug="sumi-lab" />
+      <AgentGraphWorkspace spaceId={spaceId} />
     </QueryClientProvider>,
   );
 }

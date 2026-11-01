@@ -18,6 +18,7 @@ import { LlmUsagePanel } from "../components/LlmUsagePanel";
 import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
 import { DialogFrame } from "../components/DialogFrame";
 import { DetailSkeleton } from "../components/Skeleton";
+import { formatDateTime } from "../time";
 
 export function ComputersPage() {
   const { spaceSlug } = useParams({ from: "/s/$spaceSlug/computers" });
@@ -137,7 +138,7 @@ function ComputersWorkspace({
         </div>
       ) : null}
       {computers.data?.length === 0 ? (
-        canManage ? <ComputerOnboarding active={pairFormOpen} /> : <div className="computer-empty"><p className="section-kicker">Compute</p><h2>No Computers paired</h2><p>A Human Owner or Admin must pair a machine before this Space can host Agents.</p></div>
+        canManage ? <ComputerOnboarding active={pairFormOpen} /> : <div className="computer-empty"><h2>No Computers paired</h2><p>A Human Owner or Admin must pair a machine before this Space can host Agents.</p></div>
       ) : null}
       {canManage && (!selectedFromHash || pairFormOpen) && computers.data?.length ? <ComputerOnboarding active={pairFormOpen} /> : null}
       {!canManage && !selectedFromHash && computers.data?.length ? <div className="computer-page-state"><p>Select a Computer from the navigation.</p></div> : null}
@@ -200,7 +201,6 @@ function ComputerOnboarding({ active }: { active?: boolean }) {
       </header>
       <div className="computer-onboarding-body">
         <div className="computer-onboarding-intro">
-          <p className="eyebrow">Compute</p>
           <h2>Bring a machine online</h2>
           <ol className="computer-onboarding-steps">
             <li>
@@ -264,7 +264,7 @@ function ComputerDetail({
         <div><span>Busy Agents</span><strong>{String(busyAgents)}</strong></div>
         <div><span>Platform</span><strong>{computer.os === "macos" ? "macOS" : "Linux"}</strong></div>
         <div><span>Daemon</span><strong className="tabular">v{computer.daemon_version}</strong></div>
-        <div><span>Last seen</span><strong className="tabular">{computer.last_seen_at ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(computer.last_seen_at)) : "Never connected"}</strong></div>
+        <div><span>Last seen</span><strong className="tabular">{computer.last_seen_at ? formatDateTime(computer.last_seen_at) : "Never connected"}</strong></div>
       </div>
       {canManage ? <LlmUsagePanel computerId={computer.id} online={computer.status === "online"} /> : null}
           <section className="detail-panel computer-agents">

@@ -18,6 +18,8 @@ import {
 import { PixelIdentity } from "../components/PixelIdentity";
 import { buildAgentIdenticon } from "../components/agentIdenticon";
 import { layoutGraph, type GraphLayoutNode } from "./agentGraphLayout";
+import { formatDateTime } from "../time";
+import { plainTextPreview } from "../markdownText";
 import "./agentGraph.css";
 
 const VIEW_WIDTH = 900;
@@ -85,13 +87,7 @@ interface GraphPointer {
 /** The graph world is already centered on the 900x560 canvas; the default view must not offset it. */
 export const INITIAL_GRAPH_VIEW: GraphView = { x: 0, y: 0, k: 1 };
 
-export function AgentGraphWorkspace({
-  spaceId,
-  spaceSlug,
-}: {
-  spaceId: string;
-  spaceSlug: string;
-}) {
+export function AgentGraphWorkspace({ spaceId }: { spaceId: string }) {
   const graph = useQuery({
     queryKey: ["agent-graph", spaceId],
     queryFn: () => getAgentGraph(spaceId),
@@ -436,7 +432,6 @@ export function AgentGraphWorkspace({
               nodes={nodes}
               edges={edges}
               totalInteractions={totalInteractions}
-              spaceSlug={spaceSlug}
             />
           )}
         </aside>
@@ -449,12 +444,10 @@ function GraphOverview({
   nodes,
   edges,
   totalInteractions,
-  spaceSlug,
 }: {
   nodes: AgentGraphNode[];
   edges: AgentGraphEdge[];
   totalInteractions: number;
-  spaceSlug: string;
 }) {
   const mostConnected = [...edges].sort((a, b) => b.total_interactions - a.total_interactions)[0];
   const nameOf = (id: string) => nodes.find((node) => node.member_id === id)?.display_name ?? "Agent";
@@ -475,7 +468,7 @@ function GraphOverview({
         <p className="agent-graph-hint">No interactions between Agents yet. DMs, mentions, and replies will connect them.</p>
       )}
       <p className="agent-graph-hint agent-graph-hint--muted">
-        Select an Agent or an edge to inspect the communication chain. {spaceSlug}
+        Select an Agent or an edge to inspect the communication chain.
       </p>
     </div>
   );
@@ -596,23 +589,11 @@ function CommunicationStep({
         <strong>{target?.display_name ?? "Agent"}</strong>
         <time dateTime={message.created_at}>{formatGraphTime(message.created_at)}</time>
       </div>
-      <p>{truncate(message.body_markdown, 180)}</p>
+      <p>{plainTextPreview(message.body_markdown, 180)}</p>
     </li>
   );
 }
 
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max).trimEnd()}…`;
-}
-
 function formatGraphTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(value) || value;
 }
