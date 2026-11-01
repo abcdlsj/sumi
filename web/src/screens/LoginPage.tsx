@@ -45,7 +45,6 @@ export function LoginPage() {
           </span>
           Sumi
         </Link>
-        <span className="step-index" />
       </header>
 
       <section className="register-stage" aria-labelledby="login-title">

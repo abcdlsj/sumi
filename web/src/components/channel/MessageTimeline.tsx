@@ -6,7 +6,7 @@ import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEf
 import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
 import { plainTextPreview } from "../../markdownText";
-import { formatClock, formatFullDateTime } from "../../time";
+import { formatClock, formatDayDivider, formatFullDateTime } from "../../time";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
 import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
@@ -1208,17 +1208,3 @@ function dayKey(value: string): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-function formatDayDivider(value: string): string {
-  const date = new Date(value);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (dayKey(value) === dayKey(today.toISOString())) return "Today";
-  if (dayKey(value) === dayKey(yesterday.toISOString())) return "Yesterday";
-  const sameYear = date.getFullYear() === today.getFullYear();
-  return new Intl.DateTimeFormat(undefined, {
-    month: "long",
-    day: "numeric",
-    year: sameYear ? undefined : "numeric",
-  }).format(date);
-}

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { Member, Space, User } from "../api/client";
 import { useSignOut } from "../components/signOut";
 import { SpaceShell } from "../components/SpaceShell";
+import { accentLabel } from "../spaceAccent";
 import {
   type FeatureConfigField,
   type RegisteredFeature,
@@ -51,8 +52,8 @@ export function SettingsWorkspace({ selectedFeatureId, space, user, currentMembe
             {space ? <Fact label="Address" value={`/s/${space.slug}`} mono /> : null}
             {space ? (
               <div className="settings-fact">
-                <dt>Accent</dt>
-                <dd><span className="settings-accent" style={{ backgroundColor: space.accent }} aria-hidden="true" /> <span className="settings-mono">{space.accent.toUpperCase()}</span></dd>
+                <dt>Space colour</dt>
+                <dd><span className="settings-accent" style={{ backgroundColor: space.accent }} aria-hidden="true" /><AccentName accent={space.accent} /></dd>
               </div>
             ) : null}
             {currentMember ? <Fact label="Your access" value={currentMember.access_level.charAt(0).toUpperCase() + currentMember.access_level.slice(1)} /> : null}
@@ -201,4 +202,8 @@ function SignOutRow() {
       </button>
     </div>
   );
+}
+
+function AccentName({ accent }: { accent: string }) {
+  return <>{accentLabel(accent) ?? "Custom"}</>;
 }

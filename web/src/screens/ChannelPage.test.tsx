@@ -561,7 +561,7 @@ describe("ChannelPage", () => {
     fireEvent.click(within(preview).getByRole("button", { name: "1 reply" }));
     const threadPane = await screen.findByRole("complementary", { name: /Thread #general:1/ });
     expect(threadPane.querySelector(".action-message")).toHaveTextContent("Ada Lovelace Created agent Reviewer active");
-    expect(within(threadPane).getByRole("link", { name: "Ship message metadata RELATED" })).toHaveAttribute("href", "/s/sumi-lab/tasks/019c0000-0000-7000-8000-000000000090");
+    expect(within(threadPane).getByRole("link", { name: /^Task !\d+, (Source|Linked) Thread, Ship message metadata$/ })).toHaveAttribute("href", "/s/sumi-lab/tasks/019c0000-0000-7000-8000-000000000090");
     expect(within(threadPane).getByRole("img", { name: "Reviewer avatar" })).toHaveAttribute("data-agent-identicon");
     expect(within(threadPane).queryByText(/member_id|lifecycle.*active/)).not.toBeInTheDocument();
     expect(within(threadPane).getByLabelText("Task: !7 in progress · Ship message metadata")).toBeVisible();

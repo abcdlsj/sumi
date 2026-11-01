@@ -83,6 +83,7 @@
   --sidebar-width: 256px;
   --control-height: 34px;
   --control-height-compact: 30px;
+  --measure-text: 68ch;
   --page-gutter: 28px;
   --page-gutter-compact: 16px;
 }

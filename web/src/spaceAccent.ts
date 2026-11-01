@@ -2,6 +2,19 @@
 // the accent is used sparingly: the Space mark, primary actions, the active
 // navigation marker and links. Derived shades keep text readable on white.
 
+/** The four accents a Space may pick, with the names the UI shows for them. */
+export const SPACE_ACCENTS = [
+  { value: "#F0602F", label: "Flame" },
+  { value: "#E8B42D", label: "Gold" },
+  { value: "#3C9E8F", label: "Teal" },
+  { value: "#6C5CE7", label: "Iris" },
+] as const;
+
+/** The name of an accent, so a screen can say "Flame" instead of "#F0602F". */
+export function accentLabel(accent: string): string | undefined {
+  return SPACE_ACCENTS.find((option) => option.value.toLowerCase() === accent.toLowerCase())?.label;
+}
+
 const INK = "#1c1b19";
 const WHITE = "#ffffff";
 

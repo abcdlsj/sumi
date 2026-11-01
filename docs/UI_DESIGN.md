@@ -6,7 +6,7 @@
 
 - 界面只用用户能理解的词：不显示消息 `seq`、Run、Session continuity、Generation、Focus、Provision、本地诊断计数、原始权限名或原始错误码。内部状态需要露出时，翻译成一句人话（例如 `Lin is working on this`、`Needs attention`）。
 - 只显示文字的界面（Inbox 行、Thread 回复预览、Agent 活动预览、Task Result）用 `web/src/markdownText.ts` 去掉 Markdown 记号，读者看不到 `**`、列表符号或反引号；需要保留格式的正文仍走 Markdown 渲染。
-- 时间只有一种写法，由 `web/src/time.ts` 统一提供：同一天内为时钟（`11:47 AM`），跨天为月日加时钟（`Oct 29, 11:47 AM`），更早的日期带年份（`Oct 29, 2026`）；日期分隔条和「今天／昨天」用同一套标签，页面不自行拼 `Intl` 选项。
+- 时间只有一种写法，由 `web/src/time.ts` 统一提供：同一天内为时钟（`11:47 AM`），跨天为月日加时钟（`Oct 29, 11:47 AM`），更早的日期带年份（`Oct 29, 2026`）；日期分隔条和「今天／昨天」用同一套标签，页面不自行拼 `Intl` 选项。格式固定为英文（`en-US`），不随浏览器语言变化：界面文案是英文，不能混进「10月29日」。
 
 ## 视觉（Clarity）
 
@@ -35,7 +35,7 @@
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。
 - DM 列表中 Agent 正在工作时显示青色 `Working`，否则显示 Role 摘要。
 - 1100px 及以上保持三栏；低于 1100px 出现顶栏（`Open navigation` 菜单按钮、Space 名称、Inbox 计数），Sidebar 变为抽屉，Thread 覆盖 Channel；低于 700px 使用单列，Thread 和 Task 详情为全屏路由。
-- Header 高 56px。Message 内容占满 Channel 可用宽度；消息较少时时间线贴近 Composer，像聊天一样从底部开始。
+- Header 高 56px。Message 正文、Thread 回复预览、Task Result 与 Agent 活动预览的最大宽度是 `--measure-text`（68ch），窗口再宽也不拉长行；附件、Task 标识与 Composer 仍占满整列。消息较少时时间线贴近 Composer，像聊天一样从底部开始。
 - Composer 是抬起的白色卡片（`--shadow-raised`、圆角 14px），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
 - Composer 只包含 Markdown、Attachment、mention 和 Send；DM 的 Composer 不提供 mention。
@@ -50,7 +50,7 @@
 - 当前步骤编号为实心 ink 圆，已完成为青色对勾，未到的步骤为浅灰；步骤间以发丝线相连。
 - 有 Computer、有 Agent 且 #general 里已有 Agent 发言后引导自动消失；右上角可手动隐藏（按 Space 存在浏览器本地）。引导出现时不再显示空 Channel 的开场说明。
 - 配对确认页在只有一个 Space 时自动选中它，确认后回到该 Space 的 #general，引导接着进行。
-- 注册后直接进入建 Space；建好后进入 #general。
+- 注册后直接进入建 Space；建好后进入 #general。注册页与建 Space 页的当前步骤只由顶栏进度表示，左侧标题区不再重复 `Step 1 · Identity` 之类的标签；这两页页脚留空，页脚只放真实事实（例如邀请 7 天后失效）。
 - 登录后沿用身份已有的 Space：`GET /api/v1/spaces` 返回至少一个 Space 时进入其中第一个，否则进入建 Space。
 
 ## 连接与反馈
@@ -67,6 +67,7 @@
 ## 对话与 Task
 
 - Channel 时间线只展示 Root Message；Thread pane 独立展示对应 Root Message 及其 replies，不混排 replies。Message 的 `seq` 不出现在界面上；有 replies 的 Root Message 只显示 reply 数量。
+- Thread pane 头部第二项是这条 Thread 关联的 Task：状态图形 + `!seq` + 标题，hover 显示 `Task !seq · Source/Linked Thread · 标题`，用图形表明它是 Task 而不是标题的一部分。
 - 打开 Channel 或 DM 时，自上次在本浏览器看过之后、别人发来的第一条消息前显示红色 `New` 分隔线；分隔线在本次浏览期间固定不动，已读位置按对话保存在浏览器本地。
 - Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。
 - 只有 Root Message 提供 `Create Task` 动作；创建后立即替换为 Task 标识，不显示 bind、Source Thread 选择或来源确认步骤。
@@ -92,7 +93,7 @@
 - Task 详情 header 副标题为 `!seq · #channel`（DM 为 `Direct message`）。正文依次显示：Request（白底卡片，来源对话的第一条消息与最新 3 条 reply，右上角 Open Thread）、Task facts（Created by、Created、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Result（仅 Done）、Close reason（仅 Closed）；侧栏只有 Activity。
 - Actions 只有两个操作：Mark done（直接完成，不需要理由）与 Close Task（弹窗选择理由 + 可选备注）。TODO 时说明需要先指派 Agent。不提供其它状态操作按钮。
 - Task 创建后不可修改（见 `DESIGN.md`）；不显示 Related Threads 区块，不提供手动 Link/Unlink。
-- Activity 用人话描述谁在做和之前怎么结束：当前执行显示 `Lin is working on this`（青色圆点），历史显示 `Lin finished / paused / stopped / stopped on an error`，附时间和所在 Channel；没人做过时显示 `No one has worked on this yet.`。不显示 Run、Session continuity 或 Reset continuity。
+- Activity 用人话描述谁在做和之前怎么结束：当前执行显示 `Lin is working on this`（青色圆点），历史显示 `Lin finished / paused / stopped / stopped on an error`，附时间和所在 Channel；没人做过时显示 `No one has worked on this yet.`。同一个 Agent 在同一 Channel 连续以同一结果结束的多次执行合并为一行，时间前写明次数（`2 runs · Oct 29, 11:47 AM`）。不显示 Run、Session continuity 或 Reset continuity。
 - Working、Waiting、Failed 是 Run 或 attention 状态，不进入 Task 状态选择器。
 
 ## Company 页面
@@ -129,7 +130,7 @@
 ## Settings
 
 - Sidebar 底部身份行右侧提供 Settings 入口（齿轮图标），路由为 `/s/$spaceSlug/settings`。
-- Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、accent 和你的访问级别；`Keyboard shortcuts` 分组列出快捷键；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
+- Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、Space 颜色（色块 + 四个预设名 Flame／Gold／Teal／Iris 之一，不显示十六进制原值）和你的访问级别；`Keyboard shortcuts` 分组列出快捷键；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
 - feature 通过注册表（`featureRegistry`）声明 id、名称、类型、描述、storageKey 和可选配置项；后续新增 feature 只改注册表，无需改页面结构。
 - 实验类型（experimental）的行即启用开关；所有状态只持久化在浏览器 localStorage（`sumi.feature.<id>`），不上传 Server。开启后 Sidebar 才显示对应实验入口（当前为 Agent insights 与 Company office；Company office 未开启时直达 `/company/office` 显示禁用说明）。
 

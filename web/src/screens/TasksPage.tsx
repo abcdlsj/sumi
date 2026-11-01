@@ -340,20 +340,44 @@ function TaskActivity({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
   if (!current && !past.length) return <p className="task-activity-empty">No one has worked on this yet.</p>;
   return (
     <ul className="task-activity">
-      {current ? <ActivityItem run={current} spaceSlug={spaceSlug} current /> : null}
-      {past.map((run) => <ActivityItem key={run.id} run={run} spaceSlug={spaceSlug} />)}
+      {current ? <ActivityItem runs={[current]} spaceSlug={spaceSlug} current /> : null}
+      {groupRuns(past).map((runs) => <ActivityItem key={runs[0].id} runs={runs} spaceSlug={spaceSlug} />)}
     </ul>
   );
 }
-function ActivityItem({ run, spaceSlug, current = false }: { run: Run; spaceSlug: string; current?: boolean }) {
+
+/** One attempt per row, unless the same Agent ended the same way in the same Thread again:
+ *  eleven identical "finished" rows say less than one row that names the count. */
+function groupRuns(runs: readonly Run[]): Run[][] {
+  const groups: Run[][] = [];
+  for (const run of runs) {
+    const group = groups[groups.length - 1];
+    const head = group?.[0];
+    if (
+      head &&
+      head.agent_name === run.agent_name &&
+      head.status === run.status &&
+      head.focus.id === run.focus.id
+    ) {
+      group.push(run);
+      continue;
+    }
+    groups.push([run]);
+  }
+  return groups;
+}
+
+function ActivityItem({ runs, spaceSlug, current = false }: { runs: Run[]; spaceSlug: string; current?: boolean }) {
+  const run = runs[0];
   const when = run.finished_at ?? run.started_at;
+  const repeats = runs.length > 1 ? `${runs.length} runs · ` : "";
   return (
     <li className={`task-activity-item task-activity-item--${run.status}${current ? " task-activity-item--current" : ""}`}>
       <span className="task-activity-dot" aria-hidden="true" />
       <div>
         <p><strong>{run.agent_name}</strong> {current ? (run.status === "dispatched" ? "is starting on this" : "is working on this") : runOutcome[run.status].toLowerCase()}</p>
         <small>
-          {when ? <time dateTime={when}>{formatTaskTime(when)}</time> : null}
+          {when ? <time dateTime={when}>{repeats}{formatTaskTime(when)}</time> : null}
           {run.focus.channel_slug ? <> · <ThreadLink thread={run.focus} spaceSlug={spaceSlug} label="Conversation" /></> : null}
         </small>
       </div>

@@ -2402,6 +2402,9 @@ a.task-source-link:hover {
   display: grid;
   align-content: start;
   gap: 28px;
+  /* The Request card and the sections under it share the measure of their text, so
+     every edge in the column lines up instead of the card overhanging its content. */
+  max-width: calc(var(--measure-text) + 32px + 2 * var(--page-gutter));
   padding: 24px var(--page-gutter) 48px;
 }
 
@@ -2485,6 +2488,7 @@ a.task-source-link:hover {
 }
 
 .task-result {
+  max-width: var(--measure-text);
   padding: 14px 16px;
   border-radius: var(--radius-lg);
   background: var(--bg-sidebar);
@@ -3382,6 +3386,7 @@ a.task-source-link:hover {
 
 .agent-activity-message {
   position: relative;
+  max-width: var(--measure-text);
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--radius-sm);

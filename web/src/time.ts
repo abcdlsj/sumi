@@ -1,25 +1,37 @@
 // One time language for the UI: a clock where the day is known, the day and month otherwise,
 // and the same pattern in every list, rail and header. Screens call these instead of building
 // their own Intl options, so a timestamp reads the same on every page.
+//
+// The locale is fixed: the interface copy is English, so a browser set to another language must
+// not mix "10月29日" into a sentence that says "Updated". It also keeps output stable in tests.
+const LOCALE = "en-US";
 
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
+const dateTimeFormat = new Intl.DateTimeFormat(LOCALE, {
   month: "short",
   day: "numeric",
   hour: "2-digit",
   minute: "2-digit",
 });
 
-const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const clockFormat = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" });
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const dateFormat = new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric" });
 
-const longDateFormat = new Intl.DateTimeFormat(undefined, {
+const longDateFormat = new Intl.DateTimeFormat(LOCALE, {
   year: "numeric",
   month: "short",
   day: "numeric",
 });
 
-const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
+const fullDateFormat = new Intl.DateTimeFormat(LOCALE, { dateStyle: "full", timeStyle: "short" });
+
+const dayDividerFormat = new Intl.DateTimeFormat(LOCALE, { month: "long", day: "numeric" });
+
+const dayDividerYearFormat = new Intl.DateTimeFormat(LOCALE, {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
 
 function parse(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -83,4 +95,17 @@ export function formatRecent(value: string | null | undefined, now = new Date())
   const date = parse(value);
   if (!date) return "";
   return sameDay(date, now) ? clockFormat.format(date) : dateTimeFormat.format(date);
+}
+
+/** The label above a day of messages: "Today", "Yesterday", "October 29". */
+export function formatDayDivider(value: string | null | undefined, now = new Date()): string {
+  const date = parse(value);
+  if (!date) return "";
+  if (sameDay(date, now)) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(date, yesterday)) return "Yesterday";
+  return date.getFullYear() === now.getFullYear()
+    ? dayDividerFormat.format(date)
+    : dayDividerYearFormat.format(date);
 }
