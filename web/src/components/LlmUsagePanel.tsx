@@ -34,7 +34,6 @@ export function LlmUsagePanel({
     <section className="detail-panel llm-usage-panel" aria-labelledby="llm-usage-heading">
       <header className="detail-panel-heading">
         <div>
-          <p className="detail-section-label">Local model telemetry</p>
           <h3 id="llm-usage-heading">LLM usage</h3>
         </div>
         <div className="llm-usage-range" aria-label="Usage period">

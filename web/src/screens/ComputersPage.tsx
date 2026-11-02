@@ -197,7 +197,7 @@ function ComputerOnboarding({ active }: { active?: boolean }) {
     <section className={active ? "computer-onboarding computer-onboarding--pairing" : "computer-onboarding"} aria-labelledby="computer-onboarding-heading">
       {active ? <div className="computer-onboarding-banner" role="status"><Monitor aria-hidden="true" /><span>Pairing mode active</span><p>This Space is waiting for this machine to confirm.</p></div> : null}
       <header className="computer-onboarding-header">
-        <div className="page-title"><h1 id="computer-onboarding-heading">Pair a Computer</h1><p>Confirm this machine in a Space.</p></div>
+        <div className="page-title"><h1 id="computer-onboarding-heading">Pair a Computer</h1></div>
       </header>
       <div className="computer-onboarding-body">
         <div className="computer-onboarding-intro">
@@ -269,7 +269,7 @@ function ComputerDetail({
       {canManage ? <LlmUsagePanel computerId={computer.id} online={computer.status === "online"} /> : null}
           <section className="detail-panel computer-agents">
             <header className="detail-panel-heading">
-          <div><p className="detail-section-label">Hosted workload</p><h3>Agents on this Computer</h3></div>
+          <h3>Agents on this Computer</h3>
           <div className="section-actions">
             {canCreateAgent && computer.status === "online" ? <button className="compact-action" type="button" onClick={onCreate}><Plus />Create Agent</button> : null}
           </div>
@@ -303,7 +303,7 @@ function DeleteDialog({ computer, agents, pending, error, close, confirm }: { co
 function AgentDialog({ submit, close, pending, error, computers, selectedComputerId, isOwner }: { submit: (event: FormEvent<HTMLFormElement>) => void; close: () => void; pending: boolean; error?: string; computers: Computer[]; selectedComputerId?: string; isOwner: boolean }) {
   return (
     <DialogFrame className="agent-dialog" close={close} labelId="create-agent-title">
-        <header><div><p className="section-kicker">New member</p><h2 id="create-agent-title">Create Agent</h2></div><button className="icon-button" type="button" aria-label="Close Create Agent" onClick={close}><X /></button></header>
+        <header><h2 id="create-agent-title">Create Agent</h2><button className="icon-button" type="button" aria-label="Close Create Agent" onClick={close}><X /></button></header>
         <form className="agent-create-form" onSubmit={submit}>
           <label className="agent-field agent-field--wide">Computer *<select name="computer_id" required defaultValue={selectedComputerId ?? computers[0]?.id ?? ""} disabled={computers.length === 0}>{computers.map((computer) => <option key={computer.id} value={computer.id}>{computer.name} · {computer.hostname}</option>)}</select></label>
           <label className="agent-field">Name *<input name="name" aria-label="Agent name" required maxLength={40} placeholder="e.g. Iris" data-dialog-initial-focus /></label>

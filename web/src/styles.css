@@ -118,18 +118,6 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* Type helpers ---------------------------------------------------------- */
-
-.section-kicker,
-.eyebrow,
-.detail-section-label {
-  margin: 0 0 2px;
-  color: var(--muted);
-  font-size: var(--text-meta);
-  font-weight: 500;
-  letter-spacing: 0;
-}
-
 .page-title,
 .members-title,
 .settings-header {
@@ -149,9 +137,7 @@ textarea:focus-visible {
   letter-spacing: -.01em;
 }
 
-.page-title p,
-.members-title p,
-.settings-header p {
+.page-title p {
   margin: 0;
   overflow: hidden;
   color: var(--muted);
@@ -1476,9 +1462,8 @@ body > #root > .route-status {
 .skeleton-block {
   display: block;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--bg-subtle) 0%, #ebeae6 40%, var(--bg-subtle) 80%);
-  background-size: 200% 100%;
-  animation: skeleton 1.6s ease-in-out infinite;
+  background: var(--bg-subtle);
+  animation: skeleton 1.6s ease-in-out infinite alternate;
 }
 
 .skeleton-bar {
@@ -1647,7 +1632,7 @@ body > #root > .route-status {
 }
 
 @keyframes skeleton {
-  to { background-position: -200% 0; }
+  to { opacity: .55; }
 }
 
 /* Dialogs --------------------------------------------------------------- */
@@ -2311,8 +2296,7 @@ body > #root > .route-status {
   align-items: center;
   gap: 3px;
   color: inherit;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-meta);
   text-decoration: none;
 }
 
@@ -3105,11 +3089,6 @@ a.task-source-link:hover {
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.summary-value--mono {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
 }
 
 .agent-fact-strip .agent-summary-signal {
@@ -4469,13 +4448,6 @@ a.task-source-link:hover {
 
   .page-tabs {
     padding-inline: var(--page-gutter-compact);
-  }
-
-  .tasks-header .page-title p,
-  .members-title p,
-  .inbox-workspace .channel-title p,
-  .computer-onboarding-header .page-title p {
-    display: none;
   }
 
   .compact-header-action span {

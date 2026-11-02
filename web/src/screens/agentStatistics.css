@@ -20,12 +20,6 @@
   line-height: 1.2;
 }
 
-.agent-statistics-header p {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: var(--text-small);
-}
-
 .agent-statistics-empty {
   margin: 0;
   padding: 26px 0;

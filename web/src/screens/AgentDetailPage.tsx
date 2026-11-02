@@ -135,7 +135,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
       <dl className="agent-fact-strip" aria-label="Agent summary">
         <SummaryFact label="Status"><StateSignal tone={value.desired_lifecycle} label={humanize(value.desired_lifecycle)} /></SummaryFact>
         <SummaryFact label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? "Assigned Computer"}</Link> : "Unassigned"}</SummaryFact>
-        <SummaryFact label="Driver"><span className="summary-value--mono">{driverLabel(value)}</span></SummaryFact>
+        <SummaryFact label="Driver">{driverLabel(value)}</SummaryFact>
       </dl>
       <nav className="detail-tabs" aria-label="Agent detail" role="tablist">
         {agentTabs.map(({ id, label, icon: Icon }, index) => (
@@ -246,7 +246,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
       {retireConfirmOpen ? (
         <DialogFrame close={() => setRetireConfirmOpen(false)} labelId="retire-agent-title" className="confirm-dialog agent-retire-dialog">
           <header>
-            <div><p className="section-kicker">Agent lifecycle</p><h2 id="retire-agent-title">Retire {value.name}?</h2></div>
+            <h2 id="retire-agent-title">Retire {value.name}?</h2>
             <button className="icon-button" type="button" aria-label="Close retirement confirmation" title="Close retirement confirmation" onClick={() => setRetireConfirmOpen(false)}><X aria-hidden="true" /></button>
           </header>
           <p>Retirement cannot be undone. {value.name} will stop accepting new work and lose its Computer assignment.</p>

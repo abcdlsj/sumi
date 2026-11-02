@@ -114,7 +114,6 @@ function InboxWorkspace({
       <header className="channel-header">
         <div className="channel-title">
           <h1>Inbox</h1>
-          <p>Mentions, replies and requests for you. Open one to respond.</p>
         </div>
         {stacks.length > 0 ? (
           <button

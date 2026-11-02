@@ -428,7 +428,6 @@ export function CompanyOfficeView({
       <header className="office-header">
         <div className="page-title">
           <h1 id="office-heading" tabIndex={-1}>Office</h1>
-          <p>Live view of every Agent at work.</p>
         </div>
         <Link className="command-button office-tasks-link" to="/s/$spaceSlug/tasks" params={{ spaceSlug }}>
           <ListTodo aria-hidden="true" />Tasks

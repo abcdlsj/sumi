@@ -456,7 +456,7 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
           <b aria-hidden="true">›</b>
         </span>
       </button>
-      {thread.isPending ? <span className="inline-thread-status">Loading replies…</span> : null}
+      {thread.isPending ? <span className="inline-reply inline-reply--loading" role="status" aria-label="Loading replies"><span className="skeleton-avatar" /><span className="skeleton-bar" /><span className="skeleton-bar" /></span> : null}
       {thread.error ? <span className="inline-thread-status">Replies unavailable</span> : null}
       {replies.map((reply) => (
         <button className="inline-reply" type="button" key={reply.id} onClick={(event) => open(event.currentTarget)}>

@@ -416,7 +416,7 @@ function AddAgentsDialog({ agents, spaceSlug, pending, error, close, submit }: {
   }
   return (
     <DialogFrame className="channel-dialog channel-member-dialog" close={close} labelId="add-channel-agents-title">
-        <header><div><p className="section-kicker">Channel members</p><h2 id="add-channel-agents-title">Add Agents</h2></div><button className="icon-button" type="button" aria-label="Close Add Agents" onClick={close}><X /></button></header>
+        <header><h2 id="add-channel-agents-title">Add Agents</h2><button className="icon-button" type="button" aria-label="Close Add Agents" onClick={close}><X /></button></header>
         <form onSubmit={handleSubmit}>
           <fieldset className="channel-agent-picker">
             <legend>Available Agents</legend>

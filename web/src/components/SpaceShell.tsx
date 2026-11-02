@@ -646,7 +646,7 @@ export function SpaceShell({
 
 function RouteFailure({ error, retry }: { error: unknown; retry: () => void }) {
   const message = error instanceof ApiRequestError ? error.message : "The Server did not return a usable response.";
-  return <main className="route-status route-status--error"><section className="route-status-panel" role="alert"><p className="section-kicker">Could not open Space</p><h1>Something interrupted this view.</h1><p>{message}</p><button className="command-button command-button--accent" type="button" onClick={retry}>Retry</button></section></main>;
+  return <main className="route-status route-status--error"><section className="route-status-panel" role="alert"><h1>Could not open this Space.</h1><p>{message}</p><button className="command-button command-button--accent" type="button" onClick={retry}>Retry</button></section></main>;
 }
 
 function ComputersNavigation({ computers, spaceSlug, activeHash, canManage }: { computers: Computer[]; spaceSlug: string; activeHash: string; canManage: boolean }) {
@@ -712,7 +712,7 @@ function ChannelDialog({
   return (
     <DialogFrame className="channel-dialog" close={close} labelId="create-channel-title">
         <header>
-          <div><p className="section-kicker">New conversation</p><h2 id="create-channel-title">Create Channel</h2></div>
+          <h2 id="create-channel-title">Create Channel</h2>
           <button className="icon-button" type="button" aria-label="Close Create Channel" onClick={close}><X /></button>
         </header>
         <form className="channel-create-form" onSubmit={submit}>
@@ -769,7 +769,7 @@ function DirectMessageDialog({
   return (
     <DialogFrame className="dm-dialog" close={close} labelId="start-dm-title">
       <header>
-        <div><p className="section-kicker">Direct message</p><h2 id="start-dm-title">Start DM</h2></div>
+        <h2 id="start-dm-title">Start DM</h2>
         <button className="icon-button" type="button" aria-label="Close Start DM" onClick={close}><X /></button>
       </header>
       <div className="dm-picker">

@@ -20,10 +20,6 @@
   letter-spacing: -.015em;
 }
 
-.settings-page > .settings-header p {
-  white-space: normal;
-}
-
 .settings-group {
   display: grid;
   gap: 12px;

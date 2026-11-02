@@ -38,7 +38,6 @@ export function SettingsWorkspace({ selectedFeatureId, space, user, currentMembe
     <div className="settings-page">
       <header className="settings-header">
         <h1>Settings</h1>
-        <p>Your account, this Space, and preferences for this browser.</p>
       </header>
       {user || space ? (
         <section className="settings-group" aria-labelledby="settings-account-heading">

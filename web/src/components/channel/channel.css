@@ -914,6 +914,19 @@ a.message-mention--agent:hover {
   background: var(--bg-subtle);
 }
 
+.inline-reply--loading {
+  height: 22px;
+  pointer-events: none;
+}
+
+.inline-reply--loading .skeleton-avatar {
+  width: 18px;
+  height: 18px;
+}
+
+.inline-reply--loading .skeleton-bar:nth-child(2) { width: 52px; }
+.inline-reply--loading .skeleton-bar:nth-child(3) { width: 46%; }
+
 .inline-reply .pixel-identity {
   width: 18px;
   height: 18px;
@@ -1684,11 +1697,20 @@ details.system-event .system-event-heading {
   cursor: col-resize;
 }
 
-.thread-resize-handle:hover,
-.thread-resize-handle:focus-visible,
-.channel-workspace--thread-resizing .thread-resize-handle {
+.thread-resize-handle:focus-visible {
   outline: none;
-  background: linear-gradient(to right, transparent 2px, var(--line-strong) 2px, var(--line-strong) 4px, transparent 4px);
+}
+
+.thread-resize-handle::after {
+  position: absolute;
+  inset: 0 2px;
+  content: "";
+}
+
+.thread-resize-handle:hover::after,
+.thread-resize-handle:focus-visible::after,
+.channel-workspace--thread-resizing .thread-resize-handle::after {
+  background: var(--line-strong);
 }
 
 .thread-header {

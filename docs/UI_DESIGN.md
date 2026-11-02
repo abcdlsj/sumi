@@ -16,8 +16,8 @@
   - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
 - 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
-- 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。
-- 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。
+- 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。Channel 名、Driver 名和时间是文字，使用 Geist。
+- 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
 - 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 accent（主要 CTA），圆角 7px；按下时只加深底色并加内阴影，不位移、不缩放。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
 - 选中态全站统一：白色抬起卡片（`--shadow-selected`），用于导航当前项、筛选 tab、分段控件。hover 只换极浅底色。
 - 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。
@@ -62,7 +62,7 @@
 
 ## 加载
 
-- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块。
+- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块；时间线里 Thread 预览的 replies 加载时是一行 reply 骨架。骨架是 subtle 底色的平面块，以透明度柔和明暗变化，不使用渐变扫光。
 
 ## 对话与 Task
 
@@ -122,7 +122,7 @@
 - `Agent insights` 是默认关闭的实验功能：只有 Settings 开启后，Sidebar 的 Space tools 才显示 Agent insights 入口；路由为 `/s/$spaceSlug/insights`，未开启时直达页面显示禁用说明与 Settings 链接。
 - insights 页面顶部是 `Statistics` 与 `Graph` 两个页内 tab（`/insights/stats`、`/insights/graph`），下方展示对应内容。
 - Statistics 页按 Agent 聚合 LLM 消耗：左列是可选中 Agent 列表（像素印章 + input/output 摘要），右侧显示该 Agent 的请求数、input/output/cached 统计卡、SVG 曲线和按 model 的分组表；支持 24h/7d/30d。部分 Computer 查询失败时显示部分数据警告，全部失败时显示错误与 Retry，不显示为无 usage。
-- Graph 页为力导向关系图 + 右侧详情面板。节点是 Agent 像素印章头像（与 PixelIdentity 同源算法，SVG 内联渲染，不依赖 HTML foreignObject）+ display name；边是 Agent 之间的互动关系，使用 1px 细线，hover/focus 显示总数，选中态只通过头像描边与整体明暗区分。
+- Graph 页为力导向关系图 + 右侧详情面板；画布为侧栏底色的平面，不画网格线。节点是 Agent 像素印章头像（与 PixelIdentity 同源算法，SVG 内联渲染，不依赖 HTML foreignObject）+ display name；边是 Agent 之间的互动关系，使用 1px 细线，hover/focus 显示总数，选中态只通过头像描边与整体明暗区分。
 - 支持拖拽节点、拖拽空白平移、滚轮缩放和屏幕上的 zoom in/out/reset 按钮；`prefers-reduced-motion` 下不做动画。
 - 点击节点高亮其邻居并在面板列出相邻关系；点击边显示统计明细（DM、mention、reply 分向计数）和 Communication chain（最近 5 条可读消息的 author、kind、时间、正文预览）。
 - 空态提示创建 Agent；加载失败显示 Retry。所有图形节点可键盘聚焦（Enter/Space 选中，Esc 清除），图形信号同时有文字与 `aria-label`。

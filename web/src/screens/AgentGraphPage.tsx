@@ -261,7 +261,6 @@ export function AgentGraphWorkspace({ spaceId }: { spaceId: string }) {
     return (
       <div className="route-status route-status--error">
         <section className="route-status-panel" role="alert">
-          <p className="section-kicker">Agent graph</p>
           <h1>Could not load the graph.</h1>
           <p>{graph.error instanceof Error ? graph.error.message : "The Server returned no usable data."}</p>
           <button className="command-button command-button--accent" type="button" onClick={() => void graph.refetch()}>
@@ -276,7 +275,6 @@ export function AgentGraphWorkspace({ spaceId }: { spaceId: string }) {
     return (
       <div className="route-status">
         <section className="route-status-panel">
-          <p className="section-kicker">Agent graph</p>
           <h1>No Agents yet.</h1>
           <p>Create an Agent and start a conversation; relationships appear here.</p>
         </section>

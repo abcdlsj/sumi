@@ -155,7 +155,6 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
       <header className="agent-statistics-header">
         <div>
           <h1>Agent statistics</h1>
-          <p>LLM token usage per Agent, aggregated from this Space's Computers.</p>
         </div>
         <div className="llm-usage-range" aria-label="Usage period">
           {RANGES.map((option) => (

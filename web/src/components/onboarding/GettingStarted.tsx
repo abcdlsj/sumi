@@ -274,7 +274,7 @@ function QuickAgentDialog({
   return (
     <DialogFrame className="agent-dialog quick-agent-dialog" close={close} labelId="quick-agent-title">
       <header>
-        <div><p className="section-kicker">First Agent</p><h2 id="quick-agent-title">Create Agent</h2></div>
+        <h2 id="quick-agent-title">Create Agent</h2>
         <button className="icon-button" type="button" aria-label="Close Create Agent" onClick={close}><X /></button>
       </header>
       <form className="quick-agent-form" onSubmit={submit}>

@@ -131,7 +131,6 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
       <header className="members-header">
         <div className="members-title">
           <h1 id="members-heading">{agentsPage ? "Agents" : "Members"}</h1>
-          <p>{agentsPage ? "Persistent collaborators with a Computer and a Role." : "People and Agents with access to this Space."}</p>
         </div>
         {canCreateAgent ? (
           <Link

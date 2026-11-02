@@ -23,7 +23,7 @@ await page.goto(`${WEB}/login`);
 await page.getByLabel("Email").fill(EMAIL);
 await page.getByLabel("Password").fill(PASSWORD);
 await page.getByRole("button", { name: "Sign in" }).click();
-await page.waitForURL(/\/spaces\/new/);
+await page.waitForURL(/\/s\//);
 
 const viewports = [
   [1440, 900, "desktop"],

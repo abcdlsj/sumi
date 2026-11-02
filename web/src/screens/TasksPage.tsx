@@ -97,7 +97,7 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
   return (
     <section className="tasks-workspace" aria-labelledby="tasks-heading">
       <header className="tasks-header">
-        <div className="page-title"><h1 id="tasks-heading">Tasks</h1><p>Formal work stays connected to its Threads and Result.</p></div>
+        <div className="page-title"><h1 id="tasks-heading">Tasks</h1></div>
       </header>
       <nav className="task-filters" aria-label="Task filters">
         {filters.map((item) => {
@@ -267,7 +267,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
       {closeOpen ? (
         <DialogFrame className="confirm-dialog" close={() => setCloseOpen(false)} labelId="close-task-title">
           <header>
-            <div><p className="section-kicker">!{value.seq}</p><h2 id="close-task-title">Close Task</h2></div>
+            <h2 id="close-task-title">Close Task !{value.seq}</h2>
             <button className="icon-button" type="button" aria-label="Close Close Task" onClick={() => setCloseOpen(false)}><X /></button>
           </header>
           <form onSubmit={(event) => { event.preventDefault(); confirmClose(); }}>
