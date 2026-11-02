@@ -270,6 +270,10 @@ pub(super) async fn computer_socket(
                     result,
                 )
                 .await;
+                if response.is_err() {
+                    // Without a receipt the Computer resends this result on every reconnect.
+                    tracing::warn!(%computer_id, %run_id, %event_id, "Run result rejected");
+                }
                 if response.is_ok() {
                     if yielded {
                         let run = sqlx::query(

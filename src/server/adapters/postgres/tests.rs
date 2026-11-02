@@ -1363,6 +1363,75 @@ async fn concurrent_ambient_messages_accumulate_into_one_bounded_aggregate() {
                     .unwrap();
             assert_eq!(leased, ("assigned".into(), None));
 
+            // Activity during the lease opens a second aggregate. Releasing the leased one must
+            // fold that aggregate in instead of rejecting the Run result on the unique index.
+            adapter
+                .transact(async |transaction| {
+                    transaction
+                        .publish_message(MessageDraft {
+                            message_id: MessageId::from_uuid(Uuid::now_v7()),
+                            channel_id: ChannelId::from_uuid(channel),
+                            author_member_id: MemberId::from_uuid(owner),
+                            idempotency_key: IdempotencyKey::from_uuid(Uuid::now_v7()),
+                            body_markdown: "reply during the lease".into(),
+                            thread_id: Some(ThreadId::from_uuid(root)),
+                            reply_to_message_id: None,
+                            mentions: Vec::new(),
+                            mention_all: false,
+                            attachment_ids: Vec::new(),
+                            handled_item: None,
+                            now: OffsetDateTime::now_utc(),
+                        })
+                        .await
+                })
+                .await
+                .unwrap();
+            let run_id: Uuid =
+                sqlx::query_scalar("SELECT assigned_run_id FROM inbox_items WHERE id=$1")
+                    .bind(aggregate_id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            CompleteRun::execute(
+                &mut adapter,
+                CompleteRunInput {
+                    event_id: EventId::from_uuid(Uuid::now_v7()),
+                    run_id: RunId::from_uuid(run_id),
+                    computer_id: ComputerId::from_uuid(computer_id),
+                    outcome: RunOutcome::Yielded,
+                    error_code: None,
+                    item_dispositions: vec![ItemDispositionInput {
+                        item_id: InboxItemId::from_uuid(aggregate_id),
+                        disposition: InboxItemDisposition::Released,
+                    }],
+                    continuation_note: None,
+                    max_retry_count: crate::server::domain::attention::AttentionPolicy::MAX_RETRY_COUNT,
+                    now: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .expect("a released aggregate absorbs the one opened during its lease");
+            let open: Vec<(Uuid, i32, i64, i64)> = sqlx::query_as(
+                "SELECT id,aggregated_count,first_message_seq,last_message_seq FROM inbox_items \
+                 WHERE member_id=$1 AND status='pending'",
+            )
+            .bind(agent)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                open,
+                vec![(aggregate_id, REPLIES + 1, 3, i64::from(REPLIES) + 3)]
+            );
+            let event_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM inbox_activity_events WHERE inbox_item_id=$1",
+            )
+            .bind(aggregate_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(event_count, i64::from(REPLIES) + 1);
+
             pool.close().await;
         }
         .await;

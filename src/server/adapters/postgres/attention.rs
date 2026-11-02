@@ -98,6 +98,12 @@ impl PostgresTransaction {
         item: InboxItem,
     ) -> Result<(), ApplicationError> {
         let item = item.snapshot();
+        if item.ambient.is_some()
+            && item.status == InboxItemStatus::Pending
+            && item.retry_count == 0
+        {
+            self.absorb_open_ambient_aggregate(item.id).await?;
+        }
         let changed = sqlx::query(
             "UPDATE inbox_items SET task_id=$2,status=$3,available_at=$4,assigned_run_id=$5, \
              retry_count=$6,handled_at=$7,requeue_count=$8, \
@@ -119,6 +125,53 @@ impl PostgresTransaction {
         } else {
             Err(ApplicationError::NotFound)
         }
+    }
+
+    /// An ambient Item returning to pending may meet the aggregate that opened while it was leased.
+    /// Only one open aggregate may exist per key, so the open one folds into the returning Item;
+    /// the open aggregate was never leased, so only its activity events reference it.
+    async fn absorb_open_ambient_aggregate(
+        &mut self,
+        item_id: InboxItemId,
+    ) -> Result<(), ApplicationError> {
+        let Some(open_id) = sqlx::query_scalar::<_, Uuid>(
+            "SELECT open.id FROM inbox_items item JOIN inbox_items open \
+               ON open.member_id=item.member_id AND open.kind=item.kind AND open.id<>item.id \
+              AND open.strength='ambient' AND open.status='pending' AND open.retry_count=0 \
+              AND ((item.kind='channel_activity' AND open.ambient_channel_id=item.ambient_channel_id) \
+                OR (item.kind='thread_activity' AND open.thread_id=item.thread_id)) \
+             WHERE item.id=$1 AND item.strength='ambient' \
+             FOR UPDATE OF open",
+        )
+        .bind(item_id.into_uuid())
+        .fetch_optional(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?
+        else {
+            return Ok(());
+        };
+        sqlx::query("UPDATE inbox_activity_events SET inbox_item_id=$1 WHERE inbox_item_id=$2")
+            .bind(item_id.into_uuid())
+            .bind(open_id)
+            .execute(&mut *self.connection)
+            .await
+            .map_err(map_sqlx)?;
+        sqlx::query(
+            "WITH open AS (DELETE FROM inbox_items WHERE id=$2 \
+                 RETURNING first_message_seq,last_message_seq,aggregated_count,force_at) \
+             UPDATE inbox_items item SET \
+                 first_message_seq=least(item.first_message_seq,open.first_message_seq), \
+                 last_message_seq=greatest(item.last_message_seq,open.last_message_seq), \
+                 aggregated_count=item.aggregated_count+open.aggregated_count, \
+                 force_at=least(item.force_at,open.force_at) \
+             FROM open WHERE item.id=$1",
+        )
+        .bind(item_id.into_uuid())
+        .bind(open_id)
+        .execute(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(())
     }
 
     pub(super) async fn insert_inbox_item(
