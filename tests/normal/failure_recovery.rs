@@ -832,3 +832,91 @@ async fn insert_agent(
     .await?;
     Ok(agent_id)
 }
+
+#[tokio::test]
+async fn a_server_shutdown_closes_open_computer_and_browser_streams() -> Result<()> {
+    let database = TestDatabase::create("sumi_failure_server_shutdown").await?;
+    let result = server_shutdown_closes_open_streams(&database).await;
+    database.drop().await?;
+    result
+}
+
+/// Computer sockets and browser event streams never end on their own, so graceful shutdown must
+/// close them; otherwise the process waits until the supervisor kills it.
+async fn server_shutdown_closes_open_streams(database: &TestDatabase) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+
+    let mut fixture = Fixture::start(database).await?;
+    let mut endpoint = fixture.server_url.join(&format!(
+        "/api/v1/computers/{}/connect",
+        fixture.computer_id
+    ))?;
+    endpoint
+        .set_scheme("ws")
+        .map_err(|_| anyhow::anyhow!("ws scheme"))?;
+    let mut request = endpoint.as_str().into_client_request()?;
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {}", fixture.computer_token).parse()?,
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await?;
+    socket
+        .send(Message::Text(
+            serde_json::json!({
+                "supported_versions": {"minimum": 6, "maximum": 6},
+                "daemon_version": "test",
+                "capabilities": [],
+                "daemon_session_id": Uuid::now_v7(),
+                "command_watermark": 0,
+                "live_run_ids": [],
+            })
+            .to_string()
+            .into(),
+        ))
+        .await?;
+    let welcome = socket.next().await.context("handshake")??;
+    ensure!(
+        welcome.to_text()?.contains("welcome"),
+        "Computer handshake: {welcome}"
+    );
+    let events = fixture
+        .client
+        .get(
+            fixture
+                .server_url
+                .join(&format!("/api/v1/spaces/{}/events", fixture.space_id))?,
+        )
+        .header(header::COOKIE, &fixture.cookie)
+        .send()
+        .await?;
+    ensure!(
+        events.status() == StatusCode::OK,
+        "events: {}",
+        events.status()
+    );
+
+    fixture.server.interrupt().await?;
+
+    let mut shutdown_frame = false;
+    while let Some(Ok(frame)) = socket.next().await {
+        shutdown_frame |= frame
+            .to_text()
+            .is_ok_and(|text| text.contains("server_shutdown"));
+    }
+    ensure!(
+        shutdown_frame,
+        "the Computer was not told the Server is shutting down"
+    );
+    let offline: String = sqlx::query_scalar("SELECT connection_status FROM computers WHERE id=$1")
+        .bind(fixture.computer_id)
+        .fetch_one(&fixture.pool)
+        .await?;
+    ensure!(
+        offline == "offline",
+        "Computer status after shutdown: {offline}"
+    );
+    fixture.pool.close().await;
+    drop(events);
+    Ok(())
+}

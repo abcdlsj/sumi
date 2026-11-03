@@ -7,5 +7,6 @@ mod postgres;
 mod query;
 mod realtime;
 pub(super) mod runtime;
+mod shutdown;
 mod space_events;
 mod websocket;

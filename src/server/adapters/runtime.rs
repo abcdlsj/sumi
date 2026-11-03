@@ -50,7 +50,9 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         agent_graph_cache: http::AgentGraphCache::default(),
         web_origin: web_origin.clone(),
         space_events: super::space_events::SpaceEventSignal::default(),
+        shutdown: super::shutdown::ShutdownSignal::default(),
     };
+    let shutdown = state.shutdown.clone();
     let mut api = http::api_router(state.clone(), 100 * 1024 * 1024);
     if let Some(web_origin) = &web_origin {
         api = http::allow_web_origin(api, web_origin);
@@ -77,11 +79,24 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind Server at {}", config.bind))?;
     let served = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            shutdown.trigger();
+        })
         .await
         .context("Server stopped unexpectedly");
     dispatcher.abort();
     space_event_listener.abort();
+    // Upgraded Computer sockets run outside the graceful wait and may not reach their own offline
+    // write before exit. This process holds every Computer connection, so none is online now.
+    if let Err(error) = sqlx::query(
+        "UPDATE computers SET connection_status='offline' WHERE connection_status='online'",
+    )
+    .execute(&pool)
+    .await
+    {
+        tracing::warn!(%error, "Computers could not be marked offline on shutdown");
+    }
     served
 }
 

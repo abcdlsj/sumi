@@ -3,7 +3,7 @@ use crate::protocol::{
         ChannelActivityQueryErrorCode, ChannelActivityQueryResult, ChannelActivityResultEnvelope,
         CommandAck, CommandEnvelope, CommandOutcome, CommandResult, CommandSequence, ComputerFrame,
         ComputerHello, DeliveryOutcome, HandshakeErrorCode, Receipt, ReceiptKind,
-        RunTerminalStatus, ServerFrame, ServerHandshake,
+        RunTerminalStatus, ServerFrame, ServerHandshake, ShutdownCode,
     },
     version::SUPPORTED,
 };
@@ -94,6 +94,7 @@ pub(super) fn negotiate(
 use super::command::CommandRegistry;
 use super::http::{ApiError, ComputerPrincipal};
 use super::query::QueryRegistry;
+use super::shutdown::ShutdownSignal;
 use crate::server::application::execution::{
     AcknowledgeDelivery, AcknowledgeDeliveryInput, ApplyCommandResult, CompleteRun,
     CompleteRunInput, StartRun, StartRunInput, SyncComputerRuns, SyncComputerRunsInput,
@@ -108,12 +109,13 @@ use uuid::Uuid;
 pub(super) async fn computer_socket(
     mut socket: WebSocket,
     storage: PostgresAdapter,
-    pool: PgPool,
     queries: QueryRegistry,
     commands: CommandRegistry,
+    shutdown: ShutdownSignal,
     computer_id: Uuid,
     deleted: bool,
 ) {
+    let pool = storage.pool();
     let Ok(Some(Ok(WebSocketMessage::Text(encoded)))) =
         tokio::time::timeout(COMPUTER_IDLE_TIMEOUT, socket.next()).await
     else {
@@ -185,6 +187,15 @@ pub(super) async fn computer_socket(
     let mut read_deadline = tokio::time::Instant::now() + COMPUTER_IDLE_TIMEOUT;
     loop {
         let frame = tokio::select! {
+            () = shutdown.stopped() => {
+                let _ = send_json(
+                    &mut socket,
+                    &ServerFrame::Shutdown { code: ShutdownCode::ServerShutdown },
+                )
+                .await;
+                let _ = socket.send(WebSocketMessage::Close(None)).await;
+                break;
+            }
             outgoing = outbound.recv() => {
                 let Some(outgoing) = outgoing else { break };
                 if send_json(&mut socket, &outgoing).await.is_err() {

@@ -167,6 +167,7 @@ pub(super) struct RuntimeState {
     /// Origin of a separately deployed Web UI; pairing links point there when it is set.
     pub(super) web_origin: Option<String>,
     pub(super) space_events: super::space_events::SpaceEventSignal,
+    pub(super) shutdown: super::shutdown::ShutdownSignal,
 }
 
 mod agent_graph;

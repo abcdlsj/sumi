@@ -105,6 +105,7 @@ impl CapabilityFixture {
             agent_graph_cache: AgentGraphCache::default(),
             web_origin: None,
             space_events: Default::default(),
+            shutdown: Default::default(),
         };
         let mut headers = HeaderMap::new();
         headers.insert(

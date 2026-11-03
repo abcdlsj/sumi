@@ -104,6 +104,7 @@ pub(super) async fn space_events(
         })
         .transpose()?;
     let viewer = MemberId::from_uuid(viewer);
+    let shutdown = state.shutdown.clone();
     // Subscribe before the first read so a commit between the read and the wait still wakes us.
     let wakeups = state.space_events.subscribe();
     let initial = state
@@ -137,6 +138,12 @@ pub(super) async fn space_events(
                 };
             }
         },
+    );
+    let events = futures_util::StreamExt::take_until(
+        events,
+        Box::pin(async move {
+            shutdown.stopped().await;
+        }),
     );
     Ok(Sse::new(events).keep_alive(KeepAlive::default()))
 }

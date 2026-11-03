@@ -19,16 +19,16 @@ pub(super) async fn connect_computer(
     .await
     .map_err(application_error)?;
     let storage = state.storage.clone();
-    let pool = state.storage.pool();
     let queries = state.queries.clone();
     let commands = state.storage.commands();
+    let shutdown = state.shutdown.clone();
     Ok(upgrade.on_upgrade(move |socket| {
         computer_socket(
             socket,
             storage,
-            pool,
             queries,
             commands,
+            shutdown,
             computer_id,
             identity.deleted,
         )
