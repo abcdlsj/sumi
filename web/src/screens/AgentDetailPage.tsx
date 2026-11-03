@@ -6,7 +6,7 @@ import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNod
 import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
 import { driverLabel } from "../driver";
 import { EmptyState } from "../components/EmptyState";
-import { AGENT_ACTIVITY_LABELS, activityLabel, useAgentActivity, type AgentActivityItem } from "../agentActivity";
+import { AGENT_ACTIVITY_LABELS, activityLabel, agentPresence, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
@@ -115,13 +115,13 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   return (
     <section className="agent-workspace" aria-labelledby="agent-heading">
       <header className="entity-detail-header">
-        <PresenceIdentity name={value.name} kind="agent" seed={value.member_id} activityStatus={value.activity_status} />
+        <PresenceIdentity name={value.name} kind="agent" seed={value.member_id} activityStatus={agentPresence(value)} />
         <div className="entity-detail-title">
           <div><h1 id="agent-heading" title={value.name}>{value.name}</h1><span className="agent-label">Agent</span></div>
           <p>{value.role_text}</p>
         </div>
         <div className="agent-header-signals">
-          <span className={`agent-state agent-state--${value.activity_status}`} role="status" aria-label={`Activity: ${activityLabel(value.activity_status)}`} title={`Activity: ${activityLabel(value.activity_status)}`}><i aria-hidden="true" />{activityLabel(value.activity_status)}</span>
+          <span className={`agent-state agent-state--${agentPresence(value)}`} role="status" aria-label={`Activity: ${activityLabel(agentPresence(value))}`} title={`Activity: ${activityLabel(agentPresence(value))}`}><i aria-hidden="true" />{activityLabel(agentPresence(value))}</span>
           <span className={`agent-connection-signal${value.computer_reachable ? " agent-connection-signal--online" : " agent-connection-signal--offline"}`} aria-label={value.computer_reachable ? "Computer online" : "Computer offline"} title={value.computer_reachable ? "Computer online" : "Computer offline"}>
             <i aria-hidden="true" />{value.computer_reachable ? "Computer online" : "Computer offline"}
           </span>

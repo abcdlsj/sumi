@@ -559,7 +559,7 @@ describe("timeline position", () => {
 describe("Agent failure line", () => {
   const lin = { id: "agent-lin", kind: "agent" as const, display_name: "Lin", access_level: "member" as const, permissions: [] };
 
-  function renderWithAgent(activityStatus: "idle" | "working", errorCode?: string) {
+  function renderWithAgent(activityStatus: "idle" | "working" | "offline", errorCode?: string) {
     return render(
       <QueryClientProvider client={new QueryClient()}>
         <MessageTimeline
@@ -591,6 +591,13 @@ describe("Agent failure line", () => {
     renderWithAgent("working", "unhandled_items");
 
     expect(screen.queryByText("stopped on an error", { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("says the Agent is offline instead of working while its Computer is unreachable", () => {
+    renderWithAgent("offline");
+
+    expect(screen.getByText("Lin is offline · continues when its Computer reconnects")).toBeVisible();
+    expect(screen.queryByText("Lin is working", { exact: false })).not.toBeInTheDocument();
   });
 
   it("stays quiet when the latest Run did not fail", () => {

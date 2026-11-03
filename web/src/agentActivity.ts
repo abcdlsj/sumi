@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import type { Agent } from "./api/client";
 
-export function activityLabel(status?: Agent["activity_status"]): string {
+/** What the UI shows for an Agent: its activity, or offline while its Computer is unreachable. */
+export type AgentPresence = Agent["activity_status"] | "offline";
+
+/** A Run on an unreachable Computer is not progressing, so the Agent reads as offline until it reconnects. */
+export function agentPresence(agent: Pick<Agent, "activity_status" | "computer_reachable">): AgentPresence {
+  return agent.computer_reachable ? agent.activity_status : "offline";
+}
+
+export function activityLabel(status?: AgentPresence): string {
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Agent";
 }
 

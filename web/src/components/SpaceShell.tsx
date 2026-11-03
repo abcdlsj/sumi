@@ -34,14 +34,13 @@ import {
   listInbox,
   listMembers,
   type Channel,
-  type Agent,
   type Computer,
   type DirectMessage,
   type Member,
   type Space,
   type User,
 } from "../api/client";
-import { activityLabel } from "../agentActivity";
+import { activityLabel, agentPresence, type AgentPresence } from "../agentActivity";
 import {
   AGENT_INSIGHTS_FEATURE_ID,
   COMPANY_OFFICE_FEATURE_ID,
@@ -307,7 +306,7 @@ export function SpaceShell({
   }
   const availableDirectMessages = directMessages.data ?? [];
   const activityByMemberId = new Map(
-    (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
+    (agents.data ?? []).map((agent) => [agent.member_id, agentPresence(agent)] as const),
   );
   const roleByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agent.role_text] as const),
@@ -752,7 +751,7 @@ function DirectMessageDialog({
   onSelect,
 }: {
   members: Member[];
-  activityByMemberId: Map<string, Agent["activity_status"]>;
+  activityByMemberId: Map<string, AgentPresence>;
   existingMemberIds: Set<string>;
   pendingMemberId?: string;
   error?: string;
@@ -828,7 +827,7 @@ function NavigationItem({
   );
 }
 
-function DirectMessageNavigationItem({ member, activityStatus, role, active, href, unread }: { member: Member; activityStatus?: Agent["activity_status"]; role?: string; active: boolean; href: string; unread: boolean }) {
+function DirectMessageNavigationItem({ member, activityStatus, role, active, href, unread }: { member: Member; activityStatus?: AgentPresence; role?: string; active: boolean; href: string; unread: boolean }) {
   const working = activityStatus === "working" || activityStatus === "dispatched";
   return (
     <Link className={`nav-item dm-nav-item${active ? " nav-item--active" : ""}${unread ? " nav-item--unread" : ""}`} to={href} aria-current={active ? "page" : undefined}>
@@ -846,7 +845,7 @@ function DirectMessageNavigationItem({ member, activityStatus, role, active, hre
   );
 }
 
-export function PresenceIdentity({ name, kind = "human", seed, activityStatus }: { name: string; kind?: "human" | "agent"; seed: string; activityStatus?: Agent["activity_status"] }) {
+export function PresenceIdentity({ name, kind = "human", seed, activityStatus }: { name: string; kind?: "human" | "agent"; seed: string; activityStatus?: AgentPresence }) {
   if (kind !== "agent" || !activityStatus) {
     return <PixelIdentity name={name} kind={kind} seed={seed} />;
   }

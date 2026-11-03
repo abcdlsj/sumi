@@ -8,7 +8,6 @@ import {
   readThread,
   setThreadSubscription,
   type Member,
-  type Agent,
   type Message,
   type ThreadRead,
 } from "../../api/client";
@@ -20,6 +19,7 @@ import { useSelfMemberId } from "./selfMember";
 import { TaskStatusIcon } from "../taskStatusIcon";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
+import type { AgentPresence } from "../../agentActivity";
 
 export function ThreadPane({
   channelId,
@@ -54,7 +54,7 @@ export function ThreadPane({
   resizeWithKeyboard: (event: KeyboardEvent<HTMLDivElement>) => void;
   close: () => void;
   showLatestChannelMessages: () => void;
-  activityByMemberId: ReadonlyMap<string, Agent["activity_status"]>;
+  activityByMemberId: ReadonlyMap<string, AgentPresence>;
   direct?: boolean;
   onOpenAgentDm?: (memberId: string) => void;
 }) {

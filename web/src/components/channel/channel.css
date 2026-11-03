@@ -619,6 +619,11 @@ a.message-mention--agent:hover {
   white-space: nowrap;
 }
 
+.timeline-offline {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @keyframes timeline-working-in {
   from { opacity: 0; transform: translateY(4px); }
 }

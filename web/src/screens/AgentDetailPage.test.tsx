@@ -280,6 +280,7 @@ function agent(
     member_id: agentId,
     space_id: space.id,
     computer_id: desiredLifecycle === "retired" ? null : "computer",
+    computer_reachable: desiredLifecycle !== "retired",
     name: "Lin",
     access_level: "member",
     role_text: "Review boundaries.",

@@ -41,7 +41,7 @@ describe("ChannelPage", () => {
         return json([{ channel_id: "dm", space_id: spaceId, other_member: { id: linId, kind: "agent", display_name: "Lin", access_level: "member", permissions: [] }, created_at: "2026-07-25T00:00:00Z" }]);
       }
       if (path.endsWith("/agents") && !init?.method) {
-        return json([{ member_id: linId, activity_status: "working" }]);
+        return json([{ member_id: linId, activity_status: "working", computer_reachable: true }]);
       }
       if (path.endsWith("/computers") && !init?.method) return json([]);
       if (path.endsWith(`/channels/${channelId}/members`) && !init?.method) {
@@ -176,7 +176,7 @@ describe("ChannelPage", () => {
         directMessageCreated = true;
         return json(createdDirectMessage, 201);
       }
-      if (path.endsWith("/agents") && !init?.method) return json([{ member_id: linId, activity_status: "idle" }]);
+      if (path.endsWith("/agents") && !init?.method) return json([{ member_id: linId, activity_status: "idle", computer_reachable: true }]);
       if (path.endsWith("/computers") && !init?.method) return json([]);
       if (path.endsWith(`/channels/${channelId}/members`) && !init?.method) return json({ members: [owner, grace, lin], can_manage: true });
       if (path.endsWith(`/channels/${channelId}/messages`) && !init?.method) return json({ channel_id: channelId, snapshot_channel_seq: 0, messages: [], has_more_before: false, has_more_after: false });

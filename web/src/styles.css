@@ -476,7 +476,8 @@ input[type="radio"] {
   background: var(--warning);
 }
 
-.agent-state--idle i {
+.agent-state--idle i,
+.agent-state--offline i {
   background: var(--status-todo);
 }
 
@@ -548,6 +549,12 @@ input[type="radio"] {
 
 .presence-dot--error {
   background: var(--danger);
+  box-shadow: 0 0 0 2px var(--bg);
+  opacity: 1;
+}
+
+.presence-dot--offline {
+  background: var(--line-strong);
   box-shadow: 0 0 0 2px var(--bg);
   opacity: 1;
 }

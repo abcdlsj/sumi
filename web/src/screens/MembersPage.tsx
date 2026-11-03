@@ -24,7 +24,7 @@ import {
   type Member,
   type Space,
 } from "../api/client";
-import { activityLabel } from "../agentActivity";
+import { activityLabel, agentPresence } from "../agentActivity";
 import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { ListSkeleton } from "../components/Skeleton";
@@ -70,7 +70,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
     queryFn: () => listAgents(space.id),
   });
   const activityByMemberId = new Map(
-    (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
+    (agents.data ?? []).map((agent) => [agent.member_id, agentPresence(agent)] as const),
   );
   const agentByMemberId = new Map((agents.data ?? []).map((agent) => [agent.member_id, agent] as const));
   const currentMember = members.data?.find((member) => member.id === space.current_member_id);
@@ -166,7 +166,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
       {agentsPage ? (
         <dl className="agent-directory-summary" aria-label="Agent directory summary">
           <DirectoryMetric label="Agents" value={agents.data?.length} loading={agents.isPending} />
-          <DirectoryMetric label="Working" value={agents.data ? agents.data.filter((agent) => ["dispatched", "working"].includes(agent.activity_status)).length : undefined} loading={agents.isPending} />
+          <DirectoryMetric label="Working" value={agents.data ? agents.data.filter((agent) => ["dispatched", "working"].includes(agentPresence(agent))).length : undefined} loading={agents.isPending} />
           <DirectoryMetric label="Computers online" value={agents.data ? new Set(agents.data.filter((agent) => agent.computer_reachable && agent.computer_id).map((agent) => agent.computer_id)).size : undefined} loading={agents.isPending} />
           <DirectoryMetric label="Needs attention" value={agents.data ? agents.data.filter((agent) => agent.last_error_code || agent.provision_status === "error").length : undefined} loading={agents.isPending} />
         </dl>

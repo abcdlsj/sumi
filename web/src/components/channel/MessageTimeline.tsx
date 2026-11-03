@@ -3,11 +3,11 @@ import { Link } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
 import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { apiUrl, createTaskFromRootMessage, readThread, type Agent, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
+import { apiUrl, createTaskFromRootMessage, readThread, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
 import { plainTextPreview } from "../../markdownText";
 import { formatClock, formatDayDivider, formatFullDateTime } from "../../time";
-import { AGENT_ACTIVITY_LABELS, useAgentActivity } from "../../agentActivity";
+import { AGENT_ACTIVITY_LABELS, useAgentActivity, type AgentPresence } from "../../agentActivity";
 import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
@@ -54,7 +54,7 @@ export function MessageTimeline({
   channelId: string;
   spaceSlug: string;
   openThread: (threadId: string, trigger?: HTMLButtonElement) => void;
-  activityByMemberId: ReadonlyMap<string, Agent["activity_status"]>;
+  activityByMemberId: ReadonlyMap<string, AgentPresence>;
   workingLabelByMemberId?: ReadonlyMap<string, string>;
   /** The failed Run's stable error code per Agent, reported while that Run is the Agent's latest. */
   errorByMemberId?: ReadonlyMap<string, string>;
@@ -114,6 +114,7 @@ export function MessageTimeline({
   const timelineGroups = groupTimelineMessages([...(page?.messages ?? []), ...outgoingMessages]);
   const workers = workingAgents(page?.messages ?? [], members, activityByMemberId, direct);
   const stopped = stoppedAgents(page?.messages ?? [], members, activityByMemberId, errorByMemberId, direct);
+  const offline = offlineAgents(page?.messages ?? [], members, activityByMemberId, direct);
 
   return (
     <div className="message-timeline-shell">
@@ -219,7 +220,7 @@ export function MessageTimeline({
           );
         })}
       </div>
-      <WorkingStrip workers={workers} steps={workingLabelByMemberId} />
+      {offline.length && !workers.length ? <OfflineStrip offline={offline} /> : <WorkingStrip workers={workers} steps={workingLabelByMemberId} />}
       <StoppedStrip stopped={stopped} errors={errorByMemberId} />
       {showToBottom || newMessageCount > 0 ? (
         <ToBottomButton onClick={scrollToBottom} newMessageCount={newMessageCount} />
@@ -281,7 +282,7 @@ function SystemNoticeGroup({
   );
 }
 
-export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm, outgoing, onRetryOutgoing, onDiscardOutgoing }: { message: Message; activityStatus?: Agent["activity_status"]; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void; outgoing?: OutgoingMessage; onRetryOutgoing?: (item: OutgoingMessage) => void; onDiscardOutgoing?: (key: string) => void }) {
+export function CompactMessage({ message, activityStatus, spaceSlug, members, direct = false, onOpenAgentDm, outgoing, onRetryOutgoing, onDiscardOutgoing }: { message: Message; activityStatus?: AgentPresence; spaceSlug: string; members: Member[]; direct?: boolean; onOpenAgentDm?: (memberId: string) => void; outgoing?: OutgoingMessage; onRetryOutgoing?: (item: OutgoingMessage) => void; onDiscardOutgoing?: (key: string) => void }) {
   return (
     <article className={`thread-message${outgoing ? ` message-row--outgoing message-row--${outgoing.status}` : ""}`} id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} onClick={focusMessage}>
       <MessageAvatar
@@ -331,7 +332,7 @@ function MessageAvatar({
   name: string;
   kind: Member["kind"];
   seed: string;
-  activityStatus?: Agent["activity_status"];
+  activityStatus?: AgentPresence;
   spaceSlug: string;
   onOpenAgentDm?: (memberId: string) => void;
 }) {
@@ -1090,7 +1091,7 @@ const RECENT_WINDOW = 30;
  * recent exchange (they spoke, or someone mentioned them). In a DM the other
  * member is always part of it.
  */
-function workingAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, Agent["activity_status"]>, direct: boolean): Member[] {
+function workingAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, AgentPresence>, direct: boolean): Member[] {
   const recent = messages.slice(-RECENT_WINDOW);
   return members.filter((member) => {
     if (member.kind !== "agent") return false;
@@ -1101,11 +1102,31 @@ function workingAgents(messages: readonly Message[], members: readonly Member[],
   });
 }
 
+/** Agents in this conversation whose Computer is unreachable; they continue once it reconnects. */
+function offlineAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, AgentPresence>, direct: boolean): Member[] {
+  const recent = messages.slice(-RECENT_WINDOW);
+  return members.filter((member) => {
+    if (member.kind !== "agent" || activity.get(member.id) !== "offline") return false;
+    if (direct) return true;
+    return recent.some((message) => message.author.id === member.id || message.mention_all || message.mentions.includes(member.id));
+  });
+}
+
+/** Takes the working line's reserved space, so the timeline does not move. */
+function OfflineStrip({ offline }: { offline: Member[] }) {
+  const names = offline.length === 1 ? `${offline[0].display_name} is` : offline.length === 2 ? `${offline[0].display_name} and ${offline[1].display_name} are` : `${offline[0].display_name} and ${offline.length - 1} others are`;
+  return (
+    <div className="timeline-working timeline-offline" role="status" aria-live="polite">
+      <span className="timeline-working-text">{names} offline · {offline.length === 1 ? "continues when its Computer reconnects" : "they continue when their Computers reconnect"}</span>
+    </div>
+  );
+}
+
 /**
  * Agents whose latest Run failed: idle now, but the failure is newer than anything
  * they said here. A new Run clears it because the Server recomputes the code.
  */
-function stoppedAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, Agent["activity_status"]>, errors: ReadonlyMap<string, string> | undefined, direct: boolean): Member[] {
+function stoppedAgents(messages: readonly Message[], members: readonly Member[], activity: ReadonlyMap<string, AgentPresence>, errors: ReadonlyMap<string, string> | undefined, direct: boolean): Member[] {
   if (!errors?.size) return [];
   const recent = messages.slice(-RECENT_WINDOW);
   return members.filter((member) => {

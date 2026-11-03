@@ -26,6 +26,7 @@ import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { useOutbox } from "../components/channel/outbox";
 import { PixelIdentity, PresenceIdentity, SpaceShell } from "../components/SpaceShell";
+import { agentPresence } from "../agentActivity";
 
 export function ChannelPage() {
   const { spaceSlug, channelSlug } = useParams({
@@ -232,7 +233,7 @@ export function MessageWorkspace({
     });
   }, [location.hash, messages.data]);
   const activityByMemberId = new Map(
-    (agents.data ?? []).map((agent) => [agent.member_id, agent.activity_status] as const),
+    (agents.data ?? []).map((agent) => [agent.member_id, agentPresence(agent)] as const),
   );
   const errorByMemberId = new Map(
     (agents.data ?? []).flatMap((agent) => agent.last_error_code ? [[agent.member_id, agent.last_error_code] as const] : []),
