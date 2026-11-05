@@ -1102,6 +1102,7 @@ impl CollaborationTransaction for MemoryTransaction {
     async fn inbox_for_member(
         &mut self,
         member_id: MemberId,
+        _viewer: MemberId,
         scope: InboxScope,
     ) -> Result<Vec<InboxItemView>, ApplicationError> {
         Ok(self
@@ -1145,6 +1146,7 @@ impl CollaborationTransaction for MemoryTransaction {
     async fn inbox_item_view(
         &mut self,
         item_id: InboxItemId,
+        _viewer: MemberId,
     ) -> Result<InboxItemView, ApplicationError> {
         self.state
             .items

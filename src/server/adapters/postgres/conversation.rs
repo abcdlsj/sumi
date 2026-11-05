@@ -1411,9 +1411,10 @@ impl CollaborationTransaction for PostgresTransaction {
     async fn inbox_for_member(
         &mut self,
         member_id: MemberId,
+        viewer: MemberId,
         scope: InboxScope,
     ) -> Result<Vec<InboxItemView>, ApplicationError> {
-        self.inbox_for_member(member_id, scope).await
+        self.inbox_for_member(member_id, viewer, scope).await
     }
     async fn pending_inbox_items_for_member(
         &mut self,
@@ -1426,8 +1427,9 @@ impl CollaborationTransaction for PostgresTransaction {
     async fn inbox_item_view(
         &mut self,
         item_id: InboxItemId,
+        viewer: MemberId,
     ) -> Result<InboxItemView, ApplicationError> {
-        self.inbox_item_view(item_id).await
+        self.inbox_item_view(item_id, viewer).await
     }
     async fn save_channel(&mut self, channel: Channel) -> Result<(), ApplicationError> {
         self.save_channel(channel).await

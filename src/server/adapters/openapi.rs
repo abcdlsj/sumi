@@ -580,7 +580,8 @@ pub(super) struct InboxItemResponse {
     pub(super) message_id: Option<Uuid>,
     pub(super) sender_member_id: Option<Uuid>,
     pub(super) sender_display_name: Option<String>,
-    /// A bounded preview of the source Message body. Full content is read through the Message API.
+    /// A bounded preview of the source Message body, present only when the reader is a member of
+    /// the source Channel. Full content is read through the Message API.
     pub(super) message_preview: Option<String>,
     pub(super) activity_events: Vec<InboxActivityEventResponse>,
     pub(super) summary: String,

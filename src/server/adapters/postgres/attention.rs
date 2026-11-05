@@ -58,13 +58,16 @@ impl PostgresTransaction {
     pub(super) async fn inbox_item_view(
         &mut self,
         item_id: InboxItemId,
+        viewer: MemberId,
     ) -> Result<InboxItemView, ApplicationError> {
         let row = sqlx::query(
             "SELECT i.id,i.space_id,i.member_id,i.kind,i.strength,i.status,i.available_at,i.created_at,\
                     i.retry_count,i.requeue_count,\
                     i.thread_id,i.message_id,t.channel_id,c.slug AS channel_slug,\
                     m.author_member_id AS sender_member_id,sender.display_name AS sender_name,\
-                    left(m.body_markdown, 512) AS message_preview \
+                    CASE WHEN EXISTS (SELECT 1 FROM channel_members reader \
+                                      WHERE reader.channel_id=c.id AND reader.member_id=$2) \
+                         THEN left(m.body_markdown, 512) END AS message_preview \
              FROM inbox_items i \
              JOIN messages t ON t.id=i.thread_id AND t.placement='root' \
              JOIN channels c ON c.id=t.channel_id \
@@ -73,6 +76,7 @@ impl PostgresTransaction {
              WHERE i.id=$1",
         )
         .bind(item_id.into_uuid())
+        .bind(viewer.into_uuid())
         .fetch_one(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;
@@ -202,6 +206,7 @@ impl PostgresTransaction {
     pub(super) async fn inbox_for_member(
         &mut self,
         member_id: MemberId,
+        viewer: MemberId,
         scope: InboxScope,
     ) -> Result<Vec<InboxItemView>, ApplicationError> {
         let statuses: &[&str] = match scope {
@@ -213,7 +218,9 @@ impl PostgresTransaction {
                     i.retry_count,i.requeue_count,\
                     i.thread_id,i.message_id,t.channel_id,c.slug AS channel_slug,\
                     m.author_member_id AS sender_member_id,sender.display_name AS sender_name,\
-                    left(m.body_markdown, 512) AS message_preview \
+                    CASE WHEN EXISTS (SELECT 1 FROM channel_members reader \
+                                      WHERE reader.channel_id=c.id AND reader.member_id=$3) \
+                         THEN left(m.body_markdown, 512) END AS message_preview \
              FROM inbox_items i \
              JOIN messages t ON t.id=i.thread_id AND t.placement='root' \
              JOIN channels c ON c.id=t.channel_id \
@@ -224,6 +231,7 @@ impl PostgresTransaction {
         )
         .bind(member_id.into_uuid())
         .bind(statuses)
+        .bind(viewer.into_uuid())
         .fetch_all(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;

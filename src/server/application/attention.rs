@@ -37,7 +37,9 @@ impl ReadMemberInbox {
                     return Err(ApplicationError::PermissionDenied);
                 }
             }
-            transaction.inbox_for_member(target_id, scope).await
+            transaction
+                .inbox_for_member(target_id, actor_id, scope)
+                .await
         })
         .await
     }
@@ -85,7 +87,9 @@ impl RequeueDeadItem {
             if let Some(message_id) = source_message_id {
                 transaction.emit(Effect::MessageUpdated(message_id));
             }
-            transaction.inbox_item_view(input.item_id).await
+            transaction
+                .inbox_item_view(input.item_id, input.actor_id)
+                .await
         })
         .await
     }
@@ -130,7 +134,9 @@ impl MarkInboxItemRead {
             item.mark_read(input.now)?;
             transaction.save_inbox_item(item).await?;
             transaction.emit(Effect::InboxChanged(item_view.member_id));
-            transaction.inbox_item_view(input.item_id).await
+            transaction
+                .inbox_item_view(input.item_id, input.actor_id)
+                .await
         })
         .await
     }

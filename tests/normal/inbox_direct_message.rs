@@ -458,3 +458,269 @@ async fn invite_and_accept(
         .error_for_status()?;
     Ok(cookie)
 }
+
+/// A governor reads another Member's Inbox to act on it. Channel membership still decides whether
+/// the source body is visible: the Item stays, the body does not.
+#[tokio::test]
+async fn governor_reads_agent_inbox_without_private_bodies() -> Result<()> {
+    let database = TestDatabase::create("sumi_inbox_visibility").await?;
+    let result = run_agent_inbox_visibility_flow(&database).await;
+    database.drop().await?;
+    result
+}
+
+async fn run_agent_inbox_visibility_flow(database: &TestDatabase) -> Result<()> {
+    let root = tempdir()?;
+    let web_dist = root.path().join("web");
+    let attachments = root.path().join("attachments");
+    std::fs::create_dir(&web_dist)?;
+    std::fs::write(
+        web_dist.join("index.html"),
+        "<!doctype html><title>Sumi</title>",
+    )?;
+
+    let bind = SocketAddr::from(([127, 0, 0, 1], reserve_local_port()?));
+    let server_url = Url::parse(&format!("http://{bind}"))?;
+    let config = root.path().join("server.toml");
+    write_server_config(&config, bind, &database.url, &attachments, &web_dist)?;
+    let mut server = spawn_server(&config)?;
+    wait_for_health(&server_url).await?;
+
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let owner = register_with(&client, &server_url, "Ada_Lovelace", "ada@example.test").await?;
+    let space = create_space_with_slug(&client, &server_url, &owner, "sumi-lab").await?;
+    let space_id = space["id"].as_str().context("Space ID")?.to_owned();
+    let owner_member_id = space["owner_member_id"]
+        .as_str()
+        .context("owner Member ID")?
+        .to_owned();
+
+    // Grace owns the private conversation with the Agent; the Space Owner is not a participant.
+    let grace = invite_and_accept(
+        &client,
+        &server_url,
+        &owner,
+        &space_id,
+        "grace@example.test",
+    )
+    .await?;
+    let members: Value = client
+        .get(server_url.join(&format!("/api/v1/spaces/{space_id}/members"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let grace_member_id = members
+        .as_array()
+        .context("Member list")?
+        .iter()
+        .find(|member| member["id"] != Value::String(owner_member_id.clone()))
+        .and_then(|member| member["id"].as_str())
+        .context("Grace Member ID")?
+        .to_owned();
+    client
+        .patch(server_url.join(&format!(
+            "/api/v1/spaces/{space_id}/members/{grace_member_id}"
+        ))?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header(header::COOKIE, &owner)
+        .json(&serde_json::json!({"access_level": "admin"}))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let pool = sqlx::PgPool::connect(&database.url).await?;
+    let agent_member_id = insert_idle_agent(&pool, &space_id).await?;
+
+    let private: Value = client
+        .post(server_url.join(&format!("/api/v1/spaces/{space_id}/channels"))?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header(header::COOKIE, &grace)
+        .json(&serde_json::json!({
+            "slug": "private-plan",
+            "kind": "private",
+            "agent_member_ids": [agent_member_id]
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let private_channel_id = private["id"].as_str().context("private Channel ID")?;
+
+    let private_body = "private channel plan";
+    let private_message: Value = client
+        .post(server_url.join(&format!("/api/v1/channels/{private_channel_id}/messages"))?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header(header::COOKIE, &grace)
+        .json(&serde_json::json!({
+            "body_markdown": private_body,
+            "mentions": [agent_member_id],
+            "mention_all": false,
+            "attachment_ids": []
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let private_thread_id = private_message["thread_id"]
+        .as_str()
+        .context("private Thread ID")?
+        .to_owned();
+
+    let dm_body = "direct message plan";
+    let dm: Value = client
+        .post(server_url.join(&format!("/api/v1/spaces/{space_id}/dms"))?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header(header::COOKIE, &grace)
+        .json(&serde_json::json!({"member_id": agent_member_id}))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let dm_channel_id = dm["channel_id"].as_str().context("DM Channel ID")?;
+    client
+        .post(server_url.join(&format!("/api/v1/channels/{dm_channel_id}/messages"))?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header(header::COOKIE, &grace)
+        .json(&serde_json::json!({
+            "body_markdown": dm_body,
+            "mentions": [],
+            "mention_all": false,
+            "attachment_ids": []
+        }))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // The governor sees the Agent's Items, their source summary and their Message IDs, but neither
+    // private body.
+    let agent_inbox: Value = client
+        .get(server_url.join(&format!("/api/v1/members/{agent_member_id}/inbox"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let agent_inbox = agent_inbox.as_array().context("Agent Inbox")?;
+    ensure!(agent_inbox.len() == 2, "{agent_inbox:?}");
+    ensure!(
+        agent_inbox
+            .iter()
+            .all(|item| item["message_id"].is_string()),
+        "the governor still sees which Message each Item came from: {agent_inbox:?}"
+    );
+    for item in agent_inbox {
+        ensure!(
+            item["message_preview"].is_null(),
+            "a non-member governor received a private body: {item:?}"
+        );
+    }
+
+    // The source itself stays closed to a non-member, so the Inbox is not the weaker path.
+    let private_read = client
+        .get(server_url.join(&format!("/api/v1/channels/{private_channel_id}/messages"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?;
+    ensure!(
+        private_read.status() == StatusCode::FORBIDDEN
+            || private_read.status() == StatusCode::NOT_FOUND,
+        "the private Channel admitted a non-member: {}",
+        private_read.status()
+    );
+    let private_thread = client
+        .get(server_url.join(&format!("/api/v1/threads/{private_thread_id}"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?;
+    ensure!(
+        private_thread.status() == StatusCode::FORBIDDEN
+            || private_thread.status() == StatusCode::NOT_FOUND,
+        "the private Thread admitted a non-member: {}",
+        private_thread.status()
+    );
+    let dm_read = client
+        .get(server_url.join(&format!("/api/v1/channels/{dm_channel_id}/messages"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?;
+    ensure!(
+        dm_read.status() == StatusCode::FORBIDDEN || dm_read.status() == StatusCode::NOT_FOUND,
+        "the DM admitted a non-participant: {}",
+        dm_read.status()
+    );
+
+    // Visibility follows membership, not governance: Grace governs the Space and belongs to both
+    // conversations, so the same endpoint returns the bodies to her.
+    let grace_inbox: Value = client
+        .get(server_url.join(&format!("/api/v1/members/{agent_member_id}/inbox"))?)
+        .header(header::COOKIE, &grace)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let grace_inbox = grace_inbox
+        .as_array()
+        .context("Agent Inbox for a member governor")?;
+    ensure!(grace_inbox.len() == 2, "{grace_inbox:?}");
+    let mut previews = grace_inbox
+        .iter()
+        .filter_map(|item| item["message_preview"].as_str())
+        .collect::<Vec<_>>();
+    previews.sort_unstable();
+    let mut expected = vec![dm_body, private_body];
+    expected.sort_unstable();
+    ensure!(
+        previews == expected,
+        "a member governor lost previews it may read: {previews:?}"
+    );
+
+    drop(pool);
+    server.interrupt().await?;
+    Ok(())
+}
+
+/// Inserts an active Agent without a daemon. Attention routing only needs the Member and its
+/// Computer row, and this test never dispatches a Run.
+async fn insert_idle_agent(pool: &sqlx::PgPool, space_id: &str) -> Result<String> {
+    let space_id = Uuid::parse_str(space_id).context("Space ID")?;
+    let computer_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO computers \
+         (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) \
+         VALUES ($1,$2,'test-computer','localhost','linux',NULL,'offline',1,now())",
+    )
+    .bind(computer_id)
+    .bind(space_id)
+    .execute(pool)
+    .await?;
+    let agent_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO members (id,space_id,kind,display_name,access_level,created_at) \
+         VALUES ($1,$2,'agent','Lin','member',now())",
+    )
+    .bind(agent_id)
+    .bind(space_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO agents \
+         (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) \
+         VALUES ($1,$2,$3,'Assist',1,'active','builtin',now())",
+    )
+    .bind(agent_id)
+    .bind(space_id)
+    .bind(computer_id)
+    .execute(pool)
+    .await?;
+    Ok(agent_id.to_string())
+}
