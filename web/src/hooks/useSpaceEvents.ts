@@ -110,6 +110,13 @@ export function useSpaceEvents(
         void queryClient.invalidateQueries({ queryKey: ["agents", spaceId] });
         void queryClient.invalidateQueries({ queryKey: ["agent"] });
       }
+      // A new Agent is also a new Member, so the roster changes with it and the
+      // Server emits agent.created instead of member.changed.
+      if (payload.type === "agent.created") {
+        void queryClient.invalidateQueries({ queryKey: ["agents", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["agent"] });
+        void queryClient.invalidateQueries({ queryKey: ["members", spaceId] });
+      }
       if (payload.type === "computer.changed") {
         void queryClient.invalidateQueries({ queryKey: ["computers", spaceId] });
       }

@@ -97,6 +97,37 @@ describe("useSpaceEvents", () => {
     await waitFor(() => expect(screen.getByLabelText("Channel members")).toHaveTextContent("Ada,Grace"));
     expect(fetchMembers).toHaveBeenCalledTimes(2);
   });
+
+  it("refetches the Agent roster and the Member list after an Agent is created", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let members = ["Ada"];
+    let agents = ["Lin"];
+    const fetchMembers = vi.fn(async () => members);
+    const fetchAgents = vi.fn(async () => agents);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AgentRosterProbe spaceId="space-1" fetchMembers={fetchMembers} fetchAgents={fetchAgents} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Members")).toHaveTextContent("Ada"));
+    expect(screen.getByLabelText("Agents")).toHaveTextContent("Lin");
+
+    members = ["Ada", "Mira"];
+    agents = ["Lin", "Mira"];
+    FakeEventSource.instances[0].emit("agent.created", {
+      type: "agent.created",
+      occurred_at: new Date(Date.now() + 1_000).toISOString(),
+      data: { member_id: "019c0000-0000-7000-8000-000000000040" },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Members")).toHaveTextContent("Ada,Mira"));
+    expect(screen.getByLabelText("Agents")).toHaveTextContent("Lin,Mira");
+  });
 });
 
 function MembersProbe({
@@ -114,4 +145,24 @@ function MembersProbe({
     queryFn: fetchMembers,
   });
   return <output aria-label="Channel members">{query.data?.join(",") ?? ""}</output>;
+}
+
+function AgentRosterProbe({
+  spaceId,
+  fetchMembers,
+  fetchAgents,
+}: {
+  spaceId: string;
+  fetchMembers: () => Promise<string[]>;
+  fetchAgents: () => Promise<string[]>;
+}) {
+  useSpaceEvents(spaceId);
+  const members = useQuery({ queryKey: ["members", spaceId], queryFn: fetchMembers });
+  const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: fetchAgents });
+  return (
+    <>
+      <output aria-label="Members">{members.data?.join(",") ?? ""}</output>
+      <output aria-label="Agents">{agents.data?.join(",") ?? ""}</output>
+    </>
+  );
 }
