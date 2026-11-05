@@ -322,6 +322,22 @@ pub fn write_server_config(
     Ok(())
 }
 
+/// Same as `write_server_config`, plus the separately deployed Web UI origin.
+pub fn write_server_config_with_web_origin(
+    path: &Path,
+    bind: SocketAddr,
+    database_url: &str,
+    attachment_dir: &Path,
+    web_dist: &Path,
+    web_origin: &Url,
+) -> Result<()> {
+    write_server_config(path, bind, database_url, attachment_dir, web_dist)?;
+    let mut contents = std::fs::read_to_string(path)?;
+    contents.push_str(&format!("web_origin = '{web_origin}'\n"));
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
 pub fn write_computer_config(path: &Path, server: &Url, state_dir: &Path) -> Result<()> {
     std::fs::write(
         path,

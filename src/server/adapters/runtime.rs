@@ -54,9 +54,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     };
     let shutdown = state.shutdown.clone();
     let mut api = http::api_router(state.clone(), 100 * 1024 * 1024);
-    if let Some(web_origin) = &web_origin {
-        api = http::allow_web_origin(api, web_origin);
-    }
+    api = http::allow_web_origin(api, web_origin.as_deref());
     let dispatcher = tokio::spawn(dispatch_available_work_forever(state.clone()));
     let space_event_listener =
         tokio::spawn(state.space_events.clone().listen_forever(pool.clone()));

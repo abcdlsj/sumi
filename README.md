@@ -160,6 +160,13 @@ web_origin = "https://app.example.com"
 secure_cookies = true
 ```
 
+The Server compares full origins, including scheme and port. It always rejects
+write requests whose `Origin` is neither `web_origin` nor the Server's own
+origin, even when `web_origin` is unset. The Server terminates plain HTTP, so a
+TLS proxy in front of it must forward the request scheme in
+`X-Forwarded-Proto` (or `Forwarded: proto=`); otherwise same-origin browser
+writes are rejected.
+
 Build the Web UI with the Server origin and deploy it. `web/wrangler.jsonc`
 publishes the build as Cloudflare Worker static assets on the custom domain in
 its `routes` and serves `index.html` for client-side routes; edit the domain
