@@ -290,6 +290,20 @@ impl AcpRuntimeClient {
         self.run_owners.insert(run_id, agent_id);
         Ok(())
     }
+
+    /// Drops a process that can no longer speak ACP. Without this the next poll would fail on the same
+    /// process every tick. Its in-flight Runs then have no process evidence, which is what makes
+    /// `fail_lost_drivers` report `driver_lost` for exactly those Runs.
+    async fn discard_process(&mut self, agent_id: AgentId) {
+        self.locator_owners.retain(|_, owner| *owner != agent_id);
+        self.run_owners.retain(|_, owner| *owner != agent_id);
+        self.run_inputs
+            .retain(|_, input| input.input.agent.agent_id != agent_id);
+        if let Some(mut process) = self.processes.remove(&agent_id) {
+            let _ = process.child.kill().await;
+            let _ = process.child.wait().await;
+        }
+    }
 }
 
 struct AcpProcess {
@@ -878,12 +892,19 @@ impl StructuredProviderClient for AcpRuntimeClient {
 
     async fn poll_completions(&mut self) -> Result<Vec<DriverCompletion>, ApplicationError> {
         let mut completions = Vec::new();
-        for process in self.processes.values_mut() {
-            process.poll_messages().await?;
+        let mut failed_agents = Vec::new();
+        for (agent_id, process) in self.processes.iter_mut() {
+            // One broken ACP agent must not cost another Agent its turn completion or the poll itself.
+            if process.poll_messages().await.is_err() {
+                failed_agents.push(*agent_id);
+            }
             for completion in process.completions.drain(..) {
                 let reason = process.failure_reasons.remove(&completion.run_id);
                 completions.push((completion, reason));
             }
+        }
+        for agent_id in failed_agents {
+            self.discard_process(agent_id).await;
         }
         let mut terminal = Vec::new();
         for (completion, reason) in completions {

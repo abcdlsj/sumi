@@ -154,6 +154,7 @@ Driver：
 - 失败错误码固定为 driver_error、driver_lost、computer_restarted、session_unavailable、agent_unavailable、invalid_command、unhandled_items、internal；Failed Run 必须带 error_code，其他终态不得带 error_code。
 - Driver 临时错误在 Computer 内最多尝试 3 次（首次加 2 次重试）；最终失败才上报，Server 只对该 Run 计一次 Item retry。
 - Computer 离线是可达性问题，不是 Run 失败；离线期间 Run 保持原状态。
+- 一个 ACP 进程失败只让其 Agent 的 Run 以 driver_lost 失败；同一次轮询中其他 Agent 的完成照常投递，不使连接循环报错。
 - `computer.max_concurrent_runs` 只是内存保护阈值，不是调度器；超过上限的 Run 排队等待，不因等待失败。
 - Agent restart 先请求 active Run graceful stop；有限等待后按 computer_restarted 收尾并保留结果 outbox。
 - yield 对本次 Items 逐条给出 handled、released 或 deferred；deferred 用 Item 的 available_at 表达。
