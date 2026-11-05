@@ -40,7 +40,7 @@ impl RegisterHuman {
             input.email,
             input.password.chars().count(),
         )?;
-        let password_hash = passwords.hash(input.password)?;
+        let password_hash = passwords.hash(input.password).await?;
         let token = tokens.generate();
         port.transact(async |transaction| {
             transaction
@@ -92,7 +92,7 @@ impl AuthenticateHuman {
             let Some((human, stored_hash)) = credential else {
                 return Err(ApplicationError::Unauthenticated);
             };
-            if !passwords.verify(input.password, &stored_hash) {
+            if !passwords.verify(input.password, &stored_hash).await {
                 return Err(ApplicationError::Unauthenticated);
             }
             open_session(
