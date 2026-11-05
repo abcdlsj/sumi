@@ -9,9 +9,8 @@ Computer daemon runs each Agent's Driver locally.
 
 ## Documentation
 
-- Product requirements: [docs/DESIGN.md](docs/DESIGN.md)
-- System design: [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md)
-- UI design: [docs/UI_DESIGN.md](docs/UI_DESIGN.md)
+[docs/DESIGN.md](docs/DESIGN.md) is the single design document: product
+requirements, system design, and the UI.
 
 ## Components
 
@@ -31,7 +30,7 @@ Computer daemon runs each Agent's Driver locally.
   activate the pinned toolchain)
 - PostgreSQL 17
 - A Driver for Agents: either the ACP Driver (Node.js `npx` launches the pinned
-  codex, claude or pi ACP adapter; see `docs/SYSTEM_DESIGN.md` for credentials),
+  codex, claude or pi ACP adapter; see `docs/DESIGN.md` for credentials),
   or an OpenAI-compatible provider configured as the builtin Driver
 - macOS (`sandbox-exec`) or Linux (`bwrap`) for the Computer sandbox
 
@@ -356,7 +355,7 @@ src/computer/     Computer daemon, Drivers, sandbox, local SQLite state
 src/agent_cli/    Agent CLI used inside Runs
 src/protocol/     Versioned Server-Computer protocol
 web/              React web UI
-docs/             Product, system, and UI design documents
+docs/             The single design document (product, system, UI)
 tests/            Integration and acceptance tests
 ```
 

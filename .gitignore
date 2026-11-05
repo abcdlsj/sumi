@@ -9,7 +9,6 @@
 /scripts/ui-demo/.runtime/
 /.sumi/
 /.claude/
-/.local/
 .env
 .env.*
 !.env.example
