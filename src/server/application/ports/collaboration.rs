@@ -23,9 +23,12 @@ pub(in crate::server) trait CollaborationTransaction {
         member_id: MemberId,
         space_id: SpaceId,
     ) -> Result<Option<SpaceMemberView>, ApplicationError>;
+    /// `viewer` is the Member whose read is being projected. A governor reading another Member's
+    /// Inbox is not a Channel member, so the source body stays out of reach.
     async fn inbox_for_member(
         &mut self,
         member_id: MemberId,
+        viewer: MemberId,
         scope: InboxScope,
     ) -> Result<Vec<InboxItemView>, ApplicationError>;
     async fn pending_inbox_items_for_member(
@@ -36,6 +39,7 @@ pub(in crate::server) trait CollaborationTransaction {
     async fn inbox_item_view(
         &mut self,
         item_id: InboxItemId,
+        viewer: MemberId,
     ) -> Result<InboxItemView, ApplicationError>;
     async fn save_channel(&mut self, channel: Channel) -> Result<(), ApplicationError>;
     async fn set_thread_subscription(

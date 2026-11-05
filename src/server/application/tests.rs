@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use time::OffsetDateTime;
@@ -1102,6 +1103,7 @@ impl CollaborationTransaction for MemoryTransaction {
     async fn inbox_for_member(
         &mut self,
         member_id: MemberId,
+        _viewer: MemberId,
         scope: InboxScope,
     ) -> Result<Vec<InboxItemView>, ApplicationError> {
         Ok(self
@@ -1145,6 +1147,7 @@ impl CollaborationTransaction for MemoryTransaction {
     async fn inbox_item_view(
         &mut self,
         item_id: InboxItemId,
+        _viewer: MemberId,
     ) -> Result<InboxItemView, ApplicationError> {
         self.state
             .items
@@ -4761,12 +4764,13 @@ fn complete_run_input(run_id: RunId, item_id: InboxItemId) -> CompleteRunInput {
 
 struct StubPasswords;
 
+#[async_trait]
 impl PasswordPort for StubPasswords {
-    fn hash(&self, password: &str) -> Result<String, ApplicationError> {
+    async fn hash(&self, password: &str) -> Result<String, ApplicationError> {
         Ok(format!("hashed:{password}"))
     }
 
-    fn verify(&self, password: &str, stored_hash: &str) -> bool {
+    async fn verify(&self, password: &str, stored_hash: &str) -> bool {
         stored_hash == format!("hashed:{password}")
     }
 }

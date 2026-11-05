@@ -83,6 +83,49 @@ async fn run_registration_space_flow(database: &TestDatabase) -> Result<()> {
     ensure!(registration.user.email == "ada@example.test");
     ensure!(registration.next == "create_space");
 
+    // Login goes through password verification, which must authenticate the stored hash and
+    // reject a wrong password without opening a Session.
+    let login = client
+        .post(server_url.join("/api/v1/auth/login")?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .json(&serde_json::json!({
+            "email": "ada@example.test",
+            "password": "correct horse battery staple"
+        }))
+        .send()
+        .await?;
+    ensure!(
+        login.status() == StatusCode::OK,
+        "login: {}",
+        login.status()
+    );
+    let login_cookie = session_cookie(&login)?;
+    let logged_in: serde_json::Value = login.json().await?;
+    ensure!(logged_in["user"]["id"].as_str() == Some(registration.user.id.to_string().as_str()));
+    let current: UserResponse = client
+        .get(server_url.join("/api/v1/auth/me")?)
+        .header(header::COOKIE, &login_cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    ensure!(current.id == registration.user.id);
+    let wrong_password = client
+        .post(server_url.join("/api/v1/auth/login")?)
+        .header("idempotency-key", Uuid::now_v7().to_string())
+        .json(&serde_json::json!({
+            "email": "ada@example.test",
+            "password": "wrong horse battery staple"
+        }))
+        .send()
+        .await?;
+    ensure!(
+        wrong_password.status() == StatusCode::UNAUTHORIZED,
+        "a wrong password opened a Session: {}",
+        wrong_password.status()
+    );
+
     let current_user: UserResponse = client
         .get(server_url.join("/api/v1/auth/me")?)
         .header(header::COOKIE, &cookie)

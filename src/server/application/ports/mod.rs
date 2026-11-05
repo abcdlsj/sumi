@@ -61,10 +61,13 @@ pub(in crate::server) trait AttachmentObjectPort: Send + Sync {
     async fn get(&self, object_key: &str) -> Result<Vec<u8>, ApplicationError>;
 }
 
+/// Password hashing is CPU-bound and deliberately slow, so implementations must keep it off the
+/// async runtime threads.
+#[async_trait]
 pub(in crate::server) trait PasswordPort {
-    fn hash(&self, password: &str) -> Result<String, ApplicationError>;
+    async fn hash(&self, password: &str) -> Result<String, ApplicationError>;
 
-    fn verify(&self, password: &str, stored_hash: &str) -> bool;
+    async fn verify(&self, password: &str, stored_hash: &str) -> bool;
 }
 
 pub(in crate::server) trait SessionTokenPort {

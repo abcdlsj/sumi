@@ -68,6 +68,10 @@ name = "space_invitation"
 path = "tests/normal/space_invitation.rs"
 
 [[test]]
+name = "server_origin"
+path = "tests/normal/server_origin.rs"
+
+[[test]]
 name = "werewolf_communication"
 path = "tests/werewolf_communication.rs"
 

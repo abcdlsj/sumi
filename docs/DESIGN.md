@@ -235,7 +235,8 @@ Driver：
 ### 安全与内容保护
 
 - Browser Session、Computer Token、Driver token 三个认证面不可互换；Server 只保存 token hash。
-- Web UI 可与 Server 分开部署：`server.web_origin` 指定 Web UI 的 origin，Web UI 构建时以 `VITE_SUMI_API_ORIGIN` 指定 Server origin。两者必须同站，使 Browser Session cookie 保持 SameSite=Lax。Server 只对该 origin 开放带凭据的 CORS；写请求携带的 `Origin` 既不是该 origin 也不是 Server 自身 host 时返回 permission_denied；不带 `Origin` 的 bearer 客户端不受影响。Computer 配对链接指向该 origin。
+- Web UI 可与 Server 分开部署：`server.web_origin` 指定 Web UI 的 origin，Web UI 构建时以 `VITE_SUMI_API_ORIGIN` 指定 Server origin。两者必须同站，使 Browser Session cookie 保持 SameSite=Lax。Server 只对该 origin 开放带凭据的 CORS；Computer 配对链接指向该 origin。
+- 写请求（GET、HEAD、OPTIONS 之外）携带的 `Origin` 必须等于 `server.web_origin` 或 Server 自身 origin，比较包含 scheme、host 与 port 全量，否则返回 permission_denied。该校验不依赖 `web_origin` 是否配置。Server 自身 origin 由 `Host` 与请求 scheme 组成，scheme 取 `Forwarded` 的 `proto` 或 `X-Forwarded-Proto`，都缺失时取 `http`；TLS 由反向代理终止时必须转发该头，否则同源写请求被拒绝。不带 `Origin` 的 bearer 客户端不受影响。
 - Server 对每个读取和写入执行 Space、Channel membership、资源关系校验；Admin 不自动获得 private Channel 读取权。
 - Task 不引入独立 ACL；可见范围由兼容的 Linked Threads 成员集合决定。
 - Permission 只控制一个特定 Action；Agent Permission 包含 channel.create、channel.invite、channel.remove 和 agent.create；只有 Human Owner/Admin 可授予或撤销。

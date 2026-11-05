@@ -1586,7 +1586,11 @@ async fn channel_member_activity_preserves_order_and_stops_after_leave() {
         let watcher_items = adapter
             .transact(async |transaction| {
                 transaction
-                    .inbox_for_member(MemberId::from_uuid(watcher), InboxScope::Queue)
+                    .inbox_for_member(
+                        MemberId::from_uuid(watcher),
+                        MemberId::from_uuid(watcher),
+                        InboxScope::Queue,
+                    )
                     .await
             })
             .await
