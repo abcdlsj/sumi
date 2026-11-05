@@ -696,34 +696,28 @@ where
             incoming=next_server_frame(&mut reader, &mut pending_server_frames)=>{
                 match incoming? {
                     ServerFrame::Command{envelope}=>{
-                        let channel_activity = if let crate::protocol::computer::Command::RunStart(start) = &envelope.command {
-                            Some(fetch_channel_activity(
-                                &mut reader,
-                                &mut writer,
-                                &mut pending_server_frames,
-                                &mut pending_activity_results,
-                                storage,
-                                ChannelActivityRequest {
-                                    run_id: start.run_id,
-                                    agent_id: start.agent_id,
-                                    channel_id: start.focus.channel_id,
-                                    through_sequence: start.channel_snapshot_sequence,
-                                },
-                            ).await?)
-                        } else {
-                            None
-                        };
-                        for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
-                            send_json(&mut writer, &frame).await?;
-                        }
-                        RunPipelineService::dispatch(
+                        // A rejected command leaves local state and the outbox untouched, so only an
+                        // applicable one runs the Driver pipeline.
+                        if let CommandActivity::Ready(channel_activity) = resolve_command_activity(
+                            &mut reader,
+                            &mut writer,
+                            &mut pending_server_frames,
+                            &mut pending_activity_results,
                             storage,
-                            driver,
-                            homes,
-                            max_concurrent_runs,
-                        )
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error))?;
+                            &envelope,
+                        ).await? {
+                            for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
+                                send_json(&mut writer, &frame).await?;
+                            }
+                            RunPipelineService::dispatch(
+                                storage,
+                                driver,
+                                homes,
+                                max_concurrent_runs,
+                            )
+                            .await
+                            .map_err(|error| anyhow::anyhow!(error))?;
+                        }
                         send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
                     }
                     ServerFrame::Receipt{receipt}=>{
@@ -847,6 +841,100 @@ struct ChannelActivityRequest {
     through_sequence: u64,
 }
 
+/// One RunStart Channel activity read. A query the Server cannot answer is a command-level failure,
+/// not a connection failure.
+enum ChannelActivityFetch {
+    Ready(crate::protocol::computer::ChannelActivitySnapshot),
+    Rejected(crate::protocol::computer::ChannelActivityQueryErrorCode),
+}
+
+/// What the connection loop does with one incoming command after its Channel activity read.
+enum CommandActivity {
+    /// Apply the command; a RunStart carries the snapshot its Driver needs.
+    Ready(Option<crate::protocol::computer::ChannelActivitySnapshot>),
+    /// The command was rejected on the wire and local state was not touched.
+    Rejected,
+}
+
+/// Reads the Channel activity a RunStart needs, rejecting only that command when the Server cannot
+/// answer the query. Terminating the connection instead would replay a command this Computer cannot
+/// apply, and every replay would fail the same way.
+async fn resolve_command_activity<P, R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    pending: &mut VecDeque<ServerFrame>,
+    pending_activity_results: &mut BTreeMap<
+        crate::ids::QueryId,
+        crate::protocol::computer::ChannelActivityResultEnvelope,
+    >,
+    storage: &mut P,
+    envelope: &crate::protocol::computer::CommandEnvelope,
+) -> anyhow::Result<CommandActivity>
+where
+    P: TransactionPort,
+    R: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    use crate::protocol::computer::{Command, CommandOutcome, CommandResult, ComputerFrame};
+
+    let Command::RunStart(start) = &envelope.command else {
+        return Ok(CommandActivity::Ready(None));
+    };
+    let activity = fetch_channel_activity(
+        reader,
+        writer,
+        pending,
+        pending_activity_results,
+        storage,
+        ChannelActivityRequest {
+            run_id: start.run_id,
+            agent_id: start.agent_id,
+            channel_id: start.focus.channel_id,
+            through_sequence: start.channel_snapshot_sequence,
+        },
+    )
+    .await?;
+    let code = match activity {
+        ChannelActivityFetch::Ready(snapshot) => return Ok(CommandActivity::Ready(Some(snapshot))),
+        ChannelActivityFetch::Rejected(code) => channel_activity_rejection_code(code),
+    };
+    tracing::warn!(
+        command_id = %envelope.command_id.into_uuid(),
+        sequence = envelope.sequence.0,
+        run_id = %start.run_id,
+        error_code = ?code,
+        "Computer command rejected"
+    );
+    send_json(
+        writer,
+        &ComputerFrame::CommandResult {
+            result: CommandResult {
+                command_id: envelope.command_id,
+                sequence: envelope.sequence,
+                outcome: CommandOutcome::Rejected { code },
+            },
+        },
+    )
+    .await?;
+    Ok(CommandActivity::Rejected)
+}
+
+/// The Server fails the rejected Run with this code, so it must describe why the Computer could not
+/// start it.
+fn channel_activity_rejection_code(
+    code: crate::protocol::computer::ChannelActivityQueryErrorCode,
+) -> crate::protocol::computer::ComputerErrorCode {
+    use crate::protocol::computer::{ChannelActivityQueryErrorCode, ComputerErrorCode};
+
+    match code {
+        ChannelActivityQueryErrorCode::InvalidRequest
+        | ChannelActivityQueryErrorCode::PermissionDenied => ComputerErrorCode::InvalidCommand,
+        ChannelActivityQueryErrorCode::Unavailable | ChannelActivityQueryErrorCode::Internal => {
+            ComputerErrorCode::Internal
+        }
+    }
+}
+
 async fn fetch_channel_activity<P, R, W>(
     reader: &mut R,
     writer: &mut W,
@@ -857,7 +945,7 @@ async fn fetch_channel_activity<P, R, W>(
     >,
     storage: &mut P,
     request: ChannelActivityRequest,
-) -> anyhow::Result<crate::protocol::computer::ChannelActivitySnapshot>
+) -> anyhow::Result<ChannelActivityFetch>
 where
     P: TransactionPort,
     R: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -934,27 +1022,32 @@ where
             }
         };
         pending.extend(deferred);
-        let result = channel_activity_snapshot_from_result(result)?;
+        let result = match channel_activity_fetch(result) {
+            ChannelActivityFetch::Ready(snapshot) => snapshot,
+            rejected @ ChannelActivityFetch::Rejected(_) => return Ok(rejected),
+        };
         let Some(last) = result.messages.last().map(|entry| entry.message.sequence) else {
             break;
         };
         next_after = last;
         messages.extend(result.messages);
     }
-    Ok(ChannelActivitySnapshot {
+    Ok(ChannelActivityFetch::Ready(ChannelActivitySnapshot {
         channel_id: request.channel_id,
         snapshot_sequence: request.through_sequence,
         messages,
-    })
+    }))
 }
 
-fn channel_activity_snapshot_from_result(
+fn channel_activity_fetch(
     envelope: crate::protocol::computer::ChannelActivityResultEnvelope,
-) -> anyhow::Result<crate::protocol::computer::ChannelActivitySnapshot> {
+) -> ChannelActivityFetch {
     match envelope.result {
-        crate::protocol::computer::ChannelActivityQueryResult::Snapshot(snapshot) => Ok(snapshot),
+        crate::protocol::computer::ChannelActivityQueryResult::Snapshot(snapshot) => {
+            ChannelActivityFetch::Ready(snapshot)
+        }
         crate::protocol::computer::ChannelActivityQueryResult::Unavailable { code } => {
-            Err(anyhow::anyhow!("Channel activity query failed: {code:?}"))
+            ChannelActivityFetch::Rejected(code)
         }
     }
 }
@@ -1275,27 +1368,240 @@ mod tests {
         assert!(pending.contains_key(&other));
     }
 
-    #[test]
-    fn failed_activity_query_does_not_produce_a_snapshot() {
+    /// A Server end of the Computer connection in memory: it answers RunStart Channel activity
+    /// queries so a test can drive the real command path without a socket.
+    #[derive(Default)]
+    struct FakeServerState {
+        incoming: VecDeque<ServerFrame>,
+        written: Vec<ComputerFrame>,
+        closed: bool,
+        refuse_activity_queries: Option<crate::protocol::computer::ChannelActivityQueryErrorCode>,
+    }
+
+    #[derive(Clone)]
+    struct FakeServer(std::rc::Rc<std::cell::RefCell<FakeServerState>>);
+
+    impl FakeServer {
+        fn new(
+            refuse_activity_queries: Option<
+                crate::protocol::computer::ChannelActivityQueryErrorCode,
+            >,
+        ) -> Self {
+            Self(std::rc::Rc::new(std::cell::RefCell::new(FakeServerState {
+                refuse_activity_queries,
+                ..FakeServerState::default()
+            })))
+        }
+
+        fn written(&self) -> Vec<ComputerFrame> {
+            self.0.borrow().written.clone()
+        }
+
+        fn close(&self) {
+            self.0.borrow_mut().closed = true;
+        }
+    }
+
+    impl Sink<WebSocketMessage> for FakeServer {
+        type Error = tokio_tungstenite::tungstenite::Error;
+
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn start_send(
+            self: std::pin::Pin<&mut Self>,
+            message: WebSocketMessage,
+        ) -> Result<(), Self::Error> {
+            use crate::protocol::computer::{
+                ChannelActivityQueryResult, ChannelActivityResultEnvelope, ComputerFrame,
+                ServerFrame,
+            };
+
+            let WebSocketMessage::Text(encoded) = message else {
+                return Ok(());
+            };
+            let frame: ComputerFrame = serde_json::from_str(&encoded).map_err(|_| {
+                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Computer wrote a frame the Server cannot read",
+                ))
+            })?;
+            let mut state = self.0.borrow_mut();
+            if let (ComputerFrame::ChannelActivityQuery { query }, Some(code)) =
+                (&frame, state.refuse_activity_queries)
+            {
+                state
+                    .incoming
+                    .push_back(ServerFrame::ChannelActivityResult {
+                        result: ChannelActivityResultEnvelope {
+                            query_id: query.query_id,
+                            result: ChannelActivityQueryResult::Unavailable { code },
+                        },
+                    });
+            }
+            state.written.push(frame);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    impl futures_util::Stream for FakeServer {
+        type Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>;
+
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            let mut state = self.0.borrow_mut();
+            if state.closed {
+                return std::task::Poll::Ready(None);
+            }
+            match state.incoming.pop_front() {
+                Some(frame) => std::task::Poll::Ready(Some(Ok(WebSocketMessage::Text(
+                    serde_json::to_string(&frame).unwrap().into(),
+                )))),
+                None => std::task::Poll::Pending,
+            }
+        }
+    }
+
+    /// A RunStart whose Channel activity query the Server refuses is a business failure, not a
+    /// transport failure: the command is rejected on the wire and the connection keeps serving
+    /// commands. Dropping the connection instead replayed the same command forever.
+    #[tokio::test]
+    async fn a_refused_activity_query_rejects_the_run_start_and_keeps_the_connection() {
         use crate::protocol::computer::{
-            ChannelActivityQueryErrorCode, ChannelActivityQueryResult,
-            ChannelActivityResultEnvelope,
+            ChannelActivityQueryErrorCode, CommandOutcome, ComputerErrorCode, ComputerFrame,
         };
 
-        let result = channel_activity_snapshot_from_result(ChannelActivityResultEnvelope {
-            query_id: crate::ids::QueryId::from_uuid(Uuid::now_v7()),
-            result: ChannelActivityQueryResult::Unavailable {
-                code: ChannelActivityQueryErrorCode::Unavailable,
-            },
-        });
-        assert!(result.is_err());
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = SqliteAdapter::open(&directory.path().join("daemon.db"))
+            .await
+            .unwrap();
+        let mut reader = FakeServer::new(Some(ChannelActivityQueryErrorCode::PermissionDenied));
+        let mut writer = reader.clone();
+        let mut pending = VecDeque::new();
+        let mut pending_results = BTreeMap::new();
+
+        let refused = run_start_envelope(5);
+        assert!(matches!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &refused,
+            )
+            .await
+            .unwrap(),
+            CommandActivity::Rejected
+        ));
+        let written = writer.written();
         assert!(
-            result
-                .err()
-                .expect("query error should be returned")
-                .to_string()
-                .contains("Channel activity query failed")
+            matches!(written[0], ComputerFrame::ChannelActivityQuery { .. }),
+            "the Computer must ask the Server before judging the command"
         );
+        assert!(
+            matches!(
+                &written[1],
+                ComputerFrame::CommandResult { result }
+                    if result.command_id == refused.command_id
+                        && result.sequence == refused.sequence
+                        && result.outcome
+                            == CommandOutcome::Rejected {
+                                code: ComputerErrorCode::InvalidCommand,
+                            }
+            ),
+            "the Server reconciles a rejected RunStart; it must receive that rejection"
+        );
+
+        // The connection keeps serving commands: this RunStart has nothing to read.
+        let next = run_start_envelope(0);
+        assert!(matches!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &next,
+            )
+            .await
+            .unwrap(),
+            CommandActivity::Ready(Some(snapshot)) if snapshot.snapshot_sequence == 0
+        ));
+
+        // Only a transport failure ends the connection.
+        reader.close();
+        assert!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &run_start_envelope(1),
+            )
+            .await
+            .is_err(),
+            "losing the Server during a query is a transport failure"
+        );
+    }
+
+    fn run_start_envelope(
+        channel_snapshot_sequence: u64,
+    ) -> crate::protocol::computer::CommandEnvelope {
+        use crate::protocol::computer::{
+            Command, CommandEnvelope, CommandSequence, FocusSnapshot, MessageContent,
+            MessageSnapshot, RunStart,
+        };
+
+        let thread_id = crate::ids::ThreadId::from_uuid(Uuid::now_v7());
+        CommandEnvelope {
+            command_id: crate::ids::CommandId::from_uuid(Uuid::now_v7()),
+            sequence: CommandSequence(1),
+            command: Command::RunStart(RunStart {
+                run_id: RunId::from_uuid(Uuid::now_v7()),
+                agent_id: crate::ids::AgentId::from_uuid(Uuid::now_v7()),
+                task: None,
+                focus: FocusSnapshot {
+                    thread_id,
+                    channel_id: crate::ids::ChannelId::from_uuid(Uuid::now_v7()),
+                    root: MessageSnapshot {
+                        message_id: crate::ids::MessageId::from_uuid(Uuid::now_v7()),
+                        author_member_id: crate::ids::MemberId::from_uuid(Uuid::now_v7()),
+                        sequence: 1,
+                        content: MessageContent::Text {
+                            markdown: "root".to_owned(),
+                        },
+                        created_at: OffsetDateTime::now_utc(),
+                    },
+                    replies: Vec::new(),
+                    message_sequence: 1,
+                },
+                channel_snapshot_sequence,
+                dispatched_items: Vec::new(),
+                channel_members: Vec::new(),
+            }),
+        }
     }
 
     fn usage_record(id: Uuid, created_at: OffsetDateTime) -> LlmUsageRecord {
