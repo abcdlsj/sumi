@@ -37,4 +37,32 @@ describe("useOutbox", () => {
     act(() => result.current.discard(result.current.items[0].key));
     expect(result.current.items).toEqual([]);
   });
+
+  it("retries a failed message with the key it was queued with", async () => {
+    const send = vi.fn().mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce({ id: "m3" } as Message);
+    const { result } = renderHook(() => useOutbox(send, () => undefined));
+
+    act(() => result.current.queue(input));
+    await waitFor(() => expect(result.current.items[0]).toMatchObject({ status: "failed" }));
+
+    act(() => result.current.retry(result.current.items[0]));
+    await waitFor(() => expect(result.current.items).toEqual([]));
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0]).toEqual(input);
+    expect(send.mock.calls[1]?.[1]).toBe(send.mock.calls[0]?.[1]);
+  });
+
+  it("gives each queued message its own idempotency key", () => {
+    const send = vi.fn().mockReturnValue(new Promise<Message>(() => undefined));
+    const { result } = renderHook(() => useOutbox(send, () => undefined));
+
+    act(() => result.current.queue(input));
+    act(() => result.current.queue(input));
+
+    const keys = send.mock.calls.map((call) => call[1]);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    for (const key of keys) expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
 });

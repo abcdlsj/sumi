@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { v7 as uuidv7 } from "uuid";
 
 import type { Message } from "../../api/client";
 import type { ComposerInput } from "./MessageComposer";
@@ -6,18 +7,25 @@ import type { ComposerInput } from "./MessageComposer";
 /** A message the reader sent that the Server has not confirmed yet. */
 export interface OutgoingMessage {
   key: string;
+  /** Fixed at queue time so Retry cannot post the message twice. */
+  idempotencyKey: string;
   input: ComposerInput;
   createdAt: string;
   status: "sending" | "failed";
   error?: string;
 }
 
+type Delivery = Pick<OutgoingMessage, "key" | "idempotencyKey" | "input">;
+
 /**
  * Sends messages optimistically: each one shows in the timeline at once and
  * is replaced by the Server's copy when it lands, or stays with Retry and
  * Discard when it fails, so nothing the reader typed is lost.
  */
-export function useOutbox(send: (input: ComposerInput) => Promise<Message>, onSent: (message: Message) => void) {
+export function useOutbox(
+  send: (input: ComposerInput, idempotencyKey: string) => Promise<Message>,
+  onSent: (message: Message) => void,
+) {
   const [items, setItems] = useState<OutgoingMessage[]>([]);
   const counter = useRef(0);
   const sendRef = useRef(send);
@@ -27,15 +35,15 @@ export function useOutbox(send: (input: ComposerInput) => Promise<Message>, onSe
     onSentRef.current = onSent;
   });
 
-  const deliver = useCallback((key: string, input: ComposerInput) => {
-    sendRef.current(input).then(
+  const deliver = useCallback((outgoing: Delivery) => {
+    sendRef.current(outgoing.input, outgoing.idempotencyKey).then(
       (message) => {
         onSentRef.current(message);
-        setItems((current) => current.filter((item) => item.key !== key));
+        setItems((current) => current.filter((item) => item.key !== outgoing.key));
       },
       (error: unknown) => {
         const reason = error instanceof Error ? error.message : "The message was not sent.";
-        setItems((current) => current.map((item) => (item.key === key ? { ...item, status: "failed", error: reason } : item)));
+        setItems((current) => current.map((item) => (item.key === outgoing.key ? { ...item, status: "failed", error: reason } : item)));
       },
     );
   }, []);
@@ -43,13 +51,20 @@ export function useOutbox(send: (input: ComposerInput) => Promise<Message>, onSe
   const queue = useCallback((input: ComposerInput) => {
     counter.current += 1;
     const key = `outgoing-${Date.now().toString(36)}-${counter.current}`;
-    setItems((current) => [...current, { key, input, createdAt: new Date().toISOString(), status: "sending" }]);
-    deliver(key, input);
+    const outgoing: OutgoingMessage = {
+      key,
+      idempotencyKey: uuidv7(),
+      input,
+      createdAt: new Date().toISOString(),
+      status: "sending",
+    };
+    setItems((current) => [...current, outgoing]);
+    deliver(outgoing);
   }, [deliver]);
 
   const retry = useCallback((outgoing: OutgoingMessage) => {
     setItems((current) => current.map((item) => (item.key === outgoing.key ? { ...item, status: "sending", error: undefined } : item)));
-    deliver(outgoing.key, outgoing.input);
+    deliver(outgoing);
   }, [deliver]);
 
   const discard = useCallback((key: string) => {

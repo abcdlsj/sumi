@@ -317,8 +317,17 @@ export function listMessages(channelId: string): Promise<MessagePage> {
   return apiRequest<MessagePage>(`/api/v1/channels/${encodeURIComponent(channelId)}/messages`);
 }
 
-export function createMessage(channelId: string, input: CreateMessageInput): Promise<Message> {
-  return mutate<Message>(`/api/v1/channels/${encodeURIComponent(channelId)}/messages`, "POST", input);
+export function createMessage(
+  channelId: string,
+  input: CreateMessageInput,
+  idempotencyKey: string,
+): Promise<Message> {
+  return mutate<Message>(
+    `/api/v1/channels/${encodeURIComponent(channelId)}/messages`,
+    "POST",
+    input,
+    idempotencyKey,
+  );
 }
 
 export async function uploadAttachment(spaceId: string, file: File): Promise<Attachment> {
@@ -362,11 +371,13 @@ export function setThreadSubscription(
 export function createThreadReply(
   threadId: string,
   input: CreateThreadReplyInput,
+  idempotencyKey: string,
 ): Promise<Message> {
   return mutate<Message>(
     `/api/v1/threads/${encodeURIComponent(threadId)}/messages`,
     "POST",
     input,
+    idempotencyKey,
   );
 }
 
@@ -464,11 +475,15 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return result.data as T;
 }
 
-function mutate<T>(path: string, method: string, body?: unknown): Promise<T> {
+// A caller that may resend the same write passes its idempotency key so the
+// Server collapses the resend instead of storing a second write.
+function mutate<T>(path: string, method: string, body?: unknown, idempotencyKey?: string): Promise<T> {
   return apiRequest<T>(path, {
     method,
     body: body === undefined ? undefined : JSON.stringify(body),
-    headers: body === undefined ? { "Idempotency-Key": uuidv7() } : mutationHeaders(),
+    headers: body === undefined
+      ? { "Idempotency-Key": idempotencyKey ?? uuidv7() }
+      : mutationHeaders(idempotencyKey),
   });
 }
 
@@ -485,9 +500,9 @@ function hexDigest(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function mutationHeaders(): HeadersInit {
+function mutationHeaders(idempotencyKey?: string): HeadersInit {
   return {
     "Content-Type": "application/json",
-    "Idempotency-Key": uuidv7(),
+    "Idempotency-Key": idempotencyKey ?? uuidv7(),
   };
 }

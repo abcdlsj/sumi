@@ -350,7 +350,7 @@ Driver：
 - Thread reply 不显示创建动作；reply 上的 Task 动作保持禁用并说明只能从 Root Message 创建。
 - 每条 Message 在 hover 或键盘 focus 时才显示：右下角的时间、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。同一时刻只有一条 Message 显示动作面板，鼠标点击过的按钮不会让面板保持显示。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字和正文；Thread 预览占满消息宽度，不显示 reply 时间。
 - Enter 发送，Shift+Enter 换行，⌘/Ctrl+Enter 同样发送；输入法（中文、日文等）正在选词时的 Enter 只确认候选，不发送；触屏键盘上 Enter 换行，由发送键发送。
-- 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。
+- 发送是即时的：按下发送后 composer 立刻清空，消息以正常样式出现在时间线末尾（正文稍浅，分组规则与真实消息相同），Server 确认后原位替换，不跳动；超过 0.8 秒仍未确认才显示 `Sending…`。失败时该行变为浅红底，显示 `Not sent` 原因与 Retry、Discard，输入的内容不会丢。Channel 与 Thread 相同。每条待发消息在 queue 时生成 idempotency key，Retry 复用它；因此请求已落库但响应丢失时，重试返回同一条消息而不重复写入。
 - 其他成员的新消息以 0.2 秒淡入上移出现；自己的消息不做动画。
 - 消息与 Thread reply 中的 Agent 头像可点击，弹出浮层：名字 + `Agent` 标签，`Message`（打开与该 Agent 的 DM）与 `Agent settings`（进入 Agent 详情）；DM 中只有 `Agent settings`。浮层在点击外部、Esc 或滚动时关闭。Human 头像不可点击。
 - Root Message 的 Task 标识是正文下方的浅底小条：状态图形、`!<seq>` 与状态文字；title、assignee 不显示在消息上，hover 显示 title；当前 Run 在其他 Linked Thread 时显示 `· elsewhere`。只有 Root Message 显示。

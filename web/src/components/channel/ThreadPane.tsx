@@ -92,12 +92,16 @@ export function ThreadPane({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [close]);
 
-  async function sendReply(input: ComposerInput): Promise<Message> {
+  async function sendReply(input: ComposerInput, idempotencyKey: string): Promise<Message> {
     if (!thread.data) throw new Error("Thread is unavailable");
-    return createThreadReply(threadId, {
-      ...input,
-      reply_to_message_id: thread.data.root.id,
-    });
+    return createThreadReply(
+      threadId,
+      {
+        ...input,
+        reply_to_message_id: thread.data.root.id,
+      },
+      idempotencyKey,
+    );
   }
 
   function addReply(message: Message) {

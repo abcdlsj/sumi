@@ -241,8 +241,8 @@ export function MessageWorkspace({
   const workingLabelByMemberId = new Map(
     (agents.data ?? []).flatMap((agent) => agent.activity?.label ? [[agent.member_id, agent.activity.label] as const] : []),
   );
-  async function sendMessage(input: ComposerInput): Promise<Message> {
-    return createMessage(channel.id, input);
+  async function sendMessage(input: ComposerInput, idempotencyKey: string): Promise<Message> {
+    return createMessage(channel.id, input, idempotencyKey);
   }
 
   function addMessage(message: Message) {
