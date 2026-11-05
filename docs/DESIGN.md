@@ -129,6 +129,7 @@ Driver：
 - Computer 每 15 秒发送 heartbeat 与 WebSocket ping；任一端 45 秒内未收到任何帧即判定连接失效并断开，Computer 随即重连。建连 20 秒、单帧发送 30 秒超时。连接持续 60 秒以上后，重连退避从最小间隔重新开始。Server 只在同一 Computer 没有更新的连接时把它标记为 offline。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
+- RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
 - Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况；上一连接会话的残留帧必须被丢弃。
 - 所有 HTTP 写操作使用 idempotency key；started、delivery、result、receipt 使用稳定 event ID 幂等。
