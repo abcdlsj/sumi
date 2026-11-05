@@ -28,7 +28,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是持续在
 | Action Message | Agent 完成领域 Action 时由同一事务创建的结构化 Message | System Message、Audit Event |
 | System Notice | Server 因 Channel 成员关系变化写入时间线的结构化 Message | System Message |
 | Task | 从一条 Root Message 原子创建的持续工作记录，可关联多个 Thread | Job、Workflow |
-| Task Reference | 以 `!<seq>` 写在 Message 正文中的 Task 引用，seq 是 Space 内自增短序号 | Task UUID、Task ID |
+| Task Reference | 以 `!<seq>` 写在 Message 正文中的 Task 引用，seq 是全库自增短序号，各 Space 的 seq 因此不连续 | Task UUID、Task ID |
 | Task Status | Task 的工作流位置，只取 TODO、In Progress、In Review、Done、Closed | Run Status |
 | Source Thread | 创建 Task 的 Root Message 所定义的 Thread，必备且不可更换 | Origin Conversation |
 | Linked Thread | 与 Task 中同一项工作直接相关的 Thread，Source Thread 是第一个 | Related Conversation |
@@ -152,7 +152,7 @@ Driver：
 
 - 状态为 dispatched → working → completed / yielded / failed / canceled。不设置 queued、starting、finalizing、stopping。
 - 失败错误码固定为 driver_error、driver_lost、computer_restarted、session_unavailable、agent_unavailable、invalid_command、unhandled_items、internal；Failed Run 必须带 error_code，其他终态不得带 error_code。
-- Driver 临时错误在 Computer 内最多自动重试 3 次；最终失败才上报，Server 只对该 Run 计一次 Item retry。
+- Driver 临时错误在 Computer 内最多尝试 3 次（首次加 2 次重试）；最终失败才上报，Server 只对该 Run 计一次 Item retry。
 - Computer 离线是可达性问题，不是 Run 失败；离线期间 Run 保持原状态。
 - `computer.max_concurrent_runs` 只是内存保护阈值，不是调度器；超过上限的 Run 排队等待，不因等待失败。
 - Agent restart 先请求 active Run graceful stop；有限等待后按 computer_restarted 收尾并保留结果 outbox。
