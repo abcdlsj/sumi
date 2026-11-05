@@ -77,14 +77,20 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind Server at {}", config.bind))?;
     let served = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            shutdown.trigger();
+        .with_graceful_shutdown({
+            let shutdown = shutdown.clone();
+            async move {
+                shutdown_signal().await;
+                shutdown.trigger();
+            }
         })
         .await
         .context("Server stopped unexpectedly");
     dispatcher.abort();
     space_event_listener.abort();
+    // Upgraded Computer sockets run outside the graceful wait, so a process that exited here would
+    // kill them before they wrote their Shutdown frame. Wait for them to close on their own.
+    shutdown.sockets_closed(SOCKET_CLOSE_TIMEOUT).await;
     // Upgraded Computer sockets run outside the graceful wait and may not reach their own offline
     // write before exit. This process holds every Computer connection, so none is online now.
     if let Err(error) = sqlx::query(
@@ -98,13 +104,16 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     served
 }
 
-/// How often the Server looks for Agents with work and no live Run.
-///
+/// How often the Server looks for Agents with work and no live Run.///
 /// Short because it bounds how long an Agent waits before starting, and nothing else: no Run outcome
 /// depends on this timer, so a slow or skipped tick delays work and cannot fail it. A tick is needed
 /// at all because availability is a future fact, set by ambient debounce and by Agent-chosen defer
 /// times.
 const DISPATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+/// How long shutdown waits for open Computer sockets to write their Shutdown frame and close.
+///
+/// Bounded so a Computer that ignores the signal cannot hold the process open.
+const SOCKET_CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Agents dispatched per tick. Caps one pass, not total throughput: the next tick takes the rest.
 const DISPATCH_BATCH: u32 = 64;
 

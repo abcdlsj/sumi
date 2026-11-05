@@ -115,6 +115,8 @@ pub(super) async fn computer_socket(
     computer_id: Uuid,
     deleted: bool,
 ) {
+    // Counted until the last frame is written and the close finishes; shutdown waits for it.
+    let _open_socket = shutdown.socket();
     let pool = storage.pool();
     let Ok(Some(Ok(WebSocketMessage::Text(encoded)))) =
         tokio::time::timeout(COMPUTER_IDLE_TIMEOUT, socket.next()).await
@@ -194,6 +196,7 @@ pub(super) async fn computer_socket(
                 )
                 .await;
                 let _ = socket.send(WebSocketMessage::Close(None)).await;
+                drain_before_close(&mut socket).await;
                 break;
             }
             outgoing = outbound.recv() => {
@@ -469,6 +472,7 @@ pub(super) async fn computer_socket(
 
 const COMPUTER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const SHUTDOWN_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Sends every pending command after `watermark` and returns the last sequence actually sent.
 async fn replay_pending_commands(
@@ -622,6 +626,22 @@ async fn apply_rejected_command(
     .await
     .map_err(|_| ApiError::internal())?;
     Ok(())
+}
+
+/// Reads until the peer closes so the Shutdown frame reaches it.
+///
+/// Dropping a socket while its receive buffer still holds unread frames makes the kernel send a
+/// reset instead of a FIN, and a reset discards data the peer has not read yet, including the
+/// Shutdown frame that was just written. Reading to the peer's Close keeps the close orderly.
+async fn drain_before_close(socket: &mut WebSocket) {
+    let _ = tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, async {
+        while let Some(Ok(frame)) = socket.next().await {
+            if matches!(frame, WebSocketMessage::Close(_)) {
+                break;
+            }
+        }
+    })
+    .await;
 }
 
 async fn send_json(
