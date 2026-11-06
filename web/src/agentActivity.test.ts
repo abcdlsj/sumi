@@ -70,8 +70,6 @@ describe("agent activity store", () => {
         kind: "task.submit_review",
         task_id: "task-1",
         arguments: [{ name: "body", value: "First review" }],
-        message_preview: "A bounded message preview",
-        message_truncated: true,
       }));
       recordAgentActivity(activityEvent("e2", {
         kind: "task.submit_review",
@@ -87,8 +85,7 @@ describe("agent activity store", () => {
     const items = activityForAgent("agent-1");
     expect(items).toHaveLength(2);
     expect(items[0].arguments[0]).toEqual({ name: "body", value: "Second review" });
-    expect(items[1].messagePreview).toBe("A bounded message preview");
-    expect(items[1].messageTruncated).toBe(true);
+    expect(items[1].arguments[0]).toEqual({ name: "body", value: "First review" });
   });
 
   it("caps the per-agent feed at 50 rows", () => {

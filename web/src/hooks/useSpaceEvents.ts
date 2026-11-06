@@ -20,8 +20,6 @@ interface SumiEvent {
     target_member_id?: string;
     scope_channel_id?: string;
     arguments?: { name: string; value: string }[];
-    message_preview?: string;
-    message_truncated?: boolean;
   };
 }
 

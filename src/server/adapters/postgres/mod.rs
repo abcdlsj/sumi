@@ -788,14 +788,23 @@ impl PostgresAdapter {
 
     /// Best-effort insert of an ephemeral `agent.activity` event for the Browser feed. A failed
     /// insert must never fail the Agent action that produced the activity.
+    ///
+    /// The activity is written after the action commits, so a resent action reaches this point
+    /// again. `origin` names that request; the event ID is derived from it, the kind and the IDs
+    /// in the payload, so the retry finds the first row and adds none. Without an origin there
+    /// is nothing to match a retry against and the event gets a fresh ID.
     pub(in crate::server::adapters) async fn record_agent_activity(
         &self,
+        origin: Option<Uuid>,
         space_id: SpaceId,
         agent_member_id: MemberId,
         kind: &str,
         payload: serde_json::Value,
     ) {
-        let event_id = EventId::from_uuid(Uuid::now_v7());
+        let event_id = origin.map_or_else(
+            || EventId::from_uuid(Uuid::now_v7()),
+            |origin| agent_activity_event_id(origin, kind, &payload),
+        );
         if let Err(error) = self
             .record_agent_activity_with_id(event_id, space_id, agent_member_id, kind, payload)
             .await
@@ -830,7 +839,7 @@ impl PostgresAdapter {
                 "kind": kind,
             });
         }
-        // Semantic arguments and previews can contain bounded user text, so both require a
+        // Arguments carry bounded labels such as a Channel slug or Task title, so they require a
         // Channel scope. Keep the action fact if a caller forgot the scope, but drop its details.
         let has_channel_scope = ["channel_id", "scope_channel_id"].iter().any(|field| {
             record
@@ -841,8 +850,6 @@ impl PostgresAdapter {
         });
         if !has_channel_scope && let Some(object) = record.as_object_mut() {
             object.remove("arguments");
-            object.remove("message_preview");
-            object.remove("message_truncated");
         }
         // The activity event still needs a Space commit position, so it runs in its own
         // transaction: allocation and insert either both land or neither does.
@@ -856,6 +863,32 @@ impl PostgresAdapter {
         );
         transaction.commit().await.map(|_| ())
     }
+}
+
+/// Derives the event ID of one Agent activity from the request that produced it. Only IDs in the
+/// payload take part: labels such as a Channel slug may change between an attempt and its retry.
+fn agent_activity_event_id(origin: Uuid, kind: &str, payload: &serde_json::Value) -> EventId {
+    let mut hasher = Sha256::new();
+    hasher.update(origin.as_bytes());
+    hasher.update(kind.as_bytes());
+    if let Some(object) = payload.as_object() {
+        let mut ids: Vec<(&String, &str)> = object
+            .iter()
+            .filter(|(field, _)| field.ends_with("_id"))
+            .filter_map(|(field, value)| value.as_str().map(|value| (field, value)))
+            .collect();
+        ids.sort();
+        for (field, value) in ids {
+            hasher.update([0]);
+            hasher.update(field.as_bytes());
+            hasher.update([0]);
+            hasher.update(value.as_bytes());
+        }
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    EventId::from_uuid(uuid::Builder::from_custom_bytes(bytes).into_uuid())
 }
 
 /// Decides whether one event may reach a viewer. An event that names no Channel and no Member

@@ -70,8 +70,6 @@ export interface AgentActivityItem {
   itemId?: string;
   targetMemberId?: string;
   arguments: readonly AgentActivityArgument[];
-  messagePreview?: string;
-  messageTruncated: boolean;
 }
 
 export interface AgentActivityEvent {
@@ -89,8 +87,6 @@ export interface AgentActivityEvent {
     item_id?: string;
     target_member_id?: string;
     arguments?: AgentActivityArgument[];
-    message_preview?: string;
-    message_truncated?: boolean;
   };
 }
 
@@ -111,12 +107,8 @@ function dedupeKey(item: AgentActivityItem): string {
   // The server can emit a fresh envelope when an idempotent request is retried.
   // Include semantic details so those retries collapse while two updates to the
   // same resource with different inputs remain visible as separate actions.
-  if (item.arguments.length > 0 || item.messagePreview !== undefined) {
-    return `${item.kind}:${resource}:${JSON.stringify([
-      item.arguments,
-      item.messagePreview,
-      item.messageTruncated,
-    ])}`;
+  if (item.arguments.length > 0) {
+    return `${item.kind}:${resource}:${JSON.stringify(item.arguments)}`;
   }
   return `${item.kind}:${resource}`;
 }
@@ -152,8 +144,6 @@ export function recordAgentActivity(event: AgentActivityEvent): void {
     itemId: data.item_id,
     targetMemberId: data.target_member_id,
     arguments: semanticArguments(data.arguments),
-    messagePreview: data.message_preview,
-    messageTruncated: data.message_truncated ?? false,
   };
   const current = activityByAgent.get(item.agentMemberId) ?? [];
   const key = dedupeKey(item);

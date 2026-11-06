@@ -148,6 +148,15 @@ describe("Agent detail", () => {
         session_continuity: { state: "unavailable", generation: 0 },
       });
       if (path.endsWith(`/agents/${agentId}`) && !init?.method) return json(agent("active", "ready"));
+      // The activity event carries no text; the preview comes from the Thread the Message is in.
+      if (path.endsWith("/threads/thread-1") && !init?.method) return json({
+        thread_id: "thread-1",
+        channel_id: space.general_channel_id,
+        is_following: false,
+        snapshot_channel_seq: 12,
+        root: { id: "message-1", content: { type: "text", body_markdown: "The **Agent** sent this message." }, deleted_at: null },
+        replies: [],
+      });
       throw new Error(`Unexpected request: ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -170,7 +179,6 @@ describe("Agent detail", () => {
           { name: "target", value: "#general:12" },
           { name: "attachment_count", value: "0" },
         ],
-        message_preview: "The Agent sent this message.",
       },
     });
     renderRoute(`/s/sumi-lab/agents/${agentId}`);
@@ -184,7 +192,7 @@ describe("Agent detail", () => {
     expect(screen.getByText("Sent a message")).toHaveClass("agent-activity-kind");
     expect(screen.getByRole("link", { name: "#general" })).toHaveAttribute("href", "/s/sumi-lab/channels/general#message-message-1");
     expect(screen.queryByText("target")).not.toBeInTheDocument();
-    expect(screen.getByText("The Agent sent this message.")).toBeVisible();
+    expect(await screen.findByText("The Agent sent this message.")).toBeVisible();
     expect(screen.getByText("The Agent sent this message.").closest("p")).toHaveClass("agent-activity-message");
     expect(screen.queryByText("run-1")).not.toBeInTheDocument();
     const activityList = screen.getByRole("list", { name: "Agent activity" });

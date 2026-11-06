@@ -3,7 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Settings2, Trash2, X, type LucideIcon } from "lucide-react";
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
-import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
+import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, readThread, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
 import { driverLabel } from "../driver";
 import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, agentPresence, useAgentActivity, type AgentActivityItem } from "../agentActivity";
@@ -293,10 +293,8 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
                 <span className="agent-activity-kind">{AGENT_ACTIVITY_LABELS[item.kind]}</span>
                 {link ? <span className="agent-activity-link">{link}</span> : null}
               </p>
-              {item.messagePreview ? (
-                <div className="agent-activity-details">
-                  <p className="agent-activity-message">{plainTextPreview(item.messagePreview, 400)}</p>
-                </div>
+              {item.kind === "message.send" && item.threadId && item.messageId ? (
+                <SentMessagePreview threadId={item.threadId} messageId={item.messageId} />
               ) : null}
             </div>
             <time dateTime={item.occurredAt}>{activityTime(item.occurredAt)}</time>
@@ -304,6 +302,21 @@ function AgentActivityFeed({ agentId, spaceSlug, channels }: { agentId: string; 
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * The activity event names the Message but carries none of its text, so the body is read through
+ * the Thread it belongs to: the same authorized read, and the same cache, as the Thread pane.
+ */
+function SentMessagePreview({ threadId, messageId }: { threadId: string; messageId: string }) {
+  const thread = useQuery({ queryKey: ["thread", threadId], queryFn: () => readThread(threadId) });
+  const message = [thread.data?.root, ...(thread.data?.replies ?? [])].find((entry) => entry?.id === messageId);
+  if (!message || message.deleted_at || message.content.type !== "text") return null;
+  return (
+    <div className="agent-activity-details">
+      <p className="agent-activity-message">{plainTextPreview(message.content.body_markdown, 400)}</p>
+    </div>
   );
 }
 

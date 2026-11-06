@@ -164,6 +164,7 @@ pub(super) async fn apply_run_result(
             .unwrap_or_default();
         record_agent_activity(
             state,
+            Some(result.event_id.into_uuid()),
             run_view.space_id.into_uuid(),
             run_view.agent_id.into_uuid(),
             "run.yield",
@@ -175,7 +176,6 @@ pub(super) async fn apply_run_result(
                     "scope_channel_id": focus.as_ref().map(|reference| reference.channel_id),
                 }),
                 arguments,
-                run_view.continuation_note.map(agent_activity_preview),
             ),
         )
         .await;
@@ -341,6 +341,7 @@ pub(super) async fn execute_agent_action(
         ));
     }
     let context = &request.context;
+    let request_origin = request.idempotency_key.map(IdempotencyKey::into_uuid);
     if let Some(key) = request.idempotency_key
         && matches!(
             &request.action,
@@ -531,7 +532,6 @@ pub(super) async fn execute_agent_action(
         }
         capability::Action::MessageSend(send) => {
             let target = activity_message_target(state, context, &send.target).await;
-            let message_preview = agent_activity_preview(&send.body);
             let attachment_count = send.attachment_ids.len();
             let handles_item = send.handle_item_id.is_some();
             let (channel_id, thread_id) = match send.target {
@@ -643,6 +643,7 @@ pub(super) async fn execute_agent_action(
             };
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "message.send",
@@ -659,7 +660,6 @@ pub(super) async fn execute_agent_action(
                         ("attachment_count", attachment_count.to_string()),
                         ("handle_item", handles_item.to_string()),
                     ],
-                    Some(message_preview),
                 ),
             )
             .await;
@@ -720,6 +720,7 @@ pub(super) async fn execute_agent_action(
             let task_id = task.view().id;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "task.create",
@@ -731,7 +732,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": focus.as_ref().map(|reference| reference.channel_id),
                     }),
                     vec![("title", title), ("assignee", assignee_label)],
-                    None,
                 ),
             )
             .await;
@@ -739,6 +739,7 @@ pub(super) async fn execute_agent_action(
                 let target = activity_thread_reference(&state.read, thread_id).await;
                 record_agent_activity(
                     state,
+                    request_origin,
                     context.space_id.into_uuid(),
                     context.agent_id.into_uuid(),
                     "task.link_thread",
@@ -756,7 +757,6 @@ pub(super) async fn execute_agent_action(
                                 .map(|reference| reference.label.clone())
                                 .unwrap_or_else(|| "Thread".to_owned()),
                         )],
-                        None,
                     ),
                 )
                 .await;
@@ -798,6 +798,7 @@ pub(super) async fn execute_agent_action(
             .map_err(app_to_capability)?;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "task.link_thread",
@@ -815,7 +816,6 @@ pub(super) async fn execute_agent_action(
                             .map(|reference| reference.label.clone())
                             .unwrap_or_else(|| "Thread".to_owned()),
                     )],
-                    None,
                 ),
             )
             .await;
@@ -856,6 +856,7 @@ pub(super) async fn execute_agent_action(
             .map_err(app_to_capability)?;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "task.unlink_thread",
@@ -873,7 +874,6 @@ pub(super) async fn execute_agent_action(
                             .map(|reference| reference.label.clone())
                             .unwrap_or_else(|| "Thread".to_owned()),
                     )],
-                    None,
                 ),
             )
             .await;
@@ -993,6 +993,7 @@ pub(super) async fn execute_agent_action(
             arguments.push(("private", private.to_string()));
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "channel.create",
@@ -1004,7 +1005,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": focus.as_ref().map(|reference| reference.channel_id),
                     }),
                     arguments,
-                    None,
                 ),
             )
             .await;
@@ -1038,6 +1038,7 @@ pub(super) async fn execute_agent_action(
             .map_err(app_to_capability)?;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "channel.leave",
@@ -1048,7 +1049,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": channel_id,
                     }),
                     vec![("channel", channel_label)],
-                    None,
                 ),
             )
             .await;
@@ -1084,6 +1084,7 @@ pub(super) async fn execute_agent_action(
                 .unwrap_or_else(|| "Member".to_owned());
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "channel.invite",
@@ -1095,7 +1096,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": channel_id,
                     }),
                     vec![("channel", channel_label), ("member", member_label)],
-                    None,
                 ),
             )
             .await;
@@ -1135,6 +1135,7 @@ pub(super) async fn execute_agent_action(
                 .unwrap_or_else(|| "Member".to_owned());
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "channel.remove",
@@ -1146,7 +1147,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": channel_id,
                     }),
                     vec![("channel", channel_label), ("member", member_label)],
-                    None,
                 ),
             )
             .await;
@@ -1263,6 +1263,7 @@ pub(super) async fn execute_agent_action(
             };
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "agent.create",
@@ -1279,7 +1280,6 @@ pub(super) async fn execute_agent_action(
                         ("driver", activity_driver.to_owned()),
                         ("computer", activity_computer),
                     ],
-                    None,
                 ),
             )
             .await;
@@ -1322,6 +1322,7 @@ pub(super) async fn execute_agent_action(
             .await?;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "inbox.ack",
@@ -1333,7 +1334,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": source.as_ref().map(|reference| reference.channel_id),
                     }),
                     activity_arguments,
-                    None,
                 ),
             )
             .await;
@@ -1360,6 +1360,7 @@ pub(super) async fn execute_agent_action(
             .await?;
             record_agent_activity(
                 state,
+                request_origin,
                 context.space_id.into_uuid(),
                 context.agent_id.into_uuid(),
                 "inbox.defer",
@@ -1371,7 +1372,6 @@ pub(super) async fn execute_agent_action(
                         "scope_channel_id": source.as_ref().map(|reference| reference.channel_id),
                     }),
                     activity_arguments,
-                    None,
                 ),
             )
             .await;
@@ -1413,8 +1413,7 @@ pub(super) async fn finish_agent_task(
             false,
         )
     })?;
-    let (activity_kind, activity_arguments, activity_preview, activity_post_target) = match &outcome
-    {
+    let (activity_kind, activity_arguments, activity_post_target) = match &outcome {
         TaskOutcome::SubmitReview { message } => {
             let post_to = message.as_ref().map(|message| message.post_to);
             (
@@ -1422,9 +1421,6 @@ pub(super) async fn finish_agent_task(
                 post_to
                     .map(|target| vec![("post_to", activity_task_post_target(target).to_owned())])
                     .unwrap_or_default(),
-                message
-                    .as_ref()
-                    .map(|message| agent_activity_preview(&message.body_markdown)),
                 post_to,
             )
         }
@@ -1436,7 +1432,6 @@ pub(super) async fn finish_agent_task(
                 "post_to",
                 activity_task_post_target(result.post_to).to_owned(),
             )],
-            Some(agent_activity_preview(&result.body_markdown)),
             Some(result.post_to),
         ),
         TaskOutcome::Done {
@@ -1445,9 +1440,8 @@ pub(super) async fn finish_agent_task(
             "task.done",
             vec![("result", "existing_message".to_owned())],
             None,
-            None,
         ),
-        TaskOutcome::Close { reason, note } => {
+        TaskOutcome::Close { reason, .. } => {
             let reason = match reason {
                 CloseReason::Invalid => "invalid",
                 CloseReason::Duplicate => "duplicate",
@@ -1455,12 +1449,7 @@ pub(super) async fn finish_agent_task(
                 CloseReason::Obsolete => "obsolete",
                 CloseReason::Other => "other",
             };
-            (
-                "task.close",
-                vec![("reason", reason.to_owned())],
-                note.as_deref().map(agent_activity_preview),
-                None,
-            )
+            ("task.close", vec![("reason", reason.to_owned())], None)
         }
     };
     let activity_thread_id = match activity_post_target {
@@ -1489,6 +1478,7 @@ pub(super) async fn finish_agent_task(
     .map_err(app_to_capability)?;
     record_agent_activity(
         state,
+        Some(idempotency_key.into_uuid()),
         context.space_id.into_uuid(),
         context.agent_id.into_uuid(),
         activity_kind,
@@ -1500,7 +1490,6 @@ pub(super) async fn finish_agent_task(
                 "scope_channel_id": activity_thread.as_ref().map(|reference| reference.channel_id),
             }),
             activity_arguments,
-            activity_preview,
         ),
     )
     .await;
@@ -1976,22 +1965,12 @@ pub(super) fn capability_value(value: &impl serde::Serialize) -> Result<Value, c
     })
 }
 
-const AGENT_ACTIVITY_PREVIEW_CHARS: usize = 280;
-
-pub(in crate::server::adapters) struct AgentActivityPreview {
-    pub(in crate::server::adapters) text: String,
-    pub(in crate::server::adapters) truncated: bool,
-}
-
-pub(in crate::server::adapters) fn agent_activity_preview(value: &str) -> AgentActivityPreview {
-    let (text, truncated) = bounded_activity_text(value);
-    AgentActivityPreview { text, truncated }
-}
+/// Activity arguments are labels (a slug, a title, a target), bounded so none can carry a body.
+const AGENT_ACTIVITY_ARGUMENT_CHARS: usize = 280;
 
 pub(in crate::server::adapters) fn agent_activity_details(
     mut payload: Value,
     arguments: Vec<(&str, String)>,
-    message: Option<AgentActivityPreview>,
 ) -> Value {
     let Some(object) = payload.as_object_mut() else {
         return payload;
@@ -2009,10 +1988,6 @@ pub(in crate::server::adapters) fn agent_activity_details(
                 .collect(),
         ),
     );
-    if let Some(message) = message {
-        object.insert("message_preview".to_owned(), json!(message.text));
-        object.insert("message_truncated".to_owned(), json!(message.truncated));
-    }
     payload
 }
 
@@ -2020,7 +1995,7 @@ fn bounded_activity_text(value: &str) -> (String, bool) {
     let mut characters = value.chars();
     let mut preview: String = characters
         .by_ref()
-        .take(AGENT_ACTIVITY_PREVIEW_CHARS)
+        .take(AGENT_ACTIVITY_ARGUMENT_CHARS)
         .collect();
     if characters.next().is_none() {
         return (preview, false);
@@ -2154,8 +2129,12 @@ async fn activity_message_target(
 
 /// Records an ephemeral `agent.activity` event for the Browser feed. The feed is best-effort, so a
 /// failed insert never fails the Agent action that produced the activity.
+///
+/// `origin` names the request that produced the activity (its idempotency key or result event
+/// ID). A resent request derives the same event ID, so the retry adds no second row.
 pub(super) async fn record_agent_activity(
     state: &RuntimeState,
+    origin: Option<Uuid>,
     space_id: Uuid,
     agent_member_id: Uuid,
     kind: &str,
@@ -2164,6 +2143,7 @@ pub(super) async fn record_agent_activity(
     state
         .storage
         .record_agent_activity(
+            origin,
             SpaceId::from_uuid(space_id),
             MemberId::from_uuid(agent_member_id),
             kind,

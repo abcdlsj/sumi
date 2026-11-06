@@ -26,11 +26,11 @@ struct CapabilityFixture {
 }
 
 #[test]
-fn agent_activity_preview_is_unicode_bounded() {
-    let preview = agent_activity_preview(&"界".repeat(300));
-    assert_eq!(preview.text.chars().count(), 280);
-    assert!(preview.truncated);
-    assert_eq!(preview.text.chars().last(), Some('…'));
+fn agent_activity_arguments_are_unicode_bounded() {
+    let payload = agent_activity_details(json!({}), vec![("title", "界".repeat(300))]);
+    let value = payload["arguments"][0]["value"].as_str().unwrap();
+    assert_eq!(value.chars().count(), 280);
+    assert_eq!(value.chars().last(), Some('…'));
 }
 
 impl CapabilityFixture {
@@ -2045,8 +2045,8 @@ async fn agent_write_actions_emit_agent_activity_events() {
     assert!(payloads[0]["message_id"].as_str().is_some());
     assert_eq!(payloads[0]["arguments"][0]["name"], "target");
     assert_eq!(payloads[0]["arguments"][1]["name"], "attachment_count");
-    assert_eq!(payloads[0]["message_preview"], "activity check");
-    assert_eq!(payloads[0]["message_truncated"], false);
+    // The body stays in `messages`; the Browser reads it through the Message it names.
+    assert!(payloads[0].get("message_preview").is_none());
     assert_eq!(
         payloads[1]["task_id"],
         serde_json::json!(task_id.into_uuid())
@@ -2087,6 +2087,41 @@ async fn agent_write_actions_emit_agent_activity_events() {
         .map(|event| event.data["kind"].as_str().unwrap())
         .collect();
     assert!(visible_activity.is_empty());
+
+    fixture.destroy().await;
+}
+
+/// The activity row is written after the action commits, so a Computer that resends the action
+/// with the same key reaches that write again; it must find the first row instead of adding one.
+#[tokio::test]
+async fn a_resent_agent_action_records_one_activity() {
+    let fixture = CapabilityFixture::create().await;
+    let key = IdempotencyKey::from_uuid(Uuid::now_v7());
+    let send = || {
+        capability::Action::MessageSend(capability::MessageSend {
+            target: capability::MessageTarget::Focus,
+            body: "sent once".to_owned(),
+            attachment_ids: Vec::new(),
+            handle_item_id: None,
+        })
+    };
+    let first = fixture.execute_with_key(send(), key).await.unwrap();
+    let resent = fixture.execute_with_key(send(), key).await.unwrap();
+    assert_eq!(first["message_id"], resent["message_id"]);
+    fixture.execute(send()).await.unwrap();
+
+    let activity: Vec<serde_json::Value> = sqlx::query_scalar(
+        "SELECT payload_json FROM outbox_events WHERE kind='agent.activity' ORDER BY sequence",
+    )
+    .fetch_all(&fixture.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        activity.len(),
+        2,
+        "a resend adds no row; a new request does"
+    );
+    assert_eq!(activity[0]["message_id"], first["message_id"]);
 
     fixture.destroy().await;
 }
@@ -2132,8 +2167,7 @@ async fn yielded_run_emits_agent_activity_event() {
     assert_eq!(payload["member_id"], serde_json::json!(agent_id));
     assert_eq!(payload["run_id"], serde_json::json!(run_id));
     assert_eq!(payload["thread_id"], serde_json::json!(focus_id));
-    assert_eq!(payload["message_preview"], "continue later");
-    assert_eq!(payload["message_truncated"], false);
+    assert!(payload.get("message_preview").is_none());
 
     let viewer = MemberId::from_uuid(fixture.owner_id);
     let visible = fixture

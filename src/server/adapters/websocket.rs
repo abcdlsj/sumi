@@ -292,7 +292,6 @@ pub(super) async fn computer_socket(
                     if yielded {
                         let run = sqlx::query(
                             "SELECT agent_runs.agent_id,agent_runs.space_id,agent_runs.focus_thread_id,\
-                                    agent_runs.continuation_note,\
                                     messages.channel_id,messages.channel_seq,channels.slug \
                              FROM agent_runs JOIN messages ON messages.id=agent_runs.focus_thread_id \
                                     JOIN channels ON channels.id=messages.channel_id \
@@ -303,14 +302,13 @@ pub(super) async fn computer_socket(
                         .await;
                         if let Ok(Some(row)) = run {
                             let slug = row.get::<Option<String>, _>("slug");
-                            let continuation_note =
-                                row.get::<Option<String>, _>("continuation_note");
                             let focus_label = super::http::activity_thread_label(
                                 slug.as_deref(),
                                 row.get("channel_seq"),
                             );
                             storage
                                 .record_agent_activity(
+                                    Some(event_id.into_uuid()),
                                     SpaceId::from_uuid(row.get("space_id")),
                                     MemberId::from_uuid(row.get("agent_id")),
                                     "run.yield",
@@ -322,9 +320,6 @@ pub(super) async fn computer_socket(
                                             "scope_channel_id": row.get::<Uuid, _>("channel_id"),
                                         }),
                                         vec![("focus", focus_label)],
-                                        continuation_note
-                                            .as_deref()
-                                            .map(super::http::agent_activity_preview),
                                     ),
                                 )
                                 .await;
@@ -585,7 +580,6 @@ async fn apply_rejected_command(
                             "scope_channel_id": row.get::<Uuid, _>("channel_id"),
                         }),
                         vec![("delivery_sequence", delivery_sequence.to_string())],
-                        None,
                     ),
                 )
                 .await

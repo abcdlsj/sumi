@@ -259,6 +259,8 @@ Driver：
 - 每个事件都有可见性判定：payload 涉及的 Channel 只有其成员能收到，Inbox 事件只发给所属 Member 和治理者。可见性只决定是否发送，不改变游标推进。
 - 客户端把收到的每个事件都当作新事实：用 `occurred_at` 与本地时钟比较来判断“是否回放”不成立，两端时钟有偏差时会丢实时事件或把回放误标为未读。
 - 稳定状态使用 text 和 CHECK 约束；正文、Secret、Provider transcript 不进入 idempotency 或 outbox metadata。
+- `agent.activity` 是给 Browser 活动列表的派生事实，只存稳定 ID（run、message、task、thread、channel、item、target member）和有长度上限的标签参数（Channel slug、Task 标题、目标名称等，每项最多 280 字符），不存 Message 正文、Task Result、关闭备注或 continuation note。Browser 需要正文时按事件里的 `message_id` 经所在 Thread 的正常读取接口取得，读权限、编辑与软删除都以 `messages` 为准。
+- `agent.activity` 在 Agent 动作提交后写入，不进入动作的业务事务：每个动作的事务入口由 application 层统一持有，活动是可丢失的展示数据，把它并入事务需要每个领域命令都携带展示参数。重复写由事件 ID 防止：事件 ID 由请求来源（Agent 动作的 idempotency key、Run result 的 event ID、command ID）、kind 与 payload 中的 ID 派生，同一请求重发时插入命中已有行而不新增。提交后、写活动前进程退出时，该条活动缺失，直到 Computer 以同一 key 重发。
 - 基线后 schema 变更使用前向 migration，不得修改已应用 migration。
 - 性能优化先通过查询、索引和可重建投影解决；写模型保持规范化。
 
@@ -404,7 +406,7 @@ Driver：
 - Computer 更新状态在 Server 持久化协议完成前不进入 UI；第一期只通过 Computer 本地结构化日志和 update journal 诊断，禁止从在线或离线状态推断更新结果。
 - Agent 详情头部只显示安静信号（Activity、Computer 可达性、出错时 `Needs attention`，hover 看原因的人话），不提供 DM 按钮；facts 条为 Status、Computer、Driver，值使用 13px 并截断超长文本。
 - Agent 详情 Overview：Current work（Task、Conversation `#channel`、Doing `Working / Starting / Nothing right now`、Computer）、Identity、Setup（Ready / In progress / Failed、Computer、Last problem）、Conversations with other Agents（仅 Owner/Admin）、What it can do。不显示 Session、Provision、本地 Run 诊断；Settings tab 不显示 attention 参数。
-- Agent 详情 Activity feed 按时间倒序；不显示工具参数，message preview 为 subtle 底的纯文本块（正文样式，不用等宽字体），截断以省略号结尾，时间右对齐；字号统一。Activity 页签已经是这个视图的名字，页面不再重复一个 Activity 标题。
+- Agent 详情 Activity feed 按时间倒序；不显示工具参数；发送消息的行在下方显示该 Message 的纯文本预览（subtle 底，正文样式，不用等宽字体，截断以省略号结尾），预览经所在 Thread 读取，已删除或不可读的 Message 不显示预览；时间右对齐，字号统一。Activity 页签已经是这个视图的名字，页面不再重复一个 Activity 标题。
 - 详情分区使用扁平布局：不绘制卡片边框、底色或阴影，用 1px `--line` 分隔线组织。
 
 ### Agent insights
