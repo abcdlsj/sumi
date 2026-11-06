@@ -15,7 +15,7 @@ FROM rust:1.97-bookworm AS server-builder
 WORKDIR /build
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends cmake libssl-dev pkg-config \
+    && apt-get install --yes --no-install-recommends cmake pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
@@ -27,7 +27,7 @@ RUN cargo build --release --locked
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl libssl3 \
+    && apt-get install --yes --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/sumi sumi \
     && install --directory --owner=sumi --group=sumi /var/lib/sumi/attachments /opt/sumi/web

@@ -25,21 +25,10 @@ pub(crate) struct ServerConfig {
     /// Origin of a Web UI deployed apart from the Server, such as `https://app.example.com`.
     pub(crate) web_origin: Option<Url>,
     pub(crate) attachment_dir: PathBuf,
-    pub(crate) attachment_s3: Option<AttachmentS3Config>,
     pub(crate) attachment_max_bytes: u64,
     pub(crate) computer_update_dir: Option<PathBuf>,
     pub(crate) secure_cookies: bool,
     pub(crate) session_ttl_hours: i64,
-    pub(crate) auth_ip_attempts_per_minute: u32,
-    pub(crate) auth_email_attempts_per_minute: u32,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct AttachmentS3Config {
-    pub(crate) bucket: String,
-    pub(crate) region: String,
-    pub(crate) endpoint: Option<String>,
-    pub(crate) allow_http: bool,
 }
 
 /// Per-provider overrides for the ACP agent process.
@@ -206,13 +195,10 @@ impl Default for ServerConfig {
             web_dist: PathBuf::from("web/dist"),
             web_origin: None,
             attachment_dir: default_sumi_dir().join("server/attachments"),
-            attachment_s3: None,
             attachment_max_bytes: 100 * 1024 * 1024,
             computer_update_dir: None,
             secure_cookies: false,
             session_ttl_hours: 24 * 14,
-            auth_ip_attempts_per_minute: 20,
-            auth_email_attempts_per_minute: 6,
         }
     }
 }
@@ -282,14 +268,6 @@ fn validate(config: &SumiConfig) -> Result<()> {
         "server.session_ttl_hours must be positive"
     );
     ensure!(
-        config.server.auth_ip_attempts_per_minute > 0,
-        "server.auth_ip_attempts_per_minute must be positive"
-    );
-    ensure!(
-        config.server.auth_email_attempts_per_minute > 0,
-        "server.auth_email_attempts_per_minute must be positive"
-    );
-    ensure!(
         (1..=100 * 1024 * 1024).contains(&config.server.attachment_max_bytes),
         "server.attachment_max_bytes must be between 1 and 104857600"
     );
@@ -301,16 +279,6 @@ fn validate(config: &SumiConfig) -> Result<()> {
                 && origin.query().is_none()
                 && origin.username().is_empty(),
             "server.web_origin must be an origin such as https://app.example.com"
-        );
-    }
-    if let Some(s3) = &config.server.attachment_s3 {
-        ensure!(
-            !s3.bucket.trim().is_empty(),
-            "server.attachment_s3.bucket must not be empty"
-        );
-        ensure!(
-            !s3.region.trim().is_empty(),
-            "server.attachment_s3.region must not be empty"
         );
     }
     ensure!(

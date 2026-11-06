@@ -111,8 +111,6 @@ attachment_dir = "/var/lib/sumi/attachments"
 computer_update_dir = "/var/lib/sumi/releases/stable"
 secure_cookies = true
 session_ttl_hours = 336
-auth_ip_attempts_per_minute = 20
-auth_email_attempts_per_minute = 6
 ```
 
 Start the Server:
