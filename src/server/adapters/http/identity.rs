@@ -465,13 +465,8 @@ pub(super) async fn list_members(
 }
 
 pub(super) fn permission_action(action_code: &str) -> Result<PermissionAction, ApiError> {
-    match action_code {
-        "channel.create" => Ok(PermissionAction::ChannelCreate),
-        "channel.invite" => Ok(PermissionAction::ChannelInvite),
-        "channel.remove" => Ok(PermissionAction::ChannelRemove),
-        "agent.create" => Ok(PermissionAction::AgentCreate),
-        _ => Err(ApiError::invalid("Permission action code is not supported")),
-    }
+    PermissionAction::parse(action_code)
+        .ok_or_else(|| ApiError::invalid("Permission action code is not supported"))
 }
 
 pub(super) async fn set_permission(
@@ -596,9 +591,8 @@ pub(super) async fn update_space_member(
     let Some(requested) = body.access_level.as_deref() else {
         return Err(ApiError::invalid("access_level is required"));
     };
-    let requested = match requested {
-        "admin" => AccessLevel::Admin,
-        "member" => AccessLevel::Member,
+    let requested = match AccessLevel::parse(requested) {
+        Some(level @ (AccessLevel::Admin | AccessLevel::Member)) => level,
         _ => return Err(ApiError::invalid("access_level must be admin or member")),
     };
     let mut storage = state.storage.clone();

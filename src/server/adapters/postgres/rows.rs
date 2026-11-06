@@ -216,9 +216,13 @@ macro_rules! text_enum {
     };
 }
 
-text_enum!(task_status_str, task_status_from_str, TaskStatus, {
-    TaskStatus::Todo => "todo", TaskStatus::InProgress => "in_progress", TaskStatus::InReview => "in_review", TaskStatus::Done => "done", TaskStatus::Closed => "closed"
-});
+pub(super) fn task_status_str(value: TaskStatus) -> &'static str {
+    value.as_str()
+}
+
+pub(super) fn task_status_from_str(value: &str) -> Result<TaskStatus, ApplicationError> {
+    TaskStatus::parse(value).ok_or(ApplicationError::Internal)
+}
 text_enum!(close_reason_str, close_reason_from_str, CloseReason, {
     CloseReason::Invalid => "invalid", CloseReason::Duplicate => "duplicate", CloseReason::NotNeeded => "not_needed", CloseReason::Obsolete => "obsolete", CloseReason::Other => "other"
 });
@@ -316,21 +320,11 @@ pub(super) fn permission_str(value: PermissionAction) -> &'static str {
 }
 
 pub(super) fn permission_from_str(value: &str) -> Result<PermissionAction, ApplicationError> {
-    match value {
-        "channel.create" => Ok(PermissionAction::ChannelCreate),
-        "channel.invite" => Ok(PermissionAction::ChannelInvite),
-        "channel.remove" => Ok(PermissionAction::ChannelRemove),
-        "agent.create" => Ok(PermissionAction::AgentCreate),
-        _ => Err(ApplicationError::Internal),
-    }
+    PermissionAction::parse(value).ok_or(ApplicationError::Internal)
 }
 
 pub(super) fn access_level_str(value: AccessLevel) -> &'static str {
-    match value {
-        AccessLevel::Owner => "owner",
-        AccessLevel::Admin => "admin",
-        AccessLevel::Member => "member",
-    }
+    value.as_str()
 }
 
 pub(super) fn attachment_from_row(
@@ -381,11 +375,7 @@ pub(super) fn paired_computer_from_row(
 }
 
 pub(super) fn member_kind_from_str(value: &str) -> Result<MemberKind, ApplicationError> {
-    match value {
-        "human" => Ok(MemberKind::Human),
-        "agent" => Ok(MemberKind::Agent),
-        _ => Err(ApplicationError::Internal),
-    }
+    MemberKind::parse(value).ok_or(ApplicationError::Internal)
 }
 
 pub(super) fn space_member_from_row(
@@ -487,10 +477,5 @@ pub(super) fn pairing_from_row(row: &sqlx::postgres::PgRow) -> Result<Pairing, A
 }
 
 pub(super) fn access_level_from_str(value: &str) -> Result<AccessLevel, ApplicationError> {
-    match value {
-        "owner" => Ok(AccessLevel::Owner),
-        "admin" => Ok(AccessLevel::Admin),
-        "member" => Ok(AccessLevel::Member),
-        _ => Err(ApplicationError::Internal),
-    }
+    AccessLevel::parse(value).ok_or(ApplicationError::Internal)
 }

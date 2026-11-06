@@ -233,6 +233,22 @@ pub(in crate::server) enum MemberKind {
     Agent,
 }
 
+impl MemberKind {
+    pub(in crate::server) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Agent => "agent",
+        }
+    }
+
+    /// Parses the stored form; `None` means the row holds no known Member kind.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [Self::Human, Self::Agent]
+            .into_iter()
+            .find(|kind| kind.as_str() == value)
+    }
+}
+
 /// Which Items an Inbox read returns. The queue is the default; retired Items are a separate view so a
 /// governor can find what to requeue without turning history into part of the queue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -3,9 +3,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use utoipa::ToSchema;
 
-use crate::server::adapters::postgres::{
-    ActionAgentRow, ActionChannelRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow, MessageRow,
-    MessageTaskRow, PostgresQueries, SpaceRow, TaskRefRow, ThreadReferenceRow,
+use crate::server::domain::task::TaskStatus as DomainTaskStatus;
+use crate::server::{
+    adapters::postgres::{
+        ActionAgentRow, ActionChannelRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow,
+        MessageRow, MessageTaskRow, PostgresQueries, SpaceRow, TaskRefRow, ThreadReferenceRow,
+    },
+    application::ports::MemberKind,
+    domain::identity::AccessLevel,
 };
 
 pub(super) const SPACE_ACCENTS: [&str; 4] = ["#F0602F", "#E8B42D", "#3C9E8F", "#6C5CE7"];
@@ -219,30 +224,32 @@ pub(super) async fn member_row(
         .map_err(application_error)?;
     Ok(MemberResponse {
         id,
-        kind: match row.kind.as_str() {
-            "human" => MemberKindCode::Human,
-            "agent" => MemberKindCode::Agent,
-            _ => return Err(ApiError::internal()),
-        },
+        kind: member_kind_code(&row.kind)?,
         display_name: row.display_name.clone(),
-        access_level: match row.access_level.as_str() {
-            "owner" => AccessLevelCode::Owner,
-            "admin" => AccessLevelCode::Admin,
-            "member" => AccessLevelCode::Member,
-            _ => return Err(ApiError::internal()),
-        },
+        access_level: access_level_code(
+            AccessLevel::parse(&row.access_level).ok_or_else(ApiError::internal)?,
+        ),
         permissions,
     })
 }
 
-fn task_status_code(value: &str) -> Result<TaskStatus, ApiError> {
-    Ok(match value {
-        "todo" => TaskStatus::Todo,
-        "in_progress" => TaskStatus::InProgress,
-        "in_review" => TaskStatus::InReview,
-        "done" => TaskStatus::Done,
-        "closed" => TaskStatus::Closed,
-        _ => return Err(ApiError::internal()),
+/// Stored text to API enum: the domain parse decides what exists, so a new status needs one edit.
+pub(super) fn task_status_code(value: &str) -> Result<TaskStatus, ApiError> {
+    let status = DomainTaskStatus::parse(value).ok_or_else(ApiError::internal)?;
+    Ok(match status {
+        DomainTaskStatus::Todo => TaskStatus::Todo,
+        DomainTaskStatus::InProgress => TaskStatus::InProgress,
+        DomainTaskStatus::InReview => TaskStatus::InReview,
+        DomainTaskStatus::Done => TaskStatus::Done,
+        DomainTaskStatus::Closed => TaskStatus::Closed,
+    })
+}
+
+pub(super) fn member_kind_code(value: &str) -> Result<MemberKindCode, ApiError> {
+    let kind = MemberKind::parse(value).ok_or_else(ApiError::internal)?;
+    Ok(match kind {
+        MemberKind::Human => MemberKindCode::Human,
+        MemberKind::Agent => MemberKindCode::Agent,
     })
 }
 
@@ -501,11 +508,7 @@ impl Related<'_> {
             .ok_or_else(ApiError::internal)?;
         Ok(MessageAuthor {
             id: author.id,
-            kind: match author.kind.as_str() {
-                "human" => MemberKindCode::Human,
-                "agent" => MemberKindCode::Agent,
-                _ => return Err(ApiError::internal()),
-            },
+            kind: member_kind_code(&author.kind)?,
             display_name: author.display_name.clone(),
         })
     }
@@ -672,14 +675,7 @@ pub(super) async fn task_projection(
         seq: u64::try_from(row.seq).map_err(|_| ApiError::internal())?,
         space_id: row.space_id,
         title: row.title,
-        status: match row.status.as_str() {
-            "todo" => TaskStatus::Todo,
-            "in_progress" => TaskStatus::InProgress,
-            "in_review" => TaskStatus::InReview,
-            "done" => TaskStatus::Done,
-            "closed" => TaskStatus::Closed,
-            _ => return Err(ApiError::internal()),
-        },
+        status: task_status_code(&row.status)?,
         creator_member_id: row.creator_member_id,
         creator_name: row.creator_name,
         assignee_agent_member_id: row.assignee_agent_member_id,

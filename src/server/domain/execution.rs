@@ -21,16 +21,6 @@ pub(in crate::server) enum RunStatus {
     Canceled,
 }
 
-impl RunStatus {
-    #[cfg(test)]
-    pub(in crate::server) fn is_active(self) -> bool {
-        !matches!(
-            self,
-            Self::Completed | Self::Yielded | Self::Failed | Self::Canceled
-        )
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::server) enum RunOutcome {
     Completed,
@@ -70,17 +60,6 @@ pub(in crate::server) struct RunItem {
     delivery_receipt_at: Option<OffsetDateTime>,
     disposition: Option<InboxItemDisposition>,
     disposition_at: Option<OffsetDateTime>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::server) struct RunItemView {
-    pub(in crate::server) inbox_item_id: InboxItemId,
-    pub(in crate::server) delivery_sequence: u64,
-    pub(in crate::server) delivery_outcome: Option<DeliveryOutcome>,
-    pub(in crate::server) delivery_event_id: Option<EventId>,
-    pub(in crate::server) delivery_receipt_at: Option<OffsetDateTime>,
-    pub(in crate::server) disposition: Option<InboxItemDisposition>,
-    pub(in crate::server) disposition_at: Option<OffsetDateTime>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,8 +183,8 @@ impl Run {
         }
     }
 
-    pub(in crate::server) fn items(&self) -> impl ExactSizeIterator<Item = RunItemView> + '_ {
-        self.items.iter().map(|item| RunItemView {
+    pub(in crate::server) fn items(&self) -> impl ExactSizeIterator<Item = RunItemSnapshot> + '_ {
+        self.items.iter().map(|item| RunItemSnapshot {
             inbox_item_id: item.inbox_item_id,
             delivery_sequence: item.delivery_sequence,
             delivery_outcome: item.delivery_outcome,
@@ -219,7 +198,7 @@ impl Run {
     pub(in crate::server) fn item_for_delivery(
         &self,
         delivery_sequence: u64,
-    ) -> Option<RunItemView> {
+    ) -> Option<RunItemSnapshot> {
         self.items()
             .find(|item| item.delivery_sequence == delivery_sequence)
     }

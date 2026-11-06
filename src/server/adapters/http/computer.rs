@@ -260,9 +260,8 @@ pub(super) async fn create_agent(
     Json(body): Json<CreateAgentBody>,
 ) -> Result<(StatusCode, Json<AgentResponse>), ApiError> {
     let actor_id = current_member(&state, &jar, space_id).await?;
-    let requested_access = match body.access_level.as_str() {
-        "member" => AccessLevel::Member,
-        "admin" => AccessLevel::Admin,
+    let requested_access = match AccessLevel::parse(&body.access_level) {
+        Some(level @ (AccessLevel::Admin | AccessLevel::Member)) => level,
         _ => return Err(ApiError::invalid("Agent configuration is invalid")),
     };
     // The domain owns what an Agent may be; the adapter only maps the wire form.
@@ -388,9 +387,9 @@ pub(super) fn agent_row(row: &AgentRow) -> Result<AgentResponse, ApiError> {
         space_id: row.space_id,
         computer_id: row.computer_id,
         name: row.display_name.clone(),
-        access_level: match row.access_level.as_str() {
-            "admin" => AgentAccessLevel::Admin,
-            "member" => AgentAccessLevel::Member,
+        access_level: match AccessLevel::parse(&row.access_level) {
+            Some(AccessLevel::Admin) => AgentAccessLevel::Admin,
+            Some(AccessLevel::Member) => AgentAccessLevel::Member,
             _ => return Err(ApiError::internal()),
         },
         role_text: row.role_text.clone(),

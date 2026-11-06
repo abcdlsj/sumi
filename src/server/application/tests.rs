@@ -1744,7 +1744,13 @@ impl ExecutionTransaction for MemoryTransaction {
             .state
             .runs
             .values()
-            .find(|run| run.view().agent_id == agent_id && run.view().status.is_active())
+            .find(|run| {
+                run.view().agent_id == agent_id
+                    && matches!(
+                        run.view().status,
+                        RunStatus::Dispatched | RunStatus::Working
+                    )
+            })
             .map(|run| run.view().id))
     }
     async fn completed_run_for_event(

@@ -68,6 +68,21 @@ impl Member {
 }
 
 impl AccessLevel {
+    pub(in crate::server) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+        }
+    }
+
+    /// Parses the stored form; `None` means no known Access Level.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [Self::Owner, Self::Admin, Self::Member]
+            .into_iter()
+            .find(|level| level.as_str() == value)
+    }
+
     pub(in crate::server) fn can_manage_space(self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
     }
@@ -90,6 +105,18 @@ pub(in crate::server) enum PermissionAction {
 }
 
 impl PermissionAction {
+    /// Parses the stored form; `None` means no known Action.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [
+            Self::ChannelCreate,
+            Self::ChannelInvite,
+            Self::ChannelRemove,
+            Self::AgentCreate,
+        ]
+        .into_iter()
+        .find(|action| action.code() == value)
+    }
+
     pub(in crate::server) fn code(self) -> &'static str {
         match self {
             Self::ChannelCreate => "channel.create",
