@@ -597,6 +597,11 @@ input[type="radio"] {
   grid-template-columns: 232px minmax(0, 1fr);
 }
 
+/* A page inside the section grid that has no list of its own. */
+.space-section--page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .section-nav {
   display: grid;
   min-height: 0;

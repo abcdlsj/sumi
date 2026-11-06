@@ -122,7 +122,7 @@ function ComputersWorkspace({
     });
   }
 
-  return (
+  const workspace = (
     <section className="computers-workspace" aria-label="Computers">
       {computers.isPending || agents.isPending ? <DetailSkeleton label="Loading Computers" /> : null}
       {computers.error || agents.error ? (
@@ -170,6 +170,30 @@ function ComputersWorkspace({
         />
       ) : null}
     </section>
+  );
+
+  // The paired list is this page's own column, so the sidebar never changes shape. The wrapper
+  // stays mounted without it, so pairing the first Computer does not remount the page.
+  const paired = computers.data ?? [];
+  return (
+    <div className={paired.length ? "space-section" : "space-section space-section--page"}>
+      {paired.length ? <nav className="section-nav" aria-label="Paired computers">
+        <div className="nav-section-heading">
+          <p className="nav-label">Paired computers <span>{paired.length}</span></p>
+          {canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer" aria-label="Pair Computer" title="Pair Computer"><Plus /></Link> : null}
+        </div>
+        {paired.map((computer) => {
+          const hash = `computer-${computer.id}`;
+          return (
+            <Link key={computer.id} className={`context-entity-row computer-context-row${activeHash === hash ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={hash}>
+              <Monitor aria-hidden="true" />
+              <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status}<em>v{computer.daemon_version}</em></small></span>
+            </Link>
+          );
+        })}
+      </nav> : null}
+      <div className="section-main">{workspace}</div>
+    </div>
   );
 }
 
