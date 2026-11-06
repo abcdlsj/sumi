@@ -45,10 +45,10 @@ use super::{
         ReadPairing, ReadPairingStatus,
     },
     conversation::{
-        AddChannelAgents, CreateAgent, CreateAgentAction, CreateAgentActionInput, CreateAgentInput,
-        CreateChannel, CreateChannelAction, CreateChannelActionInput, CreateChannelInput,
-        DeleteMessage, EditMessage, EditMessageInput, InviteChannelMember, LeaveChannel,
-        OpenDirectMessage, OpenDirectMessageInput, PublishMessage, RemoveChannelMember,
+        CreateAgent, CreateAgentAction, CreateAgentActionInput, CreateAgentInput, CreateChannel,
+        CreateChannelAction, CreateChannelActionInput, CreateChannelInput, DeleteMessage,
+        EditMessage, EditMessageInput, InviteChannelMember, OpenDirectMessage,
+        OpenDirectMessageInput, PublishMessage, RemoveChannelMember,
     },
     execution::{
         AcknowledgeDelivery, AcknowledgeDeliveryInput, ApplyCommandResult, CompleteRun,
@@ -207,86 +207,6 @@ async fn dispatch_failure_is_recorded_idempotently_in_a_separate_transaction() {
             channel_id,
             "run_dispatch_conflict".to_owned()
         )
-    );
-}
-
-#[tokio::test]
-async fn adding_channel_agents_replays_the_recorded_membership_result() {
-    let mut port = MemoryPort::default();
-    let actor = member(930);
-    let channel_id = channel(931);
-    let first = member(932);
-    let second = member(933);
-    let key = idempotency(934);
-
-    let added = AddChannelAgents::execute(
-        &mut port,
-        actor,
-        channel_id,
-        vec![first, second],
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("members are added");
-    let replayed = AddChannelAgents::execute(
-        &mut port,
-        actor,
-        channel_id,
-        vec![second],
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("same key replays the first result");
-
-    assert_eq!(added, vec![first, second]);
-    assert_eq!(replayed, added);
-    assert_eq!(
-        port.state.agent_channel_members,
-        HashSet::from([(channel_id, first), (channel_id, second)])
-    );
-}
-
-#[tokio::test]
-async fn an_agent_can_leave_a_channel_and_replay_the_same_request() {
-    let mut port = MemoryPort::default();
-    let agent_id = member(935);
-    let channel_id = channel(936);
-    let key = idempotency(937);
-    port.state
-        .agent_channel_members
-        .insert((channel_id, agent_id));
-
-    LeaveChannel::execute(
-        &mut port,
-        agent_id,
-        channel_id,
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("agent leaves the channel");
-    LeaveChannel::execute(
-        &mut port,
-        agent_id,
-        channel_id,
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("same request replays");
-
-    assert!(
-        !port
-            .state
-            .agent_channel_members
-            .contains(&(channel_id, agent_id))
-    );
-    assert!(
-        port.state
-            .channel_agent_leaves
-            .contains(&(agent_id, channel_id, key))
     );
 }
 

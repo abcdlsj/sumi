@@ -1,21 +1,21 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use time::Duration;
 
 use axum::http::{HeaderMap, HeaderValue};
 use object_store::local::LocalFileSystem;
-use sqlx::{Connection, PgConnection, Row, postgres::PgConnectOptions};
+use sqlx::Row;
 use tempfile::TempDir;
-use url::Url;
 
 use super::*;
+
 use crate::ids::{AgentId, AttachmentId, ChannelId, EventId, IdempotencyKey, SpaceId};
 use crate::protocol::computer::{ItemDisposition, ItemOutcome, RunResult, RunTerminalStatus};
+use crate::server::adapters::test_database::TestDatabase;
 
 struct CapabilityFixture {
     state: RuntimeState,
-    admin: PgConnection,
-    database_name: String,
+    database: TestDatabase,
     _objects: TempDir,
     headers: HeaderMap,
     computer_id: Uuid,
@@ -37,22 +37,9 @@ fn agent_activity_arguments_are_unicode_bounded() {
 
 impl CapabilityFixture {
     async fn create() -> Self {
-        let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
-        let database_name = format!("sumi_capability_{}", Uuid::now_v7().simple());
-        let mut admin =
-            PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
-                .await
-                .unwrap();
-        sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
-            .execute(&mut admin)
-            .await
-            .unwrap();
-        let mut database_url = Url::parse(&admin_url).unwrap();
-        database_url.set_path(&format!("/{database_name}"));
-        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let database = TestDatabase::create("sumi_capability").await;
+        let pool = database.pool.clone();
         let storage = PostgresAdapter::new(pool.clone());
-        storage.initialize_schema().await.unwrap();
 
         let space_id = Uuid::now_v7();
         let owner_id = Uuid::now_v7();
@@ -118,8 +105,7 @@ impl CapabilityFixture {
         );
         Self {
             state,
-            admin,
-            database_name,
+            database,
             _objects: objects,
             headers,
             computer_id,
@@ -176,15 +162,9 @@ impl CapabilityFixture {
         task_id
     }
 
-    async fn destroy(mut self) {
+    async fn destroy(self) {
         self.state.pool.close().await;
-        sqlx::query(&format!(
-            "DROP DATABASE \"{}\" WITH (FORCE)",
-            self.database_name
-        ))
-        .execute(&mut self.admin)
-        .await
-        .unwrap();
+        self.database.close().await;
     }
 }
 

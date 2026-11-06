@@ -10,4 +10,6 @@ mod realtime;
 pub(super) mod runtime;
 mod shutdown;
 mod space_events;
+#[cfg(test)]
+mod test_database;
 mod websocket;
