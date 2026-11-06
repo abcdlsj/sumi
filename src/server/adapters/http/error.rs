@@ -59,11 +59,12 @@ impl ApiError {
     }
 
     pub(in crate::server::adapters) fn context_changed() -> Self {
+        let class = ErrorClass::context_changed();
         Self {
-            status: StatusCode::CONFLICT,
-            code: "context_changed",
-            message: "Run context changed before the write; re-read the current context, then retry once",
-            retryable: false,
+            status: class.status,
+            code: class.code,
+            message: class.message,
+            retryable: class.retryable,
         }
     }
 }
@@ -76,6 +77,19 @@ pub(in crate::server::adapters) struct ErrorClass {
     pub(in crate::server::adapters) code: &'static str,
     pub(in crate::server::adapters) message: &'static str,
     pub(in crate::server::adapters) retryable: bool,
+}
+
+impl ErrorClass {
+    /// The write was prepared against a context that has moved on. The caller re-reads, then retries
+    /// once, so the rejection is not blindly retryable.
+    pub(in crate::server::adapters) fn context_changed() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: "context_changed",
+            message: "Run context changed before the write; re-read the current context, then retry once",
+            retryable: false,
+        }
+    }
 }
 
 pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorClass {
@@ -110,12 +124,7 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "request conflicts with current state",
             retryable: false,
         },
-        ApplicationError::ContextChanged => ErrorClass {
-            status: StatusCode::CONFLICT,
-            code: "context_changed",
-            message: "Run context changed before the write; re-read the current context, then retry once",
-            retryable: false,
-        },
+        ApplicationError::ContextChanged => ErrorClass::context_changed(),
         ApplicationError::StaleMessageContext => ErrorClass {
             status: StatusCode::CONFLICT,
             code: "context_changed",
@@ -134,12 +143,9 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "server adapter failed",
             retryable: false,
         },
-        ApplicationError::Domain(DomainError::RunNotWorkingForAgent) => ErrorClass {
-            status: StatusCode::CONFLICT,
-            code: "context_changed",
-            message: "Run context changed before the write; re-read the current context, then retry once",
-            retryable: false,
-        },
+        ApplicationError::Domain(DomainError::RunNotWorkingForAgent) => {
+            ErrorClass::context_changed()
+        }
         ApplicationError::Domain(DomainError::GovernorRequired) => ErrorClass {
             status: StatusCode::FORBIDDEN,
             code: "permission_denied",
