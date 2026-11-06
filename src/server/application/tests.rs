@@ -4100,6 +4100,82 @@ async fn agent_creation_and_action_message_share_permission_and_transaction() {
 }
 
 #[tokio::test]
+async fn both_agent_creation_entries_apply_the_same_role_limit() {
+    let owner = member(1200);
+    let focus = thread(1201);
+    let run_id = run(1202);
+    let computer_id = computer(1203);
+    let mut port = MemoryPort::default();
+    port.state.members.insert(
+        owner,
+        Member {
+            id: owner,
+            space_id: space(1),
+            display_name: "Owner".into(),
+            access_level: AccessLevel::Owner,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+        },
+    );
+    port.state.computers.insert(
+        computer_id,
+        Computer {
+            id: computer_id,
+            space_id: space(1),
+            lifecycle: ComputerLifecycle::Online,
+            token_hash: Some("hash".into()),
+            deleted_at: None,
+        },
+    );
+    insert_thread(&mut port, focus, &[owner]);
+    port.state
+        .runs
+        .insert(run_id, running_run(run_id, owner, focus, None, Vec::new()));
+    port.state
+        .permissions
+        .insert((owner, PermissionAction::AgentCreate));
+    let over_long = "x".repeat(12_001);
+
+    let direct = CreateAgent::execute(
+        &mut port,
+        CreateAgentInput {
+            agent_member_id: member(1204),
+            space_id: space(1),
+            display_name: "LongRole".into(),
+            access_level: AccessLevel::Member,
+            role_text: over_long.clone(),
+            computer_id,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
+            actor_member_id: owner,
+            idempotency_key: idempotency(1205),
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(direct, ApplicationError::Domain(DomainError::InvalidRole));
+
+    let action = CreateAgentAction::execute(
+        &mut port,
+        CreateAgentActionInput {
+            agent_member_id: member(1206),
+            display_name: "LongRole".into(),
+            role_text: over_long,
+            computer_id,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
+            action_message_id: message(1207),
+            actor_member_id: owner,
+            idempotency_key: idempotency(1208),
+            current_run_id: run_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(action, ApplicationError::Domain(DomainError::InvalidRole));
+    assert_eq!(port.state.agents.len(), 0);
+}
+
+#[tokio::test]
 async fn message_edit_and_delete_are_authorized_idempotent_text_mutations() {
     let mut port = MemoryPort::default();
     let author = member(1600);

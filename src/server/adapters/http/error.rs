@@ -158,6 +158,18 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "Use 1-32 lowercase ASCII letters or numbers separated by single hyphens for the Channel slug. Use topic for the human-readable description; topic supports Unicode.",
             retryable: false,
         },
+        ApplicationError::Domain(DomainError::InvalidAgentName) => ErrorClass {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_argument",
+            message: "Display Name must be 1-40 letters or underscores",
+            retryable: false,
+        },
+        ApplicationError::Domain(DomainError::InvalidRole) => ErrorClass {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_argument",
+            message: "Role is required and must be at most 12000 characters",
+            retryable: false,
+        },
         ApplicationError::Domain(DomainError::PairingLapsed) => ErrorClass {
             status: StatusCode::CONFLICT,
             code: "pairing_lapsed",

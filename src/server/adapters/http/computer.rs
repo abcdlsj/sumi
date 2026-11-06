@@ -1,7 +1,6 @@
 use super::*;
 use crate::server::adapters::postgres::AgentRow;
 use crate::server::adapters::websocket::computer_socket;
-use crate::server::domain::identity::valid_display_name;
 
 pub(super) async fn connect_computer(
     State(state): State<RuntimeState>,
@@ -266,16 +265,9 @@ pub(super) async fn create_agent(
         "admin" => AccessLevel::Admin,
         _ => return Err(ApiError::invalid("Agent configuration is invalid")),
     };
+    // The domain owns what an Agent may be; the adapter only maps the wire form.
     let name = body.name.trim();
     let role = body.role_text.trim();
-    if !valid_display_name(name)
-        || name.chars().count() > 40
-        || role.is_empty()
-        || role.chars().count() > 12_000
-        || !matches!(body.access_level.as_str(), "member" | "admin")
-    {
-        return Err(ApiError::invalid("Agent configuration is invalid"));
-    }
     let driver_kind = match (body.driver_kind.as_str(), body.driver_provider.as_deref()) {
         ("acp", Some("codex")) => DriverKind::Acp(AcpProvider::Codex),
         ("acp", Some("claude")) => DriverKind::Acp(AcpProvider::Claude),

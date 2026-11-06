@@ -26,6 +26,11 @@ pub(in crate::server) struct Member {
     pub(in crate::server) created_at: OffsetDateTime,
 }
 
+/// Longest Display Name; the Browser create form and both creation entries share it.
+pub(in crate::server) const DISPLAY_NAME_LIMIT: usize = 40;
+/// Longest Agent Role; a longer text is rejected instead of truncated.
+pub(in crate::server) const ROLE_TEXT_LIMIT: usize = 12_000;
+
 /// Display name is the only member address: Unicode letters and underscores,
 /// no spaces, no leading/trailing underscore, and never the reserved `all`.
 pub(in crate::server) fn valid_display_name(name: &str) -> bool {
@@ -117,6 +122,35 @@ pub(in crate::server) struct Agent {
 }
 
 impl Agent {
+    /// Builds a new Agent Member after validating the fields every creation entry accepts.
+    pub(in crate::server) fn create(
+        member_id: MemberId,
+        space_id: SpaceId,
+        computer_id: ComputerId,
+        display_name: &str,
+        role_text: &str,
+        driver_kind: DriverKind,
+    ) -> Result<Self, DomainError> {
+        let display_name = display_name.trim();
+        if !valid_display_name(display_name) || display_name.chars().count() > DISPLAY_NAME_LIMIT {
+            return Err(DomainError::InvalidAgentName);
+        }
+        let role_text = role_text.trim();
+        if role_text.is_empty() || role_text.chars().count() > ROLE_TEXT_LIMIT {
+            return Err(DomainError::InvalidRole);
+        }
+        Ok(Self {
+            member_id,
+            space_id,
+            computer_id: Some(computer_id),
+            role_text: role_text.to_owned(),
+            role_revision: 1,
+            lifecycle: AgentLifecycle::Provisioning,
+            driver_kind,
+            retired_at: None,
+        })
+    }
+
     pub(in crate::server) fn apply_provision_result(
         &mut self,
         computer_id: ComputerId,

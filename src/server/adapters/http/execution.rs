@@ -3,7 +3,6 @@ use crate::protocol::computer::{ComputerErrorCode, DeliveryOutcome, DeliveryRece
 use crate::server::domain::{
     attention::InboxItemDisposition,
     execution::{DeliveryOutcome as ServerDeliveryOutcome, RunErrorCode, RunOutcome},
-    identity::valid_display_name,
 };
 
 /// Resolve `@display_name` tokens in an Agent message body against the target
@@ -1162,13 +1161,6 @@ pub(super) async fn execute_agent_action(
             driver,
             computer_id: target_computer_id,
         } => {
-            if !valid_display_name(&name) || name.chars().count() > 40 || role.trim().is_empty() {
-                return Err(capability_error(
-                    capability::ErrorCode::InvalidArgument,
-                    "Agent display name or role is invalid",
-                    false,
-                ));
-            }
             let activity_name = name.clone();
             let activity_role = bounded_activity_text(&role).0;
             let (driver_kind, activity_driver) = match driver {

@@ -8,7 +8,7 @@ use crate::ids::{
 use crate::server::domain::{
     conversation::{Channel, ChannelKind, Message, MessageContent},
     execution::RunStatus,
-    identity::{AccessLevel, Agent, AgentLifecycle, DriverKind, Member, PermissionAction},
+    identity::{AccessLevel, Agent, DriverKind, Member, PermissionAction},
 };
 
 use super::ports::{
@@ -562,16 +562,14 @@ impl CreateAgent {
                 access_level: input.access_level,
                 created_at: input.now,
             };
-            let agent = Agent {
-                member_id: member.id,
-                space_id: member.space_id,
-                computer_id: Some(input.computer_id),
-                role_text: input.role_text,
-                role_revision: 1,
-                lifecycle: AgentLifecycle::Provisioning,
-                driver_kind: input.driver_kind,
-                retired_at: None,
-            };
+            let agent = Agent::create(
+                member.id,
+                member.space_id,
+                input.computer_id,
+                &member.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )?;
             transaction.insert_agent(member, agent.clone()).await?;
             transaction
                 .record_resource_idempotency(
@@ -636,16 +634,14 @@ impl CreateAgentAction {
                 access_level: AccessLevel::Member,
                 created_at: input.now,
             };
-            let agent = Agent {
-                member_id: member.id,
-                space_id: member.space_id,
-                computer_id: Some(input.computer_id),
-                role_text: input.role_text,
-                role_revision: 1,
-                lifecycle: AgentLifecycle::Provisioning,
-                driver_kind: input.driver_kind,
-                retired_at: None,
-            };
+            let agent = Agent::create(
+                member.id,
+                member.space_id,
+                input.computer_id,
+                &member.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )?;
             let action = Message::action_reply(
                 input.action_message_id,
                 run_view.focus_thread_id,
