@@ -115,7 +115,9 @@ else
     exit 1
   fi
   installed_version="$("$pg_bin/psql" --dbname sumi_dev --tuples-only --no-align --command "SELECT max(version) FROM schema_meta" 2>/dev/null || true)"
-  if [ "$installed_version" != "$schema_version" ]; then
+  # The Server migrates forward from the baseline, so only a database older than the baseline is
+  # incompatible; a newer version is the result of those migrations.
+  if [ -n "$installed_version" ] && [ "$installed_version" -lt "$schema_version" ]; then
     echo "sumi_dev uses an incompatible schema baseline; recreating the development database" >&2
     "$pg_bin/dropdb" --force sumi_dev
     "$pg_bin/createdb" sumi_dev
