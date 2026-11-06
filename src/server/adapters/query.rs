@@ -49,12 +49,13 @@ impl QueryRegistry {
             .expect("query registry lock")
             .pending
             .insert(query_id, sender);
+        // Whatever ends the wait (an unreachable Computer, a send failure, the timeout, or the
+        // caller dropping the future) must take the registration with it.
+        let _registration = PendingQuery {
+            state: self.state.clone(),
+            query_id,
+        };
         let Some(frames) = self.slots.sender(computer_id) else {
-            self.state
-                .lock()
-                .expect("query registry lock")
-                .pending
-                .remove(&query_id);
             return unreachable();
         };
         if frames
@@ -63,23 +64,11 @@ impl QueryRegistry {
             })
             .is_err()
         {
-            self.state
-                .lock()
-                .expect("query registry lock")
-                .pending
-                .remove(&query_id);
             return unreachable();
         }
         match tokio::time::timeout(QUERY_TIMEOUT, receiver).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) | Err(_) => {
-                self.state
-                    .lock()
-                    .expect("query registry lock")
-                    .pending
-                    .remove(&query_id);
-                unreachable()
-            }
+            Ok(Err(_)) | Err(_) => unreachable(),
         }
     }
 
@@ -96,6 +85,23 @@ impl QueryRegistry {
     }
 }
 
+/// Removes a query's registration when its caller stops waiting, so a cancelled `ask` leaves no
+/// entry behind for a later reply to fill.
+struct PendingQuery {
+    state: Arc<Mutex<RegistryState>>,
+    query_id: QueryId,
+}
+
+impl Drop for PendingQuery {
+    fn drop(&mut self) {
+        self.state
+            .lock()
+            .expect("query registry lock")
+            .pending
+            .remove(&self.query_id);
+    }
+}
+
 fn unreachable() -> QueryResult {
     QueryResult::Unavailable {
         code: QueryErrorCode::Unreachable,
@@ -104,39 +110,78 @@ fn unreachable() -> QueryResult {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+
     use super::*;
     use crate::protocol::computer::{MemoryListResult, MemoryQuery};
 
+    fn pending(ask: &mut std::pin::Pin<&mut impl Future<Output = QueryResult>>) -> bool {
+        let mut context = Context::from_waker(Waker::noop());
+        matches!(ask.as_mut().poll(&mut context), Poll::Pending)
+    }
+
+    fn memory_list() -> Query {
+        Query::MemoryList(MemoryQuery {
+            agent_id: crate::ids::AgentId::from_uuid(Uuid::now_v7()),
+        })
+    }
+
     #[tokio::test]
-    async fn a_reply_that_arrives_before_the_caller_awaits_is_not_lost() {
+    async fn a_reply_that_arrives_before_the_caller_checks_again_is_not_lost() {
         let registry = QueryRegistry::default();
         let computer = Uuid::now_v7();
         let (handle, mut frames) = registry.connect(computer);
-        let responder = registry.clone();
-        let computer_side = tokio::spawn(async move {
-            let Some(ServerFrame::Query { query }) = frames.recv().await else {
-                return;
-            };
-            responder.resolve(QueryResultEnvelope {
-                query_id: query.query_id,
-                result: QueryResult::MemoryList(MemoryListResult { files: Vec::new() }),
-            });
+
+        let mut ask = Box::pin(registry.ask(computer, memory_list()));
+        // The first poll registers the query and writes the frame, then waits for the reply. The
+        // Computer answers before the caller polls again, the way a socket read can deliver a reply
+        // between two polls of the waiting task.
+        assert!(pending(&mut ask.as_mut()));
+        let Some(ServerFrame::Query { query }) = frames.try_recv().ok() else {
+            panic!("the query must reach the Computer");
+        };
+        // The registration is in place before the frame is observable, so a reply can never arrive
+        // without somewhere to go.
+        assert!(
+            registry
+                .state
+                .lock()
+                .unwrap()
+                .pending
+                .contains_key(&query.query_id)
+        );
+        registry.resolve(QueryResultEnvelope {
+            query_id: query.query_id,
+            result: QueryResult::MemoryList(MemoryListResult { files: Vec::new() }),
         });
 
-        let result = registry
-            .ask(
-                computer,
-                Query::MemoryList(MemoryQuery {
-                    agent_id: crate::ids::AgentId::from_uuid(Uuid::now_v7()),
-                }),
-            )
-            .await;
+        assert!(matches!(ask.await, QueryResult::MemoryList(_)));
+        assert!(
+            registry.state.lock().unwrap().pending.is_empty(),
+            "a resolved query leaves no registration behind"
+        );
+        registry.disconnect(handle);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_waiting_ask_removes_its_registration() {
+        let registry = QueryRegistry::default();
+        let computer = Uuid::now_v7();
+        let (handle, _frames) = registry.connect(computer);
+
+        let mut ask = Box::pin(registry.ask(computer, memory_list()));
+        assert!(pending(&mut ask.as_mut()));
+        assert_eq!(registry.state.lock().unwrap().pending.len(), 1);
+
+        drop(ask);
 
         assert!(
-            matches!(result, QueryResult::MemoryList(_)),
-            "an immediate reply must reach the caller, not time out: {result:?}"
+            registry.state.lock().unwrap().pending.is_empty(),
+            "a cancelled query must not stay registered"
         );
-        computer_side.await.unwrap();
         registry.disconnect(handle);
     }
 }
