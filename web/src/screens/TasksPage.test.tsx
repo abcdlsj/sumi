@@ -154,6 +154,8 @@ describe("Task work index", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(screen.getByRole("heading", { name: "What needs to change?" })).toBeVisible();
+    // The form opens below the action row, so the buttons do not reflow around it.
+    expect(screen.getByRole("heading", { name: "What needs to change?" }).closest(".task-actions")).toBeNull();
     expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
     expect(screen.getByPlaceholderText("Tell Lin what to change.")).toHaveFocus();
     expect(screen.getByText("Add one sentence on what to change.")).toBeVisible();
