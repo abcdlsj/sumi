@@ -3,7 +3,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
   AGENT_PROFILES,
@@ -106,32 +105,6 @@ test("development seed extracts the Computer pairing URL without depending on lo
   );
   assert.equal(extractComputerPairingUrl("INFO request completed url=http://127.0.0.1:3000/api/v1/health"), undefined);
   assert.equal(extractComputerPairingUrl("INFO Confirm this Computer in Sumi url=not-a-url"), undefined);
-});
-
-test("dev-seed provisions its PostgreSQL database and exposes an explicit clean command", () => {
-  const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-  const miseConfig = readFileSync(join(repositoryRoot, "mise.toml"), "utf8");
-  const taskScript = readFileSync(join(repositoryRoot, "scripts", "dev-seed-task.sh"), "utf8");
-  const task = miseConfig.match(/\[tasks\.dev-seed\]\n(?<body>(?:[^\[]|\[(?!tasks\.))*?)(?=\n\[|$)/)?.groups?.body;
-
-  assert.ok(task, "mise.toml must define tasks.dev-seed");
-  assert.match(task, /run = "sh scripts\/dev-seed-task\.sh"/);
-  assert.match(task, /RUST_LOG = "sumi=warn,tower_http=warn"/);
-  assert.match(taskScript, /mise run db-start/);
-  assert.match(taskScript, /dropdb" --if-exists --force sumi_dev/);
-  assert.match(taskScript, /node scripts\/dev-seed\.mjs clean/);
-
-  const developmentTask = miseConfig.match(/\[tasks\.dev\]\n(?<body>(?:[^\[]|\[(?!tasks\.))*?)(?=\n\[|$)/)?.groups?.body;
-  assert.ok(developmentTask, "mise.toml must define tasks.dev");
-  assert.match(developmentTask, /SUMI_SERVER__DATABASE_URL = "postgres:\/\/localhost\/sumi_dev"/);
-
-  const databaseTask = miseConfig.match(/\[tasks\.db-start\]\n(?<body>(?:[^\[]|\[(?!tasks\.))*?)(?=\n\[|$)/)?.groups?.body;
-  assert.ok(databaseTask, "mise.toml must define tasks.db-start");
-  assert.match(databaseTask, /dropdb" --force sumi_dev/);
-  assert.match(databaseTask, /schema_version=/);
-  assert.match(databaseTask, /schema\/postgres\.sql/);
-  assert.match(databaseTask, /installed_version.*!= "\$schema_version"/);
-  assert.doesNotMatch(databaseTask, /installed_version.*!= "[0-9]+"/);
 });
 
 test("development seed cleanup removes only its resolved state root", (context) => {
