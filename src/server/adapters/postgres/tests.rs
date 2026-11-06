@@ -202,113 +202,20 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         assert!(event_sequence_index);
         assert_eq!(schema_version, 13);
 
-        let space = Uuid::now_v7();
-        let owner = Uuid::now_v7();
-        let agent = Uuid::now_v7();
-        let computer = Uuid::now_v7();
-        let provision = serde_json::json!({
-            "kind": "agent.provision",
-            "payload": {
-                "agent_id": agent,
-                "space_id": space,
-                "name": "Coder",
-                "role": {"revision": 1, "text": "Act"},
-                "driver": "codex",
-            },
-        });
-        sqlx::raw_sql(&format!(
-            "BEGIN; \
-             INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) \
-                 VALUES ('{space}','migration','Migration','#F0602F','{owner}',now()); \
-             INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) \
-                 VALUES ('{owner}','{space}','human','Owner','owner',now()), \
-                        ('{agent}','{space}','agent','Coder','member',now()); \
-             INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,created_at) \
-                 VALUES ('{computer}','{space}','Laptop','localhost','linux','migration-hash','offline',now()); \
-             ALTER TABLE agents DROP CONSTRAINT agents_driver_provider_check; \
-             ALTER TABLE agents DROP CONSTRAINT agents_driver_kind_check; \
-             ALTER TABLE agents ADD CONSTRAINT agents_driver_kind_check \
-                 CHECK (driver_kind IN ('codex', 'builtin')); \
-             INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) \
-                 VALUES ('{agent}','{space}','{computer}','Act',1,'active','codex',now()); \
-             INSERT INTO computer_commands(id,computer_id,computer_seq,kind,payload_json,created_at) \
-                 VALUES ('{}','{computer}',1,'agent.provision','{provision}',now()); \
-             COMMIT;",
-            Uuid::now_v7()
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::raw_sql(
-            "ALTER TABLE channels DROP CONSTRAINT channels_slug_form_check; \
-             DROP TABLE inbox_activity_events; \
-             DROP INDEX inbox_items_open_channel_ambient_aggregate; \
-             DROP INDEX inbox_items_open_thread_ambient_aggregate; \
-             ALTER TABLE inbox_items DROP COLUMN ambient_channel_id; \
-             DROP TABLE run_observations; \
-             DROP INDEX outbox_events_space_sequence; \
-             ALTER TABLE outbox_events DROP COLUMN sequence; \
-             ALTER TABLE spaces DROP COLUMN event_sequence; \
-             CREATE INDEX outbox_events_space_cursor ON outbox_events(space_id, created_at, id); \
-             DELETE FROM schema_meta; \
-             INSERT INTO schema_meta(version,applied_at) VALUES (5,now());",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        adapter.initialize_schema().await.unwrap();
-        let migrated_version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&pool)
+        // A database below the baseline is refused instead of upgraded.
+        sqlx::raw_sql("DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (11,now());")
+            .execute(&pool)
             .await
             .unwrap();
-        let migrated_constraint: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM pg_constraint \
-                 WHERE conname='channels_slug_form_check')",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let migrated_run_observations: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
-                 WHERE table_name='run_observations')",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let migrated_observed_thread_seq: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-                 WHERE table_name='agent_runs' AND column_name='observed_thread_seq')",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(migrated_version, 13);
-        assert!(migrated_constraint);
-        assert!(migrated_run_observations);
-        assert!(!migrated_observed_thread_seq);
-        let migrated_driver: (String, Option<String>) = sqlx::query_as(
-            "SELECT driver_kind,driver_config_json->>'provider' FROM agents WHERE member_id=$1",
-        )
-        .bind(agent)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(migrated_driver, ("acp".to_owned(), Some("codex".to_owned())));
-        let commands = adapter
-            .pending_commands(ComputerId::from_uuid(computer), CommandSequence(0))
+        let error = adapter.initialize_schema().await.unwrap_err();
+        assert!(
+            error.to_string().contains("older than the supported baseline"),
+            "{error}"
+        );
+        sqlx::raw_sql("DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (13,now());")
+            .execute(&pool)
             .await
             .unwrap();
-        assert!(matches!(
-            &commands[..],
-            [CommandEnvelope {
-                command: Command::AgentProvision(configuration),
-                ..
-            }] if configuration.driver
-                == crate::protocol::computer::DriverKind::Acp {
-                    provider: crate::protocol::computer::AcpProvider::Codex,
-                }
-        ));
         pool.close().await;
     }
     .await;
@@ -1652,89 +1559,6 @@ async fn channel_member_activity_preserves_order_and_stops_after_leave() {
             .iter()
             .any(|candidate| candidate.agent_id == MemberId::from_uuid(joining_agent)));
 
-        pool.close().await;
-    }
-    .await;
-
-    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
-        .execute(&mut admin)
-        .await
-        .unwrap();
-    result
-}
-
-#[tokio::test]
-async fn v6_to_v7_migration_merges_channel_aggregates_across_threads() {
-    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
-    let database_name = format!("sumi_activity_migration_{}", Uuid::now_v7().simple());
-    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
-        .await
-        .unwrap();
-    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
-        .execute(&mut admin)
-        .await
-        .unwrap();
-    let mut database_url = Url::parse(&admin_url).unwrap();
-    database_url.set_path(&format!("/{database_name}"));
-
-    let result = async {
-        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
-        let adapter = PostgresAdapter::new(pool.clone());
-        adapter.initialize_schema().await.unwrap();
-        let space = Uuid::now_v7();
-        let owner = Uuid::now_v7();
-        let agent = Uuid::now_v7();
-        let channel = Uuid::now_v7();
-        let first_root = Uuid::now_v7();
-        let second_root = Uuid::now_v7();
-        let first_item = Uuid::now_v7();
-        let second_item = Uuid::now_v7();
-        sqlx::raw_sql(&format!(
-            "BEGIN;
-             DROP TABLE inbox_activity_events;
-             DROP INDEX inbox_items_open_channel_ambient_aggregate;
-             DROP INDEX inbox_items_open_thread_ambient_aggregate;
-             ALTER TABLE inbox_items DROP COLUMN ambient_channel_id;
-             DROP TABLE run_observations;
-             DROP INDEX outbox_events_space_sequence;
-             ALTER TABLE outbox_events DROP COLUMN sequence;
-             ALTER TABLE spaces DROP COLUMN event_sequence;
-             CREATE INDEX outbox_events_space_cursor ON outbox_events(space_id, created_at, id);
-             CREATE UNIQUE INDEX inbox_items_open_ambient_aggregate ON inbox_items(member_id,thread_id) WHERE strength='ambient' AND status='pending' AND retry_count=0;
-             ALTER TABLE agents DROP CONSTRAINT agents_driver_provider_check;
-             DELETE FROM schema_meta;
-             INSERT INTO schema_meta(version,applied_at) VALUES (6,now());
-             INSERT INTO spaces (id,slug,name,accent,owner_member_id,created_at) VALUES ('{space}','migration-space','Migration Space','#F0602F','{owner}',now());
-             INSERT INTO members (id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner}','{space}','human','Owner','owner',now()),('{agent}','{space}','agent','Migrator','member',now());
-             INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','migration',5,now());
-             INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{first_root}','{space}','{channel}','{first_root}',1,'root','text','{owner}','first',now()),('{second_root}','{space}','{channel}','{second_root}',2,'root','text','{owner}','second',now());
-             INSERT INTO inbox_items(id,space_id,member_id,message_id,thread_id,task_id,kind,strength,status,available_at,retry_count,first_message_seq,last_message_seq,aggregated_count,force_at,created_at) VALUES
-                ('{first_item}','{space}','{agent}',NULL,'{first_root}',NULL,'channel_activity','ambient','pending',now(),0,3,3,1,now(),now()),
-                ('{second_item}','{space}','{agent}',NULL,'{second_root}',NULL,'channel_activity','ambient','pending',now(),0,2,4,2,now()+interval '10 minutes',now());
-             COMMIT;"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        adapter.initialize_schema().await.unwrap();
-        let merged: (i64, i32, i64, i64, Uuid) = sqlx::query_as(
-            "SELECT count(*),aggregated_count,first_message_seq,last_message_seq,ambient_channel_id \
-             FROM inbox_items WHERE member_id=$1 GROUP BY aggregated_count,first_message_seq,last_message_seq,ambient_channel_id",
-        )
-        .bind(agent)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(merged, (1, 3, 2, 4, channel));
-        assert_eq!(
-            sqlx::query_scalar::<_, i32>("SELECT max(version) FROM schema_meta")
-                .fetch_one(&pool)
-                .await
-                .unwrap(),
-            13
-        );
         pool.close().await;
     }
     .await;

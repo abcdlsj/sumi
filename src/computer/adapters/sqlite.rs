@@ -23,6 +23,9 @@ use crate::{
 
 const BASELINE: &str = include_str!("../../../schema/computer.sql");
 
+/// Schema version written by `schema/computer.sql`. Older databases are not upgraded.
+const BASELINE_VERSION: i64 = 5;
+
 pub(in crate::computer) struct SqliteAdapter {
     connection: SqliteConnection,
 }
@@ -93,125 +96,12 @@ impl SqliteAdapter {
                 .await
                 .map_err(map_sqlx)?;
         }
-        let mut version: i64 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
+        let version: i64 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
             .fetch_one(&mut connection)
             .await
             .map_err(map_sqlx)?;
-        if version == 1 {
-            // A v1 database written before `run_secret` existed has nothing to drop, and SQLite
-            // has no `DROP COLUMN IF EXISTS`; drop only when the column is actually there.
-            let has_run_secret: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM pragma_table_info('local_runs') WHERE name='run_secret'",
-            )
-            .fetch_one(&mut connection)
-            .await
-            .map_err(map_sqlx)?;
-            if has_run_secret > 0 {
-                sqlx::raw_sql("ALTER TABLE local_runs DROP COLUMN run_secret;")
-                    .execute(&mut connection)
-                    .await
-                    .map_err(map_sqlx)?;
-            }
-            sqlx::raw_sql(
-                "INSERT INTO schema_meta (version, applied_at) \
-                 VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
-            )
-            .execute(&mut connection)
-            .await
-            .map_err(map_sqlx)?;
-            version = 2;
-        }
-        if version == 2 {
-            sqlx::raw_sql(
-                "CREATE TABLE llm_usage (
-                     id TEXT PRIMARY KEY,
-                     run_id TEXT NOT NULL,
-                     agent_id TEXT NOT NULL,
-                     driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'builtin')),
-                     model TEXT,
-                     input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
-                     output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
-                     cached_input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cached_input_tokens >= 0),
-                     cache_write_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cache_write_tokens >= 0),
-                     duration_ms INTEGER,
-                     created_at TEXT NOT NULL
-                 ) STRICT;
-                 CREATE INDEX llm_usage_created_at ON llm_usage (created_at);
-                 INSERT INTO schema_meta (version, applied_at) \
-                 VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
-            )
-            .execute(&mut connection)
-            .await
-            .map_err(map_sqlx)?;
-            version = 3;
-        }
-        if version == 3 {
-            sqlx::raw_sql(
-                "CREATE TABLE channel_contexts (\
-                     agent_id TEXT NOT NULL,\
-                     channel_id TEXT NOT NULL,\
-                     through_sequence INTEGER NOT NULL CHECK (through_sequence >= 0),\
-                     PRIMARY KEY (agent_id, channel_id)\
-                 ) STRICT;\
-                 INSERT INTO schema_meta (version, applied_at)\
-                 VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
-            )
-            .execute(&mut connection)
-            .await
-            .map_err(map_sqlx)?;
-            version = 4;
-        }
-        if version == 4 {
-            // SQLite cannot alter a CHECK constraint; rebuild both tables that store driver_kind.
-            sqlx::raw_sql(
-                "BEGIN;
-                 CREATE TABLE provider_sessions_v5 (
-                     agent_id TEXT NOT NULL,
-                     scope_kind TEXT NOT NULL CHECK (scope_kind IN ('thread', 'task')),
-                     scope_id TEXT NOT NULL,
-                     generation INTEGER NOT NULL CHECK (generation > 0),
-                     driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'claude', 'pi', 'builtin')),
-                     provider_locator TEXT NOT NULL,
-                     workspace_fingerprint TEXT NOT NULL,
-                     role_revision INTEGER NOT NULL CHECK (role_revision >= 0),
-                     audience_fingerprint TEXT NOT NULL,
-                     state TEXT NOT NULL CHECK (state IN ('ready', 'in_use', 'closing', 'closed', 'lost')),
-                     created_at TEXT NOT NULL,
-                     last_resumed_at TEXT,
-                     closed_at TEXT,
-                     PRIMARY KEY (agent_id, scope_kind, scope_id, generation)
-                 ) STRICT;
-                 INSERT INTO provider_sessions_v5 SELECT * FROM provider_sessions;
-                 DROP TABLE provider_sessions;
-                 ALTER TABLE provider_sessions_v5 RENAME TO provider_sessions;
-                 CREATE TABLE llm_usage_v5 (
-                     id TEXT PRIMARY KEY,
-                     run_id TEXT NOT NULL,
-                     agent_id TEXT NOT NULL,
-                     driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'claude', 'pi', 'builtin')),
-                     model TEXT,
-                     input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
-                     output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
-                     cached_input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cached_input_tokens >= 0),
-                     cache_write_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cache_write_tokens >= 0),
-                     duration_ms INTEGER,
-                     created_at TEXT NOT NULL
-                 ) STRICT;
-                 INSERT INTO llm_usage_v5 SELECT * FROM llm_usage;
-                 DROP TABLE llm_usage;
-                 ALTER TABLE llm_usage_v5 RENAME TO llm_usage;
-                 CREATE INDEX llm_usage_created_at ON llm_usage (created_at);
-                 INSERT INTO schema_meta (version, applied_at)
-                 VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-                 COMMIT;",
-            )
-            .execute(&mut connection)
-            .await
-            .map_err(map_sqlx)?;
-            version = 5;
-        }
-        if version != 5 {
-            return Err(ApplicationError::Internal);
+        if version != BASELINE_VERSION {
+            return Err(ApplicationError::UnsupportedSchema(version));
         }
         Ok(Self { connection })
     }
@@ -979,7 +869,7 @@ fn application_error_name(value: &ApplicationError) -> &'static str {
         ApplicationError::AlreadyApplied => "already_applied",
         ApplicationError::DriverUnavailable => "driver_unavailable",
         ApplicationError::SessionLost => "session_lost",
-        ApplicationError::Internal => "internal",
+        ApplicationError::Internal | ApplicationError::UnsupportedSchema(_) => "internal",
     }
 }
 
@@ -1178,7 +1068,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn version_1_database_drops_the_run_secret_column() {
+    async fn a_database_below_the_baseline_is_refused_instead_of_upgraded() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("daemon.db");
         let options = SqliteConnectOptions::new()
@@ -1190,62 +1080,19 @@ mod tests {
                  version INTEGER PRIMARY KEY CHECK (version > 0),
                  applied_at TEXT NOT NULL
              ) STRICT;
-             INSERT INTO schema_meta (version, applied_at) VALUES (1, 'v1');
-             CREATE TABLE local_runs (
-                 run_id TEXT PRIMARY KEY,
-                 agent_id TEXT NOT NULL,
-                 task_id TEXT,
-                 focus_thread_id TEXT NOT NULL,
-                 run_secret TEXT NOT NULL,
-                 state TEXT NOT NULL,
-                 run_json TEXT NOT NULL
-             ) STRICT;
-             CREATE TABLE provider_sessions (
-                 agent_id TEXT NOT NULL,
-                 scope_kind TEXT NOT NULL CHECK (scope_kind IN ('thread', 'task')),
-                 scope_id TEXT NOT NULL,
-                 generation INTEGER NOT NULL CHECK (generation > 0),
-                 driver_kind TEXT NOT NULL CHECK (driver_kind IN ('codex', 'builtin')),
-                 provider_locator TEXT NOT NULL,
-                 workspace_fingerprint TEXT NOT NULL,
-                 role_revision INTEGER NOT NULL CHECK (role_revision >= 0),
-                 audience_fingerprint TEXT NOT NULL,
-                 state TEXT NOT NULL CHECK (state IN ('ready', 'in_use', 'closing', 'closed', 'lost')),
-                 created_at TEXT NOT NULL,
-                 last_resumed_at TEXT,
-                 closed_at TEXT,
-                 PRIMARY KEY (agent_id, scope_kind, scope_id, generation)
-             ) STRICT;
-             INSERT INTO provider_sessions VALUES
-                 ('agent', 'thread', 'thread', 1, 'codex', 'locator', 'workspace', 1,
-                  'audience', 'ready', 'v1', NULL, NULL);",
+             INSERT INTO schema_meta (version, applied_at) VALUES (4, 'v4');",
         )
         .execute(&mut connection)
         .await
         .unwrap();
         drop(connection);
 
-        let mut adapter = SqliteAdapter::open(&path).await.unwrap();
-        let columns: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM pragma_table_info('local_runs') ORDER BY cid")
-                .fetch_all(&mut adapter.connection)
-                .await
-                .unwrap();
-        assert!(!columns.contains(&"run_secret".to_owned()));
-        let version: i64 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut adapter.connection)
-            .await
-            .unwrap();
-        assert_eq!(version, 5);
-        let driver: String = sqlx::query_scalar("SELECT driver_kind FROM provider_sessions")
-            .fetch_one(&mut adapter.connection)
-            .await
-            .unwrap();
-        assert_eq!(driver, "codex");
-        sqlx::query("UPDATE provider_sessions SET driver_kind='claude'")
-            .execute(&mut adapter.connection)
-            .await
-            .unwrap();
+        let error = match SqliteAdapter::open(&path).await {
+            Err(error) => error,
+            Ok(_) => panic!("a pre-baseline database must not open"),
+        };
+        assert_eq!(error, ApplicationError::UnsupportedSchema(4));
+        assert!(error.to_string().contains("delete the daemon database"));
     }
 
     #[tokio::test]

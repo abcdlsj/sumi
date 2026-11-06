@@ -47,4 +47,8 @@ pub(in crate::computer) enum ApplicationError {
     SessionLost,
     #[error("local persistence failed")]
     Internal,
+    #[error(
+        "local database schema version {0} is older than this release supports; delete the daemon database for a fresh schema"
+    )]
+    UnsupportedSchema(i64),
 }
