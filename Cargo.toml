@@ -64,6 +64,10 @@ name = "registration_space"
 path = "tests/normal/registration_space.rs"
 
 [[test]]
+name = "space_events"
+path = "tests/normal/space_events.rs"
+
+[[test]]
 name = "space_invitation"
 path = "tests/normal/space_invitation.rs"
 

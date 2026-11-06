@@ -216,14 +216,14 @@ impl PostgresTransaction {
             },
         })
         .await?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'member.changed',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(space_id)
-            .bind(serde_json::json!({"resource_id": member_id.into_uuid(), "channel_id": channel_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            SpaceId::from_uuid(space_id),
+            "member.changed",
+            serde_json::json!({"resource_id": member_id.into_uuid(), "channel_id": channel_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok(())
     }
 
@@ -256,14 +256,19 @@ impl PostgresTransaction {
         .execute(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'message.created',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(sqlx::query_scalar::<_, Uuid>("SELECT space_id FROM channels WHERE id=$1").bind(channel_id.into_uuid()).fetch_one(&mut *self.connection).await.map_err(map_sqlx)?)
-            .bind(serde_json::json!({"channel_id": channel_id.into_uuid(), "message_id": message_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
+        let space_id: Uuid = sqlx::query_scalar("SELECT space_id FROM channels WHERE id=$1")
+            .bind(channel_id.into_uuid())
+            .fetch_one(&mut *self.connection)
             .await
             .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            SpaceId::from_uuid(space_id),
+            "message.created",
+            serde_json::json!({"channel_id": channel_id.into_uuid(), "message_id": message_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok((
             message_id,
             u64::try_from(sequence).map_err(|_| ApplicationError::Internal)?,
@@ -391,14 +396,14 @@ impl PostgresTransaction {
             .execute(&mut *self.connection)
             .await
             .map_err(map_sqlx)?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'member.changed',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(space_id)
-            .bind(serde_json::json!({"resource_id":agent_id.into_uuid(), "channel_id":channel_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            SpaceId::from_uuid(space_id),
+            "member.changed",
+            serde_json::json!({"resource_id":agent_id.into_uuid(), "channel_id":channel_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok(())
     }
 
@@ -566,14 +571,14 @@ impl PostgresTransaction {
             },
         })
         .await?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'member.changed',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(space_id)
-            .bind(serde_json::json!({"resource_id":member_id.into_uuid(), "channel_id":channel_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            SpaceId::from_uuid(space_id),
+            "member.changed",
+            serde_json::json!({"resource_id":member_id.into_uuid(), "channel_id":channel_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok(true)
     }
 
@@ -665,14 +670,14 @@ impl PostgresTransaction {
             .execute(&mut *self.connection)
             .await
             .map_err(map_sqlx)?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'member.changed',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(space_id)
-            .bind(serde_json::json!({"resource_id":agent_id.into_uuid(), "channel_id":channel_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            SpaceId::from_uuid(space_id),
+            "member.changed",
+            serde_json::json!({"resource_id":agent_id.into_uuid(), "channel_id":channel_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok(())
     }
     pub(super) async fn channel_action_audience(

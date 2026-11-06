@@ -461,14 +461,14 @@ impl PostgresTransaction {
             .execute(&mut *self.connection)
             .await
             .map_err(map_sqlx)?;
-        sqlx::query("INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) VALUES($1,$2,'channel.created',$3,$4)")
-            .bind(Uuid::now_v7())
-            .bind(space_id.into_uuid())
-            .bind(json!({"resource_id": general_channel_id.into_uuid()}))
-            .bind(now)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            space_id,
+            "channel.created",
+            json!({"resource_id": general_channel_id.into_uuid()}),
+            now,
+        )
+        .await?;
         Ok(CreatedSpace {
             space_id,
             owner_id,
