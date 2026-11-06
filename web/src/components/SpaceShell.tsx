@@ -36,12 +36,11 @@ import { DialogFrame } from "./DialogFrame";
 import { SpaceShellValue, useSpaceShell, type SpaceShellContext } from "./spaceShellContext";
 import { AccountMenu } from "./AccountMenu";
 import { ConnectionBanner } from "./Feedback";
-import { PixelIdentity } from "./PixelIdentity";
+import { PixelIdentity, PresenceIdentity } from "./PixelIdentity";
 import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
 import { ShellSkeleton } from "./Skeleton";
 
-export { PixelIdentity } from "./PixelIdentity";
 
 /** Renders a page body from the Space context, for pages that only pass it through. */
 export function SpacePage({ children }: { children: (context: SpaceShellContext) => ReactNode }) {
@@ -856,17 +855,3 @@ function DirectMessageNavigationItem({ member, activityStatus, role, active, hre
   );
 }
 
-export function PresenceIdentity({ name, kind = "human", seed, activityStatus }: { name: string; kind?: "human" | "agent"; seed: string; activityStatus?: AgentPresence }) {
-  if (kind !== "agent" || !activityStatus) {
-    return <PixelIdentity name={name} kind={kind} seed={seed} />;
-  }
-  const label = activityLabel(activityStatus);
-  // Working breathes a teal ring around the seal; idle stays silent; only
-  // error and suspended add a corner dot.
-  return (
-    <span className={`presence-identity presence-identity--${activityStatus}`}>
-      <PixelIdentity name={name} kind={kind} seed={seed} />
-      <span className={`presence-dot presence-dot--${activityStatus}`} role="img" aria-label={`${name} is ${label}`} title={`${name} · ${label}`} />
-    </span>
-  );
-}

@@ -11,7 +11,7 @@ import { formatClock, formatDayDivider, formatFullDateTime } from "../../time";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity, type AgentPresence } from "../../agentActivity";
 import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
-import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
+import { PixelIdentity, PresenceIdentity } from "../PixelIdentity";
 import { TaskStatusIcon } from "../taskStatusIcon";
 import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";

@@ -17,7 +17,8 @@ import { type FormEvent, useState } from "react";
 import {createInvitation, createDirectMessage, listAgents, listMembers, updateMember} from "../api/client";
 import type {Agent, Member, Space} from "../api/types";
 import { activityLabel, agentPresence } from "../agentActivity";
-import { PresenceIdentity, SpacePage } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
+import { PresenceIdentity } from "../components/PixelIdentity";
 import { SumiSelect } from "../components/SumiSelect";
 import { ListSkeleton } from "../components/Skeleton";
 

@@ -4,7 +4,7 @@ import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useId,
 
 import {uploadAttachment} from "../../api/client";
 import type {CreateMessageInput, Member, Message} from "../../api/types";
-import { PixelIdentity } from "../SpaceShell";
+import { PixelIdentity } from "../PixelIdentity";
 
 const DRAFT_STORAGE_PREFIX = "sumi:composer-draft:";
 

@@ -13,7 +13,8 @@ import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { useOutbox } from "../components/channel/outbox";
 import { messagesQueryOptions, timelinePage, upsertRootMessage, type MessagePages } from "../components/channel/messageCache";
-import { PixelIdentity, PresenceIdentity, SpacePage } from "../components/SpaceShell";
+import { PixelIdentity, PresenceIdentity } from "../components/PixelIdentity";
+import { SpacePage } from "../components/SpaceShell";
 import { agentPresence } from "../agentActivity";
 
 export function ChannelPage() {
