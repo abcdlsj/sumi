@@ -2,6 +2,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
@@ -10,22 +11,26 @@ import { RouteChrome } from "./RouteChrome";
 import { SpaceLayout } from "./SpaceLayout";
 import { loadLastConversationRoute } from "./conversationMemory";
 import { ChannelPage } from "./screens/ChannelPage";
-import { CompanyOfficePage } from "./screens/CompanyPage";
-import { AgentGraphRouteContent, InsightsPage } from "./screens/InsightsPage";
-import { AgentStatisticsPage } from "./screens/AgentStatisticsPage";
-import { AgentDetailPage } from "./screens/AgentDetailPage";
-import { ComputersPage } from "./screens/ComputersPage";
-import { InvitationPage } from "./screens/InvitationPage";
-import { InboxPage } from "./screens/InboxPage";
 import { DirectMessagePage } from "./screens/DirectMessagePage";
 import { LoginPage } from "./screens/LoginPage";
-import { MembersPage } from "./screens/MembersPage";
 import { RegisterPage } from "./screens/RegisterPage";
-import { PairComputerPage } from "./screens/PairComputerPage";
-import { SettingsPage } from "./screens/SettingsPage";
 import { SpaceCreatePage } from "./screens/SpaceCreatePage";
-import { TaskDetailPage, TasksPage } from "./screens/TasksPage";
 import { NotFoundPage, RouteErrorPage } from "./components/RoutePages";
+
+// Pages beyond the conversation load on first visit, so opening a Channel downloads only what it renders.
+const CompanyOfficePage = lazyRouteComponent(() => import("./screens/CompanyPage"), "CompanyOfficePage");
+const AgentGraphRouteContent = lazyRouteComponent(() => import("./screens/InsightsPage"), "AgentGraphRouteContent");
+const InsightsPage = lazyRouteComponent(() => import("./screens/InsightsPage"), "InsightsPage");
+const AgentStatisticsPage = lazyRouteComponent(() => import("./screens/AgentStatisticsPage"), "AgentStatisticsPage");
+const AgentDetailPage = lazyRouteComponent(() => import("./screens/AgentDetailPage"), "AgentDetailPage");
+const ComputersPage = lazyRouteComponent(() => import("./screens/ComputersPage"), "ComputersPage");
+const InvitationPage = lazyRouteComponent(() => import("./screens/InvitationPage"), "InvitationPage");
+const InboxPage = lazyRouteComponent(() => import("./screens/InboxPage"), "InboxPage");
+const MembersPage = lazyRouteComponent(() => import("./screens/MembersPage"), "MembersPage");
+const PairComputerPage = lazyRouteComponent(() => import("./screens/PairComputerPage"), "PairComputerPage");
+const SettingsPage = lazyRouteComponent(() => import("./screens/SettingsPage"), "SettingsPage");
+const TaskDetailPage = lazyRouteComponent(() => import("./screens/TasksPage"), "TaskDetailPage");
+const TasksPage = lazyRouteComponent(() => import("./screens/TasksPage"), "TasksPage");
 
 const rootRoute = createRootRoute({ component: RouteChrome });
 const registerRoute = createRoute({
