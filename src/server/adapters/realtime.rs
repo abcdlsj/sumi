@@ -36,9 +36,11 @@ pub(super) struct BrowserEvent<T> {
 pub(super) struct BrowserEventPage<T> {
     /// Rows the viewer may see, in commit order.
     pub(super) events: Vec<BrowserEvent<T>>,
-    /// Cursor after the last scanned row, present only when the read filled a whole page. Invisible
-    /// rows advance it too, so a page of private events cannot pin the stream in place.
-    pub(super) next: Option<EventCursor>,
+    /// Cursor of the last scanned row, visible or not; `None` when the read found no rows. Invisible
+    /// rows advance it too, so private events cannot pin the stream in place.
+    pub(super) scanned: Option<EventCursor>,
+    /// The read filled a whole page, so more rows may already be committed after `scanned`.
+    pub(super) full: bool,
 }
 
 impl<T: Serialize> BrowserEvent<T> {
@@ -146,8 +148,6 @@ impl SpaceEventFeed {
     async fn next_event(mut self) -> Option<(Result<SseEvent, Infallible>, Self)> {
         loop {
             if let Some(event) = self.buffered.pop_front() {
-                // A full page already moved the cursor past all of its rows, so it never goes back.
-                self.cursor = self.cursor.max(event.cursor);
                 let event = event.into_sse().ok()?;
                 return Some((Ok(event), self));
             }
@@ -160,15 +160,12 @@ impl SpaceEventFeed {
                 .browser_events(self.space_id, self.viewer, Some(self.cursor))
                 .await
                 .ok()?;
-            self.paging = page.next.is_some();
-            // An invisible tail still advances the cursor, so re-reading after a wake-up cannot
-            // resend an event the Browser already has.
-            self.cursor = page.next.unwrap_or_else(|| {
-                page.events
-                    .last()
-                    .map(|event| event.cursor)
-                    .unwrap_or(self.cursor)
-            });
+            self.paging = page.full;
+            // Every scanned row moves the cursor, including an invisible tail, so re-reading after a
+            // wake-up neither resends an event nor scans the same private rows again.
+            if let Some(scanned) = page.scanned {
+                self.cursor = self.cursor.max(scanned);
+            }
             self.buffered = VecDeque::from(page.events);
         }
     }

@@ -642,8 +642,9 @@ impl PostgresAdapter {
     ///
     /// `viewer_member_id` filters events whose payload names a Channel the viewer cannot read, and
     /// Inbox events belonging to another Member, so a private Channel does not leak through the
-    /// stream. Filtering happens after the page is read: the returned `next` is derived from the
-    /// scanned rows, never from the visible ones, so an unreadable backlog cannot stall the stream.
+    /// stream. Filtering happens after the page is read: the returned `scanned` cursor is derived
+    /// from the scanned rows, never from the visible ones, so an unreadable backlog cannot stall the
+    /// stream or be re-read on every wake-up.
     pub(super) async fn browser_events(
         &self,
         space_id: SpaceId,
@@ -672,15 +673,15 @@ impl PostgresAdapter {
             .await
             .map_err(map_sqlx)?
         };
-        let next = if rows.len() == EVENT_PAGE {
-            let last = rows.last().ok_or(ApplicationError::Internal)?;
-            Some(super::realtime::EventCursor::new(
+        let full = rows.len() == EVENT_PAGE;
+        let scanned = rows
+            .last()
+            .map(|last| {
                 u64::try_from(last.get::<i64, _>("sequence"))
-                    .map_err(|_| ApplicationError::Internal)?,
-            ))
-        } else {
-            None
-        };
+                    .map(super::realtime::EventCursor::new)
+                    .map_err(|_| ApplicationError::Internal)
+            })
+            .transpose()?;
         let readable_channels = sqlx::query_scalar::<_, Uuid>(
             "SELECT channel_id FROM channel_members WHERE member_id=$1",
         )
@@ -726,7 +727,11 @@ impl PostgresAdapter {
                 )
             })
             .collect();
-        Ok(super::realtime::BrowserEventPage { events, next })
+        Ok(super::realtime::BrowserEventPage {
+            events,
+            scanned,
+            full,
+        })
     }
 
     /// Position the stream should start from when it has no `Last-Event-ID`: the Space tail.

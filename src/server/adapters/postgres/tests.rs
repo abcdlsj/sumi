@@ -2860,9 +2860,10 @@ async fn a_full_page_of_unreadable_events_still_advances_the_stream() {
             private_page.events.is_empty(),
             "an event scoped to an unreadable Channel must not reach the viewer"
         );
+        assert!(private_page.full);
         let next = private_page
-            .next
-            .expect("a full page must hand the stream its last scanned row");
+            .scanned
+            .expect("a page must hand the stream its last scanned row");
         assert_eq!(next, EventCursor::new(100));
 
         let following = adapter
@@ -2873,9 +2874,25 @@ async fn a_full_page_of_unreadable_events_still_advances_the_stream() {
         assert_eq!(following.events[0].event_type, "task.updated");
         assert_eq!(following.events[0].data, visible_payload);
         assert!(
-            following.next.is_none(),
+            !following.full,
             "a page that is not full means the stream caught up"
         );
+
+        // A short page whose tail the viewer cannot read still moves the cursor past that tail.
+        commit_events(
+            &pool,
+            space_id,
+            2,
+            "message.created",
+            json!({"resource_id": Uuid::now_v7(), "channel_id": private_channel_id}),
+        )
+        .await;
+        let private_tail = adapter
+            .browser_events(space_id, owner_id, following.scanned)
+            .await
+            .unwrap();
+        assert!(private_tail.events.is_empty() && !private_tail.full);
+        assert_eq!(private_tail.scanned, Some(EventCursor::new(103)));
 
         pool.close().await;
     }
@@ -2927,7 +2944,7 @@ async fn a_new_stream_starts_at_the_space_tail() {
             .await
             .unwrap();
         assert!(
-            history.events.is_empty() && history.next.is_none(),
+            history.events.is_empty() && history.scanned.is_none(),
             "a first connection must not replay committed history"
         );
 
