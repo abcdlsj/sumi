@@ -143,9 +143,9 @@ export function useSpaceEvents(
       for (const type of eventTypes) target.addEventListener(type, invalidate as EventListener);
       target.onopen = () => {
         retryDelay = 1000;
-        // Anything that changed while the stream was down has no event here;
-        // refetch what is on screen so nothing stays stale.
-        if (lost) void queryClient.invalidateQueries();
+        // The stream starts at the Server's current tail, so a commit that landed between the
+        // projection queries and this connection has no event here; refetch what is on screen.
+        void queryClient.invalidateQueries();
         lost = false;
         wasLive = true;
         setConnection("live");
