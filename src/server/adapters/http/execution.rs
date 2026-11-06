@@ -1669,14 +1669,11 @@ pub(super) async fn agent_read_channel_members(
     space_id: Uuid,
     channel_id: Uuid,
 ) -> Result<Value, capability::Error> {
-    let mut storage = state.storage.clone();
-    let member = ReadAgentChannel::membership(
-        &mut storage,
-        ChannelId::from_uuid(channel_id),
-        MemberId::from_uuid(agent_id),
-    )
-    .await
-    .map_err(app_to_capability)?;
+    let member = state
+        .read
+        .channel_member_visible(channel_id, agent_id)
+        .await
+        .map_err(app_to_capability)?;
     if !member {
         return Err(capability_error(
             capability::ErrorCode::PermissionDenied,
@@ -1734,14 +1731,11 @@ pub(super) async fn agent_read_channel(
     around_message_id: Option<Uuid>,
     limit: u16,
 ) -> Result<(Value, Vec<u64>), capability::Error> {
-    let mut storage = state.storage.clone();
-    let member = ReadAgentChannel::membership(
-        &mut storage,
-        ChannelId::from_uuid(channel_id),
-        MemberId::from_uuid(agent_id),
-    )
-    .await
-    .map_err(app_to_capability)?;
+    let member = state
+        .read
+        .channel_member_visible(channel_id, agent_id)
+        .await
+        .map_err(app_to_capability)?;
     if !member {
         return Err(capability_error(
             capability::ErrorCode::PermissionDenied,
@@ -1751,30 +1745,24 @@ pub(super) async fn agent_read_channel(
     }
     let around_sequence = match around_message_id {
         Some(message_id) => Some(
-            ReadAgentChannel::around_sequence(
-                &mut storage,
-                MessageId::from_uuid(message_id),
-                ChannelId::from_uuid(channel_id),
-            )
-            .await
-            .map_err(app_to_capability)?
-            .ok_or_else(|| {
-                capability_error(
-                    capability::ErrorCode::NotFound,
-                    "Around Message was not found in the Channel",
-                    false,
-                )
-            })?,
+            state
+                .read
+                .message_sequence_in_channel(message_id, channel_id)
+                .await
+                .map_err(app_to_capability)?
+                .ok_or_else(|| {
+                    capability_error(
+                        capability::ErrorCode::NotFound,
+                        "Around Message was not found in the Channel",
+                        false,
+                    )
+                })?,
         ),
         None => None,
     };
     let rows = state
         .read
-        .channel_messages(
-            channel_id,
-            around_sequence.map(|value| value as i64),
-            i64::from(limit),
-        )
+        .channel_messages(channel_id, around_sequence, i64::from(limit))
         .await
         .map_err(|_| {
             capability_error(
@@ -1793,7 +1781,9 @@ pub(super) async fn agent_read_channel(
                 .map_err(api_to_capability)?,
         );
     }
-    let snapshot = ReadAgentChannel::snapshot(&mut storage, ChannelId::from_uuid(channel_id))
+    let snapshot = state
+        .read
+        .channel_snapshot(channel_id)
         .await
         .map_err(app_to_capability)?;
     Ok((
@@ -1815,18 +1805,16 @@ async fn record_read(
     sequences: &[u64],
 ) {
     let mut storage = state.storage.clone();
-    if let Err(error) = storage
-        .transact(async |transaction| {
-            transaction
-                .record_read(
-                    context.run_id,
-                    MemberId::from_uuid(context.agent_id.into_uuid()),
-                    scope,
-                    sequences,
-                )
-                .await
-        })
-        .await
+    if let Err(error) = RecordObservedRead::execute(
+        &mut storage,
+        RecordObservedReadInput {
+            run_id: context.run_id,
+            observer: MemberId::from_uuid(context.agent_id.into_uuid()),
+            scope,
+            sequences: sequences.to_vec(),
+        },
+    )
+    .await
     {
         tracing::warn!(%context.run_id, %error, "observed read position record failed");
     }
@@ -2191,4 +2179,4 @@ pub(in crate::server::adapters) fn run_error_code(code: ComputerErrorCode) -> Ru
         ComputerErrorCode::Internal => RunErrorCode::Internal,
     }
 }
-use crate::server::application::ports::{CollaborationTransaction, ExecutionTransaction};
+use crate::server::application::ports::CollaborationTransaction;

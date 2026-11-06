@@ -3,9 +3,9 @@ use sqlx::{FromRow, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::server::application::ports::ApplicationError;
+use crate::server::application::ports::{ApplicationError, PairedComputer};
 
-use super::map_sqlx;
+use super::{map_sqlx, rows::paired_computer_from_row};
 
 pub(in crate::server::adapters) struct ChannelLeaveReplayQuery {
     pub(in crate::server::adapters) agent_id: Uuid,
@@ -427,6 +427,34 @@ impl PostgresQueries {
             .map_err(map_sqlx)
     }
 
+    pub(in crate::server::adapters) async fn channel_member_visible(
+        &self,
+        channel_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<bool, ApplicationError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=$1 AND member_id=$2)",
+        )
+        .bind(channel_id)
+        .bind(member_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn message_sequence_in_channel(
+        &self,
+        message_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<Option<i64>, ApplicationError> {
+        sqlx::query_scalar("SELECT channel_seq FROM messages WHERE id=$1 AND channel_id=$2")
+            .bind(message_id)
+            .bind(channel_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx)
+    }
+
     pub(in crate::server::adapters) async fn thread_following(
         &self,
         thread_id: Uuid,
@@ -760,6 +788,50 @@ impl PostgresQueries {
             .await
             .map_err(map_sqlx),
         }
+    }
+
+    pub(in crate::server::adapters) async fn paired_computer(
+        &self,
+        computer_id: Uuid,
+    ) -> Result<Option<PairedComputer>, ApplicationError> {
+        let row = sqlx::query(
+            "SELECT id,space_id,name,hostname,os,connection_status,daemon_version,\
+             last_seen_at,created_at,deleted_at FROM computers WHERE id=$1",
+        )
+        .bind(computer_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx)?;
+        row.map(|row| paired_computer_from_row(&row)).transpose()
+    }
+
+    /// The Agent's live Run, but only when `viewer_id` may read its Focus Thread.
+    pub(in crate::server::adapters) async fn active_run_for_visible_agent(
+        &self,
+        agent_id: Uuid,
+        viewer_id: Uuid,
+    ) -> Result<Option<Uuid>, ApplicationError> {
+        sqlx::query_scalar(
+            "SELECT r.id FROM agent_runs r\n             JOIN messages t ON t.id=r.focus_thread_id AND t.placement='root'\n             JOIN channel_members cm ON cm.channel_id=t.channel_id AND cm.member_id=$2\n             WHERE r.agent_id=$1\n               AND r.status NOT IN ('completed','yielded','failed','canceled')\n             ORDER BY r.created_at DESC LIMIT 1",
+        )
+        .bind(agent_id)
+        .bind(viewer_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn pending_item_for_agent(
+        &self,
+        agent_id: Uuid,
+    ) -> Result<bool, ApplicationError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM inbox_items WHERE member_id=$1 AND status='pending')",
+        )
+        .bind(agent_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx)
     }
 
     pub(in crate::server::adapters) async fn computer_options(

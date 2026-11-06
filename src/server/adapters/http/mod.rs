@@ -43,8 +43,7 @@ use crate::{
         },
         application::computer::{
             AuthenticateComputer, BeginPairing, BeginPairingInput, ConfirmPairing,
-            ConfirmPairingInput, ListSpaceComputers, ReadPairedComputer, ReadPairing,
-            ReadPairingStatus,
+            ConfirmPairingInput, ListSpaceComputers, ReadPairing, ReadPairingStatus,
         },
         application::conversation::{
             AddChannelAgents, ArchiveChannel, CreateAgent, CreateAgentAction,
@@ -64,7 +63,7 @@ use crate::{
             execution::{
                 AcknowledgeDelivery, AcknowledgeDeliveryInput, AuthorizeRunCapability, CompleteRun,
                 CompleteRunInput, DispatchRun, DispatchRunInput, FindDispatchableWork,
-                ItemDispositionInput, ReadAgentChannel, ReadCurrentAgentRun,
+                ItemDispositionInput, RecordObservedRead, RecordObservedReadInput,
                 RecordRunItemDisposition, RecordRunItemDispositionInput, RequestRunCancel,
                 RequestRunCancelInput, StartRun, StartRunInput,
             },

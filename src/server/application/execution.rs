@@ -15,7 +15,7 @@ use crate::server::domain::{
 use super::attention::attach_to_working_run;
 use super::ports::{
     ApplicationError, CollaborationTransaction, Effect, EffectSink, ExecutionTransaction,
-    IdentityTransaction, RunCapabilityProof, TaskTransaction, TransactionPort,
+    IdentityTransaction, ObservationScope, RunCapabilityProof, TaskTransaction, TransactionPort,
 };
 
 /// Finds Agents whose Inbox holds work and who have no live Run, so the Server can dispatch to them.
@@ -66,55 +66,26 @@ impl AuthorizeRunCapability {
     }
 }
 
-pub(in crate::server) struct ReadAgentChannel;
-impl ReadAgentChannel {
-    pub(in crate::server) async fn membership<P: TransactionPort>(
-        port: &mut P,
-        channel_id: ChannelId,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        port.transact(async |transaction| {
-            transaction
-                .channel_member_visible(channel_id, agent_id)
-                .await
-        })
-        .await
-    }
-    pub(in crate::server) async fn around_sequence<P: TransactionPort>(
-        port: &mut P,
-        message_id: MessageId,
-        channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        port.transact(async |transaction| {
-            transaction
-                .message_sequence_in_channel(message_id, channel_id)
-                .await
-        })
-        .await
-    }
-    pub(in crate::server) async fn snapshot<P: TransactionPort>(
-        port: &mut P,
-        channel_id: ChannelId,
-    ) -> Result<u64, ApplicationError> {
-        port.transact(async |transaction| transaction.channel_snapshot(channel_id).await)
-            .await
-    }
+pub(in crate::server) struct RecordObservedReadInput {
+    pub(in crate::server) run_id: RunId,
+    pub(in crate::server) observer: MemberId,
+    pub(in crate::server) scope: ObservationScope,
+    pub(in crate::server) sequences: Vec<u64>,
 }
 
-pub(in crate::server) struct ReadCurrentAgentRun;
-impl ReadCurrentAgentRun {
+/// Records the Message range an Agent read. A failed record only leaves the position behind, which
+/// can hold a later write; it never lets a write skip unobserved Messages.
+pub(in crate::server) struct RecordObservedRead;
+
+impl RecordObservedRead {
     pub(in crate::server) async fn execute<P: TransactionPort>(
         port: &mut P,
-        agent_id: MemberId,
-        viewer_id: MemberId,
-    ) -> Result<(Option<RunId>, bool), ApplicationError> {
+        input: RecordObservedReadInput,
+    ) -> Result<(), ApplicationError> {
         port.transact(async |transaction| {
-            Ok((
-                transaction
-                    .active_run_for_visible_agent(agent_id, viewer_id)
-                    .await?,
-                transaction.pending_item_for_agent(agent_id).await?,
-            ))
+            transaction
+                .record_read(input.run_id, input.observer, input.scope, &input.sequences)
+                .await
         })
         .await
     }

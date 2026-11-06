@@ -1527,39 +1527,6 @@ impl CollaborationTransaction for MemoryTransaction {
             Err(ApplicationError::NotFound)
         }
     }
-    async fn channel_member_visible(
-        &mut self,
-        channel_id: ChannelId,
-        member_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        Ok(self.state.channel_members.values().any(|m| {
-            *m == member_id
-                && self
-                    .state
-                    .channel_members
-                    .keys()
-                    .any(|(_, c)| *c == channel_id)
-        }))
-    }
-    async fn message_sequence_in_channel(
-        &mut self,
-        _message_id: MessageId,
-        _channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        Ok(None)
-    }
-    async fn channel_snapshot(&mut self, _channel_id: ChannelId) -> Result<u64, ApplicationError> {
-        Ok(0)
-    }
-    async fn pending_item_for_agent(
-        &mut self,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        Ok(self.state.items.values().any(|i| {
-            let v = i.view();
-            v.member_id == agent_id && v.status == InboxItemStatus::Pending
-        }))
-    }
 }
 
 #[async_trait::async_trait]
@@ -1773,21 +1740,6 @@ impl ExecutionTransaction for MemoryTransaction {
                 .state
                 .computer_assignments
                 .contains(&(proof.computer_id, proof.agent_id)))
-    }
-    async fn active_run_for_visible_agent(
-        &mut self,
-        agent_id: MemberId,
-        _viewer_id: MemberId,
-    ) -> Result<Option<RunId>, ApplicationError> {
-        Ok(self
-            .state
-            .runs
-            .values()
-            .find(|r| {
-                let v = r.view();
-                v.agent_id == agent_id && v.status == RunStatus::Working
-            })
-            .map(|r| r.view().id))
     }
     async fn agent_provision_command_target(
         &mut self,

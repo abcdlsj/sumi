@@ -219,23 +219,6 @@ async fn lapse_if_needed<T: ServerTransaction>(
     Ok(())
 }
 
-pub(in crate::server) struct ReadPairedComputer;
-
-impl ReadPairedComputer {
-    pub(in crate::server) async fn execute<P: TransactionPort>(
-        port: &mut P,
-        computer_id: ComputerId,
-    ) -> Result<PairedComputer, ApplicationError> {
-        port.transact(async |transaction| {
-            transaction
-                .paired_computer(computer_id)
-                .await?
-                .ok_or(ApplicationError::NotFound)
-        })
-        .await
-    }
-}
-
 pub(in crate::server) struct ListSpaceComputers;
 
 impl ListSpaceComputers {

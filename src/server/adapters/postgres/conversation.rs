@@ -1,48 +1,6 @@
 use super::*;
 
 impl PostgresTransaction {
-    pub(super) async fn channel_member_visible(
-        &mut self,
-        channel_id: ChannelId,
-        member_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=$1 AND member_id=$2)",
-        )
-        .bind(channel_id.into_uuid())
-        .bind(member_id.into_uuid())
-        .fetch_one(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)
-    }
-    pub(super) async fn message_sequence_in_channel(
-        &mut self,
-        message_id: MessageId,
-        channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        let value: Option<i64> =
-            sqlx::query_scalar("SELECT channel_seq FROM messages WHERE id=$1 AND channel_id=$2")
-                .bind(message_id.into_uuid())
-                .bind(channel_id.into_uuid())
-                .fetch_optional(&mut *self.connection)
-                .await
-                .map_err(map_sqlx)?;
-        value
-            .map(|v| u64::try_from(v).map_err(|_| ApplicationError::Internal))
-            .transpose()
-    }
-    pub(super) async fn channel_snapshot(
-        &mut self,
-        channel_id: ChannelId,
-    ) -> Result<u64, ApplicationError> {
-        let value: i64 = sqlx::query_scalar("SELECT next_seq-1 FROM channels WHERE id=$1")
-            .bind(channel_id.into_uuid())
-            .fetch_one(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
-        u64::try_from(value).map_err(|_| ApplicationError::Internal)
-    }
-
     pub(super) async fn join_channel(
         &mut self,
         actor: MemberId,
@@ -1571,29 +1529,5 @@ impl CollaborationTransaction for PostgresTransaction {
     ) -> Result<(), ApplicationError> {
         self.leave_channel(agent_id, channel_id, idempotency_key, now)
             .await
-    }
-    async fn channel_member_visible(
-        &mut self,
-        channel_id: ChannelId,
-        member_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        self.channel_member_visible(channel_id, member_id).await
-    }
-    async fn message_sequence_in_channel(
-        &mut self,
-        message_id: MessageId,
-        channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        self.message_sequence_in_channel(message_id, channel_id)
-            .await
-    }
-    async fn channel_snapshot(&mut self, channel_id: ChannelId) -> Result<u64, ApplicationError> {
-        self.channel_snapshot(channel_id).await
-    }
-    async fn pending_item_for_agent(
-        &mut self,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        self.pending_item_for_agent(agent_id).await
     }
 }

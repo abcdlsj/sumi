@@ -70,11 +70,6 @@ pub(in crate::server) trait ExecutionTransaction {
         &mut self,
         proof: &RunCapabilityProof,
     ) -> Result<bool, ApplicationError>;
-    async fn active_run_for_visible_agent(
-        &mut self,
-        agent_id: MemberId,
-        viewer_id: MemberId,
-    ) -> Result<Option<RunId>, ApplicationError>;
     async fn agent_provision_command_target(
         &mut self,
         computer_id: ComputerId,

@@ -61,27 +61,6 @@ impl PostgresTransaction {
             .map_err(|_| ApplicationError::Internal)?;
         Ok(Some(MemberId::from_uuid(agent_id)))
     }
-    pub(super) async fn active_run_for_visible_agent(
-        &mut self,
-        agent_id: MemberId,
-        viewer_id: MemberId,
-    ) -> Result<Option<RunId>, ApplicationError> {
-        let id: Option<Uuid> = sqlx::query_scalar("SELECT r.id FROM agent_runs r JOIN messages t ON t.id=r.focus_thread_id AND t.placement='root' JOIN channel_members cm ON cm.channel_id=t.channel_id AND cm.member_id=$2 WHERE r.agent_id=$1 AND r.status NOT IN ('completed','yielded','failed','canceled') ORDER BY r.created_at DESC LIMIT 1")
-            .bind(agent_id.into_uuid()).bind(viewer_id.into_uuid()).fetch_optional(&mut *self.connection).await.map_err(map_sqlx)?;
-        Ok(id.map(RunId::from_uuid))
-    }
-    pub(super) async fn pending_item_for_agent(
-        &mut self,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM inbox_items WHERE member_id=$1 AND status='pending')",
-        )
-        .bind(agent_id.into_uuid())
-        .fetch_one(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)
-    }
     pub(super) async fn authorize_run_capability(
         &mut self,
         proof: &RunCapabilityProof,
@@ -969,13 +948,6 @@ impl ExecutionTransaction for PostgresTransaction {
         proof: &RunCapabilityProof,
     ) -> Result<bool, ApplicationError> {
         self.authorize_run_capability(proof).await
-    }
-    async fn active_run_for_visible_agent(
-        &mut self,
-        agent_id: MemberId,
-        viewer_id: MemberId,
-    ) -> Result<Option<RunId>, ApplicationError> {
-        self.active_run_for_visible_agent(agent_id, viewer_id).await
     }
     async fn agent_provision_command_target(
         &mut self,
