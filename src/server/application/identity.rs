@@ -87,14 +87,21 @@ impl AuthenticateHuman {
     ) -> Result<OpenedSession, ApplicationError> {
         let email_normalized = normalize_email(input.email);
         let token = tokens.generate();
+        // The KDF runs between two transactions so a slow verification never holds a database
+        // connection, and an unknown email pays the same KDF cost as a wrong password.
+        let credential = port
+            .transact(async |transaction| transaction.human_credential(&email_normalized).await)
+            .await?;
+        let verified = passwords
+            .verify(
+                input.password,
+                credential.as_ref().map(|(_, hash)| hash.as_str()),
+            )
+            .await;
+        let Some((human, _)) = credential.filter(|_| verified) else {
+            return Err(ApplicationError::Unauthenticated);
+        };
         port.transact(async |transaction| {
-            let credential = transaction.human_credential(&email_normalized).await?;
-            let Some((human, stored_hash)) = credential else {
-                return Err(ApplicationError::Unauthenticated);
-            };
-            if !passwords.verify(input.password, &stored_hash).await {
-                return Err(ApplicationError::Unauthenticated);
-            }
             open_session(
                 transaction,
                 input.session_id,

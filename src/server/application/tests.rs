@@ -4770,8 +4770,8 @@ impl PasswordPort for StubPasswords {
         Ok(format!("hashed:{password}"))
     }
 
-    async fn verify(&self, password: &str, stored_hash: &str) -> bool {
-        stored_hash == format!("hashed:{password}")
+    async fn verify(&self, password: &str, stored_hash: Option<&str>) -> bool {
+        stored_hash == Some(format!("hashed:{password}").as_str())
     }
 }
 

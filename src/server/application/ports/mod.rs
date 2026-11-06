@@ -67,7 +67,9 @@ pub(in crate::server) trait AttachmentObjectPort: Send + Sync {
 pub(in crate::server) trait PasswordPort {
     async fn hash(&self, password: &str) -> Result<String, ApplicationError>;
 
-    async fn verify(&self, password: &str, stored_hash: &str) -> bool;
+    /// `None` means no account has this email. The implementation must still spend the same work,
+    /// so response time does not reveal which emails are registered.
+    async fn verify(&self, password: &str, stored_hash: Option<&str>) -> bool;
 }
 
 pub(in crate::server) trait SessionTokenPort {
