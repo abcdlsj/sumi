@@ -457,7 +457,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
             ? browserApi.DELETE(path, options)
             : Promise.reject(new Error(`Unsupported HTTP method: ${method}`)));
   if (result.error !== undefined) {
-    await throwResponseError(result.response);
+    // openapi-fetch has already read the body into `result.error`; the response cannot be read again.
+    throwApiError(result.response, result.error as ErrorEnvelope);
   }
   return result.data as T;
 }
@@ -475,7 +476,10 @@ function mutate<T>(path: string, method: string, body?: unknown, idempotencyKey?
 }
 
 async function throwResponseError(response: Response): Promise<never> {
-  const payload = (await response.json().catch(() => ({}))) as ErrorEnvelope;
+  throwApiError(response, (await response.json().catch(() => ({}))) as ErrorEnvelope);
+}
+
+function throwApiError(response: Response, payload: ErrorEnvelope): never {
   throw new ApiRequestError(
     response.status,
     payload.error?.code ?? "request_failed",

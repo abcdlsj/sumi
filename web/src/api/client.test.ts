@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createMessage, createThreadReply } from "./client";
+import { ApiRequestError, createMessage, createThreadReply, login } from "./client";
 
 const channelId = "019c0000-0000-7000-8000-000000000003";
 const threadId = "019c0000-0000-7000-8000-000000000004";
@@ -28,6 +28,21 @@ describe("message writes", () => {
     await createThreadReply(threadId, { ...input, reply_to_message_id: "m0" }, idempotencyKey);
 
     expect(sentHeaders(fetchMock).get("idempotency-key")).toBe(idempotencyKey);
+  });
+});
+
+describe("API errors", () => {
+  it("keeps the Server's error code and message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(
+      { error: { code: "conflict", message: "Display Name is already taken", retryable: false } },
+      409,
+    )));
+
+    const failure = await login({ email: "ada@example.test", password: "guess" }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiRequestError);
+    expect((failure as ApiRequestError).code).toBe("conflict");
+    expect((failure as ApiRequestError).message).toBe("Display Name is already taken");
   });
 });
 
