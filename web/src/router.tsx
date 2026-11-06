@@ -18,7 +18,7 @@ import { InvitationPage } from "./screens/InvitationPage";
 import { InboxPage } from "./screens/InboxPage";
 import { DirectMessagePage } from "./screens/DirectMessagePage";
 import { LoginPage } from "./screens/LoginPage";
-import { AgentsPage, MembersPage } from "./screens/MembersPage";
+import { MembersPage } from "./screens/MembersPage";
 import { RegisterPage } from "./screens/RegisterPage";
 import { PairComputerPage } from "./screens/PairComputerPage";
 import { SettingsPage } from "./screens/SettingsPage";
@@ -90,11 +90,6 @@ const membersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/s/$spaceSlug/members",
   component: MembersPage,
-});
-const agentsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/agents",
-  component: AgentsPage,
 });
 const insightsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -179,7 +174,6 @@ const routeTree = rootRoute.addChildren([
   companyRoute,
   companyOfficeRoute,
   membersRoute,
-  agentsRoute,
   insightsRoute,
   insightsIndexRoute,
   insightsStatsRoute,

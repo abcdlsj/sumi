@@ -27,7 +27,7 @@ const agentTabs: { id: AgentTab; label: string; icon: LucideIcon }[] = [
 export function AgentDetailPage() {
   const { spaceSlug, agentId } = useParams({ from: "/s/$spaceSlug/agents/$agentId" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="agents">
+    <SpaceShell spaceSlug={spaceSlug} active="members">
       {({ space, currentMember, channels }) => (
         <AgentWorkspace
           agentId={agentId}

@@ -36,7 +36,6 @@ import type {
   MarkAllInboxRead,
   Task,
   CreateTaskInput,
-  LinkTaskThreadInput,
   CompleteTaskInput,
   CloseTaskInput,
   AgentRuntime,
@@ -45,7 +44,7 @@ import type {
   CreateThreadReplyInput,
   ErrorEnvelope,
 } from "./types";
-export type { User, RegisterInput, LoginInput, Space, CreateSpaceInput, Computer, PairingDetails, Agent, AgentGraph, AgentGraphNode, AgentGraphEdge, AgentGraphMessage, AgentRuntime, AttentionConfig, AgentMemoryFile, AgentMemoryContent, UpdateAgentInput, Member, UpdateMemberInput, Invitation, CreatedInvitation, CreateInvitationInput, Channel, ChannelList, ChannelMembers, DirectMessage, CreateChannelInput, LlmUsage, LlmUsageBucket, LlmUsageAgentSeries, LlmUsageAgentModel, MessageAuthor, Message, MessagePage, MessageTaskRef, MessageTaskSummary, CreateMessageInput, Attachment, InboxItem, MarkAllInboxRead, Task, TaskStatus, Run, RunStatus, SessionContinuity, ThreadReference, CreateTaskInput, LinkTaskThreadInput, CompleteTaskInput, CloseTaskInput, ThreadRead, ThreadSubscription, CreateThreadReplyInput } from "./types";
+export type { User, RegisterInput, LoginInput, Space, CreateSpaceInput, Computer, PairingDetails, Agent, AgentGraph, AgentGraphNode, AgentGraphEdge, AgentGraphMessage, AgentRuntime, AttentionConfig, AgentMemoryFile, AgentMemoryContent, UpdateAgentInput, Member, UpdateMemberInput, Invitation, CreatedInvitation, CreateInvitationInput, Channel, ChannelList, ChannelMembers, DirectMessage, CreateChannelInput, LlmUsage, LlmUsageBucket, LlmUsageAgentSeries, LlmUsageAgentModel, MessageAuthor, Message, MessagePage, MessageTaskRef, MessageTaskSummary, CreateMessageInput, Attachment, InboxItem, MarkAllInboxRead, Task, TaskStatus, Run, RunStatus, SessionContinuity, ThreadReference, CreateTaskInput, CompleteTaskInput, CloseTaskInput, ThreadRead, ThreadSubscription, CreateThreadReplyInput } from "./types";
 
 export class ApiRequestError extends Error {
   readonly code: string;
@@ -408,14 +407,6 @@ export function createTaskFromRootMessage(messageId: string, input: CreateTaskIn
   return mutate<Task>(`/api/v1/root-messages/${encodeURIComponent(messageId)}/task`, "POST", input);
 }
 
-export function linkTaskThread(taskId: string, input: LinkTaskThreadInput): Promise<Task> {
-  return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/threads`, "POST", input);
-}
-
-export function unlinkTaskThread(taskId: string, threadId: string): Promise<Task> {
-  return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/threads/${encodeURIComponent(threadId)}`, "DELETE");
-}
-
 export function startTask(taskId: string, assigneeAgentMemberId: string): Promise<Task> {
   return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/start`, "POST", {
     assignee_agent_member_id: assigneeAgentMemberId,
@@ -436,10 +427,6 @@ export function completeTask(taskId: string, input: CompleteTaskInput): Promise<
 
 export function closeTask(taskId: string, input: CloseTaskInput): Promise<Task> {
   return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/close`, "POST", input);
-}
-
-export function resetTaskSession(taskId: string): Promise<Task> {
-  return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/reset-session`, "POST");
 }
 
 export function getAgentRuntime(agentId: string): Promise<AgentRuntime> {

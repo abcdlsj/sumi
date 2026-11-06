@@ -312,20 +312,6 @@
 }
 
 /* The sequence is a coordinate for Agents; Humans see it on hover. */
-.message-seq {
-  flex: none;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  opacity: 0;
-  transition: opacity .12s ease;
-}
-
-.message-row:hover .message-seq,
-.thread-message:hover .message-seq,
-.message-block:focus-within .message-seq {
-  opacity: 1;
-}
 
 /* Message body: one compact Markdown rhythm. */
 .message-body-wrap {
@@ -1948,7 +1934,6 @@ details.system-event .system-event-heading {
     padding-top: 1px;
   }
 
-  .message-seq,
   .composer-shortcut {
     display: none;
   }

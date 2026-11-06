@@ -69,13 +69,11 @@
     height: 36px;
   }
 
-  .message-row:hover .message-seq,
   .message-row:hover .message-hover-time,
   .thread-message:hover .message-hover-time {
     opacity: 0;
   }
 
-  .message-block:focus-within .message-seq,
   .message-block:focus-within .message-hover-time,
   .thread-message:focus-within .message-hover-time {
     opacity: 1;

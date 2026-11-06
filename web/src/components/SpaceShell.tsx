@@ -76,7 +76,7 @@ export function SpaceShell({
   children,
 }: {
   spaceSlug: string;
-  active: "channel" | "dm" | "company" | "members" | "agents" | "inbox" | "tasks" | "computers" | "insights" | "settings";
+  active: "channel" | "dm" | "company" | "members" | "inbox" | "tasks" | "computers" | "insights" | "settings";
   children: (context: SpaceShellContext) => ReactNode;
 }) {
   const navigate = useNavigate();
@@ -459,7 +459,7 @@ export function SpaceShell({
             <NavigationItem
               icon={Users}
               label="Members"
-              active={active === "members" || active === "agents"}
+              active={active === "members"}
               href={`/s/${spaceSlugValue}/members`}
             />
             <NavigationItem

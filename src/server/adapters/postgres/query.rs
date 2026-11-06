@@ -997,7 +997,6 @@ pub(in crate::server::adapters) struct ThreadRootRow {
     pub(in crate::server::adapters) channel_id: Uuid,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct MessageRow {
     pub(in crate::server::adapters) id: Uuid,
@@ -1007,7 +1006,6 @@ pub(in crate::server::adapters) struct MessageRow {
     pub(in crate::server::adapters) channel_seq: i64,
     pub(in crate::server::adapters) placement: String,
     pub(in crate::server::adapters) content_kind: String,
-    pub(in crate::server::adapters) reply_to_message_id: Option<Uuid>,
     pub(in crate::server::adapters) author_member_id: Uuid,
     pub(in crate::server::adapters) body_markdown: Option<String>,
     pub(in crate::server::adapters) mention_all: bool,
@@ -1044,7 +1042,6 @@ pub(in crate::server::adapters) struct AuthorRow {
     pub(in crate::server::adapters) display_name: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct AttachmentRow {
     pub(in crate::server::adapters) id: Uuid,
@@ -1054,11 +1051,8 @@ pub(in crate::server::adapters) struct AttachmentRow {
     pub(in crate::server::adapters) media_type: String,
     pub(in crate::server::adapters) length: Option<i64>,
     pub(in crate::server::adapters) sha256: Option<Vec<u8>>,
-    pub(in crate::server::adapters) object_key: String,
     pub(in crate::server::adapters) status: String,
     pub(in crate::server::adapters) created_at: OffsetDateTime,
-    pub(in crate::server::adapters) ready_at: Option<OffsetDateTime>,
-    pub(in crate::server::adapters) deleted_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1082,10 +1076,8 @@ pub(in crate::server::adapters) struct ActionAgentRow {
     pub(in crate::server::adapters) retired_at: Option<OffsetDateTime>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct TaskRow {
-    pub(in crate::server::adapters) id: Uuid,
     pub(in crate::server::adapters) seq: i64,
     pub(in crate::server::adapters) space_id: Uuid,
     pub(in crate::server::adapters) title: String,
@@ -1103,21 +1095,15 @@ pub(in crate::server::adapters) struct TaskRow {
     pub(in crate::server::adapters) assignee_name: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct RunRow {
-    pub(in crate::server::adapters) id: Uuid,
-    pub(in crate::server::adapters) space_id: Uuid,
     pub(in crate::server::adapters) agent_id: Uuid,
     pub(in crate::server::adapters) task_id: Option<Uuid>,
     pub(in crate::server::adapters) focus_thread_id: Uuid,
     pub(in crate::server::adapters) status: String,
-    pub(in crate::server::adapters) trigger_kind: String,
-    pub(in crate::server::adapters) cancel_requested: bool,
     pub(in crate::server::adapters) outcome_code: Option<String>,
     pub(in crate::server::adapters) error_code: Option<String>,
     pub(in crate::server::adapters) continuation_note: Option<String>,
-    pub(in crate::server::adapters) created_at: OffsetDateTime,
     pub(in crate::server::adapters) started_at: Option<OffsetDateTime>,
     pub(in crate::server::adapters) finished_at: Option<OffsetDateTime>,
     pub(in crate::server::adapters) agent_name: String,
@@ -1132,11 +1118,9 @@ pub(in crate::server::adapters) struct ThreadReferenceRow {
     pub(in crate::server::adapters) channel_seq: i64,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct TaskSourceRow {
     pub(in crate::server::adapters) space_id: Uuid,
-    pub(in crate::server::adapters) thread_id: Uuid,
     pub(in crate::server::adapters) body_markdown: Option<String>,
 }
 
@@ -1153,7 +1137,6 @@ pub(in crate::server::adapters) struct ComputerAgentRow {
     pub(in crate::server::adapters) access_level: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct AgentRow {
     pub(in crate::server::adapters) member_id: Uuid,
@@ -1169,22 +1152,18 @@ pub(in crate::server::adapters) struct AgentRow {
     pub(in crate::server::adapters) display_name: String,
     pub(in crate::server::adapters) access_level: String,
     pub(in crate::server::adapters) connection_status: Option<String>,
-    pub(in crate::server::adapters) computer_deleted_at: Option<OffsetDateTime>,
     pub(in crate::server::adapters) run_status: Option<String>,
-    pub(in crate::server::adapters) run_task_id: Option<Uuid>,
     pub(in crate::server::adapters) run_task_title: Option<String>,
     pub(in crate::server::adapters) run_focus_slug: Option<String>,
     pub(in crate::server::adapters) run_focus_seq: Option<i64>,
     pub(in crate::server::adapters) last_error_code: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct AgentThreadMessageRow {
     pub(in crate::server::adapters) id: Uuid,
     pub(in crate::server::adapters) channel_seq: i64,
     pub(in crate::server::adapters) author_member_id: Uuid,
-    pub(in crate::server::adapters) content_kind: String,
     pub(in crate::server::adapters) body_markdown: Option<String>,
     pub(in crate::server::adapters) created_at: OffsetDateTime,
 }

@@ -221,7 +221,6 @@ impl fmt::Debug for OpenedSession {
 pub(in crate::computer) enum SteerOutcome {
     Accepted,
     TooLate,
-    #[allow(dead_code)]
     Unsupported,
 }
 

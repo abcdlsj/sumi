@@ -15,7 +15,6 @@ const space = {
   general_channel_id: "019c0000-0000-7000-8000-000000000003",
 };
 const linId = "019c0000-0000-7000-8000-000000000020";
-const reviewerId = "019c0000-0000-7000-8000-000000000021";
 const computerId = "019c0000-0000-7000-8000-000000000040";
 
 afterEach(() => {
@@ -24,41 +23,6 @@ afterEach(() => {
 });
 
 describe("Agent directory", () => {
-  it("shows Agent summary facts and links each Agent to management", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.includes("/spaces/by-slug/")) return json(space);
-      if (path === "/api/v1/auth/me") return json({ id: "user", display_name: "Ada", email: "ada@example.test" });
-      if (path.endsWith("/channels")) return json({ can_create: true, channels: [] });
-      if (path.endsWith("/dms")) return json([]);
-      if (path.endsWith("/members")) return json([
-        { id: space.owner_member_id, kind: "human", display_name: "Ada", access_level: "owner", permissions: [] },
-        { id: linId, kind: "agent", display_name: "Lin", access_level: "member", permissions: [] },
-        { id: reviewerId, kind: "agent", display_name: "Reviewer", access_level: "admin", permissions: [] },
-      ]);
-      if (path.endsWith("/agents")) return json([
-        agent({ member_id: linId, name: "Lin", activity_status: "working", computer_reachable: true }),
-        agent({ member_id: reviewerId, name: "Reviewer", activity_status: "idle", computer_reachable: false, computer_id: null, last_error_code: "computer_offline" }),
-      ]);
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    renderRoute("/s/sumi-lab/agents");
-
-    expect(await screen.findByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
-    const summary = screen.getByLabelText("Agent directory summary");
-    expect(summary).toHaveTextContent("Agents2");
-    expect(summary).toHaveTextContent("Working1");
-    expect(summary).toHaveTextContent("Computers online1");
-    expect(summary).toHaveTextContent("Needs attention1");
-
-    const manageLinks = screen.getAllByRole("link", { name: /^Manage/ });
-    expect(manageLinks).toHaveLength(2);
-    expect(manageLinks[0]).toHaveAttribute("href", `/s/sumi-lab/agents/${linId}`);
-    expect(manageLinks[1]).toHaveAttribute("href", `/s/sumi-lab/agents/${reviewerId}`);
-    expect(screen.getAllByText("Working").length).toBeGreaterThan(0);
-  });
-
   it("keeps Members grouped while exposing Agent management links", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);

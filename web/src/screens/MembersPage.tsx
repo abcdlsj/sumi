@@ -35,32 +35,19 @@ export function MembersPage() {
   return (
     <SpaceShell spaceSlug={spaceSlug} active="members">
       {({ space }) => (
-        <MembersWorkspace space={space} directory="members" />
+        <MembersWorkspace space={space} />
       )}
     </SpaceShell>
   );
 }
 
-export function AgentsPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/agents" });
-
-  return (
-    <SpaceShell spaceSlug={spaceSlug} active="agents">
-      {({ space }) => (
-        <MembersWorkspace space={space} directory="agents" />
-      )}
-    </SpaceShell>
-  );
-}
-
-function MembersWorkspace({ space, directory }: { space: Space; directory: "members" | "agents" }) {
+function MembersWorkspace({ space }: { space: Space }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const agentsPage = directory === "agents";
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState<string>();
   const [copied, setCopied] = useState(false);
-  const [kindFilter, setKindFilter] = useState<"all" | "human" | "agent">(agentsPage ? "agent" : "all");
+  const [kindFilter, setKindFilter] = useState<"all" | "human" | "agent">("all");
   const members = useQuery({
     queryKey: ["members", space.id],
     queryFn: () => listMembers(space.id),
@@ -106,10 +93,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
       });
     },
   });
-  const visibleMembers = members.data?.filter((member) => {
-    if (agentsPage && member.kind !== "agent") return false;
-    return kindFilter === "all" || member.kind === kindFilter;
-  }) ?? [];
+  const visibleMembers = members.data?.filter((member) => kindFilter === "all" || member.kind === kindFilter) ?? [];
   const memberGroups = (['agent', 'human'] as const)
     .map((kind) => ({ kind, members: visibleMembers.filter((member) => member.kind === kind) }))
     .filter((group) => group.members.length > 0);
@@ -127,10 +111,10 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
   }
 
   return (
-    <section className={`members-workspace${agentsPage ? " members-workspace--agents" : ""}`} aria-labelledby="members-heading">
+    <section className="members-workspace" aria-labelledby="members-heading">
       <header className="members-header">
         <div className="members-title">
-          <h1 id="members-heading">{agentsPage ? "Agents" : "Members"}</h1>
+          <h1 id="members-heading">Members</h1>
         </div>
         {canCreateAgent ? (
           <Link
@@ -145,7 +129,7 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
             <span>Create agent</span>
           </Link>
         ) : null}
-        {canInvite && !agentsPage ? (
+        {canInvite ? (
           <button
             className="command-button compact-header-action"
             type="button"
@@ -163,42 +147,25 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
         ) : null}
       </header>
 
-      {agentsPage ? (
-        <dl className="agent-directory-summary" aria-label="Agent directory summary">
-          <DirectoryMetric label="Agents" value={agents.data?.length} loading={agents.isPending} />
-          <DirectoryMetric label="Working" value={agents.data ? agents.data.filter((agent) => ["dispatched", "working"].includes(agentPresence(agent))).length : undefined} loading={agents.isPending} />
-          <DirectoryMetric label="Computers online" value={agents.data ? new Set(agents.data.filter((agent) => agent.computer_reachable && agent.computer_id).map((agent) => agent.computer_id)).size : undefined} loading={agents.isPending} />
-          <DirectoryMetric label="Needs attention" value={agents.data ? agents.data.filter((agent) => agent.last_error_code || agent.provision_status === "error").length : undefined} loading={agents.isPending} />
-        </dl>
-      ) : (
-        <div className="member-filter" role="group" aria-label="Filter Members by kind">
-          {(["all", "human", "agent"] as const).map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className={kindFilter === kind ? "member-filter--active" : undefined}
-              aria-pressed={kindFilter === kind}
-              onClick={() => setKindFilter(kind)}
-            >
-              {kind === "all" ? "All" : kind === "human" ? "Human" : "Agent"}
-              <span>
-                {kind === "all"
-                  ? members.data?.length ?? 0
-                  : members.data?.filter((member) => member.kind === kind).length ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {agentsPage && agents.error ? (
-        <div className="directory-status directory-status--error" role="alert">
-          <span>Unable to load Agent status.</span>
-          <button className="quiet-button" type="button" onClick={() => void agents.refetch()} disabled={agents.isFetching}>
-            {agents.isFetching ? "Retrying…" : "Retry"}
+      <div className="member-filter" role="group" aria-label="Filter Members by kind">
+        {(["all", "human", "agent"] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className={kindFilter === kind ? "member-filter--active" : undefined}
+            aria-pressed={kindFilter === kind}
+            onClick={() => setKindFilter(kind)}
+          >
+            {kind === "all" ? "All" : kind === "human" ? "Human" : "Agent"}
+            <span>
+              {kind === "all"
+                ? members.data?.length ?? 0
+                : members.data?.filter((member) => member.kind === kind).length ?? 0}
+            </span>
           </button>
-        </div>
-      ) : null}
+        ))}
+      </div>
+
 
       {inviteOpen ? (
         <section className="invite-band" aria-labelledby="invite-heading">
@@ -335,22 +302,13 @@ function MembersWorkspace({ space, directory }: { space: Space; directory: "memb
         <div className="empty-members">
           <Users aria-hidden="true" />
           <div>
-            <strong>{agentsPage ? "No Agents yet" : members.data?.length ? "No matching members" : "No members yet"}</strong>
-            <p>{agentsPage ? "Create an Agent to give this Space a persistent collaborator." : "Invite a Human or create an Agent to start collaborating."}</p>
-            {agentsPage && canCreateAgent ? (
-              <Link className="command-button command-button--accent" to="/s/$spaceSlug/computers" params={{ spaceSlug: space.slug }} hash="create-agent">
-                <Plus aria-hidden="true" /> Create agent
-              </Link>
-            ) : null}
+            <strong>{members.data?.length ? "No matching members" : "No members yet"}</strong>
+            <p>Invite a Human or create an Agent to start collaborating.</p>
           </div>
         </div>
       ) : null}
     </section>
   );
-}
-
-function DirectoryMetric({ label, value, loading }: { label: string; value?: number; loading: boolean }) {
-  return <div><dt>{label}</dt><dd aria-label={loading ? `Loading ${label}` : `${value ?? 0} ${label}`}>{loading ? "—" : value}</dd></div>;
 }
 
 function capitalize(value: string): string {
