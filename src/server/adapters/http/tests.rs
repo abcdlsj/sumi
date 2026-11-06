@@ -106,6 +106,7 @@ impl CapabilityFixture {
             web_origin: None,
             space_events: Default::default(),
             shutdown: Default::default(),
+            rate_limits: RateLimits::default(),
         };
         let mut headers = HeaderMap::new();
         headers.insert(

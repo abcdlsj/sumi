@@ -168,6 +168,7 @@ pub(super) struct RuntimeState {
     pub(super) web_origin: Option<String>,
     pub(super) space_events: super::space_events::SpaceEventSignal,
     pub(super) shutdown: super::shutdown::ShutdownSignal,
+    pub(super) rate_limits: RateLimits,
 }
 
 mod agent_graph;
@@ -179,6 +180,7 @@ mod error;
 mod execution;
 mod identity;
 mod origin;
+mod rate_limit;
 mod task;
 
 #[cfg(test)]
@@ -193,6 +195,7 @@ pub(super) use error::*;
 pub(super) use execution::*;
 pub(super) use identity::*;
 pub(super) use origin::allow_web_origin;
+pub(super) use rate_limit::*;
 pub(super) use task::*;
 
 pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> Router {

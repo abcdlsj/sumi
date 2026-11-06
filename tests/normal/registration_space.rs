@@ -519,6 +519,34 @@ async fn run_registration_space_flow(database: &TestDatabase) -> Result<()> {
 
     pool.close().await;
     server.ensure_running()?;
+    // Sign-in attempts for one email stop at the fixed window and name when to retry; another
+    // email is still checked normally.
+    let attempt = |email: &'static str| {
+        client
+            .post(server_url.join("/api/v1/auth/login").unwrap())
+            .json(&serde_json::json!({"email": email, "password": "guess"}))
+            .send()
+    };
+    for _ in 0..10 {
+        ensure!(attempt("target@example.test").await?.status() == StatusCode::UNAUTHORIZED);
+    }
+    let limited = attempt("TARGET@example.test ").await?;
+    ensure!(
+        limited.status() == StatusCode::TOO_MANY_REQUESTS,
+        "{}",
+        limited.status()
+    );
+    let retry_after: u64 = limited
+        .headers()
+        .get(header::RETRY_AFTER)
+        .context("Retry-After")?
+        .to_str()?
+        .parse()?;
+    ensure!((1..=900).contains(&retry_after), "{retry_after}");
+    let body: serde_json::Value = limited.json().await?;
+    ensure!(body["error"]["code"] == "rate_limited", "{body}");
+    ensure!(attempt("other@example.test").await?.status() == StatusCode::UNAUTHORIZED);
+
     server.interrupt().await?;
     Ok(())
 }

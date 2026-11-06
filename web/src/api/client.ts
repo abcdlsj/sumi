@@ -480,11 +480,21 @@ async function throwResponseError(response: Response): Promise<never> {
 }
 
 function throwApiError(response: Response, payload: ErrorEnvelope): never {
+  const code = payload.error?.code ?? "request_failed";
   throw new ApiRequestError(
     response.status,
-    payload.error?.code ?? "request_failed",
-    payload.error?.message ?? "The request could not be completed",
+    code,
+    code === "rate_limited"
+      ? rateLimitedMessage(Number(response.headers.get("Retry-After")))
+      : payload.error?.message ?? "The request could not be completed",
   );
+}
+
+/** Says when the reader may try again, rounded up to whole minutes. */
+export function rateLimitedMessage(retryAfterSeconds: number): string {
+  if (!Number.isFinite(retryAfterSeconds) || retryAfterSeconds <= 0) return "Too many attempts. Try again later.";
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  return `Too many attempts. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
 }
 
 function hexDigest(buffer: ArrayBuffer): string {

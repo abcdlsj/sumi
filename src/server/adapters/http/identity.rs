@@ -2,9 +2,11 @@ use super::*;
 
 pub(super) async fn register(
     State(state): State<RuntimeState>,
+    ClientAddress(client): ClientAddress,
     jar: CookieJar,
     Json(body): Json<RegisterBody>,
-) -> Result<(CookieJar, (StatusCode, Json<RegisterResponse>)), ApiError> {
+) -> Result<(CookieJar, (StatusCode, Json<RegisterResponse>)), LimitedError> {
+    state.rate_limits.check(REGISTER_PER_CLIENT, &client)?;
     let mut storage = state.storage.clone();
     let session = RegisterHuman::execute(
         &mut storage,
@@ -36,9 +38,15 @@ pub(super) async fn register(
 
 pub(super) async fn login(
     State(state): State<RuntimeState>,
+    ClientAddress(client): ClientAddress,
     jar: CookieJar,
     Json(body): Json<LoginBody>,
-) -> Result<(CookieJar, Json<LoginResponse>), ApiError> {
+) -> Result<(CookieJar, Json<LoginResponse>), LimitedError> {
+    state.rate_limits.check(LOGIN_PER_CLIENT, &client)?;
+    state.rate_limits.check(
+        LOGIN_PER_EMAIL,
+        &crate::server::domain::access::normalize_email(&body.email),
+    )?;
     let mut storage = state.storage.clone();
     let session = AuthenticateHuman::execute(
         &mut storage,
@@ -86,8 +94,10 @@ pub(super) async fn current_user(
 
 pub(super) async fn begin_pairing(
     State(state): State<RuntimeState>,
+    ClientAddress(client): ClientAddress,
     Json(body): Json<BeginPairingBody>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
+) -> Result<(StatusCode, Json<Value>), LimitedError> {
+    state.rate_limits.check(PAIRING_BEGIN_PER_CLIENT, &client)?;
     let mut storage = state.storage.clone();
     let started = BeginPairing::execute(
         &mut storage,
@@ -119,8 +129,11 @@ pub(super) async fn pairing_details(
     jar: CookieJar,
     Path(pairing_id): Path<Uuid>,
     Query(query): Query<PairingCodeQuery>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<Value>, LimitedError> {
     authenticate(&state, &jar).await?;
+    state
+        .rate_limits
+        .check(PAIRING_CODE_PER_PAIRING, &pairing_id.to_string())?;
     let mut storage = state.storage.clone();
     let pairing = ReadPairing::execute(
         &mut storage,
@@ -147,8 +160,11 @@ pub(super) async fn confirm_pairing(
     headers: HeaderMap,
     Path(pairing_id): Path<Uuid>,
     Json(body): Json<ConfirmPairingBody>,
-) -> Result<(StatusCode, Json<ComputerResponse>), ApiError> {
+) -> Result<(StatusCode, Json<ComputerResponse>), LimitedError> {
     let actor_id = current_member(&state, &jar, body.space_id).await?;
+    state
+        .rate_limits
+        .check(PAIRING_CODE_PER_PAIRING, &pairing_id.to_string())?;
     let key = idempotency_header(&headers)?;
     let mut storage = state.storage.clone();
     let computer = ConfirmPairing::execute(

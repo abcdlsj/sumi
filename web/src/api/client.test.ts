@@ -46,6 +46,23 @@ describe("API errors", () => {
   });
 });
 
+describe("rate limits", () => {
+  it("turns a rate-limited sign-in into a retry time the reader can act on", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: "rate_limited", message: "too many attempts; retry later", retryable: true } }),
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "61" } },
+    )));
+
+    const failure = await login({ email: "ada@example.test", password: "guess" }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiRequestError);
+    expect((failure as ApiRequestError).code).toBe("rate_limited");
+    expect((failure as ApiRequestError).status).toBe(429);
+    // 61 seconds is more than one minute, so the reader is told two.
+    expect((failure as ApiRequestError).message).toBe("Too many attempts. Try again in 2 minutes.");
+  });
+});
+
 function sentHeaders(fetchMock: ReturnType<typeof vi.fn>): Headers {
   const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
   return new Headers(init?.headers);

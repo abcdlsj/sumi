@@ -51,6 +51,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         web_origin: web_origin.clone(),
         space_events: super::space_events::SpaceEventSignal::default(),
         shutdown: super::shutdown::ShutdownSignal::default(),
+        rate_limits: http::RateLimits::default(),
     };
     let shutdown = state.shutdown.clone();
     let mut api = http::api_router(state.clone(), 100 * 1024 * 1024);
@@ -76,16 +77,20 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await
         .with_context(|| format!("failed to bind Server at {}", config.bind))?;
-    let served = axum::serve(listener, app)
-        .with_graceful_shutdown({
-            let shutdown = shutdown.clone();
-            async move {
-                shutdown_signal().await;
-                shutdown.trigger();
-            }
-        })
-        .await
-        .context("Server stopped unexpectedly");
+    // Rate limits key unauthenticated endpoints by the client address.
+    let served = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown({
+        let shutdown = shutdown.clone();
+        async move {
+            shutdown_signal().await;
+            shutdown.trigger();
+        }
+    })
+    .await
+    .context("Server stopped unexpectedly");
     dispatcher.abort();
     space_event_listener.abort();
     // Upgraded Computer sockets run outside the graceful wait, so a process that exited here would
