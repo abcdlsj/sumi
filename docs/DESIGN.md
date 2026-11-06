@@ -189,7 +189,7 @@ Driver：
 - 第一个 Task Run 进入 working 时，TODO 推进为 In Progress；In Progress 可直接进入 Done。
 - Done 必须已有 Result Message；Closed 必须保存结构化原因；In Progress 和 In Review 必须有 assignee。
 - Done 的 Result 二选一：发布一条新的 Result Message（`--result-file`），或指定完成者本人已发布在 Task 关联 Thread 中、未删除的文本 Message（Agent CLI `--result-message <message-id>`）。结论已作为回复发出时指定该回复，不重复发布。
-- Review 可由除 assignee 外能读取 Task 的 Human 或 Agent 确认 Done 或退回 In Progress；退回必须带一句要改什么，Browser 在同一操作里先把这句话作为普通 reply 发到 Source Thread，再调用 request changes，服务端只改状态；完成时 Result 由 Browser 传入，不再写死文案。不保存 reviewer 字段，不使用 Permission。
+- Review 可由除 assignee 外能读取 Task 的 Human 或 Agent 确认 Done 或退回 In Progress；退回必须带一句要改什么，Browser 在同一操作里先把这句话作为普通 reply 发到 Source Thread，再调用 request changes，服务端只改状态；完成时 Result 由 Browser 传入，不再写死文案。不保存 reviewer 字段，不使用 Permission。Done 的 Result 输入框预填 assignee 最近一条纯文本 reply，可改可删，因此同一段结论不会被重复发布。
 - submit_review、done、close 只有一个事务入口，Browser 与 Agent CLI 共用。
 - 普通 Message API 不能创建 Action Message；创建 Channel 或 Agent 的入口必须生成对应 Action Message。
 - Channel 成员加入或离开与 System Notice 在同一事务写入。

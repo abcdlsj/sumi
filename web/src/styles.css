@@ -2473,6 +2473,120 @@ a.task-source-link:hover {
   gap: 8px;
 }
 
+.task-actions-secondary {
+  margin-top: 12px;
+}
+
+.task-changes {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-width: var(--measure-text);
+}
+
+.task-changes h3 {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.task-changes textarea {
+  min-height: 78px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.task-changes-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.task-changes-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* The assignee's last word while review is pending, above the Request body. */
+.task-latest {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-sidebar);
+}
+
+.task-latest header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-latest h3 {
+  margin: 0;
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.task-latest time {
+  color: var(--muted);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.task-latest-body {
+  margin: 0;
+  max-width: var(--measure-text);
+  color: var(--ink);
+  font-size: var(--text-small);
+  white-space: pre-wrap;
+}
+
+.task-latest-body--clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.task-latest-toggle {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+
+.task-latest-toggle:hover {
+  text-decoration: underline;
+}
+
+.task-latest--empty {
+  margin: 2px 0 10px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+@media (max-width: 700px) {
+  .task-changes-actions {
+    flex-direction: column;
+  }
+
+  .task-changes-actions .command-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .task-assignee {
   display: grid;
   max-width: 280px;
