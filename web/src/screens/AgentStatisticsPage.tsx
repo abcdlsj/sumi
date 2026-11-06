@@ -50,12 +50,14 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
     queryFn: () => getSpaceBySlug(spaceSlug),
   });
   const agents = useQuery({
-    queryKey: ["agents-stats", space.data?.id],
+    // Same keys as every other Agents and Computers reader, so `agent.changed`,
+    // `computer.changed` and their member events refresh this page too.
+    queryKey: ["agents", space.data?.id],
     queryFn: () => listAgents(space.data!.id),
     enabled: Boolean(space.data),
   });
   const computers = useQuery({
-    queryKey: ["computers-stats", space.data?.id],
+    queryKey: ["computers", space.data?.id],
     queryFn: () => listComputers(space.data!.id),
     enabled: Boolean(space.data),
   });

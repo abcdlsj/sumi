@@ -1,7 +1,8 @@
-import { Link, Outlet, useParams } from "@tanstack/react-router";
+import { Outlet, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { getSpaceBySlug } from "../api/client";
+import { FeatureDisabled } from "../components/FeatureDisabled";
 import { InsightsTabs } from "../components/InsightsNavigation";
 import { SpacePage } from "../components/SpaceShell";
 import { AGENT_INSIGHTS_FEATURE_ID, useFeatureEnabled } from "../featureRegistry";
@@ -14,21 +15,7 @@ export function InsightsPage() {
   if (!enabled) {
     return (
       <SpacePage>
-        {() => (
-          <div className="route-status">
-            <section className="route-status-panel">
-              <h1>Agent insights is disabled.</h1>
-              <p>This experimental feature is off. Turn it on in Settings to add it to the sidebar.</p>
-              <Link
-                className="command-button command-button--accent"
-                to="/s/$spaceSlug/settings"
-                params={{ spaceSlug }}
-              >
-                Open Settings
-              </Link>
-            </section>
-          </div>
-        )}
+        {() => <FeatureDisabled featureName="Agent insights" spaceSlug={spaceSlug} />}
       </SpacePage>
     );
   }

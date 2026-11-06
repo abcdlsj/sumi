@@ -1,23 +1,16 @@
 .settings-page {
   display: grid;
-  width: min(100%, 760px);
   /* The page scrolls; rows keep their content height instead of shrinking. */
   grid-auto-rows: max-content;
   gap: 28px;
   align-content: start;
-  padding: 28px var(--page-gutter) 48px;
+  padding-bottom: 48px;
 }
 
-.settings-page > .settings-header {
-  display: grid;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-}
-
-.settings-page > .settings-header h1 {
-  font-size: 22px;
-  letter-spacing: -.015em;
+/* Everything under the page header reads in one narrow column. */
+.settings-page > :not(.settings-header) {
+  width: min(100%, 760px);
+  margin: 0 var(--page-gutter);
 }
 
 .settings-group {

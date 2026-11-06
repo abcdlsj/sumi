@@ -119,16 +119,14 @@ textarea:focus-visible {
 }
 
 .page-title,
-.members-title,
-.settings-header {
+.members-title {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
 .page-title h1,
-.members-title h1,
-.settings-header h1 {
+.members-title h1 {
   margin: 0;
   font-size: var(--text-page-title);
   font-weight: 600;
@@ -1396,8 +1394,10 @@ input[type="radio"] {
 .tasks-header .page-title h1,
 .members-title h1,
 .computer-onboarding-header .page-title h1,
-.office-header .page-title h1 {
+.office-header .page-title h1,
+.settings-header h1 {
   font-size: var(--text-page-title);
+  font-weight: 600;
 }
 
 /* Route states ---------------------------------------------------------- */
