@@ -46,6 +46,7 @@ use uuid::Uuid;
         MessageTaskSummary,
         MessageTaskRefResponse,
         MessageResponse,
+        ReplyPreviewResponse,
         MessagePageResponse,
         CreateMessageRequest,
         UpdateMessageRequest,
@@ -498,11 +499,21 @@ pub(super) struct MessageResponse {
     pub(super) mention_all: bool,
     pub(super) attachments: Vec<AttachmentResponse>,
     pub(super) reply_count: u64,
+    /// The newest replies of a Root Message, oldest first, for the Channel timeline preview. Empty
+    /// for a reply.
+    pub(super) latest_replies: Vec<ReplyPreviewResponse>,
     pub(super) task: Option<MessageTaskSummary>,
     pub(super) task_refs: Vec<MessageTaskRefResponse>,
     pub(super) attention_failures: Vec<AttentionFailureResponse>,
     pub(super) created_at: String,
     pub(super) edited_at: Option<String>,
+    pub(super) deleted_at: Option<String>,
+}
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
+pub(super) struct ReplyPreviewResponse {
+    pub(super) id: Uuid,
+    pub(super) author: MessageAuthor,
+    pub(super) content: MessageContentResponse,
     pub(super) deleted_at: Option<String>,
 }
 #[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]

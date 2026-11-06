@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
-import { type MouseEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { apiUrl, createTaskFromRootMessage, readThread, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
+import { apiUrl, createTaskFromRootMessage, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
 import { formatBytes } from "../../format";
 import { plainTextPreview } from "../../markdownText";
 import { formatClock, formatDayDivider, formatFullDateTime } from "../../time";
@@ -17,6 +17,7 @@ import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
 import { provisionalMessage, type OutgoingMessage } from "./outbox";
 import { useUnreadMarker } from "./unreadMarker";
+import { messagesQueryOptions, updateRootMessage, type MessagePages } from "./messageCache";
 
 type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
 
@@ -25,6 +26,7 @@ export function MessageTimeline({
   scrollApiRef,
   header,
   page,
+  earlier,
   pending,
   error,
   retry,
@@ -47,6 +49,8 @@ export function MessageTimeline({
   scrollApiRef?: RefObject<MessageTimelineScrollApi | null>;
   header?: ReactNode;
   page?: MessagePage;
+  /** Older Root Messages the reader can load above the timeline. */
+  earlier?: { available: boolean; loading: boolean; load: () => Promise<unknown> };
   pending: boolean;
   error: Error | null;
   retry: () => void;
@@ -121,6 +125,7 @@ export function MessageTimeline({
       <div ref={timelineRef} className="message-timeline">
         <div className="visually-hidden" role="status">{newMessageAnnouncement}</div>
         {header}
+        {earlier?.available ? <EarlierMessages timelineRef={timelineRef} earlier={earlier} firstMessageId={page?.messages[0]?.id} /> : null}
         {pending ? <TimelineSkeleton /> : null}
         {error ? (
           <div className="system-event system-event--standalone" role="alert">
@@ -198,7 +203,7 @@ export function MessageTimeline({
                   <AttentionFailureNotice message={message} members={members} />
                   {!message.deleted_at && message.thread_id && message.reply_count > 0 ? (
                     <InlineThreadPreview
-                      threadId={message.thread_id}
+                      replies={message.latest_replies ?? []}
                       replyCount={message.reply_count}
                       open={(trigger) => openThread(message.thread_id!, trigger)}
                     />
@@ -435,13 +440,7 @@ function MessageTaskBadge({ task, spaceSlug }: { task: MessageTaskSummary; space
   );
 }
 
-function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string; replyCount: number; open: (trigger: HTMLButtonElement) => void }) {
-  const thread = useQuery({
-    queryKey: ["thread", threadId],
-    queryFn: () => readThread(threadId),
-    staleTime: 15_000,
-  });
-  const replies = thread.data?.replies.slice(-3) ?? [];
+function InlineThreadPreview({ replies, replyCount, open }: { replies: Message["latest_replies"]; replyCount: number; open: (trigger: HTMLButtonElement) => void }) {
   const hiddenReplyCount = Math.max(0, replyCount - replies.length);
   return (
     <section className="inline-thread-preview" aria-label={`${replyCount} Thread ${replyCount === 1 ? "reply" : "replies"}`}>
@@ -457,18 +456,63 @@ function InlineThreadPreview({ threadId, replyCount, open }: { threadId: string;
           <b aria-hidden="true">›</b>
         </span>
       </button>
-      {thread.isPending ? <span className="inline-reply inline-reply--loading" role="status" aria-label="Loading replies"><span className="skeleton-avatar" /><span className="skeleton-bar" /><span className="skeleton-bar" /></span> : null}
-      {thread.error ? <span className="inline-thread-status">Replies unavailable</span> : null}
       {replies.map((reply) => (
         <button className="inline-reply" type="button" key={reply.id} onClick={(event) => open(event.currentTarget)}>
           <PixelIdentity name={reply.author.display_name} kind={reply.author.kind} seed={reply.author.id} />
           <span className="inline-reply-author">
             <strong>{reply.author.display_name}</strong>
           </span>
-          <span className="inline-reply-body">{reply.deleted_at ? "Message deleted" : plainTextPreview(messagePreview(reply))}</span>
+          <span className="inline-reply-body">{reply.deleted_at ? "Message deleted" : plainTextPreview(contentPreview(reply.content))}</span>
         </button>
       ))}
     </section>
+  );
+}
+
+/**
+ * Loads the page before the oldest loaded Root Message when the reader reaches the top, and keeps
+ * the message they were reading in place while older ones are inserted above it.
+ */
+function EarlierMessages({
+  timelineRef,
+  earlier,
+  firstMessageId,
+}: {
+  timelineRef: RefObject<HTMLDivElement | null>;
+  earlier: { loading: boolean; load: () => Promise<unknown> };
+  firstMessageId?: string;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<{ messageId: string; distanceFromBottom: number } | null>(null);
+  const { loading, load } = earlier;
+  const loadEarlier = useCallback(() => {
+    const timeline = timelineRef.current;
+    if (loading || !timeline || !firstMessageId) return;
+    anchor.current = { messageId: firstMessageId, distanceFromBottom: timeline.scrollHeight - timeline.scrollTop };
+    void load();
+  }, [firstMessageId, load, loading, timelineRef]);
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    const saved = anchor.current;
+    if (!timeline || !saved || saved.messageId === firstMessageId) return;
+    anchor.current = null;
+    timeline.scrollTop = timeline.scrollHeight - saved.distanceFromBottom;
+  }, [firstMessageId, timelineRef]);
+  useEffect(() => {
+    const target = trigger.current;
+    if (!target || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) loadEarlier();
+    }, { root: timelineRef.current, rootMargin: "200px 0px 0px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadEarlier, timelineRef]);
+  return (
+    <div className="timeline-earlier">
+      <button ref={trigger} className="timeline-earlier-button" type="button" disabled={loading} onClick={loadEarlier}>
+        {loading ? "Loading earlier messages…" : "Load earlier messages"}
+      </button>
+    </div>
   );
 }
 
@@ -478,21 +522,18 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
     mutationFn: () => createTaskFromRootMessage(message.id, { title: textBody(message).trim().slice(0, 120) || undefined }),
     meta: { success: (task) => `Task !${(task as { seq: number }).seq} created.` },
     onSuccess: (task) => {
-      queryClient.setQueryData<MessagePage>(["messages", channelId], (page) => page ? {
-        ...page,
-        messages: page.messages.map((item) => item.id === message.id ? {
-          ...item,
-          task: {
-            id: task.id,
-            seq: task.seq,
-            title: task.title,
-            status: task.status,
-            assignee_agent_member_id: task.assignee_agent_member_id,
-            assignee_name: task.assignee_name,
-            working_elsewhere: false,
-          },
-        } : item),
-      } : page);
+      queryClient.setQueryData<MessagePages>(messagesQueryOptions(channelId).queryKey, (data) => updateRootMessage(data, message.id, (item) => ({
+        ...item,
+        task: {
+          id: task.id,
+          seq: task.seq,
+          title: task.title,
+          status: task.status,
+          assignee_agent_member_id: task.assignee_agent_member_id,
+          assignee_name: task.assignee_name,
+          working_elsewhere: false,
+        },
+      })));
       void queryClient.invalidateQueries({ queryKey: ["tasks", task.space_id] });
     },
   });
@@ -1045,10 +1086,14 @@ function textBody(message: Message): string {
 }
 
 function messagePreview(message: Message): string {
-  if (message.content.type === "text") return message.content.body_markdown;
-  if (message.content.type === "channel_created") return `Created channel #${message.content.channel.slug}`;
-  if (message.content.type === "system_notice") return message.content.body_markdown;
-  return `Created agent ${message.content.agent.name} · ${message.content.agent.lifecycle}`;
+  return contentPreview(message.content);
+}
+
+function contentPreview(content: Message["content"]): string {
+  if (content.type === "text") return content.body_markdown;
+  if (content.type === "channel_created") return `Created channel #${content.channel.slug}`;
+  if (content.type === "system_notice") return content.body_markdown;
+  return `Created agent ${content.agent.name} · ${content.agent.lifecycle}`;
 }
 
 function AttachmentList({ attachments }: { attachments: Attachment[] }) {

@@ -312,8 +312,17 @@ export function createDirectMessage(spaceId: string, memberId: string): Promise<
   });
 }
 
-export function listMessages(channelId: string): Promise<MessagePage> {
-  return apiRequest<MessagePage>(`/api/v1/channels/${encodeURIComponent(channelId)}/messages`);
+/** One page of Root Messages: the newest page, or the page just before `beforeSeq`. */
+export function listMessages(channelId: string, page: { beforeSeq?: number; limit?: number } = {}): Promise<MessagePage> {
+  const query = new URLSearchParams();
+  if (page.beforeSeq !== undefined) query.set("before_seq", String(page.beforeSeq));
+  if (page.limit !== undefined) query.set("limit", String(page.limit));
+  const search = query.size > 0 ? `?${query}` : "";
+  return apiRequest<MessagePage>(`/api/v1/channels/${encodeURIComponent(channelId)}/messages${search}`);
+}
+
+export function getMessage(messageId: string): Promise<Message> {
+  return apiRequest<Message>(`/api/v1/messages/${encodeURIComponent(messageId)}`);
 }
 
 export function createMessage(

@@ -83,6 +83,7 @@ export function provisionalMessage(item: OutgoingMessage, author: Message["autho
     thread_id: "",
     placement: "root",
     reply_count: 0,
+    latest_replies: [],
     author,
     content: { type: "text", body_markdown: item.input.body_markdown },
     mentions: item.input.mentions,

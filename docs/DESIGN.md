@@ -253,6 +253,7 @@ Driver：
 
 - 可由关联关系推导的数据不重复保存。
 - 事务提交后才发送 SSE、WebSocket command 或外部请求。
+- `message.created`、`message.updated`、`message.deleted` 事件带 `channel_id` 与 `thread_id`。Browser 收到后只重读该 Thread 与它的 Root Message（`GET /api/v1/messages/{thread_id}`），并把 Root Message 就地替换进已加载的时间线页；不重读整个 Channel。
 - Browser SSE 以 `outbox_events` 为唯一事实：该表的 insert 触发器在事务提交时以 Space ID `NOTIFY`，Server 唤醒同 Space 的事件流后再读取；唤醒丢失（如监听连接重连）时事件流最多 30 秒后兜底读取，不按固定间隔轮询数据库。
 - `outbox_events.sequence` 是 Space 内的提交序：写入事务在其他写入完成后、`COMMIT` 前才锁 `spaces` 行取得下一个值并插入事件，因此 sequence 的先后就是提交的先后，同一 Space 的写入只在提交这一步串行；一个事务涉及多个 Space 时按 Space ID 顺序加锁。`created_at`、event ID 和 UUIDv7 都不承担排序职责。
 - 首次连接（没有 `Last-Event-ID`）不回放历史，流从当前末尾开始；只有带 `Last-Event-ID` 的重连才从该事件之后继续，并且只发送该位置之后的事件。未知或已过期的 `Last-Event-ID` 返回 `context_changed`，由客户端重建投影。
@@ -351,11 +352,12 @@ Driver：
 
 ### 加载
 
-- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块；时间线里 Thread 预览的 replies 加载时是一行 reply 骨架。骨架是 subtle 底色的平面块，以透明度柔和明暗变化，不使用渐变扫光。
+- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块。骨架是 subtle 底色的平面块，以透明度柔和明暗变化，不使用渐变扫光。
 
 ### 对话与 Task
 
-- Channel 时间线只展示 Root Message；Thread pane 独立展示对应 Root Message 及其 replies，不混排 replies。Message 的 `seq` 不出现在界面上；有 replies 的 Root Message 只显示 reply 数量。
+- Channel 时间线只展示 Root Message；Thread pane 独立展示对应 Root Message 及其 replies，不混排 replies。Message 的 `seq` 不出现在界面上；有 replies 的 Root Message 显示 reply 数量和最新 3 条 reply 的预览，预览随 Root Message 一起返回，不为每个 Thread 单独请求。
+- Channel 时间线按页读取 Root Message：首屏是最新 50 条，滚到顶部时自动读取更早的一页（顶部同时有 `Load earlier messages` 按钮供键盘使用），插入后正在阅读的消息保持在原位置。
 - Thread pane 头部第二项是这条 Thread 关联的 Task：状态图形 + `!seq` + 标题，hover 显示 `Task !seq · Source/Linked Thread · 标题`，用图形表明它是 Task 而不是标题的一部分。
 - 打开 Channel 或 DM 时，自上次在本浏览器看过之后、别人发来的第一条消息前显示红色 `New` 分隔线；分隔线在本次浏览期间固定不动，已读位置按对话保存在浏览器本地。
 - Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。

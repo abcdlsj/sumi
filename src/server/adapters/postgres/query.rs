@@ -240,15 +240,177 @@ impl PostgresQueries {
             .map_err(map_sqlx)
     }
 
-    pub(in crate::server::adapters) async fn root_messages_in_channel(
+    /// One page of Root Messages, oldest first: the newest `limit` roots before `before_seq`, or
+    /// the newest `limit` overall. Reads one extra row to tell whether older roots remain.
+    pub(in crate::server::adapters) async fn root_message_page(
         &self,
         channel_id: Uuid,
-    ) -> Result<Vec<MessageRow>, ApplicationError> {
-        sqlx::query_as(
+        before_seq: Option<i64>,
+        limit: i64,
+    ) -> Result<(Vec<MessageRow>, bool), ApplicationError> {
+        let mut rows: Vec<MessageRow> = sqlx::query_as(
             "SELECT * FROM messages WHERE channel_id=$1 AND placement='root'
-             ORDER BY channel_seq",
+                AND ($2::bigint IS NULL OR channel_seq < $2)
+             ORDER BY channel_seq DESC LIMIT $3",
         )
         .bind(channel_id)
+        .bind(before_seq)
+        .bind(limit + 1)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)?;
+        let has_more_before = rows.len() as i64 > limit;
+        rows.truncate(usize::try_from(limit).unwrap_or(0));
+        rows.reverse();
+        Ok((rows, has_more_before))
+    }
+
+    pub(in crate::server::adapters) async fn message_by_id(
+        &self,
+        message_id: Uuid,
+    ) -> Result<Option<MessageRow>, ApplicationError> {
+        sqlx::query_as("SELECT * FROM messages WHERE id=$1")
+            .bind(message_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx)
+    }
+
+    /// The newest `per_thread` replies of each Thread, oldest first within a Thread.
+    pub(in crate::server::adapters) async fn latest_replies(
+        &self,
+        thread_ids: &[Uuid],
+        per_thread: i64,
+    ) -> Result<Vec<MessageRow>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT latest.* FROM unnest($1::uuid[]) AS thread(id)
+             CROSS JOIN LATERAL (
+                 SELECT * FROM messages m WHERE m.thread_id=thread.id AND m.placement='reply'
+                 ORDER BY m.channel_seq DESC LIMIT $2
+             ) latest
+             ORDER BY latest.thread_id, latest.channel_seq",
+        )
+        .bind(thread_ids)
+        .bind(per_thread)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn authors(
+        &self,
+        member_ids: &[Uuid],
+    ) -> Result<Vec<AuthorRow>, ApplicationError> {
+        sqlx::query_as("SELECT id,kind,display_name FROM members WHERE id = ANY($1)")
+            .bind(member_ids)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn reply_counts(
+        &self,
+        thread_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, i64)>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT thread_id,count(*) FROM messages
+             WHERE thread_id = ANY($1) AND placement='reply' GROUP BY thread_id",
+        )
+        .bind(thread_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn attachments_for_messages(
+        &self,
+        message_ids: &[Uuid],
+    ) -> Result<Vec<MessageAttachmentRow>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT ma.message_id,a.* FROM attachments a
+             JOIN message_attachments ma ON ma.attachment_id=a.id
+             WHERE ma.message_id = ANY($1) ORDER BY ma.message_id,ma.position",
+        )
+        .bind(message_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn attention_failures_for_messages(
+        &self,
+        message_ids: &[Uuid],
+    ) -> Result<Vec<MessageAttentionFailureRow>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT message_id,member_id,last_error_code FROM inbox_items
+             WHERE message_id = ANY($1) AND last_error_code IS NOT NULL
+             ORDER BY message_id,member_id",
+        )
+        .bind(message_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn mentions_for_messages(
+        &self,
+        message_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, Uuid)>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT message_id,member_id FROM message_mentions
+             WHERE message_id = ANY($1) ORDER BY message_id,member_id",
+        )
+        .bind(message_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn channel_actions(
+        &self,
+        channel_ids: &[Uuid],
+    ) -> Result<Vec<ActionChannelRow>, ApplicationError> {
+        sqlx::query_as("SELECT id,slug,archived_at FROM channels WHERE id = ANY($1)")
+            .bind(channel_ids)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx)
+    }
+
+    pub(in crate::server::adapters) async fn agent_actions(
+        &self,
+        member_ids: &[Uuid],
+    ) -> Result<Vec<ActionAgentRow>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT a.member_id,a.lifecycle,m.display_name,m.retired_at
+             FROM agents a JOIN members m ON m.id=a.member_id WHERE a.member_id = ANY($1)",
+        )
+        .bind(member_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
+    /// The Task shown on each Thread: the Task it is the Source of, else its newest linked Task.
+    pub(in crate::server::adapters) async fn tasks_for_threads(
+        &self,
+        thread_ids: &[Uuid],
+    ) -> Result<Vec<ThreadTaskRow>, ApplicationError> {
+        sqlx::query_as(
+            "SELECT thread.id AS thread_id,task.* FROM unnest($1::uuid[]) AS thread(id)
+             CROSS JOIN LATERAL (
+                 SELECT t.id,t.seq,t.title,t.status,t.assignee_agent_member_id,
+                        m.display_name AS assignee_name,
+                        (SELECT r.focus_thread_id FROM agent_runs r
+                         WHERE r.task_id=t.id AND r.status IN ('dispatched','working')
+                         ORDER BY r.created_at DESC LIMIT 1) AS active_focus_thread_id
+                 FROM tasks t LEFT JOIN members m ON m.id=t.assignee_agent_member_id
+                 WHERE t.source_thread_id=thread.id OR EXISTS
+                     (SELECT 1 FROM task_threads tt WHERE tt.task_id=t.id AND tt.thread_id=thread.id)
+                 ORDER BY (t.source_thread_id=thread.id) DESC,t.created_at DESC LIMIT 1
+             ) task",
+        )
+        .bind(thread_ids)
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx)
@@ -305,116 +467,6 @@ impl PostgresQueries {
             .fetch_all(&self.pool)
             .await
             .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn task_for_thread(
-        &self,
-        thread_id: Uuid,
-    ) -> Result<Option<MessageTaskRow>, ApplicationError> {
-        sqlx::query_as(
-            "SELECT t.id,t.seq,t.title,t.status,t.assignee_agent_member_id,
-                    m.display_name AS assignee_name,
-                    (SELECT r.focus_thread_id FROM agent_runs r
-                     WHERE r.task_id=t.id AND r.status IN ('dispatched','working')
-                     ORDER BY r.created_at DESC LIMIT 1) AS active_focus_thread_id
-             FROM tasks t LEFT JOIN members m ON m.id=t.assignee_agent_member_id
-             WHERE t.source_thread_id=$1 OR EXISTS
-                 (SELECT 1 FROM task_threads tt WHERE tt.task_id=t.id AND tt.thread_id=$1)
-             ORDER BY (t.source_thread_id=$1) DESC,t.created_at DESC LIMIT 1",
-        )
-        .bind(thread_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn message_author(
-        &self,
-        member_id: Uuid,
-    ) -> Result<AuthorRow, ApplicationError> {
-        sqlx::query_as("SELECT id,kind,display_name FROM members WHERE id=$1")
-            .bind(member_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn reply_count(
-        &self,
-        thread_id: Uuid,
-    ) -> Result<i64, ApplicationError> {
-        sqlx::query_scalar("SELECT count(*) FROM messages WHERE thread_id=$1 AND placement='reply'")
-            .bind(thread_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn attachments_for_message(
-        &self,
-        message_id: Uuid,
-    ) -> Result<Vec<AttachmentRow>, ApplicationError> {
-        sqlx::query_as(
-            "SELECT a.* FROM attachments a
-             JOIN message_attachments ma ON ma.attachment_id=a.id
-             WHERE ma.message_id=$1 ORDER BY ma.position",
-        )
-        .bind(message_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn attention_failures(
-        &self,
-        message_id: Uuid,
-    ) -> Result<Vec<AttentionFailureRow>, ApplicationError> {
-        sqlx::query_as(
-            "SELECT member_id,last_error_code FROM inbox_items
-             WHERE message_id=$1 AND last_error_code IS NOT NULL ORDER BY member_id",
-        )
-        .bind(message_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn message_mentions(
-        &self,
-        message_id: Uuid,
-    ) -> Result<Vec<Uuid>, ApplicationError> {
-        sqlx::query_scalar(
-            "SELECT member_id FROM message_mentions WHERE message_id=$1 ORDER BY member_id",
-        )
-        .bind(message_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn channel_action(
-        &self,
-        channel_id: Uuid,
-    ) -> Result<ActionChannelRow, ApplicationError> {
-        sqlx::query_as("SELECT id,slug,archived_at FROM channels WHERE id=$1")
-            .bind(channel_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_sqlx)
-    }
-
-    pub(in crate::server::adapters) async fn agent_action(
-        &self,
-        member_id: Uuid,
-    ) -> Result<ActionAgentRow, ApplicationError> {
-        sqlx::query_as(
-            "SELECT a.member_id,a.lifecycle,m.display_name,m.retired_at
-             FROM agents a JOIN members m ON m.id=a.member_id WHERE a.member_id=$1",
-        )
-        .bind(member_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx)
     }
 
     pub(in crate::server::adapters) async fn task(
@@ -1017,6 +1069,27 @@ pub(in crate::server::adapters) struct MessageRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(in crate::server::adapters) struct MessageAttachmentRow {
+    pub(in crate::server::adapters) message_id: Uuid,
+    #[sqlx(flatten)]
+    pub(in crate::server::adapters) attachment: AttachmentRow,
+}
+
+#[derive(Debug, FromRow)]
+pub(in crate::server::adapters) struct MessageAttentionFailureRow {
+    pub(in crate::server::adapters) message_id: Uuid,
+    pub(in crate::server::adapters) member_id: Uuid,
+    pub(in crate::server::adapters) last_error_code: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(in crate::server::adapters) struct ThreadTaskRow {
+    pub(in crate::server::adapters) thread_id: Uuid,
+    #[sqlx(flatten)]
+    pub(in crate::server::adapters) task: MessageTaskRow,
+}
+
+#[derive(Debug, FromRow)]
 pub(in crate::server::adapters) struct TaskRefRow {
     pub(in crate::server::adapters) id: Uuid,
     pub(in crate::server::adapters) seq: i64,
@@ -1053,12 +1126,6 @@ pub(in crate::server::adapters) struct AttachmentRow {
     pub(in crate::server::adapters) sha256: Option<Vec<u8>>,
     pub(in crate::server::adapters) status: String,
     pub(in crate::server::adapters) created_at: OffsetDateTime,
-}
-
-#[derive(Debug, FromRow)]
-pub(in crate::server::adapters) struct AttentionFailureRow {
-    pub(in crate::server::adapters) member_id: Uuid,
-    pub(in crate::server::adapters) last_error_code: String,
 }
 
 #[derive(Debug, FromRow)]

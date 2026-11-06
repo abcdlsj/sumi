@@ -387,6 +387,7 @@ describe("ChannelPage", () => {
             ...message(channelId, 1, "First Message"),
             thread_id: "1",
             reply_count: 1,
+            latest_replies: [replyPreview(agentCreatedMessage(channelId, 2, reviewerId))],
             task: taskSummary(),
             attention_failures: [
               { agent_member_id: linId, error_code: "run_claim_unavailable", retrying: true },
@@ -560,7 +561,8 @@ describe("ChannelPage", () => {
     expect(within(preview).getByText("Created agent Reviewer · active")).toBeVisible();
     fireEvent.click(within(preview).getByRole("button", { name: "1 reply" }));
     const threadPane = await screen.findByRole("complementary", { name: /Thread #general:1/ });
-    expect(threadPane.querySelector(".action-message")).toHaveTextContent("Ada Lovelace Created agent Reviewer active");
+    // The Thread is read when the pane opens; the timeline preview did not need it.
+    await waitFor(() => expect(threadPane.querySelector(".action-message")).toHaveTextContent("Ada Lovelace Created agent Reviewer active"));
     expect(within(threadPane).getByRole("link", { name: /^Task !\d+, (Source|Linked) Thread, Ship message metadata$/ })).toHaveAttribute("href", "/s/sumi-lab/tasks/019c0000-0000-7000-8000-000000000090");
     expect(within(threadPane).getByRole("img", { name: "Reviewer avatar" })).toHaveAttribute("data-agent-identicon");
     expect(within(threadPane).queryByText(/member_id|lifecycle.*active/)).not.toBeInTheDocument();
@@ -630,6 +632,10 @@ function renderRoute(path: string) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+}
+
+function replyPreview(reply: { id: string; author: unknown; content: unknown; deleted_at?: string | null }) {
+  return { id: reply.id, author: reply.author, content: reply.content, deleted_at: reply.deleted_at ?? null };
 }
 
 function message(channelId: string, seq: number, body: string) {

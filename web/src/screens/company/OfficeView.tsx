@@ -309,7 +309,7 @@ export function CompanyOfficeView({
   async function handleDmMessage(pair: { a: string; b: string }, channelId: string) {
     let authorId: string | undefined;
     try {
-      const page = await listMessages(channelId);
+      const page = await listMessages(channelId, { limit: 1 });
       authorId = page.messages[page.messages.length - 1]?.author.id;
     } catch {
       // Directory still lets us visualise the discussion without the author.

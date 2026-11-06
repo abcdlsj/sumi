@@ -1,7 +1,8 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { messagesQueryOptions, timelinePage } from "../components/channel/messageCache";
 import { useSpaceEvents } from "./useSpaceEvents";
 
 class FakeEventSource {
@@ -163,6 +164,53 @@ describe("useSpaceEvents", () => {
     expect(onMessage).toHaveBeenCalledWith({ type: "message.created", channelId: "channel-1" });
   });
 });
+
+describe("useSpaceEvents Thread changes", () => {
+  it("re-reads only the Root and the Thread a reply belongs to", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const root = { id: "root-1", thread_id: "root-1", channel_id: "channel-1", placement: "root", seq: 1, reply_count: 0 };
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      requests.push(path);
+      if (path === "/api/v1/channels/channel-1/messages") {
+        return Response.json({ channel_id: "channel-1", snapshot_channel_seq: 1, messages: [root], has_more_before: false, has_more_after: false });
+      }
+      if (path === "/api/v1/messages/root-1") return Response.json({ ...root, reply_count: 1 });
+      if (path === "/api/v1/threads/root-1") return Response.json({ thread_id: "root-1", replies: ["reply"] });
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ThreadProbe spaceId="space-1" channelId="channel-1" threadId="root-1" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Reply count")).toHaveTextContent("0"));
+    requests.length = 0;
+
+    FakeEventSource.instances[0].emit("message.created", {
+      type: "message.created",
+      data: { resource_id: "reply-1", channel_id: "channel-1", thread_id: "root-1" },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Reply count")).toHaveTextContent("1"));
+    await waitFor(() => expect(requests).toContain("/api/v1/threads/root-1"));
+    expect(requests).toContain("/api/v1/messages/root-1");
+    expect(requests).not.toContain("/api/v1/channels/channel-1/messages");
+  });
+});
+
+function ThreadProbe({ spaceId, channelId, threadId }: { spaceId: string; channelId: string; threadId: string }) {
+  useSpaceEvents(spaceId);
+  const messages = useInfiniteQuery(messagesQueryOptions(channelId));
+  useQuery({
+    queryKey: ["thread", threadId],
+    queryFn: async () => (await fetch(`/api/v1/threads/${threadId}`)).json(),
+  });
+  const root = timelinePage(messages.data)?.messages[0];
+  return <output aria-label="Reply count">{root ? String(root.reply_count) : ""}</output>;
+}
 
 function MessagesProbe({
   spaceId,

@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -77,31 +77,26 @@ describe("System Notice timeline", () => {
 });
 
 describe("Inline Thread preview", () => {
-  it("keeps the Channel root list separate and labels root and latest reply coordinates", async () => {
+  it("previews the newest replies the page carries without reading the Thread", async () => {
+    const reply = (seq: number, body: string) => ({
+      ...humanMessage(seq),
+      id: `reply-${seq}`,
+      placement: "reply" as const,
+      thread_id: "thread-1",
+      content: { type: "text" as const, body_markdown: body },
+    });
+    const replies = [reply(7, "**Second** reply"), reply(9, "Latest reply")];
     const root = {
       ...humanMessage(4),
       id: "root-message",
       thread_id: "thread-1",
-      reply_count: 2,
+      reply_count: 5,
+      latest_replies: replies.map(({ id, author, content, deleted_at }) => ({ id, author, content, deleted_at })),
     };
-    const replies = [
-      { ...humanMessage(7), id: "reply-1", placement: "reply" as const, thread_id: "thread-1" },
-      { ...humanMessage(9), id: "reply-2", placement: "reply" as const, thread_id: "thread-1" },
-    ];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.endsWith("/api/v1/threads/thread-1")) {
-        return jsonResponse({
-          channel_id: "channel-1",
-          thread_id: "thread-1",
-          snapshot_channel_seq: 9,
-          is_following: false,
-          root,
-          replies,
-        });
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const { container } = render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -121,14 +116,39 @@ describe("Inline Thread preview", () => {
       </QueryClientProvider>,
     );
 
-    expect(container).not.toHaveTextContent("@4");
-    expect(screen.getByRole("region", { name: "2 Thread replies" })).toBeVisible();
+    const preview = screen.getByRole("region", { name: "5 Thread replies" });
     expect(container.querySelectorAll(".message-row")).toHaveLength(1);
+    // Two of five replies are shown, so the heading counts the three before them.
+    expect(within(preview).getByRole("button", { name: "5 replies" })).toHaveTextContent("3 earlier replies");
+    expect(within(preview).getByText("Second reply")).toBeVisible();
+    expect(within(preview).getByText("Latest reply")).toBeVisible();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 
-    const replySummary = screen.getByRole("button", { name: "2 replies" });
-    await waitFor(() => expect(replySummary).toHaveTextContent("2 replies"));
-    expect(replySummary).not.toHaveTextContent("@9");
-    expect(replySummary).toHaveAttribute("title", "Open Thread");
+describe("Earlier messages", () => {
+  it("loads the page before the oldest loaded Root on request", () => {
+    const load = vi.fn(async () => undefined);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MessageTimeline
+          timelineRef={createRef<HTMLDivElement>()}
+          page={{ ...pageWith([humanMessage(4)]), has_more_before: true }}
+          earlier={{ available: true, loading: false, load }}
+          pending={false}
+          error={null}
+          retry={vi.fn()}
+          emptyTitle="No messages"
+          channelId="channel-1"
+          spaceSlug="sumi-lab"
+          openThread={vi.fn()}
+          activityByMemberId={new Map()}
+          members={[]}
+        />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -659,6 +679,7 @@ function systemNotice(seq: number, body: string, createdAt: string): Message {
     thread_id: `thread-${seq}`,
     created_at: createdAt,
     reply_count: 0,
+    latest_replies: [],
   };
 }
 
@@ -678,13 +699,6 @@ function humanMessage(seq: number): Message {
     author: { id: "human-ada", kind: "human", display_name: "Ada" },
     content: { type: "text", body_markdown: "Hello" },
   };
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 
 describe("collapsed message body style", () => {

@@ -905,18 +905,8 @@ a.message-mention--agent:hover {
   background: var(--bg-subtle);
 }
 
-.inline-reply--loading {
-  height: 22px;
-  pointer-events: none;
-}
 
-.inline-reply--loading .skeleton-avatar {
-  width: 18px;
-  height: 18px;
-}
 
-.inline-reply--loading .skeleton-bar:nth-child(2) { width: 52px; }
-.inline-reply--loading .skeleton-bar:nth-child(3) { width: 46%; }
 
 .inline-reply .pixel-identity {
   width: 18px;
@@ -1970,4 +1960,32 @@ details.system-event .system-event-heading {
 /* The setup guide already says what to do in a fresh #general. */
 .getting-started ~ .empty-channel {
   display: none;
+}
+
+/* Older Root Messages load when the reader reaches the top; the button is the keyboard path and
+   the scroll trigger, so it stays in the flow above the first loaded message. */
+.timeline-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+
+.timeline-earlier-button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--text-meta);
+}
+
+.timeline-earlier-button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--ink);
+}
+
+.timeline-earlier-button:disabled {
+  cursor: progress;
 }

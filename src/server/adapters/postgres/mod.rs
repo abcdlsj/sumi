@@ -1386,7 +1386,8 @@ impl PostgresTransaction {
             }
         };
         if kind.starts_with("message.") {
-            let row = sqlx::query("SELECT space_id,channel_id FROM messages WHERE id=$1")
+            // The Thread lets a Browser refresh only the Root Message and Thread the change is in.
+            let row = sqlx::query("SELECT space_id,channel_id,thread_id FROM messages WHERE id=$1")
                 .bind(subject_id)
                 .fetch_one(&mut *self.connection)
                 .await
@@ -1394,7 +1395,11 @@ impl PostgresTransaction {
             return Ok((
                 SpaceId::from_uuid(row.get("space_id")),
                 kind,
-                json!({"resource_id": subject_id, "channel_id": row.get::<Uuid,_>("channel_id")}),
+                json!({
+                    "resource_id": subject_id,
+                    "channel_id": row.get::<Uuid, _>("channel_id"),
+                    "thread_id": row.get::<Uuid, _>("thread_id"),
+                }),
             ));
         }
         let space_id = self.space_for_subject(kind, subject_id).await?;

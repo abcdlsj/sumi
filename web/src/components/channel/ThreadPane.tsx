@@ -15,6 +15,7 @@ import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { MessageComposer, type ComposerInput } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
 import { provisionalMessage, useOutbox } from "./outbox";
+import { refreshRootMessage } from "./messageCache";
 import { useSelfMemberId } from "./selfMember";
 import { TaskStatusIcon } from "../taskStatusIcon";
 import { ToBottomButton } from "./ToBottomButton";
@@ -115,7 +116,8 @@ export function ThreadPane({
     // the scroll hook still applies the 3/4-screen rule to external updates.
     scrollToBottom();
     window.requestAnimationFrame(() => scrollToBottom());
-    void queryClient.invalidateQueries({ queryKey: ["messages", channelId] });
+    // The Root's reply count and preview changed; the rest of the Channel did not.
+    void refreshRootMessage(queryClient, channelId, threadId).catch(() => undefined);
   }
 
   const outbox = useOutbox(sendReply, addReply);

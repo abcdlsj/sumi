@@ -101,5 +101,6 @@ function message(): Message {
     thread_id: "thread-1",
     created_at: "2026-07-25T12:00:00Z",
     reply_count: 0,
+    latest_replies: [],
   };
 }

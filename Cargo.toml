@@ -32,6 +32,10 @@ name = "builtin_harness_benchmark"
 path = "tests/builtin_harness_benchmark.rs"
 
 [[test]]
+name = "channel_messages"
+path = "tests/normal/channel_messages.rs"
+
+[[test]]
 name = "cli"
 path = "tests/normal/cli.rs"
 

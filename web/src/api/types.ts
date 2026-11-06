@@ -547,6 +547,11 @@ export interface components {
             edited_at?: string | null;
             /** Format: uuid */
             id: string;
+            /**
+             * @description The newest replies of a Root Message, oldest first, for the Channel timeline preview. Empty
+             *     for a reply.
+             */
+            latest_replies: components["schemas"]["ReplyPreviewResponse"][];
             mention_all: boolean;
             mentions: string[];
             placement: components["schemas"]["MessagePlacement"];
@@ -604,6 +609,13 @@ export interface components {
         RegisterResponse: {
             next: string;
             user: components["schemas"]["UserResponse"];
+        };
+        ReplyPreviewResponse: {
+            author: components["schemas"]["MessageAuthor"];
+            content: components["schemas"]["MessageContentResponse"];
+            deleted_at?: string | null;
+            /** Format: uuid */
+            id: string;
         };
         /** @enum {string} */
         RunOutcome: "completed" | "yielded" | "failed" | "canceled";

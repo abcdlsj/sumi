@@ -1,7 +1,10 @@
 use super::*;
+use std::collections::{BTreeMap, HashMap};
+
 use crate::server::adapters::postgres::{
-    ActionAgentRow, ActionChannelRow, AgentRow, AttachmentRow, ChannelRow, MemberRow, MessageRow,
-    MessageTaskRow, PostgresQueries, RunRow, SpaceRow, TaskRefRow, TaskRow, ThreadReferenceRow,
+    ActionAgentRow, ActionChannelRow, AgentRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow,
+    MessageRow, MessageTaskRow, PostgresQueries, RunRow, SpaceRow, TaskRefRow, TaskRow,
+    ThreadReferenceRow,
 };
 
 pub(super) const SPACE_ACCENTS: [&str; 4] = ["#F0602F", "#E8B42D", "#3C9E8F", "#6C5CE7"];
@@ -240,12 +243,16 @@ pub(super) async fn message_task_summary(
     thread_id: Uuid,
 ) -> Result<Option<MessageTaskSummary>, ApiError> {
     let row = queries
-        .task_for_thread(thread_id)
+        .tasks_for_threads(&[thread_id])
         .await
-        .map_err(application_error)?;
-    let Some(row) = row else { return Ok(None) };
+        .map_err(application_error)?
+        .pop();
+    row.map(|row| task_summary(row.task, thread_id)).transpose()
+}
+
+fn task_summary(row: MessageTaskRow, thread_id: Uuid) -> Result<MessageTaskSummary, ApiError> {
     let active_focus = row.active_focus_thread_id;
-    Ok(Some(MessageTaskSummary {
+    Ok(MessageTaskSummary {
         id: row.id,
         seq: u64::try_from(row.seq).map_err(|_| ApiError::internal())?,
         title: row.title,
@@ -253,7 +260,7 @@ pub(super) async fn message_task_summary(
         assignee_agent_member_id: row.assignee_agent_member_id,
         assignee_name: row.assignee_name,
         working_elsewhere: active_focus.is_some_and(|focus| focus != thread_id),
-    }))
+    })
 }
 
 /// Extracts `!<seq>` tokens at word boundaries from Message Markdown.
@@ -289,152 +296,304 @@ fn parse_task_ref_seqs(body: &str) -> Vec<i64> {
 }
 
 /// Resolves `!<seq>` tokens in a Message to Tasks of the same Space.
-pub(super) async fn task_refs_for_message(
-    queries: &PostgresQueries,
-    space_id: Uuid,
-    body: Option<&str>,
-) -> Result<Vec<MessageTaskRefResponse>, ApiError> {
-    let Some(body) = body else {
-        return Ok(Vec::new());
-    };
-    let seqs = parse_task_ref_seqs(body);
-    if seqs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let rows = queries
-        .task_refs(space_id, &seqs)
-        .await
-        .map_err(application_error)?;
-    let mut refs = rows
-        .iter()
-        .map(|row| {
-            Ok(MessageTaskRefResponse {
-                seq: u64::try_from(row.seq).map_err(|_| ApiError::internal())?,
-                task_id: row.id,
-                title: row.title.clone(),
-                status: task_status_code(&row.status)?,
-            })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
-    refs.sort_by_key(|task_ref| task_ref.seq);
-    Ok(refs)
-}
-
+/// Projects one Message. Prefer [`message_rows`] for a list: it reads each relation once for all rows.
 pub(super) async fn message_row(
     queries: &PostgresQueries,
     row: &MessageRow,
 ) -> Result<MessageResponse, ApiError> {
-    let author = queries
-        .message_author(row.author_member_id)
-        .await
-        .map_err(application_error)?;
-    let replies = queries
-        .reply_count(row.thread_id)
-        .await
-        .map_err(application_error)?;
-    let attachments = queries
-        .attachments_for_message(row.id)
-        .await
-        .map_err(application_error)?;
-    let mut attachment_views = Vec::with_capacity(attachments.len());
-    for attachment in &attachments {
-        attachment_views.push(attachment_row(attachment)?);
+    message_rows(queries, std::slice::from_ref(row))
+        .await?
+        .pop()
+        .ok_or_else(ApiError::internal)
+}
+
+/// Replies shown under a Root Message in the Channel timeline.
+const LATEST_REPLIES: i64 = 3;
+
+/// Projects Messages in input order with one query per relation, whatever the number of rows.
+pub(super) async fn message_rows(
+    queries: &PostgresQueries,
+    rows: &[MessageRow],
+) -> Result<Vec<MessageResponse>, ApiError> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
     }
-    let attention_failures = queries
-        .attention_failures(row.id)
+    let message_ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let root_threads: Vec<Uuid> = rows
+        .iter()
+        .filter(|row| row.placement == "root")
+        .map(|row| row.thread_id)
+        .collect();
+    let latest = queries
+        .latest_replies(&root_threads, LATEST_REPLIES)
+        .await
+        .map_err(application_error)?;
+    let mut author_ids: Vec<Uuid> = rows
+        .iter()
+        .chain(&latest)
+        .map(|row| row.author_member_id)
+        .collect();
+    author_ids.sort_unstable();
+    author_ids.dedup();
+    let authors: HashMap<Uuid, AuthorRow> = queries
+        .authors(&author_ids)
         .await
         .map_err(application_error)?
-        .iter()
-        .map(|failure| AttentionFailureResponse {
-            agent_member_id: failure.member_id,
-            error_code: failure.last_error_code.clone(),
-            retrying: true,
-        })
-        .collect::<Vec<_>>();
-    let mentions = queries
-        .message_mentions(row.id)
+        .into_iter()
+        .map(|author| (author.id, author))
+        .collect();
+    let reply_counts: HashMap<Uuid, i64> = queries
+        .reply_counts(&root_threads)
         .await
-        .map_err(application_error)?;
-    let task = if row.placement == "root" {
-        message_task_summary(queries, row.thread_id).await?
-    } else {
-        None
+        .map_err(application_error)?
+        .into_iter()
+        .collect();
+    let mut attachments: HashMap<Uuid, Vec<AttachmentResponse>> = HashMap::new();
+    for row in queries
+        .attachments_for_messages(&message_ids)
+        .await
+        .map_err(application_error)?
+    {
+        attachments
+            .entry(row.message_id)
+            .or_default()
+            .push(attachment_row(&row.attachment)?);
+    }
+    let mut failures: HashMap<Uuid, Vec<AttentionFailureResponse>> = HashMap::new();
+    for row in queries
+        .attention_failures_for_messages(&message_ids)
+        .await
+        .map_err(application_error)?
+    {
+        failures
+            .entry(row.message_id)
+            .or_default()
+            .push(AttentionFailureResponse {
+                agent_member_id: row.member_id,
+                error_code: row.last_error_code,
+                retrying: true,
+            });
+    }
+    let mut mentions: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for (message_id, member_id) in queries
+        .mentions_for_messages(&message_ids)
+        .await
+        .map_err(application_error)?
+    {
+        mentions.entry(message_id).or_default().push(member_id);
+    }
+    let mut tasks: HashMap<Uuid, MessageTaskSummary> = HashMap::new();
+    for row in queries
+        .tasks_for_threads(&root_threads)
+        .await
+        .map_err(application_error)?
+    {
+        let thread_id = row.thread_id;
+        tasks.insert(thread_id, task_summary(row.task, thread_id)?);
+    }
+    let task_refs = task_refs_for_messages(queries, rows).await?;
+    let channel_ids: Vec<Uuid> = rows
+        .iter()
+        .chain(&latest)
+        .filter_map(|row| row.action_channel_id)
+        .collect();
+    let channels: HashMap<Uuid, ActionChannelRow> = queries
+        .channel_actions(&channel_ids)
+        .await
+        .map_err(application_error)?
+        .into_iter()
+        .map(|channel| (channel.id, channel))
+        .collect();
+    let agent_ids: Vec<Uuid> = rows
+        .iter()
+        .chain(&latest)
+        .filter_map(|row| row.action_agent_member_id)
+        .collect();
+    let agents: HashMap<Uuid, ActionAgentRow> = queries
+        .agent_actions(&agent_ids)
+        .await
+        .map_err(application_error)?
+        .into_iter()
+        .map(|agent| (agent.member_id, agent))
+        .collect();
+    let related = Related {
+        authors: &authors,
+        channels: &channels,
+        agents: &agents,
     };
-    let task_refs =
-        task_refs_for_message(queries, row.space_id, row.body_markdown.as_deref()).await?;
-    let content = match row.content_kind.as_str() {
-        "text" => MessageContentResponse::Text {
-            body_markdown: row.body_markdown.clone().unwrap_or_default(),
-        },
-        "channel_created" => {
-            let target_id = row.action_channel_id.ok_or_else(ApiError::internal)?;
-            let target = queries
-                .channel_action(target_id)
-                .await
-                .map_err(application_error)?;
-            MessageContentResponse::ChannelCreated {
-                channel: ActionChannelResponse {
-                    id: target.id,
-                    slug: target.slug.unwrap_or_default(),
-                    available: target.archived_at.is_none(),
+    let mut latest_by_thread: HashMap<Uuid, Vec<ReplyPreviewResponse>> = HashMap::new();
+    for reply in &latest {
+        latest_by_thread
+            .entry(reply.thread_id)
+            .or_default()
+            .push(ReplyPreviewResponse {
+                id: reply.id,
+                author: related.author(reply.author_member_id)?,
+                content: related.content(reply)?,
+                deleted_at: optional_timestamp(reply.deleted_at),
+            });
+    }
+    rows.iter()
+        .map(|row| {
+            let root = row.placement == "root";
+            Ok(MessageResponse {
+                id: row.id,
+                channel_id: row.channel_id,
+                thread_id: row.thread_id,
+                seq: u64::try_from(row.channel_seq).map_err(|_| ApiError::internal())?,
+                placement: match row.placement.as_str() {
+                    "root" => MessagePlacement::Root,
+                    "reply" => MessagePlacement::Reply,
+                    _ => return Err(ApiError::internal()),
                 },
-            }
-        }
-        "agent_created" => {
-            let target_id = row.action_agent_member_id.ok_or_else(ApiError::internal)?;
-            let target = queries
-                .agent_action(target_id)
-                .await
-                .map_err(application_error)?;
-            MessageContentResponse::AgentCreated {
-                agent: ActionAgentResponse {
-                    member_id: target.member_id,
-                    name: target.display_name,
-                    lifecycle: match target.lifecycle.as_str() {
-                        "suspended" => AgentLifecycle::Suspended,
-                        "retired" => AgentLifecycle::Retired,
-                        _ => AgentLifecycle::Active,
-                    },
-                    available: target.retired_at.is_none(),
+                author: related.author(row.author_member_id)?,
+                content: related.content(row)?,
+                mentions: mentions.remove(&row.id).unwrap_or_default(),
+                mention_all: row.mention_all,
+                attachments: attachments.remove(&row.id).unwrap_or_default(),
+                reply_count: if root {
+                    u64::try_from(reply_counts.get(&row.thread_id).copied().unwrap_or(0))
+                        .map_err(|_| ApiError::internal())?
+                } else {
+                    0
                 },
-            }
-        }
-        "system_notice" => MessageContentResponse::SystemNotice {
-            body_markdown: row.body_markdown.clone().unwrap_or_default(),
-        },
-        _ => return Err(ApiError::internal()),
-    };
-    Ok(MessageResponse {
-        id: row.id,
-        channel_id: row.channel_id,
-        thread_id: row.thread_id,
-        seq: u64::try_from(row.channel_seq).map_err(|_| ApiError::internal())?,
-        placement: match row.placement.as_str() {
-            "root" => MessagePlacement::Root,
-            "reply" => MessagePlacement::Reply,
-            _ => return Err(ApiError::internal()),
-        },
-        author: MessageAuthor {
+                latest_replies: if root {
+                    latest_by_thread.remove(&row.thread_id).unwrap_or_default()
+                } else {
+                    Vec::new()
+                },
+                task: if root {
+                    tasks.remove(&row.thread_id)
+                } else {
+                    None
+                },
+                task_refs: task_refs.get(&row.id).cloned().unwrap_or_default(),
+                attention_failures: failures.remove(&row.id).unwrap_or_default(),
+                created_at: timestamp(row.created_at),
+                edited_at: optional_timestamp(row.edited_at),
+                deleted_at: optional_timestamp(row.deleted_at),
+            })
+        })
+        .collect()
+}
+
+/// Rows a Message projection refers to, read once per page.
+struct Related<'a> {
+    authors: &'a HashMap<Uuid, AuthorRow>,
+    channels: &'a HashMap<Uuid, ActionChannelRow>,
+    agents: &'a HashMap<Uuid, ActionAgentRow>,
+}
+
+impl Related<'_> {
+    fn author(&self, member_id: Uuid) -> Result<MessageAuthor, ApiError> {
+        let author = self
+            .authors
+            .get(&member_id)
+            .ok_or_else(ApiError::internal)?;
+        Ok(MessageAuthor {
             id: author.id,
             kind: match author.kind.as_str() {
                 "human" => MemberKindCode::Human,
                 "agent" => MemberKindCode::Agent,
                 _ => return Err(ApiError::internal()),
             },
-            display_name: author.display_name,
-        },
-        content,
-        mentions,
-        mention_all: row.mention_all,
-        attachments: attachment_views,
-        reply_count: u64::try_from(replies).map_err(|_| ApiError::internal())?,
-        task,
-        task_refs,
-        attention_failures,
-        created_at: timestamp(row.created_at),
-        edited_at: optional_timestamp(row.edited_at),
-        deleted_at: optional_timestamp(row.deleted_at),
-    })
+            display_name: author.display_name.clone(),
+        })
+    }
+
+    fn content(&self, row: &MessageRow) -> Result<MessageContentResponse, ApiError> {
+        Ok(match row.content_kind.as_str() {
+            "text" => MessageContentResponse::Text {
+                body_markdown: row.body_markdown.clone().unwrap_or_default(),
+            },
+            "channel_created" => {
+                let target_id = row.action_channel_id.ok_or_else(ApiError::internal)?;
+                let target = self
+                    .channels
+                    .get(&target_id)
+                    .ok_or_else(ApiError::internal)?;
+                MessageContentResponse::ChannelCreated {
+                    channel: ActionChannelResponse {
+                        id: target.id,
+                        slug: target.slug.clone().unwrap_or_default(),
+                        available: target.archived_at.is_none(),
+                    },
+                }
+            }
+            "agent_created" => {
+                let target_id = row.action_agent_member_id.ok_or_else(ApiError::internal)?;
+                let target = self.agents.get(&target_id).ok_or_else(ApiError::internal)?;
+                MessageContentResponse::AgentCreated {
+                    agent: ActionAgentResponse {
+                        member_id: target.member_id,
+                        name: target.display_name.clone(),
+                        lifecycle: match target.lifecycle.as_str() {
+                            "suspended" => AgentLifecycle::Suspended,
+                            "retired" => AgentLifecycle::Retired,
+                            _ => AgentLifecycle::Active,
+                        },
+                        available: target.retired_at.is_none(),
+                    },
+                }
+            }
+            "system_notice" => MessageContentResponse::SystemNotice {
+                body_markdown: row.body_markdown.clone().unwrap_or_default(),
+            },
+            _ => return Err(ApiError::internal()),
+        })
+    }
+}
+
+/// Resolves `!<seq>` references for every row with one Task query per Space.
+async fn task_refs_for_messages(
+    queries: &PostgresQueries,
+    rows: &[MessageRow],
+) -> Result<HashMap<Uuid, Vec<MessageTaskRefResponse>>, ApiError> {
+    let mut wanted: BTreeMap<Uuid, Vec<(Uuid, Vec<i64>)>> = BTreeMap::new();
+    for row in rows {
+        let seqs = row
+            .body_markdown
+            .as_deref()
+            .map(parse_task_ref_seqs)
+            .unwrap_or_default();
+        if !seqs.is_empty() {
+            wanted.entry(row.space_id).or_default().push((row.id, seqs));
+        }
+    }
+    let mut refs = HashMap::new();
+    for (space_id, messages) in wanted {
+        let mut seqs: Vec<i64> = messages
+            .iter()
+            .flat_map(|(_, seqs)| seqs.iter().copied())
+            .collect();
+        seqs.sort_unstable();
+        seqs.dedup();
+        let tasks: HashMap<i64, TaskRefRow> = queries
+            .task_refs(space_id, &seqs)
+            .await
+            .map_err(application_error)?
+            .into_iter()
+            .map(|task| (task.seq, task))
+            .collect();
+        for (message_id, mut message_seqs) in messages {
+            message_seqs.sort_unstable();
+            message_seqs.dedup();
+            let resolved = message_seqs
+                .into_iter()
+                .filter_map(|seq| tasks.get(&seq))
+                .map(|task| {
+                    Ok(MessageTaskRefResponse {
+                        seq: u64::try_from(task.seq).map_err(|_| ApiError::internal())?,
+                        task_id: task.id,
+                        title: task.title.clone(),
+                        status: task_status_code(&task.status)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ApiError>>()?;
+            refs.insert(message_id, resolved);
+        }
+    }
+    Ok(refs)
 }
 
 pub(super) fn attachment_row(row: &AttachmentRow) -> Result<AttachmentResponse, ApiError> {

@@ -228,10 +228,7 @@ pub(super) async fn read_thread(
         .messages_in_thread(thread_id)
         .await
         .map_err(application_error)?;
-    let mut projected = Vec::with_capacity(rows.len());
-    for row in &rows {
-        projected.push(message_row(&state.read, row).await?);
-    }
+    let projected = message_rows(&state.read, &rows).await?;
     let root = projected.first().cloned().ok_or_else(ApiError::not_found)?;
     let snapshot = state
         .read
@@ -916,31 +913,68 @@ pub(super) async fn set_subscription(
     }))
 }
 
+#[derive(Deserialize)]
+pub(super) struct MessagePageQuery {
+    /// Return Root Messages older than this `channel_seq`; the newest page when absent.
+    before_seq: Option<u64>,
+    limit: Option<u32>,
+}
+
+/// Root Messages per Channel page when the Browser does not ask for a size.
+const MESSAGE_PAGE: u32 = 50;
+const MESSAGE_PAGE_MAX: u32 = 100;
+
 pub(super) async fn list_messages(
     State(state): State<RuntimeState>,
     jar: CookieJar,
     Path(channel_id): Path<Uuid>,
+    Query(query): Query<MessagePageQuery>,
 ) -> Result<Json<MessagePageResponse>, ApiError> {
     channel_member(&state, &jar, channel_id).await?;
-    let rows = state
-        .read
-        .root_messages_in_channel(channel_id)
-        .await
-        .map_err(application_error)?;
-    let mut messages = Vec::with_capacity(rows.len());
-    for row in rows {
-        messages.push(message_row(&state.read, &row).await?);
-    }
+    let limit = query
+        .limit
+        .unwrap_or(MESSAGE_PAGE)
+        .clamp(1, MESSAGE_PAGE_MAX);
+    let before_seq = query
+        .before_seq
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| ApiError::invalid("before_seq is out of range"))?;
+    // The snapshot is read first, so every root in the page is at or below it.
     let snapshot = state
         .read
         .channel_snapshot(channel_id)
         .await
         .map_err(application_error)?;
+    let (rows, has_more_before) = state
+        .read
+        .root_message_page(channel_id, before_seq, i64::from(limit))
+        .await
+        .map_err(application_error)?;
     Ok(Json(MessagePageResponse {
         channel_id,
-        messages,
+        messages: message_rows(&state.read, &rows).await?,
         snapshot_channel_seq: u64::try_from(snapshot).map_err(|_| ApiError::internal())?,
-        has_more_before: false,
+        has_more_before,
         has_more_after: false,
     }))
+}
+
+/// One Message, for a Browser that learned from the event stream that it changed.
+pub(super) async fn read_message(
+    State(state): State<RuntimeState>,
+    jar: CookieJar,
+    Path(message_id): Path<Uuid>,
+) -> Result<Json<MessageResponse>, ApiError> {
+    let row = state
+        .read
+        .message_by_id(message_id)
+        .await
+        .map_err(application_error)?
+        .ok_or_else(ApiError::not_found)?;
+    // A reader outside the Channel learns nothing, not even that the Message exists.
+    channel_member(&state, &jar, row.channel_id)
+        .await
+        .map_err(|_| ApiError::not_found())?;
+    Ok(Json(message_row(&state.read, &row).await?))
 }

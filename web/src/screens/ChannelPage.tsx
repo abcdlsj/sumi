@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { Hash, LoaderCircle, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -11,12 +11,10 @@ import {
   listChannelMembers,
   listComputers,
   listMembers,
-  listMessages,
   type Channel,
   type ChannelMembers,
   type Member,
   type Message,
-  type MessagePage,
 } from "../api/client";
 import { DialogFrame } from "../components/DialogFrame";
 import { GettingStarted } from "../components/onboarding/GettingStarted";
@@ -25,6 +23,7 @@ import { MessageTimeline, type MessageTimelineScrollApi } from "../components/ch
 import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { useOutbox } from "../components/channel/outbox";
+import { messagesQueryOptions, timelinePage, upsertRootMessage, type MessagePages } from "../components/channel/messageCache";
 import { PixelIdentity, PresenceIdentity, SpaceShell } from "../components/SpaceShell";
 import { agentPresence } from "../agentActivity";
 
@@ -189,10 +188,8 @@ export function MessageWorkspace({
     setThreadId(undefined);
     window.requestAnimationFrame(() => timelineScrollApi.current?.scrollToBottom());
   }, []);
-  const messages = useQuery({
-    queryKey: ["messages", channel.id],
-    queryFn: () => listMessages(channel.id),
-  });
+  const messages = useInfiniteQuery(messagesQueryOptions(channel.id));
+  const page = timelinePage(messages.data);
   const spaceMembers = useQuery({
     queryKey: ["members", spaceId],
     queryFn: () => listMembers(spaceId),
@@ -216,7 +213,7 @@ export function MessageWorkspace({
   const [composerInsert, setComposerInsert] = useState<{ text: string; nonce: number }>();
   const latestMainMessageSeq = Math.max(
     0,
-    ...(messages.data?.messages.map((message) => message.seq) ?? []),
+    ...(page?.messages.map((message) => message.seq) ?? []),
   );
   const availableAgents = (spaceMembers.data ?? [])
     .filter((member) => member.kind === "agent" && !channelMembers.data?.members.some((joined) => joined.id === member.id))
@@ -225,13 +222,13 @@ export function MessageWorkspace({
       role_text: agents.data?.find((agent) => agent.member_id === member.id)?.role_text?.trim() || "Agent",
     }));
   useEffect(() => {
-    if (!messages.data || !location.hash.startsWith("message-")) return;
+    if (!page || !location.hash.startsWith("message-")) return;
     window.requestAnimationFrame(() => {
       const target = document.getElementById(location.hash);
       target?.scrollIntoView({ block: "center" });
       target?.focus({ preventScroll: true });
     });
-  }, [location.hash, messages.data]);
+  }, [location.hash, page]);
   const activityByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agentPresence(agent)] as const),
   );
@@ -246,18 +243,8 @@ export function MessageWorkspace({
   }
 
   function addMessage(message: Message) {
-    queryClient.setQueryData<MessagePage>(["messages", channel.id], (current) => {
-      // The event stream may already have refetched the page with this message.
-      const messages = current?.messages ?? [];
-      if (messages.some((item) => item.id === message.id)) return current;
-      return {
-        channel_id: channel.id,
-        snapshot_channel_seq: Math.max(message.seq, current?.snapshot_channel_seq ?? 0),
-        messages: [...messages, message],
-        has_more_before: current?.has_more_before ?? false,
-        has_more_after: false,
-      };
-    });
+    // The event stream may already have patched the page with this message.
+    queryClient.setQueryData<MessagePages>(messagesQueryOptions(channel.id).queryKey, (data) => upsertRootMessage(data, message));
   }
   const outbox = useOutbox(sendMessage, addMessage);
   function queueMessage(input: ComposerInput) {
@@ -332,7 +319,7 @@ export function MessageWorkspace({
               computers={computers.data ?? []}
               agents={agents.data ?? []}
               channelMembers={channelMembers.data?.members ?? []}
-              agentHasSpoken={Boolean(messages.data?.messages.some((message) => message.author.kind === "agent"))}
+              agentHasSpoken={Boolean(page?.messages.some((message) => message.author.kind === "agent"))}
               canPairComputer={setup.canPairComputer}
               canCreateAgent={setup.canCreateAgent}
               isOwner={setup.isOwner}
@@ -340,7 +327,12 @@ export function MessageWorkspace({
             />
           )
         ) : undefined}
-        page={messages.data}
+        page={page}
+        earlier={{
+          available: messages.hasNextPage,
+          loading: messages.isFetchingNextPage,
+          load: () => messages.fetchNextPage(),
+        }}
         pending={messages.isPending}
         error={messages.error}
         retry={() => void messages.refetch()}

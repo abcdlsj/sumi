@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from "react";
 
 import { openSpaceEvents } from "../api/client";
 import { clearAgentActivityForChannel, recordAgentActivity, type AgentActivityEvent } from "../agentActivity";
+import { refreshRootMessage } from "../components/channel/messageCache";
 
 interface SumiEvent {
   type: string;
   event_id?: string;
   occurred_at?: string;
   data: {
+    resource_id?: string;
     channel_id?: string;
     member_id?: string;
     kind?: string;
@@ -66,21 +68,25 @@ export function useSpaceEvents(
       if (payload.type === "member.changed" && payload.data.channel_id) {
         clearAgentActivityForChannel(payload.data.channel_id);
       }
-      if (payload.type.startsWith("message.") && payload.data.channel_id) {
-        if (payload.type === "message.created" && payload.data.channel_id) {
-          onMessageRef.current?.({ type: payload.type, channelId: payload.data.channel_id });
+      // A change inside a Thread touches that Thread and its Root Message's reply count and
+      // preview, so only those two are re-read; the rest of the Channel timeline stays as it is.
+      const threadId = payload.type.startsWith("message.") ? payload.data.thread_id : payload.type === "thread.updated" ? payload.data.resource_id : undefined;
+      if ((payload.type.startsWith("message.") || payload.type === "thread.updated") && payload.data.channel_id) {
+        const channelId = payload.data.channel_id;
+        if (payload.type === "message.created") {
+          onMessageRef.current?.({ type: payload.type, channelId });
         }
-        void queryClient.invalidateQueries({ queryKey: ["messages", payload.data.channel_id] });
-        void queryClient.invalidateQueries({ queryKey: ["thread", payload.data.channel_id] });
+        if (threadId) {
+          void queryClient.invalidateQueries({ queryKey: ["thread", threadId] });
+          refreshRootMessage(queryClient, channelId, threadId).catch(() => {
+            void queryClient.invalidateQueries({ queryKey: ["messages", channelId] });
+          });
+        } else {
+          void queryClient.invalidateQueries({ queryKey: ["messages", channelId] });
+        }
       }
       if (payload.type === "inbox.changed") {
         void queryClient.invalidateQueries({ queryKey: ["inbox", spaceId] });
-      }
-      if (payload.type === "thread.updated") {
-        void queryClient.invalidateQueries({ queryKey: ["thread"] });
-        if (payload.data.channel_id) {
-          void queryClient.invalidateQueries({ queryKey: ["messages", payload.data.channel_id] });
-        }
       }
       if (payload.type.startsWith("channel.")) {
         void queryClient.invalidateQueries({ queryKey: ["channels", spaceId] });
