@@ -2,28 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { openSpaceEvents } from "../api/client";
-import { clearAgentActivityForChannel, recordAgentActivity, type AgentActivityEvent } from "../agentActivity";
+import { clearAgentActivityForChannel, isAgentActivityEvent, recordAgentActivity, type SumiEvent } from "../agentActivity";
 import { refreshRootMessage } from "../components/channel/messageCache";
-
-interface SumiEvent {
-  type: string;
-  event_id?: string;
-  occurred_at?: string;
-  data: {
-    resource_id?: string;
-    channel_id?: string;
-    member_id?: string;
-    kind?: string;
-    run_id?: string;
-    thread_id?: string;
-    message_id?: string;
-    task_id?: string;
-    item_id?: string;
-    target_member_id?: string;
-    scope_channel_id?: string;
-    arguments?: { name: string; value: string }[];
-  };
-}
 
 /** Whether this tab is receiving live updates for the Space. */
 export type SpaceConnection = "connecting" | "live" | "reconnecting" | "offline";
@@ -54,14 +34,8 @@ export function useSpaceEvents(
     let retryTimer: number | undefined;
     const invalidate = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as SumiEvent;
-      if (
-        payload.type === "agent.activity" &&
-        payload.event_id &&
-        payload.occurred_at &&
-        payload.data.member_id &&
-        payload.data.kind
-      ) {
-        recordAgentActivity(payload as AgentActivityEvent);
+      if (isAgentActivityEvent(payload)) {
+        recordAgentActivity(payload);
       }
       // Membership changes revoke any scoped preview still held in this tab's
       // ephemeral feed.

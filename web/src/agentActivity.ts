@@ -72,22 +72,40 @@ export interface AgentActivityItem {
   arguments: readonly AgentActivityArgument[];
 }
 
-export interface AgentActivityEvent {
-  event_id: string;
-  occurred_at: string;
+/** The envelope every Space event carries, whatever its kind. */
+export interface SumiEvent {
+  type: string;
+  event_id?: string;
+  occurred_at?: string;
   data: {
-    member_id: string;
-    kind: AgentActivityKind;
-    run_id?: string;
+    resource_id?: string;
     channel_id?: string;
-    scope_channel_id?: string;
+    member_id?: string;
+    kind?: string;
+    run_id?: string;
     thread_id?: string;
     message_id?: string;
     task_id?: string;
     item_id?: string;
     target_member_id?: string;
+    scope_channel_id?: string;
     arguments?: AgentActivityArgument[];
   };
+}
+
+/** An `agent.activity` event: the envelope with the fields that event always sends. */
+export interface AgentActivityEvent extends SumiEvent {
+  event_id: string;
+  occurred_at: string;
+  data: SumiEvent["data"] & { member_id: string; kind: AgentActivityKind };
+}
+
+/** Narrows an event to the Agent activity shape the feed records. */
+export function isAgentActivityEvent(event: SumiEvent): event is AgentActivityEvent {
+  return (
+    event.type === "agent.activity" &&
+    Boolean(event.event_id && event.occurred_at && event.data.member_id && event.data.kind)
+  );
 }
 
 const MAX_ITEMS_PER_AGENT = 50;

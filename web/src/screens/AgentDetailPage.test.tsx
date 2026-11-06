@@ -161,11 +161,13 @@ describe("Agent detail", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     recordAgentActivity({
+      type: "agent.activity",
       event_id: "evt-2",
       occurred_at: "2026-08-03T00:01:00Z",
       data: { member_id: agentId, kind: "task.done", task_id: "task" },
     });
     recordAgentActivity({
+      type: "agent.activity",
       event_id: "evt-1",
       occurred_at: "2026-08-03T00:00:00Z",
       data: {
