@@ -1843,6 +1843,31 @@ fn the_session_cookie_is_secure_only_when_the_server_is_served_over_tls() {
     assert!(header(true).contains("Secure"));
 }
 
+#[tokio::test]
+async fn logout_removes_the_cookie_on_the_path_it_was_set_on() {
+    let token = RawSessionToken::new("session-token".to_owned());
+    let set = session_cookie(CookieJar::new(), &token, true).into_response();
+    let removal =
+        clear_session_cookie(CookieJar::from_headers(set.headers()), true).into_response();
+    let header = removal
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("logout sends a removal cookie")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        header.starts_with(&format!("{SESSION_COOKIE}=")),
+        "{header}"
+    );
+    assert!(header.contains("Path=/"), "{header}");
+    assert!(header.contains("Secure"), "{header}");
+    assert!(
+        header.contains("Max-Age=0") || header.contains("expires=Thu, 01 Jan 1970"),
+        "the removal cookie must expire the session: {header}"
+    );
+}
+
 #[test]
 fn task_create_dto_rejects_system_derived_source_fields() {
     let body = serde_json::json!({

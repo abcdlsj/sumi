@@ -79,7 +79,7 @@ pub(super) async fn logout(
         let _ = CloseSession::execute(&mut storage, &token).await;
     }
     (
-        jar.remove(Cookie::from(SESSION_COOKIE)),
+        clear_session_cookie(jar, state.secure_cookies),
         StatusCode::NO_CONTENT,
     )
 }
@@ -540,6 +540,16 @@ pub(super) fn session_cookie(jar: CookieJar, token: &RawSessionToken, secure: bo
         .secure(secure)
         .same_site(SameSite::Lax)
         .build();
+    jar.add(cookie)
+}
+
+/// Expires the session cookie on the path it was set on, so the browser drops it.
+pub(super) fn clear_session_cookie(jar: CookieJar, secure: bool) -> CookieJar {
+    let mut cookie = Cookie::build(SESSION_COOKIE)
+        .path("/")
+        .secure(secure)
+        .build();
+    cookie.make_removal();
     jar.add(cookie)
 }
 
