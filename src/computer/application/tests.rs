@@ -913,7 +913,7 @@ async fn run_pipeline_finishes_driver_turn_and_dispatches_next_queued_run() {
         .unwrap();
     }
 
-    RunPipelineService::dispatch(&mut store, &mut driver, &mut homes, 1)
+    SchedulerService::dispatch(&mut store, &mut driver, &mut homes, 1)
         .await
         .unwrap();
     let running_id = if store.state.runs[&first_id].view().state == LocalRunState::Running {

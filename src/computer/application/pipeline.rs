@@ -32,7 +32,7 @@ impl RunPipelineService {
                 .is_some();
         }
         if changed {
-            Self::dispatch(store, driver, homes, capacity).await?;
+            SchedulerService::dispatch(store, driver, homes, capacity).await?;
         }
         Ok(changed)
     }
@@ -49,7 +49,7 @@ impl RunPipelineService {
     ) -> Result<bool, ApplicationError> {
         let changed = RecoveryService::fail_lost_drivers(store, driver).await?;
         if changed {
-            Self::dispatch(store, driver, homes, capacity).await?;
+            SchedulerService::dispatch(store, driver, homes, capacity).await?;
         }
         Ok(changed)
     }
@@ -68,32 +68,6 @@ impl RunPipelineService {
         if let Err(error) = RunService::interrupt_terminal(store, driver, run_id).await {
             tracing::warn!(%run_id, %error, "yielded Driver interrupt failed");
         }
-        Self::dispatch(store, driver, homes, capacity).await
-    }
-
-    pub(in crate::computer) async fn dispatch<
-        P: TransactionPort,
-        D: DriverPort,
-        H: AgentHomePort,
-    >(
-        store: &mut P,
-        driver: &mut D,
-        homes: &mut H,
-        capacity: usize,
-    ) -> Result<(), ApplicationError> {
         SchedulerService::dispatch(store, driver, homes, capacity).await
-    }
-
-    pub(in crate::computer) async fn recover<
-        P: TransactionPort,
-        D: DriverPort,
-        H: AgentHomePort,
-    >(
-        store: &mut P,
-        driver: &mut D,
-        homes: &mut H,
-        capacity: usize,
-    ) -> Result<(), ApplicationError> {
-        RecoveryService::recover(store, driver, homes, capacity).await
     }
 }

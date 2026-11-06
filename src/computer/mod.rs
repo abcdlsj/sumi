@@ -18,6 +18,7 @@ use application::{
     pipeline::RunPipelineService,
     ports::{AgentHomePort, ComputerTransaction, DriverPort, LlmUsageStore, TransactionPort},
     recovery::RecoveryService,
+    scheduler::SchedulerService,
 };
 use backon::{BackoffBuilder, ExponentialBuilder};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -221,7 +222,7 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
     );
     let mut driver = drivers::runtime(&computer_home, &config, driver_secret, Some(usage_tx))
         .map_err(|error| anyhow::anyhow!(error))?;
-    RunPipelineService::recover(
+    RecoveryService::recover(
         &mut storage,
         &mut driver,
         &mut homes,
@@ -695,7 +696,7 @@ where
                             for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
                                 send_json(&mut writer, &frame).await?;
                             }
-                            RunPipelineService::dispatch(
+                            SchedulerService::dispatch(
                                 storage,
                                 driver,
                                 homes,

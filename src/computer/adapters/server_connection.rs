@@ -31,22 +31,6 @@ impl ServerConnectionAdapter {
         Self { product_contract }
     }
 
-    #[cfg(test)]
-    pub(in crate::computer) async fn receive<
-        P: TransactionPort,
-        D: DriverPort,
-        H: AgentHomePort,
-    >(
-        &self,
-        store: &mut P,
-        driver: &mut D,
-        homes: &mut H,
-        envelope: wire::CommandEnvelope,
-    ) -> Result<Vec<wire::ComputerFrame>, ApplicationError> {
-        self.receive_with_activity(store, driver, homes, envelope, None)
-            .await
-    }
-
     pub(in crate::computer) async fn receive_with_activity<
         P: TransactionPort,
         D: DriverPort,
@@ -1016,7 +1000,7 @@ mod tests {
         let agent_id = AgentId::from_uuid(Uuid::now_v7());
         let space_id = SpaceId::from_uuid(Uuid::now_v7());
         adapter
-            .receive(
+            .receive_with_activity(
                 &mut store,
                 &mut driver,
                 &mut homes,
@@ -1036,6 +1020,7 @@ mod tests {
                         },
                     }),
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1052,7 +1037,7 @@ mod tests {
         };
         let run_id = RunId::from_uuid(Uuid::now_v7());
         let frames = adapter
-            .receive(
+            .receive_with_activity(
                 &mut store,
                 &mut driver,
                 &mut homes,
@@ -1075,6 +1060,7 @@ mod tests {
                         channel_members: Vec::new(),
                     }),
                 },
+                None,
             )
             .await
             .unwrap();
