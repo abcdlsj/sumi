@@ -100,6 +100,7 @@ impl CapabilityFixture {
             read: PostgresQueries::new(pool),
             objects: Arc::new(AttachmentObjectStore::new(Arc::new(object_store))),
             session_lifetime: SessionLifetime::from_hours(1).unwrap(),
+            secure_cookies: false,
             attachment_max_bytes: 100 * 1024 * 1024,
             queries: QueryRegistry::default(),
             agent_graph_cache: AgentGraphCache::default(),
@@ -1864,6 +1865,22 @@ async fn authentication_surfaces_cannot_be_substituted() {
         serde_json::from_slice(&to_bytes(error.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(body["error"]["code"], "permission_denied");
     assert!(body["error"].get("details").is_none());
+}
+
+#[test]
+fn the_session_cookie_is_secure_only_when_the_server_is_served_over_tls() {
+    let token = RawSessionToken::new("session-token".to_owned());
+    let header = |secure| {
+        session_cookie(CookieJar::new(), &token, secure)
+            .get(SESSION_COOKIE)
+            .map(|cookie| cookie.to_string())
+            .unwrap()
+    };
+    let insecure = header(false);
+    assert!(insecure.contains("HttpOnly"), "{insecure}");
+    assert!(insecure.contains("SameSite=Lax"), "{insecure}");
+    assert!(!insecure.contains("Secure"), "{insecure}");
+    assert!(header(true).contains("Secure"));
 }
 
 #[test]

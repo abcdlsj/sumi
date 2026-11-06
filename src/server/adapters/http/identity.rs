@@ -25,7 +25,7 @@ pub(super) async fn register(
     .await
     .map_err(application_error)?;
     Ok((
-        session_cookie(jar, &session.token),
+        session_cookie(jar, &session.token, state.secure_cookies),
         (
             StatusCode::CREATED,
             Json(RegisterResponse {
@@ -63,7 +63,7 @@ pub(super) async fn login(
     .await
     .map_err(application_error)?;
     Ok((
-        session_cookie(jar, &session.token),
+        session_cookie(jar, &session.token, state.secure_cookies),
         Json(LoginResponse {
             user: user_response(&session.human),
         }),
@@ -533,10 +533,12 @@ pub(super) fn require_session_token(jar: &CookieJar) -> Result<RawSessionToken, 
     session_token(jar).ok_or_else(ApiError::unauthenticated)
 }
 
-pub(super) fn session_cookie(jar: CookieJar, token: &RawSessionToken) -> CookieJar {
+/// Sets the session cookie; `secure` keeps it off plain-HTTP transports.
+pub(super) fn session_cookie(jar: CookieJar, token: &RawSessionToken, secure: bool) -> CookieJar {
     let cookie = Cookie::build((SESSION_COOKIE, token.expose().to_owned()))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .build();
     jar.add(cookie)

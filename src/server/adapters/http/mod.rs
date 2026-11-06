@@ -162,6 +162,8 @@ pub(super) struct RuntimeState {
     pub(super) read: PostgresQueries,
     pub(super) objects: Arc<AttachmentObjectStore>,
     pub(super) session_lifetime: SessionLifetime,
+    /// Marks the session cookie `Secure` when the Server is served over TLS.
+    pub(super) secure_cookies: bool,
     pub(super) attachment_max_bytes: u64,
     pub(super) queries: QueryRegistry,
     pub(super) agent_graph_cache: AgentGraphCache,
