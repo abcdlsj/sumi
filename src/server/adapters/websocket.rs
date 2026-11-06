@@ -304,7 +304,7 @@ pub(super) async fn computer_socket(
                     if yielded {
                         match storage.run_activity_focus(run_id).await {
                             Ok(Some(focus)) => {
-                                let focus_label = super::http::activity_thread_label(
+                                let focus_label = super::activity::activity_thread_label(
                                     focus.slug.as_deref(),
                                     focus.channel_seq,
                                 );
@@ -314,7 +314,7 @@ pub(super) async fn computer_socket(
                                         focus.space_id,
                                         focus.agent_id,
                                         "run.yield",
-                                        super::http::agent_activity_details(
+                                        super::activity::agent_activity_details(
                                             serde_json::json!({
                                                 "run_id": run_id,
                                                 "thread_id": focus.thread_id,
@@ -607,7 +607,7 @@ async fn apply_rejected_command(
                     focus.space_id,
                     focus.agent_id,
                     "run.delivery_rejected",
-                    super::http::agent_activity_details(
+                    super::activity::agent_activity_details(
                         serde_json::json!({
                             "run_id": run_id,
                             "thread_id": focus.thread_id,

@@ -9,14 +9,13 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::server::application::attention::{RequeueDeadItem, RequeueDeadItemInput};
-use crate::server::application::conversation::{
-    AddChannelAgents, CreateAgentAction, CreateAgentActionInput,
-};
+use crate::server::application::channel::AddChannelAgents;
 use crate::server::application::execution::{
     CompleteRun, CompleteRunInput, DispatchRun, DispatchRunInput, ItemDispositionInput,
     SyncComputerRuns, SyncComputerRunsInput,
 };
 use crate::server::application::identity::{AgentLifecycleAction, UpdateAgent, UpdateAgentInput};
+use crate::server::application::identity::{CreateAgentAction, CreateAgentActionInput};
 use crate::server::application::ports::{InboxActivityEventKind, InboxScope};
 use crate::server::application::task::{CreateTaskFromRootMessage, CreateTaskInput, TaskSource};
 

@@ -1,3 +1,4 @@
+pub(in crate::server::adapters) mod activity;
 mod command;
 mod connection_slots;
 mod credential;

@@ -24,7 +24,7 @@ use crate::{
         MessageId, RunId, SpaceId, TaskId, ThreadId,
     },
     protocol::{
-        capability,
+        capability as wire_capability,
         computer::{
             ItemDisposition, LlmUsageQuery, MemoryQuery, MemoryReadQuery, Query as ComputerQuery,
             QueryErrorCode, QueryResult, RunResult, RunTerminalStatus, RuntimeDiagnosticsQuery,
@@ -41,17 +41,18 @@ use crate::{
             ReadMemberInbox, RequeueDeadItem, RequeueDeadItemInput, RouteHardItem,
             RouteHardItemInput,
         },
+        application::channel::{
+            AddChannelAgents, ArchiveChannel, CreateChannel, CreateChannelAction,
+            CreateChannelActionInput, CreateChannelInput, InviteChannelMember, JoinChannel,
+            LeaveChannel, RemoveChannelAgent, RemoveChannelMember, SetThreadSubscription,
+        },
         application::computer::{
             AuthenticateComputer, BeginPairing, BeginPairingInput, ConfirmPairing,
             ConfirmPairingInput, ListSpaceComputers, ReadPairing, ReadPairingStatus,
         },
-        application::conversation::{
-            AddChannelAgents, ArchiveChannel, CreateAgent, CreateAgentAction,
-            CreateAgentActionInput, CreateAgentInput, CreateChannel, CreateChannelAction,
-            CreateChannelActionInput, CreateChannelInput, DeleteMessage, EditMessage,
-            EditMessageInput, InviteChannelMember, JoinChannel, LeaveChannel, ListDirectMessages,
-            OpenDirectMessage, OpenDirectMessageInput, PublishMessage, RemoveChannelAgent,
-            RemoveChannelMember, SetThreadSubscription,
+        application::message::{
+            DeleteMessage, EditMessage, EditMessageInput, ListDirectMessages, OpenDirectMessage,
+            OpenDirectMessageInput, PublishMessage,
         },
         application::task::{
             CreateTaskFromRootMessage, CreateTaskInput, LinkThreadInput, LinkThreadToTask,
@@ -71,7 +72,8 @@ use crate::{
                 AgentLifecycleAction, AuthenticateHuman, AuthenticateHumanInput,
                 AuthenticateSession, AuthorizeAgentAccess, AuthorizeAgentGovernance,
                 AuthorizeAttachmentAccess, AuthorizeChannelAccess, AuthorizeComputerGovernance,
-                AuthorizeSpaceAccess, AuthorizeSpaceGovernance, CloseSession, CreateSpace,
+                AuthorizeSpaceAccess, AuthorizeSpaceGovernance, CloseSession, CreateAgent,
+                CreateAgentAction, CreateAgentActionInput, CreateAgentInput, CreateSpace,
                 CreateSpaceInput, DeleteComputer, RegisterHuman, RegisterHumanInput, RetireAgent,
                 SetPermission, UpdateAgent, UpdateAgentInput, UpdateMemberAccess,
             },
@@ -158,14 +160,15 @@ pub(super) struct RuntimeState {
 
 mod agent_graph;
 mod attachment;
+mod capability;
 mod computer;
 mod conversation;
 mod dto;
 mod error;
-mod execution;
 mod identity;
 mod origin;
 mod rate_limit;
+mod run;
 mod task;
 
 #[cfg(test)]
@@ -174,6 +177,7 @@ mod tests;
 pub(super) use agent_graph::*;
 use attachment::*;
 pub(in crate::server::adapters) use attachment::{CompleteUploadBody, CreateUploadBody};
+pub(in crate::server::adapters::http) use capability::*;
 use computer::*;
 use conversation::*;
 use dto::*;
@@ -184,10 +188,10 @@ pub(in crate::server::adapters) use dto::{
     UpdateMessageBody,
 };
 pub(super) use error::*;
-pub(super) use execution::*;
 pub(super) use identity::*;
 pub(super) use origin::allow_web_origin;
 pub(super) use rate_limit::*;
+pub(in crate::server::adapters) use run::*;
 use task::*;
 pub(in crate::server::adapters) use task::{
     CloseTaskBody, CompleteTaskBody, CreateTaskBody, LinkThreadBody,

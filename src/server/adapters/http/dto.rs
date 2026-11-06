@@ -151,8 +151,8 @@ pub(in crate::server::adapters) struct UpdateMemberBody {
 
 #[derive(Deserialize)]
 pub(super) struct AgentActionRequest {
-    pub(super) context: capability::RunContext,
-    pub(super) action: capability::Action,
+    pub(super) context: wire_capability::RunContext,
+    pub(super) action: wire_capability::Action,
     pub(super) idempotency_key: Option<IdempotencyKey>,
 }
 
