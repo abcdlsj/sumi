@@ -1,13 +1,4 @@
 use super::*;
-use crate::server::domain::task::TaskStatus as DomainTaskStatus;
-use serde::Serialize;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct CreateTaskRequest {
-    title: Option<String>,
-    assignee_agent_member_id: Option<Uuid>,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -91,7 +82,7 @@ pub(super) async fn create_task(
     jar: CookieJar,
     headers: HeaderMap,
     Path(message_id): Path<Uuid>,
-    Json(body): Json<CreateTaskRequest>,
+    Json(body): Json<CreateTaskBody>,
 ) -> Result<(StatusCode, Json<TaskResponse>), ApiError> {
     let source = state
         .read
@@ -112,24 +103,19 @@ pub(super) async fn create_task(
                 .take(120)
                 .collect()
         });
-    let context = super::write_context(
-        super::AuthenticationSurface::Browser,
-        super::AuthenticationSurface::Browser,
-        headers
-            .get("Idempotency-Key")
-            .and_then(|value| value.to_str().ok()),
-    )
-    .map_err(|_| ApiError::invalid("Idempotency-Key must be a UUID"))?;
-    let task = create_task_from_root(
-        &state.storage,
-        super::BrowserPrincipal {
-            member_id: MemberId::from_uuid(actor),
-        },
-        MessageId::from_uuid(message_id),
-        context,
-        super::CreateTaskBody {
+    let mut storage = state.storage.clone();
+    let task = CreateTaskFromRootMessage::execute(
+        &mut storage,
+        CreateTaskInput {
+            task_id: TaskId::from_uuid(Uuid::now_v7()),
+            actor_member_id: MemberId::from_uuid(actor),
+            source: TaskSource::HumanRoot(ThreadId::from_uuid(message_id)),
             title,
-            assignee_agent_member_id: body.assignee_agent_member_id.map(MemberId::from_uuid),
+            assignee_agent_member_id: body.assignee_agent_member_id,
+            source_thread_id: None,
+            link_thread_ids: Vec::new(),
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
+            now: OffsetDateTime::now_utc(),
         },
     )
     .await
@@ -140,7 +126,7 @@ pub(super) async fn create_task(
     })?;
     Ok((
         StatusCode::CREATED,
-        Json(task_detail(&state, task.0.id.into_uuid()).await?),
+        Json(task_detail(&state, task.view().id.into_uuid()).await?),
     ))
 }
 
@@ -384,95 +370,9 @@ pub(super) async fn task_detail(
     Ok(task)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum AuthenticationSurface {
-    Browser,
-    #[cfg(test)]
-    Computer,
-    #[cfg(test)]
-    Agent,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(super) struct WriteContext {
-    pub(super) authentication: AuthenticationSurface,
-    pub(super) idempotency_key: IdempotencyKey,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct BrowserPrincipal {
-    pub(super) member_id: MemberId,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateTaskBody {
-    pub(super) title: String,
+    pub(super) title: Option<String>,
     pub(super) assignee_agent_member_id: Option<MemberId>,
-}
-
-#[derive(Serialize)]
-pub(super) struct CreatedTask {
-    pub(super) id: TaskId,
-    source_thread_id: ThreadId,
-    status: &'static str,
-}
-
-pub(super) fn write_context(
-    expected: AuthenticationSurface,
-    authenticated_as: AuthenticationSurface,
-    idempotency_key: Option<&str>,
-) -> Result<WriteContext, HttpError> {
-    if expected != authenticated_as {
-        return Err(ApplicationError::PermissionDenied.into());
-    }
-    let key = idempotency_key
-        .ok_or(ApplicationError::Conflict)?
-        .parse()
-        .map_err(|_| ApplicationError::Conflict)?;
-    Ok(WriteContext {
-        authentication: authenticated_as,
-        idempotency_key: key,
-    })
-}
-
-pub(super) async fn create_task_from_root<P: TransactionPort + Clone>(
-    port: &P,
-    principal: BrowserPrincipal,
-    root_message_id: MessageId,
-    context: WriteContext,
-    body: CreateTaskBody,
-) -> Result<Json<CreatedTask>, HttpError> {
-    if context.authentication != AuthenticationSurface::Browser {
-        return Err(ApplicationError::PermissionDenied.into());
-    }
-    let mut port = port.clone();
-    let task = CreateTaskFromRootMessage::execute(
-        &mut port,
-        CreateTaskInput {
-            task_id: TaskId::from_uuid(Uuid::now_v7()),
-            actor_member_id: principal.member_id,
-            source: TaskSource::HumanRoot(ThreadId::from_uuid(root_message_id.into_uuid())),
-            title: body.title,
-            assignee_agent_member_id: body.assignee_agent_member_id,
-            source_thread_id: None,
-            link_thread_ids: Vec::new(),
-            idempotency_key: context.idempotency_key,
-            now: OffsetDateTime::now_utc(),
-        },
-    )
-    .await?;
-    let task = task.view();
-    let status = match task.status {
-        DomainTaskStatus::Todo => "todo",
-        DomainTaskStatus::InProgress => "in_progress",
-        DomainTaskStatus::InReview => "in_review",
-        DomainTaskStatus::Done => "done",
-        DomainTaskStatus::Closed => "closed",
-    };
-    Ok(Json(CreatedTask {
-        id: task.id,
-        source_thread_id: task.source_thread_id,
-        status,
-    }))
 }

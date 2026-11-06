@@ -1846,26 +1846,8 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
     fixture.destroy().await;
 }
 
-use axum::body::to_bytes;
 use serde_json::Value;
 use uuid::Uuid;
-
-#[tokio::test]
-async fn authentication_surfaces_cannot_be_substituted() {
-    let error = write_context(
-        AuthenticationSurface::Computer,
-        AuthenticationSurface::Browser,
-        Some(&Uuid::now_v7().to_string()),
-    )
-    .unwrap_err()
-    .into_response();
-    assert_eq!(error.status(), StatusCode::FORBIDDEN);
-
-    let body: Value =
-        serde_json::from_slice(&to_bytes(error.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(body["error"]["code"], "permission_denied");
-    assert!(body["error"].get("details").is_none());
-}
 
 #[test]
 fn the_session_cookie_is_secure_only_when_the_server_is_served_over_tls() {
@@ -1881,26 +1863,6 @@ fn the_session_cookie_is_secure_only_when_the_server_is_served_over_tls() {
     assert!(insecure.contains("SameSite=Lax"), "{insecure}");
     assert!(!insecure.contains("Secure"), "{insecure}");
     assert!(header(true).contains("Secure"));
-}
-
-#[test]
-fn every_write_requires_a_valid_idempotency_key() {
-    assert!(
-        write_context(
-            AuthenticationSurface::Agent,
-            AuthenticationSurface::Agent,
-            None,
-        )
-        .is_err()
-    );
-    assert!(
-        write_context(
-            AuthenticationSurface::Agent,
-            AuthenticationSurface::Agent,
-            Some("not-a-uuid"),
-        )
-        .is_err()
-    );
 }
 
 #[test]
