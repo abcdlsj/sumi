@@ -74,8 +74,8 @@ impl CapabilityFixture {
                  INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','{}','online',1,now());
                  INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Test',1,'active','builtin',now());
                  INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel_id}','{space_id}','private','general',2,now());
-                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{owner_id}',now(),0);
-                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{agent_id}',now(),0);
+                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{channel_id}','{space_id}','{owner_id}',now());
+                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{channel_id}','{space_id}','{agent_id}',now());
                  INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{focus_id}','{space_id}','{channel_id}','{focus_id}',1,'root','text','{owner_id}','source',now());
                  INSERT INTO agent_runs(id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at,started_at) VALUES ('{run_id}','{space_id}','{agent_id}','{focus_id}','working','mention',now(),now());
                  INSERT INTO inbox_items(id,space_id,member_id,thread_id,kind,strength,status,available_at,assigned_run_id,created_at) VALUES
@@ -1561,8 +1561,8 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) \
-         VALUES($1,$2,$3,now(),0)",
+        "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) \
+         VALUES($1,$2,$3,now())",
     )
     .bind(hidden_channel_id)
     .bind(fixture.context.space_id.into_uuid())

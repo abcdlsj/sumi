@@ -203,6 +203,18 @@ impl PostgresAdapter {
             .execute(&mut *transaction)
             .await?;
         }
+        if version < 14 {
+            // Columns no code ever wrote or read.
+            sqlx::raw_sql(
+                "ALTER TABLE computer_commands DROP COLUMN result_event_id; \
+                 ALTER TABLE channel_members DROP COLUMN last_read_seq; \
+                 ALTER TABLE users DROP COLUMN disabled_at; \
+                 ALTER TABLE spaces DROP COLUMN deleted_at; \
+                 INSERT INTO schema_meta (version, applied_at) VALUES (14, now());",
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await
     }
 

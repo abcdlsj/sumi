@@ -56,8 +56,8 @@ impl PostgresTransaction {
             .map_err(map_sqlx)?
             .ok_or(ApplicationError::NotFound)?;
         let inserted: Option<Uuid> = sqlx::query_scalar(
-            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) \
-             VALUES($1,$2,$3,$4,0) ON CONFLICT (channel_id,member_id) DO NOTHING \
+            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) \
+             VALUES($1,$2,$3,$4) ON CONFLICT (channel_id,member_id) DO NOTHING \
              RETURNING member_id",
         )
         .bind(channel_id.into_uuid())
@@ -137,8 +137,8 @@ impl PostgresTransaction {
             return Ok(Vec::new());
         }
         let inserted: Vec<Uuid> = sqlx::query_scalar(
-            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) \
-             SELECT $1,$2,requested.member_id,$4,0 FROM UNNEST($3::uuid[]) AS requested(member_id) \
+            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) \
+             SELECT $1,$2,requested.member_id,$4 FROM UNNEST($3::uuid[]) AS requested(member_id) \
              ON CONFLICT DO NOTHING RETURNING member_id",
         )
         .bind(channel_id.into_uuid())
@@ -449,8 +449,8 @@ impl PostgresTransaction {
         .map_err(map_sqlx)?
         .ok_or(ApplicationError::NotFound)?;
         let inserted: Option<Uuid> = sqlx::query_scalar(
-            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) \
-             VALUES($1,$2,$3,$4,0) ON CONFLICT (channel_id,member_id) DO NOTHING \
+            "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) \
+             VALUES($1,$2,$3,$4) ON CONFLICT (channel_id,member_id) DO NOTHING \
              RETURNING member_id",
         )
         .bind(channel_id.into_uuid())
@@ -1160,8 +1160,8 @@ impl PostgresTransaction {
         .map_err(map_sqlx)?;
         for member in channel.audience {
             sqlx::query(
-                "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-                 VALUES ($1,$2,$3,now(),0)",
+                "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+                 VALUES ($1,$2,$3,now())",
             )
             .bind(channel.id.into_uuid())
             .bind(channel.space_id.into_uuid())
@@ -1352,8 +1352,8 @@ impl PostgresTransaction {
         }
         for member in channel.audience {
             sqlx::query(
-                "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-                 VALUES ($1,$2,$3,now(),0) ON CONFLICT (channel_id,member_id) DO NOTHING",
+                "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+                 VALUES ($1,$2,$3,now()) ON CONFLICT (channel_id,member_id) DO NOTHING",
             )
             .bind(channel.id.into_uuid())
             .bind(channel.space_id.into_uuid())

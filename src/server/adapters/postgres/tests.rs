@@ -200,7 +200,7 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
         assert!(slug_constraint);
         assert!(run_observations);
         assert!(event_sequence_index);
-        assert_eq!(schema_version, 13);
+        assert_eq!(schema_version, 14);
 
         // A database below the baseline is refused instead of upgraded.
         sqlx::raw_sql("DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (11,now());")
@@ -212,7 +212,7 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
             error.to_string().contains("older than the supported baseline"),
             "{error}"
         );
-        sqlx::raw_sql("DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (13,now());")
+        sqlx::raw_sql("DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (14,now());")
             .execute(&pool)
             .await
             .unwrap();
@@ -430,8 +430,8 @@ async fn mention_all_expands_active_channel_members_and_deduplicates_agents() {
                ('{agent}','{space}','{computer}','Act',1,'active','builtin',now()),
                ('{second_agent}','{space}','{computer}','Act',1,'active','builtin',now());
              INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES
-               ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0),('{channel}','{space}','{second_agent}',now(),0);
+             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES
+               ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now()),('{channel}','{space}','{second_agent}',now());
              INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
              COMMIT;"
         ))
@@ -558,11 +558,11 @@ async fn agent_messages_do_not_create_ambient_items_for_other_agents() {
                ('{recipient_agent}','{space}','{computer}','Act',1,'active','builtin',now()),
                ('{subscribed_agent}','{space}','{computer}','Act',1,'active','builtin',now());
              INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES
-               ('{channel}','{space}','{owner}',now(),0),
-               ('{channel}','{space}','{author_agent}',now(),0),
-               ('{channel}','{space}','{recipient_agent}',now(),0),
-               ('{channel}','{space}','{subscribed_agent}',now(),0);
+             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES
+               ('{channel}','{space}','{owner}',now()),
+               ('{channel}','{space}','{author_agent}',now()),
+               ('{channel}','{space}','{recipient_agent}',now()),
+               ('{channel}','{space}','{subscribed_agent}',now());
              INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
              INSERT INTO thread_subscriptions(thread_id,space_id,member_id,created_at) VALUES ('{root}','{space}','{subscribed_agent}',now());
              COMMIT;"
@@ -686,7 +686,7 @@ async fn failing_an_orphaned_run_unblocks_the_agent_and_subscription_raises_thre
                  INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer_id}','Act',1,'active','builtin',now());
                  INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{subscriber}','{space}','{computer_id}','Watch',1,'active','builtin',now());
                  INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0),('{channel}','{space}','{subscriber}',now(),0);
+                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now()),('{channel}','{space}','{subscriber}',now());
                  INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
                  INSERT INTO thread_subscriptions (thread_id,space_id,member_id,created_at) VALUES ('{root}','{space}','{subscriber}',now());
                  INSERT INTO agent_runs (id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at,started_at) VALUES ('{stale_run}','{space}','{agent}','{root}','working','mention',now(),now());
@@ -932,7 +932,7 @@ async fn completing_a_run_settles_its_pending_commands() {
                  INSERT INTO computers (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space}','Computer','localhost','linux','hash','online',4,now());
                  INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer_id}','Act',1,'active','builtin',now());
                  INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0);
+                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now());
                  INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
                  INSERT INTO agent_runs (id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at,started_at) VALUES ('{run_id}','{space}','{agent}','{root}','working','mention',now(),now());
                  INSERT INTO inbox_items (id,space_id,member_id,message_id,thread_id,kind,strength,status,available_at,assigned_run_id,retry_count,created_at) VALUES ('{item}','{space}','{agent}','{root}','{root}','mention','hard','assigned',now(),'{run_id}',0,now());
@@ -1025,7 +1025,7 @@ async fn replay_skips_commands_for_terminal_runs() {
                  INSERT INTO computers (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space}','Computer','localhost','linux','hash','offline',3,now());
                  INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer_id}','Act',1,'active','builtin',now());
                  INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0);
+                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now());
                  INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
                  INSERT INTO agent_runs (id,space_id,agent_id,focus_thread_id,status,trigger_kind,outcome_code,created_at,started_at,finished_at) VALUES ('{terminal_run}','{space}','{agent}','{root}','completed','mention','completed',now(),now(),now());
                  INSERT INTO agent_runs (id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at) VALUES ('{live_run}','{space}','{agent}','{root}','dispatched','mention',now());
@@ -1146,7 +1146,7 @@ async fn concurrent_ambient_messages_accumulate_into_one_bounded_aggregate() {
                  INSERT INTO computers (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space}','Computer','localhost','linux','hash','offline',1,now());
                  INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer_id}','Act',1,'active','builtin',now());
                  INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',3,now());
-                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0);
+                 INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now());
                  INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
                  INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{second_root}','{space}','{channel}','{second_root}',2,'root','text','{owner}','second source',now());
                  COMMIT;"
@@ -1403,7 +1403,7 @@ async fn channel_member_activity_preserves_order_and_stops_after_leave() {
              INSERT INTO computers (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space}','Computer','localhost','linux','hash','offline',1,now());
              INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{watcher}','{space}','{computer_id}','Watch',1,'active','builtin',now()),('{joining_agent}','{space}','{computer_id}','Join',1,'active','builtin',now());
              INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',2,now());
-             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{watcher}',now(),0);
+             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{watcher}',now());
              INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now());
              COMMIT;"
         ))
@@ -1605,8 +1605,8 @@ async fn run_observations_start_frozen_and_advance_only_over_what_a_read_returne
              INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer}','{space}','Computer','localhost','linux','observations-hash','online',1,now());
              INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent}','{space}','{computer}','Act',1,'active','builtin',now());
              INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','public','general',3,now());
-             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES
-               ('{channel}','{space}','{owner}',now(),0),('{channel}','{space}','{agent}',now(),0);
+             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES
+               ('{channel}','{space}','{owner}',now()),('{channel}','{space}','{agent}',now());
              INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES
                ('{root}','{space}','{channel}','{root}',1,'root','text','{owner}','source',now()),
                ('{}','{space}','{channel}','{root}',2,'reply','text','{owner}','early reply',now());
@@ -1850,8 +1850,8 @@ async fn application_transaction_commits_task_source_idempotency_and_outbox_toge
              INSERT INTO agents (member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{actor_agent}','{space}','{computer_id}','Act',1,'active','builtin',now());
              INSERT INTO member_permissions (member_id,space_id,action_code,granted_by_member_id,created_at) VALUES ('{actor_agent}','{space}','agent.create','{member}',now());
              INSERT INTO channels (id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel}','{space}','private','general',2,now());
-             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{member}',now(),0);
-             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel}','{space}','{actor_agent}',now(),0);
+             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{member}',now());
+             INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) VALUES ('{channel}','{space}','{actor_agent}',now());
              INSERT INTO messages (id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{root}','{space}','{channel}','{root}',1,'root','text','{member}','source',now());
              INSERT INTO agent_runs (id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at,started_at) VALUES ('{run_id}','{space}','{actor_agent}','{root}','working','mention',now(),now());
              COMMIT;"
@@ -2256,7 +2256,7 @@ async fn claim_run_inserts_the_run_before_leasing_its_inbox_item() {
              INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','claim-run-hash','online',1,now());
              INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Reply',1,'active','builtin',now());
              INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel_id}','{space_id}','public','general',2,now());
-             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{owner_id}',now(),0),('{channel_id}','{space_id}','{agent_id}',now(),0);
+             INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{channel_id}','{space_id}','{owner_id}',now()),('{channel_id}','{space_id}','{agent_id}',now());
              INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{message_id}','{space_id}','{channel_id}','{message_id}',1,'root','text','{owner_id}','mention',now());
              INSERT INTO inbox_items(id,space_id,member_id,message_id,thread_id,kind,strength,status,available_at,last_error_code,created_at) VALUES ('{item_id}','{space_id}','{agent_id}','{message_id}','{message_id}','mention','hard','pending',now(),'run_claim_unavailable',now());
              COMMIT;"
@@ -2335,7 +2335,7 @@ async fn resuming_an_agent_queues_resume_before_a_later_run_start() {
          INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','resume-order-hash','offline',1,now());
          INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Reply',1,'suspended','builtin',now());
          INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{message_id}','{space_id}','public','general',2,now());
-         INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{message_id}','{space_id}','{owner_id}',now(),0),('{message_id}','{space_id}','{agent_id}',now(),0);
+         INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{message_id}','{space_id}','{owner_id}',now()),('{message_id}','{space_id}','{agent_id}',now());
          INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{message_id}','{space_id}','{message_id}','{message_id}',1,'root','text','{owner_id}','mention',now());
          INSERT INTO inbox_items(id,space_id,member_id,message_id,thread_id,kind,strength,status,available_at,created_at) VALUES ('{item_id}','{space_id}','{agent_id}','{message_id}','{message_id}','mention','hard','pending',now(),now());
          COMMIT;"

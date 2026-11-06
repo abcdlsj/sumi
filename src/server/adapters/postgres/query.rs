@@ -37,7 +37,7 @@ impl PostgresQueries {
                     (SELECT id FROM channels WHERE space_id=s.id AND slug='general' LIMIT 1)
                         AS general_channel_id
              FROM spaces s JOIN human_members hm ON hm.space_id=s.id
-             WHERE hm.user_id=$1 AND s.deleted_at IS NULL ORDER BY s.created_at",
+             WHERE hm.user_id=$1 ORDER BY s.created_at",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -56,7 +56,7 @@ impl PostgresQueries {
                     (SELECT id FROM channels WHERE space_id=s.id AND slug='general' LIMIT 1)
                         AS general_channel_id
              FROM spaces s JOIN human_members hm ON hm.space_id=s.id
-             WHERE hm.user_id=$1 AND lower(s.slug)=lower($2) AND s.deleted_at IS NULL",
+             WHERE hm.user_id=$1 AND lower(s.slug)=lower($2)",
         )
         .bind(user_id)
         .bind(slug)
