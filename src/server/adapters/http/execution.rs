@@ -1916,24 +1916,10 @@ pub(super) fn api_to_capability(error: ApiError) -> capability::Error {
 pub(super) fn app_to_capability(error: ApplicationError) -> capability::Error {
     let class = classify(&error);
     capability::Error {
-        code: capability_code(class.code),
+        code: capability::ErrorCode::parse(class.code),
         message: class.message.to_owned(),
         retryable: class.retryable,
         details: Default::default(),
-    }
-}
-
-fn capability_code(code: &str) -> capability::ErrorCode {
-    match code {
-        "invalid_argument" => capability::ErrorCode::InvalidArgument,
-        "unauthenticated" => capability::ErrorCode::Unauthenticated,
-        "permission_denied" => capability::ErrorCode::PermissionDenied,
-        "not_found" => capability::ErrorCode::NotFound,
-        "conflict" => capability::ErrorCode::Conflict,
-        "context_changed" => capability::ErrorCode::ContextChanged,
-        "rate_limited" => capability::ErrorCode::RateLimited,
-        "unavailable" => capability::ErrorCode::Unavailable,
-        _ => capability::ErrorCode::Internal,
     }
 }
 

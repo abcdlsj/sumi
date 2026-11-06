@@ -506,23 +506,9 @@ async fn attachment_http_error(
         .as_ref()
         .and_then(|value| value.pointer("/error/code"))
         .and_then(serde_json::Value::as_str)
-        .map(capability_error_code)
+        .map(capability::ErrorCode::parse)
         .unwrap_or(capability::ErrorCode::Internal);
     capability_error_response(code, "Attachment operation failed", retryable)
-}
-
-fn capability_error_code(code: &str) -> capability::ErrorCode {
-    match code {
-        "invalid_argument" => capability::ErrorCode::InvalidArgument,
-        "unauthenticated" => capability::ErrorCode::Unauthenticated,
-        "permission_denied" => capability::ErrorCode::PermissionDenied,
-        "not_found" => capability::ErrorCode::NotFound,
-        "conflict" => capability::ErrorCode::Conflict,
-        "context_changed" => capability::ErrorCode::ContextChanged,
-        "rate_limited" => capability::ErrorCode::RateLimited,
-        "unavailable" => capability::ErrorCode::Unavailable,
-        _ => capability::ErrorCode::Internal,
-    }
 }
 
 fn local_attachment_error(error: ApplicationError) -> capability::Response<serde_json::Value> {

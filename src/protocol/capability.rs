@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) use super::computer::{AcpProvider, DriverKind};
+
 use crate::ids::{
     AgentId, AttachmentId, ChannelId, ComputerId, IdempotencyKey, InboxItemId, MemberId, MessageId,
     RunId, SpaceId, TaskId, ThreadId,
@@ -248,21 +250,6 @@ pub(crate) enum CloseReason {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum DriverKind {
-    Acp { provider: AcpProvider },
-    Builtin,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AcpProvider {
-    Codex,
-    Claude,
-    Pi,
-}
-
 /// Identifies which Run a capability call belongs to. Carries no credential: the Computer's own token
 /// authenticates the caller, and the Run being `working` on that Computer authorizes the call.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -287,6 +274,23 @@ pub(crate) enum ErrorCode {
     RateLimited,
     Unavailable,
     Internal,
+}
+
+impl ErrorCode {
+    /// Reads a stable error code from the wire; an unknown code degrades to `internal`.
+    pub(crate) fn parse(code: &str) -> Self {
+        match code {
+            "invalid_argument" => Self::InvalidArgument,
+            "unauthenticated" => Self::Unauthenticated,
+            "permission_denied" => Self::PermissionDenied,
+            "not_found" => Self::NotFound,
+            "conflict" => Self::Conflict,
+            "context_changed" => Self::ContextChanged,
+            "rate_limited" => Self::RateLimited,
+            "unavailable" => Self::Unavailable,
+            _ => Self::Internal,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
