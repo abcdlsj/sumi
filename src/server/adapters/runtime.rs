@@ -104,7 +104,8 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     served
 }
 
-/// How often the Server looks for Agents with work and no live Run.///
+/// How often the Server looks for Agents with work and no live Run.
+///
 /// Short because it bounds how long an Agent waits before starting, and nothing else: no Run outcome
 /// depends on this timer, so a slow or skipped tick delays work and cannot fail it. A tick is needed
 /// at all because availability is a future fact, set by ambient debounce and by Agent-chosen defer
