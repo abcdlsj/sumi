@@ -134,6 +134,12 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "server adapter failed",
             retryable: false,
         },
+        ApplicationError::Domain(DomainError::RunNotWorkingForAgent) => ErrorClass {
+            status: StatusCode::CONFLICT,
+            code: "context_changed",
+            message: "Run context changed before the write; re-read the current context, then retry once",
+            retryable: false,
+        },
         ApplicationError::Domain(DomainError::GovernorRequired) => ErrorClass {
             status: StatusCode::FORBIDDEN,
             code: "permission_denied",

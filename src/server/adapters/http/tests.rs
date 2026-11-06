@@ -1853,6 +1853,41 @@ fn task_create_dto_rejects_system_derived_source_fields() {
 }
 
 #[tokio::test]
+async fn a_write_from_a_run_that_stopped_working_reports_context_changed() {
+    let fixture = CapabilityFixture::create().await;
+    sqlx::query(
+        "INSERT INTO member_permissions (member_id,space_id,action_code,granted_by_member_id,created_at) \
+         VALUES ($1,$2,'channel.create',$3,now())",
+    )
+    .bind(fixture.context.agent_id.into_uuid())
+    .bind(fixture.context.space_id.into_uuid())
+    .bind(fixture.owner_id)
+    .execute(&fixture.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent_runs SET status='yielded',outcome_code='yielded',finished_at=now() WHERE id=$1",
+    )
+        .bind(fixture.context.run_id.into_uuid())
+        .execute(&fixture.state.pool)
+        .await
+        .unwrap();
+
+    let error = fixture
+        .execute(capability::Action::ChannelCreate {
+            slug: "late".into(),
+            topic: None,
+            private: false,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, capability::ErrorCode::ContextChanged);
+    assert!(!error.retryable);
+    fixture.destroy().await;
+}
+
+#[tokio::test]
 async fn agent_channel_create_rejects_topic_text_used_as_a_slug() {
     let fixture = CapabilityFixture::create().await;
     sqlx::query(
