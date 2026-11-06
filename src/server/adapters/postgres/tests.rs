@@ -2707,10 +2707,7 @@ async fn space_event_sequence_follows_commit_order_not_creation_time() {
                 )
                 .await
                 .unwrap();
-            sqlx::query("COMMIT")
-                .execute(&mut *transaction.connection)
-                .await
-                .unwrap();
+            transaction.commit().await.unwrap();
         };
         let commits_first = async {
             let mut transaction = PostgresTransaction::begin(&pool).await.unwrap();
@@ -2724,10 +2721,7 @@ async fn space_event_sequence_follows_commit_order_not_creation_time() {
                 )
                 .await
                 .unwrap();
-            sqlx::query("COMMIT")
-                .execute(&mut *transaction.connection)
-                .await
-                .unwrap();
+            transaction.commit().await.unwrap();
             committed_tx.send(()).unwrap();
         };
         tokio::join!(commits_last, commits_first);
@@ -2752,6 +2746,79 @@ async fn space_event_sequence_follows_commit_order_not_creation_time() {
             .await
             .unwrap();
         assert_eq!(tail, 2);
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}
+
+/// A write that queued a Space event but has not reached its commit must not hold the Space row:
+/// another write to the same Space commits meanwhile, and the open one still lands after it.
+#[tokio::test]
+async fn an_open_write_does_not_block_other_writes_to_its_space() {
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_event_lock_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        PostgresAdapter::new(pool.clone())
+            .initialize_schema()
+            .await
+            .unwrap();
+        let (space_id, _, _) = event_test_space(&pool).await;
+
+        let mut open = PostgresTransaction::begin(&pool).await.unwrap();
+        open.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            space_id,
+            "task.updated",
+            json!({"resource_id": Uuid::now_v7()}),
+            OffsetDateTime::now_utc(),
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            commit_events(
+                &pool,
+                space_id,
+                1,
+                "inbox.changed",
+                json!({"resource_id": Uuid::now_v7()}),
+            ),
+        )
+        .await
+        .expect("an uncommitted write must not block the Space");
+        open.commit().await.unwrap();
+
+        let kinds: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT sequence,kind FROM outbox_events WHERE space_id=$1 ORDER BY sequence",
+        )
+        .bind(space_id.into_uuid())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            kinds,
+            vec![
+                (1, "inbox.changed".to_owned()),
+                (2, "task.updated".to_owned())
+            ]
+        );
         pool.close().await;
     }
     .await;
@@ -2811,10 +2878,7 @@ async fn commit_events(
             .await
             .unwrap();
     }
-    sqlx::query("COMMIT")
-        .execute(&mut *transaction.connection)
-        .await
-        .unwrap();
+    transaction.commit().await.unwrap();
 }
 
 /// A page the viewer cannot read still moves the stream to its last row, so the visible event

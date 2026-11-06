@@ -73,7 +73,19 @@ pub(super) struct PostgresAdapter {
 pub(super) struct PostgresTransaction {
     connection: PoolConnection<Postgres>,
     effects: Vec<Effect>,
+    /// Space events of this transaction, written by [`PostgresTransaction::commit`] right before
+    /// `COMMIT` so the Space row lock that orders them is held only for the commit itself.
+    events: Vec<PendingSpaceEvent>,
     notified_computers: std::collections::BTreeSet<Uuid>,
+}
+
+struct PendingSpaceEvent {
+    event_id: EventId,
+    space_id: SpaceId,
+    kind: String,
+    payload: serde_json::Value,
+    created_at: OffsetDateTime,
+    idempotent: bool,
 }
 
 pub(super) struct ChannelActivityQueryRequest {
@@ -137,6 +149,7 @@ impl PostgresAdapter {
         let mut transaction = PostgresTransaction {
             connection,
             effects: Vec::new(),
+            events: Vec::new(),
             notified_computers: BTreeSet::new(),
         };
         transaction.channel_activity_snapshot(request).await
@@ -834,24 +847,14 @@ impl PostgresAdapter {
         // The activity event still needs a Space commit position, so it runs in its own
         // transaction: allocation and insert either both land or neither does.
         let mut transaction = PostgresTransaction::begin(&self.pool).await?;
-        if let Err(error) = transaction
-            .insert_space_event_once(
-                event_id,
-                space_id,
-                "agent.activity",
-                record,
-                OffsetDateTime::now_utc(),
-            )
-            .await
-        {
-            transaction.rollback().await;
-            return Err(error);
-        }
-        sqlx::query("COMMIT")
-            .execute(&mut *transaction.connection)
-            .await
-            .map_err(map_sqlx)
-            .map(|_| ())
+        transaction.insert_space_event_once(
+            event_id,
+            space_id,
+            "agent.activity",
+            record,
+            OffsetDateTime::now_utc(),
+        );
+        transaction.commit().await.map(|_| ())
     }
 }
 
@@ -900,19 +903,7 @@ impl TransactionPort for PostgresAdapter {
             .map_err(|_| ApplicationError::Unavailable)?;
         match operation(&mut transaction).await {
             Ok(value) => {
-                if let Err(error) = transaction.flush_effects().await {
-                    transaction.rollback().await;
-                    return Err(error);
-                }
-                if let Err(error) = sqlx::query("COMMIT")
-                    .execute(&mut *transaction.connection)
-                    .await
-                    .map_err(map_sqlx)
-                {
-                    transaction.rollback().await;
-                    return Err(error);
-                }
-                for computer_id in std::mem::take(&mut transaction.notified_computers) {
+                for computer_id in transaction.commit().await? {
                     self.commands.notify(computer_id);
                 }
                 Ok(value)
@@ -944,6 +935,7 @@ impl PostgresTransaction {
         let mut transaction = Self {
             connection: pool.acquire().await.map_err(map_sqlx)?,
             effects: Vec::new(),
+            events: Vec::new(),
             notified_computers: BTreeSet::new(),
         };
         sqlx::query("BEGIN")
@@ -953,12 +945,7 @@ impl PostgresTransaction {
         Ok(transaction)
     }
 
-    /// Inserts one Browser event under the next commit position of its Space.
-    ///
-    /// `spaces.event_sequence` is bumped by a row lock this transaction keeps until it commits, so
-    /// the allocation order is the commit order: a transaction that allocated a higher sequence
-    /// cannot commit before one holding a lower sequence. That is why the stream can follow
-    /// `sequence` alone, while `created_at` is only the time the application entered the write.
+    /// Queues one Browser event; [`Self::commit`] gives it the next commit position of its Space.
     async fn insert_space_event(
         &mut self,
         event_id: EventId,
@@ -967,26 +954,25 @@ impl PostgresTransaction {
         payload: serde_json::Value,
         created_at: OffsetDateTime,
     ) -> Result<(), ApplicationError> {
-        self.insert_space_event_row(event_id, space_id, kind, payload, created_at, false)
-            .await
+        self.queue_space_event(event_id, space_id, kind, payload, created_at, false);
+        Ok(())
     }
 
     /// Same as [`Self::insert_space_event`], but a repeated `event_id` is a no-op instead of a
     /// conflict. Retried best-effort activity events keep their id and must not fail the retry; the
     /// consumed position stays unused, which readers only skip.
-    async fn insert_space_event_once(
+    fn insert_space_event_once(
         &mut self,
         event_id: EventId,
         space_id: SpaceId,
         kind: &str,
         payload: serde_json::Value,
         created_at: OffsetDateTime,
-    ) -> Result<(), ApplicationError> {
-        self.insert_space_event_row(event_id, space_id, kind, payload, created_at, true)
-            .await
+    ) {
+        self.queue_space_event(event_id, space_id, kind, payload, created_at, true);
     }
 
-    async fn insert_space_event_row(
+    fn queue_space_event(
         &mut self,
         event_id: EventId,
         space_id: SpaceId,
@@ -994,32 +980,83 @@ impl PostgresTransaction {
         payload: serde_json::Value,
         created_at: OffsetDateTime,
         idempotent: bool,
-    ) -> Result<(), ApplicationError> {
-        let sequence: i64 = sqlx::query_scalar(
-            "UPDATE spaces SET event_sequence=event_sequence+1 WHERE id=$1 RETURNING event_sequence",
-        )
-        .bind(space_id.into_uuid())
-        .fetch_one(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)?;
-        let conflict = if idempotent {
-            " ON CONFLICT (id) DO NOTHING"
-        } else {
-            ""
-        };
-        sqlx::query(&format!(
-            "INSERT INTO outbox_events (id,space_id,kind,payload_json,created_at,sequence) \
-             VALUES ($1,$2,$3,$4,$5,$6){conflict}"
-        ))
-        .bind(event_id.into_uuid())
-        .bind(space_id.into_uuid())
-        .bind(kind)
-        .bind(payload)
-        .bind(created_at)
-        .bind(sequence)
-        .execute(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)?;
+    ) {
+        self.events.push(PendingSpaceEvent {
+            event_id,
+            space_id,
+            kind: kind.to_owned(),
+            payload,
+            created_at,
+            idempotent,
+        });
+    }
+
+    /// Writes effects and queued Space events, then commits, returning the Computers to wake.
+    ///
+    /// Each Space's `event_sequence` is bumped by a row lock this transaction keeps until it
+    /// commits, so the allocation order is the commit order: a transaction that allocated a higher
+    /// sequence cannot commit before one holding a lower sequence. That is why the stream can follow
+    /// `sequence` alone, while `created_at` is only the time the application entered the write.
+    /// The lock is taken here, after all other work, so concurrent writes to one Space serialize
+    /// only on their commit, and Spaces are locked in ID order so two multi-Space commits cannot
+    /// deadlock.
+    async fn commit(mut self) -> Result<BTreeSet<Uuid>, ApplicationError> {
+        let written = async {
+            self.flush_effects().await?;
+            self.write_space_events().await?;
+            sqlx::query("COMMIT")
+                .execute(&mut *self.connection)
+                .await
+                .map_err(map_sqlx)
+        }
+        .await;
+        if let Err(error) = written {
+            self.rollback().await;
+            return Err(error);
+        }
+        Ok(std::mem::take(&mut self.notified_computers))
+    }
+
+    async fn write_space_events(&mut self) -> Result<(), ApplicationError> {
+        let mut by_space = std::collections::BTreeMap::<Uuid, Vec<PendingSpaceEvent>>::new();
+        for event in std::mem::take(&mut self.events) {
+            by_space
+                .entry(event.space_id.into_uuid())
+                .or_default()
+                .push(event);
+        }
+        for (space_id, events) in by_space {
+            let count = i64::try_from(events.len()).map_err(|_| ApplicationError::Internal)?;
+            let last: i64 = sqlx::query_scalar(
+                "UPDATE spaces SET event_sequence=event_sequence+$2 WHERE id=$1 \
+                 RETURNING event_sequence",
+            )
+            .bind(space_id)
+            .bind(count)
+            .fetch_one(&mut *self.connection)
+            .await
+            .map_err(map_sqlx)?;
+            for (sequence, event) in (last - count + 1..).zip(events) {
+                let conflict = if event.idempotent {
+                    " ON CONFLICT (id) DO NOTHING"
+                } else {
+                    ""
+                };
+                sqlx::query(&format!(
+                    "INSERT INTO outbox_events (id,space_id,kind,payload_json,created_at,sequence) \
+                     VALUES ($1,$2,$3,$4,$5,$6){conflict}"
+                ))
+                .bind(event.event_id.into_uuid())
+                .bind(space_id)
+                .bind(&event.kind)
+                .bind(event.payload)
+                .bind(event.created_at)
+                .bind(sequence)
+                .execute(&mut *self.connection)
+                .await
+                .map_err(map_sqlx)?;
+            }
+        }
         Ok(())
     }
 
