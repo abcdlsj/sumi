@@ -243,47 +243,36 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
             .build()
     };
     let mut reconnect = reconnect_backoff();
-    // A staged release is activated only while no Run is live, so a deferred one stays here and is
-    // retried on this loop rather than by the checker reading the daemon database on the side.
-    let mut staged_update: Option<update::StagedUpdate> = None;
     loop {
         let connection_started = tokio::time::Instant::now();
-        enum LoopEvent {
-            Connection(anyhow::Result<()>),
-            Update(update::StagedUpdate),
-            ActivateUpdate,
-        }
-        let event = if let Some(receiver) = updates.as_mut() {
-            tokio::select! {
-                result = connect(
-                    &config.server_url,
-                    &secrets,
-                    &mut storage,
-                    &mut driver,
-                    &mut homes,
-                    config.max_concurrent_runs,
-                    &mut yield_interrupt_rx,
-                ) => LoopEvent::Connection(result),
-                Some(update) = receiver.recv(), if staged_update.is_none() => LoopEvent::Update(update),
-                () = tokio::time::sleep(UPDATE_ACTIVATION_POLL), if staged_update.is_some() => LoopEvent::ActivateUpdate,
-            }
-        } else {
-            LoopEvent::Connection(
-                connect(
-                    &config.server_url,
-                    &secrets,
-                    &mut storage,
-                    &mut driver,
-                    &mut homes,
-                    config.max_concurrent_runs,
-                    &mut yield_interrupt_rx,
+        // The connection future is created once per attempt and only completes when the connection
+        // ends: a staged release is handed to it, never able to cancel it.
+        let exit = connect(
+            &config.server_url,
+            &secrets,
+            &mut storage,
+            &mut driver,
+            &mut homes,
+            config.max_concurrent_runs,
+            ConnectionChannels {
+                yield_interrupts: &mut yield_interrupt_rx,
+                updates: updates.as_mut(),
+            },
+        )
+        .await;
+        match exit {
+            Ok(ConnectionExit::Closed) => return Ok(()),
+            Ok(ConnectionExit::Activate(staged)) => {
+                update::launch_updater(
+                    &staged,
+                    &computer_home,
+                    &restart_args,
+                    config.update_ready_timeout_seconds,
                 )
-                .await,
-            )
-        };
-        match event {
-            LoopEvent::Connection(Ok(())) => return Ok(()),
-            LoopEvent::Connection(Err(error)) => {
+                .await?;
+                return Ok(());
+            }
+            Err(error) => {
                 // A connection that lasted is not part of a failure streak.
                 if connection_started.elapsed() >= STABLE_CONNECTION {
                     reconnect = reconnect_backoff();
@@ -293,31 +282,24 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
                     .expect("an unlimited reconnect backoff always yields a delay");
                 tracing::warn!(%error, ?delay, "Computer connection lost; retrying");
                 tokio::time::sleep(delay).await;
-                continue;
             }
-            LoopEvent::Update(staged) => staged_update = Some(staged),
-            LoopEvent::ActivateUpdate => {}
         }
-        let Some(staged) = staged_update.as_ref() else {
-            continue;
-        };
-        if !RecoveryService::live_run_ids(&mut storage)
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?
-            .is_empty()
-        {
-            tracing::info!(target_version = %staged.version, "Computer update is waiting for active Runs");
-            continue;
-        }
-        update::launch_updater(
-            staged,
-            &computer_home,
-            &restart_args,
-            config.update_ready_timeout_seconds,
-        )
-        .await?;
-        return Ok(());
     }
+}
+
+/// What one connection borrows from the daemon loop besides its local state.
+struct ConnectionChannels<'a> {
+    yield_interrupts: &'a mut tokio::sync::mpsc::UnboundedReceiver<RunId>,
+    /// Staged releases, absent when local policy disables automatic updates.
+    updates: Option<&'a mut tokio::sync::mpsc::Receiver<update::StagedUpdate>>,
+}
+
+/// Why a Computer connection ended.
+enum ConnectionExit {
+    /// The Server closed the connection, or the daemon is shutting down.
+    Closed,
+    /// No Run is live and a staged release waits; the caller launches the updater.
+    Activate(update::StagedUpdate),
 }
 
 /// Resolves on SIGINT or, on Unix, SIGTERM, which service managers send to stop a daemon.
@@ -560,8 +542,8 @@ async fn connect<P, D, H>(
     driver: &mut D,
     homes: &mut H,
     max_concurrent_runs: usize,
-    yield_interrupts: &mut tokio::sync::mpsc::UnboundedReceiver<RunId>,
-) -> anyhow::Result<()>
+    channels: ConnectionChannels<'_>,
+) -> anyhow::Result<ConnectionExit>
 where
     P: TransactionPort + LlmUsageStore,
     D: DriverPort,
@@ -631,6 +613,12 @@ where
     let mut lost_driver_check = tokio::time::interval(std::time::Duration::from_secs(1));
     let mut pending_server_frames = VecDeque::new();
     let mut pending_activity_results = BTreeMap::new();
+    let ConnectionChannels {
+        yield_interrupts,
+        updates,
+    } = channels;
+    let mut updates = updates;
+    let mut staged_update: Option<update::StagedUpdate> = None;
     loop {
         tokio::select! {
             _ = shutdown_signal() => {
@@ -638,7 +626,11 @@ where
                     computer_id = %secrets.computer_id,
                     "Computer disconnected from Server on shutdown"
                 );
-                return Ok(());
+                return Ok(ConnectionExit::Closed);
+            }
+            Some(staged) = next_staged_update(updates.as_deref_mut()), if staged_update.is_none() => {
+                tracing::info!(target_version = %staged.version, "Computer update staged; waiting for active Runs");
+                staged_update = Some(staged);
             }
             Some(run_id) = yield_interrupts.recv() => {
                 RunPipelineService::interrupt_yielded(
@@ -653,7 +645,13 @@ where
                 send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
             }
             _ = heartbeat.tick() => {
-                let active_runs=RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?.len() as u32;
+                let live_runs = RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?;
+                if let Some(staged) = staged_update.clone()
+                    && activation_due(&live_runs)
+                {
+                    return Ok(ConnectionExit::Activate(staged));
+                }
+                let active_runs = live_runs.len() as u32;
                 let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,active_runs,observed_at:time::OffsetDateTime::now_utc()}};
                 send_json(&mut writer, &frame).await?;
                 // The Server answers pings, so the idle timeout on reads detects a dead socket.
@@ -736,8 +734,20 @@ where
     }
 }
 
-/// How often a staged release re-checks whether its Runs finished.
-const UPDATE_ACTIVATION_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+/// A staged release may take over only while no Run is live, so a live connection keeps running.
+fn activation_due(live_runs: &[RunId]) -> bool {
+    live_runs.is_empty()
+}
+
+/// Waits for the update checker; an absent receiver waits forever, which disables the branch.
+async fn next_staged_update(
+    updates: Option<&mut tokio::sync::mpsc::Receiver<update::StagedUpdate>>,
+) -> Option<update::StagedUpdate> {
+    match updates {
+        Some(updates) => updates.recv().await,
+        None => std::future::pending().await,
+    }
+}
 
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// Three heartbeat periods; the Server answers the ping sent with every heartbeat.
@@ -1255,6 +1265,37 @@ async fn write_secrets(path: &Path, secrets: &ComputerSecrets) -> anyhow::Result
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn a_staged_release_waits_for_the_last_live_run() {
+        let run = RunId::from_uuid(Uuid::now_v7());
+        assert!(!super::activation_due(&[run]));
+        assert!(super::activation_due(&[]));
+
+        // The update branch never resolves without a checker, so a connection without updates
+        // keeps its own future instead of polling for one.
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                super::next_staged_update(None)
+            )
+            .await
+            .is_err()
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<update::StagedUpdate>(1);
+        drop(sender);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                super::next_staged_update(Some(&mut receiver))
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "a closed checker channel disables the branch"
+        );
+    }
+
     #[tokio::test]
     async fn idle_timeout_ends_a_silent_stream_and_spares_an_active_one() {
         use futures_util::StreamExt;
