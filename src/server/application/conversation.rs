@@ -548,6 +548,8 @@ impl CreateAgent {
             if !actor_access.can_grant(input.access_level) {
                 return Err(ApplicationError::PermissionDenied);
             }
+            Agent::validate_new(&input.display_name, &input.role_text)
+                .map_err(ApplicationError::Domain)?;
             if !transaction
                 .computer_accepts_agent(input.computer_id, input.space_id)
                 .await?
@@ -557,7 +559,7 @@ impl CreateAgent {
             let member = Member {
                 id: input.agent_member_id,
                 space_id: input.space_id,
-                display_name: input.display_name,
+                display_name: input.display_name.trim().to_owned(),
                 access_level: input.access_level,
                 created_at: input.now,
             };
@@ -619,6 +621,8 @@ impl CreateAgentAction {
             {
                 return Err(ApplicationError::PermissionDenied);
             }
+            Agent::validate_new(&input.display_name, &input.role_text)
+                .map_err(ApplicationError::Domain)?;
             if !transaction
                 .computer_accepts_agent(input.computer_id, run_view.space_id)
                 .await?
@@ -628,7 +632,7 @@ impl CreateAgentAction {
             let member = Member {
                 id: input.agent_member_id,
                 space_id: run_view.space_id,
-                display_name: input.display_name,
+                display_name: input.display_name.trim().to_owned(),
                 access_level: AccessLevel::Member,
                 created_at: input.now,
             };

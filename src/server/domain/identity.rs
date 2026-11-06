@@ -149,15 +149,11 @@ pub(in crate::server) struct Agent {
 }
 
 impl Agent {
-    /// Builds a new Agent Member after validating the fields every creation entry accepts.
-    pub(in crate::server) fn create(
-        member_id: MemberId,
-        space_id: SpaceId,
-        computer_id: ComputerId,
+    /// Validates the fields every Agent creation entry accepts, before anything is written.
+    pub(in crate::server) fn validate_new(
         display_name: &str,
         role_text: &str,
-        driver_kind: DriverKind,
-    ) -> Result<Self, DomainError> {
+    ) -> Result<(), DomainError> {
         let display_name = display_name.trim();
         if !valid_display_name(display_name) || display_name.chars().count() > DISPLAY_NAME_LIMIT {
             return Err(DomainError::InvalidAgentName);
@@ -166,11 +162,24 @@ impl Agent {
         if role_text.is_empty() || role_text.chars().count() > ROLE_TEXT_LIMIT {
             return Err(DomainError::InvalidRole);
         }
+        Ok(())
+    }
+
+    /// Builds a new Agent Member from an already trimmed Display Name and Role.
+    pub(in crate::server) fn create(
+        member_id: MemberId,
+        space_id: SpaceId,
+        computer_id: ComputerId,
+        display_name: &str,
+        role_text: &str,
+        driver_kind: DriverKind,
+    ) -> Result<Self, DomainError> {
+        Self::validate_new(display_name, role_text)?;
         Ok(Self {
             member_id,
             space_id,
             computer_id: Some(computer_id),
-            role_text: role_text.to_owned(),
+            role_text: role_text.trim().to_owned(),
             role_revision: 1,
             lifecycle: AgentLifecycle::Provisioning,
             driver_kind,

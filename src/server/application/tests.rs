@@ -4026,6 +4026,64 @@ async fn agent_creation_and_action_message_share_permission_and_transaction() {
 }
 
 #[tokio::test]
+async fn agent_creation_normalizes_the_display_name_and_rejects_it_first() {
+    let owner = member(1300);
+    let computer_id = computer(1301);
+    let mut port = MemoryPort::default();
+    port.state.members.insert(
+        owner,
+        Member {
+            id: owner,
+            space_id: space(1),
+            display_name: "Owner".into(),
+            access_level: AccessLevel::Owner,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+        },
+    );
+    port.state.computers.insert(
+        computer_id,
+        Computer {
+            id: computer_id,
+            space_id: space(1),
+            lifecycle: ComputerLifecycle::Online,
+            token_hash: Some("hash".into()),
+            deleted_at: None,
+        },
+    );
+    let create = |display_name: &str, key: u128| CreateAgentInput {
+        agent_member_id: member(1302 + key),
+        space_id: space(1),
+        display_name: display_name.to_owned(),
+        access_level: AccessLevel::Member,
+        role_text: "Write".into(),
+        computer_id,
+        driver_kind: DriverKind::Acp(AcpProvider::Codex),
+        actor_member_id: owner,
+        idempotency_key: idempotency(key),
+        now: OffsetDateTime::UNIX_EPOCH,
+    };
+
+    let agent = CreateAgent::execute(&mut port, create("  Lin  ", 1304))
+        .await
+        .unwrap();
+    assert_eq!(
+        port.state.members[&agent.member_id].display_name, "Lin",
+        "the stored Display Name is the one the domain validated"
+    );
+
+    // An invalid name is refused before the Computer is consulted, so an offline Computer cannot
+    // turn a client mistake into a conflict.
+    port.state.computers.clear();
+    let invalid = CreateAgent::execute(&mut port, create("Lin Lin", 1305))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        invalid,
+        ApplicationError::Domain(DomainError::InvalidAgentName)
+    );
+}
+
+#[tokio::test]
 async fn both_agent_creation_entries_apply_the_same_role_limit() {
     let owner = member(1200);
     let focus = thread(1201);
