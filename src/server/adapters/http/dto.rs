@@ -2,9 +2,8 @@ use super::*;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::server::adapters::postgres::{
-    ActionAgentRow, ActionChannelRow, AgentRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow,
-    MessageRow, MessageTaskRow, PostgresQueries, RunRow, SpaceRow, TaskRefRow, TaskRow,
-    ThreadReferenceRow,
+    ActionAgentRow, ActionChannelRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow, MessageRow,
+    MessageTaskRow, PostgresQueries, SpaceRow, TaskRefRow, ThreadReferenceRow,
 };
 
 pub(super) const SPACE_ACCENTS: [&str; 4] = ["#F0602F", "#E8B42D", "#3C9E8F", "#6C5CE7"];

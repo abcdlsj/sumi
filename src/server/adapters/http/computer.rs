@@ -1,5 +1,5 @@
 use super::*;
-use crate::server::adapters::postgres::{AgentRow, ComputerAgentRow};
+use crate::server::adapters::postgres::AgentRow;
 use crate::server::adapters::websocket::computer_socket;
 use crate::server::domain::identity::valid_display_name;
 

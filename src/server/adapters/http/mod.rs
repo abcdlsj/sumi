@@ -1,41 +1,23 @@
 // HTTP adapter facade and shared request state.
-#![allow(unused_imports)]
-use std::{
-    collections::{BTreeSet, VecDeque},
-    convert::Infallible,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
-use anyhow::Context;
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{
-        DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
-        ws::{Message as WebSocketMessage, WebSocket},
-    },
+    extract::{DefaultBodyLimit, Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{
-        IntoResponse, Response, Sse,
-        sse::{Event as SseEvent, KeepAlive},
-    },
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use futures_util::{StreamExt, stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 #[cfg(test)]
 use sqlx::PgPool;
-use time::{Duration, OffsetDateTime};
-use tower_http::{
-    services::{ServeDir, ServeFile},
-    trace::TraceLayer,
-};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::config::ServerConfig;
 use crate::{
     ids::{
         AgentId, AttachmentId, ChannelId, ComputerId, IdempotencyKey, InboxItemId, MemberId,
@@ -44,10 +26,9 @@ use crate::{
     protocol::{
         capability,
         computer::{
-            ComputerFrame, ComputerHello, ItemDisposition, LlmUsageQuery, MemoryQuery,
-            MemoryReadQuery, Query as ComputerQuery, QueryErrorCode, QueryResult, RunResult,
-            RunTerminalStatus, RuntimeDiagnosticsQuery, ServerFrame, SessionContinuityQuery,
-            SessionContinuityState, SessionScope,
+            ItemDisposition, LlmUsageQuery, MemoryQuery, MemoryReadQuery, Query as ComputerQuery,
+            QueryErrorCode, QueryResult, RunResult, RunTerminalStatus, RuntimeDiagnosticsQuery,
+            SessionContinuityQuery, SessionContinuityState, SessionScope,
         },
     },
     server::{
@@ -56,9 +37,9 @@ use crate::{
             ReadAttachment, WriteUploadContent, WriteUploadContentInput,
         },
         application::attention::{
-            HardItemRoute, MarkAllInboxRead, MarkAllInboxReadInput, MarkInboxItemRead,
-            MarkInboxItemReadInput, ReadMemberInbox, RequeueDeadItem, RequeueDeadItemInput,
-            RouteHardItem, RouteHardItemInput,
+            MarkAllInboxRead, MarkAllInboxReadInput, MarkInboxItemRead, MarkInboxItemReadInput,
+            ReadMemberInbox, RequeueDeadItem, RequeueDeadItemInput, RouteHardItem,
+            RouteHardItemInput,
         },
         application::computer::{
             AuthenticateComputer, BeginPairing, BeginPairingInput, ConfirmPairing,
@@ -85,8 +66,7 @@ use crate::{
                 CompleteRunInput, DispatchRun, DispatchRunInput, FindDispatchableWork,
                 ItemDispositionInput, ReadAgentChannel, ReadCurrentAgentRun,
                 RecordRunItemDisposition, RecordRunItemDispositionInput, RequestRunCancel,
-                RequestRunCancelInput, StartRun, StartRunInput, SyncComputerRuns,
-                SyncComputerRunsInput,
+                RequestRunCancelInput, StartRun, StartRunInput,
             },
             identity::{
                 AgentLifecycleAction, AuthenticateHuman, AuthenticateHumanInput,
@@ -104,8 +84,8 @@ use crate::{
                 ApplicationError, AuthenticatedHuman, DirectMessageView,
                 InboxActivityEventKind as InboxActivityEventKindView, InboxItemView, InboxScope,
                 InvitationView, MemberKind, MessageDraft, PairedComputer, RawInvitationToken,
-                RawPairingCode, RawSessionToken, RunCapabilityProof, ServerTransaction,
-                SpaceMemberView, TransactionPort,
+                RawPairingCode, RawSessionToken, RunCapabilityProof, SpaceMemberView,
+                TransactionPort,
             },
         },
         domain::{
@@ -151,6 +131,9 @@ use super::{
     postgres::{ChannelLeaveReplayQuery, PostgresAdapter, PostgresQueries},
     query::QueryRegistry,
 };
+use crate::server::application::ports::{
+    IdentityTransaction, ObservationScope, ObservedMessage, PublishOutcome,
+};
 
 const SESSION_COOKIE: &str = "sumi_session";
 
@@ -190,16 +173,16 @@ mod task;
 mod tests;
 
 pub(super) use agent_graph::*;
-pub(super) use attachment::*;
-pub(super) use computer::*;
-pub(super) use conversation::*;
-pub(super) use dto::*;
+use attachment::*;
+use computer::*;
+use conversation::*;
+use dto::*;
 pub(super) use error::*;
 pub(super) use execution::*;
 pub(super) use identity::*;
 pub(super) use origin::allow_web_origin;
 pub(super) use rate_limit::*;
-pub(super) use task::*;
+use task::*;
 
 pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> Router {
     Router::new()
@@ -216,7 +199,3 @@ pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> R
         .route("/members/{member_id}/inbox/read", post(read_all_inbox_items))
         .route("/attachments/uploads", post(create_upload)).route("/attachments/{attachment_id}/content", axum::routing::put(upload_content).layer(DefaultBodyLimit::max(attachment_body_limit))).route("/attachments/{attachment_id}/complete", post(complete_upload)).route("/attachments/{attachment_id}/download", get(download_attachment)).route("/computers/{computer_id}", axum::routing::delete(delete_computer)).with_state(state)
 }
-use crate::server::application::ports::{
-    AttachmentTransaction, CollaborationTransaction, EffectSink, ExecutionTransaction,
-    IdentityTransaction, ObservationScope, ObservedMessage, PublishOutcome, TaskTransaction,
-};
