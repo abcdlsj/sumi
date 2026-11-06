@@ -161,8 +161,72 @@ describe("Task work index", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send request" }));
 
     await vi.waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[0].body).toMatchObject({ body_markdown: "@Lin Cover the retry path." });
+    expect(calls[0].body).toMatchObject({
+      body_markdown: "@Lin Cover the retry path.",
+      mentions: ["agent"],
+    });
     expect(calls[1].path).toContain("/request-changes");
+  });
+
+  it("retries only the status change after the reason was posted", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const calls: string[] = [];
+    let statusAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}/messages`) && init?.method === "POST") {
+        calls.push("reply");
+        return json(reply("human", "Ada", "@Lin Wrap the retry."), 201);
+      }
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, []));
+      if (path.endsWith(`/tasks/${value.id}/request-changes`)) {
+        statusAttempts += 1;
+        calls.push("status");
+        if (statusAttempts === 1) throw new Error("offline");
+        return json({ ...value, status: "in_progress" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request changes" }));
+    fireEvent.change(screen.getByPlaceholderText("Tell Lin what to change."), { target: { value: "Wrap the retry." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+
+    expect(await screen.findByText("Reason sent. Status unchanged — retry to move it back to In progress.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await vi.waitFor(() => expect(statusAttempts).toBe(2));
+    expect(calls).toEqual(["reply", "status", "status"]);
+  });
+
+  it("offers Request changes only with an assignee and a readable Source Thread", async () => {
+    const unreadable = task("in_review", "Review Web contract", 19, "Lin");
+    const current = unreadable;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${current.id}`)) return json(current);
+      if (path.endsWith(`/threads/${current.source_thread.id}`)) {
+        return new Response(JSON.stringify({ error: { code: "permission_denied", message: "denied", retryable: false } }), { status: 403 });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${unreadable.id}`);
+
+    expect(await screen.findByText("You cannot see the conversation this Task came from.")).toBeVisible();
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Mark done" })).toBeVisible();
   });
 
   it("labels a DM Source Thread without a channel link", async () => {

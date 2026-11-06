@@ -194,36 +194,10 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
       void queryClient.invalidateQueries({ queryKey: ["tasks", updated.space_id] });
     },
   });
-  const requestChanges = useMutation({
-    mutationFn: async ({ task, reason }: { task: Task; reason: string }) => {
-      // The reason is a normal reply first, so the assignee reads it in the conversation; only then
-      // does the status move back, and a failed status change retries without reposting the reason.
-      if (!reasonSent) {
-        await createThreadReply(
-          task.source_thread.id,
-          { body_markdown: `@${task.assignee_name} ${reason}`, mentions: [], mention_all: false, attachment_ids: [] },
-          uuidv7(),
-        );
-        setReasonSent(true);
-      }
-      return requestTaskChanges(task.id);
-    },
-    onSuccess: (updated) => {
-      queryClient.setQueryData(["task", taskId], updated);
-      void queryClient.invalidateQueries({ queryKey: ["tasks", updated.space_id] });
-      void queryClient.invalidateQueries({ queryKey: ["thread", updated.source_thread.id] });
-      setChangesOpen(false);
-      setReason("");
-      setReasonSent(false);
-    },
-  });
   const [closeOpen, setCloseOpen] = useState(false);
   const [closeReason, setCloseReason] = useState("invalid");
   const [closeNote, setCloseNote] = useState("");
   const [doneOpen, setDoneOpen] = useState(false);
-  const [changesOpen, setChangesOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const [reasonSent, setReasonSent] = useState(false);
 
   if (task.isPending) return <DetailSkeleton label="Loading Task" />;
   if (task.error || !task.data) return <div className="route-status route-status--error" role="alert">Task unavailable or outside your visible Threads.</div>;
@@ -270,43 +244,8 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
           <section className="task-detail-section"><h2>Actions</h2>
             <div className="task-actions">
               <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={() => setDoneOpen(true)}><Check /> Mark done</button>
-              {value.status === "in_review" && value.source_thread.channel_slug ? (
-                <button className="command-button" type="button" aria-expanded={changesOpen} disabled={requestChanges.isPending} onClick={() => setChangesOpen(true)}><MessageSquare /> Request changes</button>
-              ) : null}
+              {value.status === "in_review" ? <TaskRequestChanges task={value} /> : null}
             </div>
-            {changesOpen ? (
-              <form
-                className="task-changes"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (reason.trim()) requestChanges.mutate({ task: value, reason: reason.trim() });
-                }}
-              >
-                <h3>What needs to change?</h3>
-                <textarea
-                  autoFocus
-                  value={reason}
-                  rows={3}
-                  placeholder={`Tell ${value.assignee_name ?? "the Agent"} what to change.`}
-                  onChange={(event) => setReason(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setChangesOpen(false);
-                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && reason.trim()) {
-                      event.preventDefault();
-                      requestChanges.mutate({ task: value, reason: reason.trim() });
-                    }
-                  }}
-                />
-                <p className="task-changes-hint" role={reason.trim() ? undefined : "status"}>Add one sentence on what to change.</p>
-                <div className="task-changes-actions">
-                  <button className="command-button command-button--accent" type="submit" disabled={!reason.trim() || requestChanges.isPending}>{requestChanges.isError && reasonSent ? "Retry" : "Send request"}</button>
-                  <button className="command-button" type="button" onClick={() => setChangesOpen(false)}>Cancel</button>
-                </div>
-              </form>
-            ) : null}
-            {requestChanges.isError ? (
-              <p className="inline-notice inline-notice--error" role="alert">{reasonSent ? "Reason sent. Status unchanged — retry to move it back to In progress." : "Could not post the reason. Nothing was changed."}</p>
-            ) : null}
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
             {!value.finished_at ? (
               <div className="task-actions-secondary">
@@ -417,8 +356,10 @@ function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest
 function MarkDoneDialog({ task, pending, onCancel, onConfirm }: { task: Task; pending: boolean; onCancel: () => void; onConfirm: (result: string) => void }) {
   const read = useQuery({ queryKey: ["thread", task.source_thread.id], queryFn: () => readThread(task.source_thread.id) });
   const [result, setResult] = useState<string | undefined>(undefined);
+  // Without a readable Source Thread there is no reply to offer, and the Task can still finish.
   const prefill = latestReplyText(read.data, task.assignee_agent_member_id);
   const value = result ?? prefill;
+  const resultRequired = !read.isError;
   return (
     <DialogFrame className="confirm-dialog" close={onCancel} labelId="finish-task-title">
       <header>
@@ -438,10 +379,106 @@ function MarkDoneDialog({ task, pending, onCancel, onConfirm }: { task: Task; pe
         </label>
         <footer>
           <button className="command-button" type="button" onClick={onCancel}>Cancel</button>
-          <button className="command-button command-button--accent" type="submit" disabled={pending || !value.trim()}><Check /> Mark done</button>
+          <button className="command-button command-button--accent" type="submit" disabled={pending || (resultRequired && !value.trim())}><Check /> Mark done</button>
         </footer>
       </form>
     </DialogFrame>
+  );
+}
+
+/** Asks the assignee for another pass: a normal reply with a real mention, then the status change. */
+function TaskRequestChanges({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const thread = useQuery({ queryKey: ["thread", task.source_thread.id], queryFn: () => readThread(task.source_thread.id) });
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [reasonSent, setReasonSent] = useState(false);
+  const change = useMutation({
+    mutationFn: async ({ reason, resent }: { reason: string; resent: boolean }) => {
+      if (!resent) {
+        await createThreadReply(
+          task.source_thread.id,
+          {
+            body_markdown: `@${task.assignee_name} ${reason}`,
+            mentions: task.assignee_agent_member_id ? [task.assignee_agent_member_id] : [],
+            mention_all: false,
+            attachment_ids: [],
+          },
+          uuidv7(),
+        );
+        setReasonSent(true);
+      }
+      return requestTaskChanges(task.id);
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["task", updated.id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["tasks", updated.space_id] });
+      void queryClient.invalidateQueries({ queryKey: ["thread", updated.source_thread.id] });
+      setOpen(false);
+      setReason("");
+      setReasonSent(false);
+    },
+  });
+
+  // Without an assignee there is nobody to ask, and an unreadable Source Thread has no place for
+  // the reason, so the action only exists where DESIGN's flow can complete.
+  if (!task.assignee_agent_member_id || thread.isError) return null;
+
+  const submit = () => {
+    if (reason.trim()) change.mutate({ reason: reason.trim(), resent: reasonSent });
+  };
+
+  return (
+    <>
+      <button className="command-button" type="button" aria-expanded={open} disabled={change.isPending} onClick={() => setOpen(true)}><MessageSquare /> Request changes</button>
+      {open ? (
+        <form
+          className="task-changes"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <h3>What needs to change?</h3>
+          <textarea
+            autoFocus
+            value={reason}
+            rows={3}
+            placeholder={`Tell ${task.assignee_name} what to change.`}
+            onChange={(event) => {
+              setReason(event.target.value);
+              // A new sentence is a new request: the reply must be posted again.
+              setReasonSent(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false);
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+          {reason.trim() ? null : <p className="task-changes-hint" role="status">Add one sentence on what to change.</p>}
+          <div className="task-changes-actions">
+            <button className="command-button command-button--accent" type="submit" disabled={!reason.trim() || change.isPending}>{change.isError && reasonSent ? "Retry" : "Send request"}</button>
+            <button
+              className="command-button"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setReason("");
+                setReasonSent(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {change.isError ? (
+        <p className="inline-notice inline-notice--error" role="alert">{reasonSent ? "Reason sent. Status unchanged — retry to move it back to In progress." : "Could not post the reason. Nothing was changed."}</p>
+      ) : null}
+    </>
   );
 }
 
