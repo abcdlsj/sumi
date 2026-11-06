@@ -47,10 +47,6 @@ export function useSpaceEvents(
 
   useEffect(() => {
     if (!spaceId || typeof EventSource === "undefined") return;
-    // A fresh connection replays the storage retention window (historical
-    // message.created etc.). Only events arriving after the connection opened
-    // are live; replay must not be treated as new unread activity.
-    const connectedAt = Date.now();
     let source = openSpaceEvents(spaceId);
     let wasLive = false;
     let lost = attempt > 0;
@@ -58,9 +54,6 @@ export function useSpaceEvents(
     let retryTimer: number | undefined;
     const invalidate = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as SumiEvent;
-      const isReplay =
-        payload.occurred_at !== undefined &&
-        new Date(payload.occurred_at).getTime() < connectedAt;
       if (
         payload.type === "agent.activity" &&
         payload.event_id &&
@@ -70,12 +63,11 @@ export function useSpaceEvents(
       ) {
         recordAgentActivity(payload as AgentActivityEvent);
       }
-      // Membership changes are relevant even when replayed: they revoke any scoped
-      // preview that is still held in this tab's ephemeral feed.
+      // Membership changes revoke any scoped preview still held in this tab's
+      // ephemeral feed.
       if (payload.type === "member.changed" && payload.data.channel_id) {
         clearAgentActivityForChannel(payload.data.channel_id);
       }
-      if (isReplay) return;
       if (payload.type.startsWith("message.") && payload.data.channel_id) {
         if (payload.type === "message.created" && payload.data.channel_id) {
           onMessageRef.current?.({ type: payload.type, channelId: payload.data.channel_id });
@@ -151,9 +143,9 @@ export function useSpaceEvents(
       for (const type of eventTypes) target.addEventListener(type, invalidate as EventListener);
       target.onopen = () => {
         retryDelay = 1000;
-        // Anything that changed while the stream was down has no event here;
-        // refetch what is on screen so nothing stays stale.
-        if (lost) void queryClient.invalidateQueries();
+        // The stream starts at the Server's current tail, so a commit that landed between the
+        // projection queries and this connection has no event here; refetch what is on screen.
+        void queryClient.invalidateQueries();
         lost = false;
         wasLive = true;
         setConnection("live");
