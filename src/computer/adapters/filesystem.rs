@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
+use time::OffsetDateTime;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
@@ -306,58 +307,28 @@ impl AgentHomePort for AgentHomeAdapter {
         &mut self,
         agent_id: AgentId,
     ) -> Result<Vec<MemoryFile>, ApplicationError> {
-        let root = tokio::fs::canonicalize(self.agent_home_for_id(agent_id).join("memory"))
+        // The runtime owns the Memory traversal, including never following a symlink out of the root.
+        let files = sumi_agent_core::list_memory(&self.agent_home_for_id(agent_id).join("memory"))
             .await
-            .map_err(|_| ApplicationError::NotFound)?;
-        let mut files = Vec::new();
-        let mut pending = vec![root.clone()];
-        while let Some(directory) = pending.pop() {
-            let mut entries = tokio::fs::read_dir(&directory)
-                .await
-                .map_err(|_| ApplicationError::Internal)?;
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|_| ApplicationError::Internal)?
-            {
-                let path = entry.path();
-                let metadata = tokio::fs::symlink_metadata(&path)
-                    .await
-                    .map_err(|_| ApplicationError::Internal)?;
-                // Never follow a symlink that may escape the Memory root.
-                if metadata.file_type().is_symlink() {
-                    continue;
-                }
-                if metadata.is_dir() {
-                    pending.push(path);
-                    continue;
-                }
-                if !metadata.is_file() {
-                    continue;
-                }
-                let Ok(relative) = path.strip_prefix(&root) else {
-                    continue;
-                };
-                let Some(relative) = relative.to_str() else {
-                    continue;
-                };
-                let content = tokio::fs::read(&path)
-                    .await
-                    .map_err(|_| ApplicationError::Internal)?;
-                let updated_at = metadata
-                    .modified()
-                    .map_err(|_| ApplicationError::Internal)?
-                    .into();
-                files.push(MemoryFile {
-                    path: relative.to_owned(),
-                    size: content.len() as u64,
-                    sha256: hex::encode(Sha256::digest(&content)),
-                    updated_at,
-                });
-            }
-        }
-        files.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(files)
+            .map_err(|error| match error {
+                sumi_agent_core::AgentError::NotFound => ApplicationError::NotFound,
+                _ => ApplicationError::Internal,
+            })?;
+        files
+            .into_iter()
+            .map(|file| {
+                Ok(MemoryFile {
+                    path: file.path,
+                    size: file.size,
+                    sha256: file.sha256,
+                    updated_at: OffsetDateTime::from_unix_timestamp(
+                        i64::try_from(file.modified_at_unix)
+                            .map_err(|_| ApplicationError::Internal)?,
+                    )
+                    .map_err(|_| ApplicationError::Internal)?,
+                })
+            })
+            .collect()
     }
 
     async fn read_memory(
