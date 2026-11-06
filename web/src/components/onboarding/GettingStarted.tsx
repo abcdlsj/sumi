@@ -265,7 +265,7 @@ function QuickAgentDialog({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     creation.mutate({
-      computer_id: String(form.get("computer_id") ?? computers[0]?.id ?? ""),
+      computer_id: String(form.get("computer_id") ?? ""),
       name: name.trim(),
       role_text: role.trim(),
       access_level: String(form.get("access_level") ?? "member") as "member" | "admin",

@@ -21,9 +21,15 @@ export function AgentSetupFields({
   /** Hide the fields behind a summary, as the onboarding dialog does. */
   collapsible?: boolean;
 }) {
-  const [computerId, setComputerId] = useState(defaultComputerId ?? computers[0]?.id ?? "");
+  const [selectedComputerId, setSelectedComputerId] = useState(defaultComputerId ?? "");
   const [driver, setDriver] = useState<DriverChoice>("codex");
   const [accessLevel, setAccessLevel] = useState<"member" | "admin">("member");
+
+  // Computers can come online while the dialog is open, so the effective id follows the current list:
+  // the chosen Computer while it is still there, otherwise the first one available now.
+  const computerId = computers.some((computer) => computer.id === selectedComputerId)
+    ? selectedComputerId
+    : (computers[0]?.id ?? "");
 
   const fields = (
     <div className="agent-setup-fields">
@@ -35,7 +41,7 @@ export function AgentSetupFields({
         <SumiSelect
           ariaLabel="Computer"
           value={computerId}
-          onChange={setComputerId}
+          onChange={setSelectedComputerId}
           options={computers.map((computer) => ({
             value: computer.id,
             label: `${computer.name} · ${computer.hostname}`,
