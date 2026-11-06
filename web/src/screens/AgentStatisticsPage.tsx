@@ -1,23 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
 import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Gauge } from "lucide-react";
 
-import {getComputerLlmUsage, getSpaceBySlug, listAgents, listComputers} from "../api/client";
+import {getComputerLlmUsage, listAgents, listComputers} from "../api/client";
 import type {LlmUsageAgentSeries, LlmUsageBucket} from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity } from "../components/PixelIdentity";
+import { useSpaceShell } from "../components/spaceShellContext";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "../components/TokenUsageChart";
+import { UsageRangeSwitch, type LlmUsageRange } from "../components/LlmUsagePanel";
 import "./agentStatistics.css";
 import { PanelSkeleton } from "../components/Skeleton";
 
-type Range = "24h" | "7d" | "30d";
-
-const RANGES: Array<{ value: Range; label: string }> = [
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
-  { value: "30d", label: "30d" },
-];
 
 interface MergedAgent {
   member_id: string;
@@ -38,28 +32,22 @@ interface MergedModel {
 }
 
 export function AgentStatisticsPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/insights/stats" });
-  return <AgentStatisticsWorkspace spaceSlug={spaceSlug} />;
+  return <AgentStatisticsWorkspace spaceId={useSpaceShell().space.id} />;
 }
 
-export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
-  const [range, setRange] = useState<Range>("24h");
+export function AgentStatisticsWorkspace({ spaceId }: { spaceId: string }) {
+  const [range, setRange] = useState<LlmUsageRange>("24h");
   const [selectedMemberId, setSelectedMemberId] = useState<string>();
-  const space = useQuery({
-    queryKey: ["space", spaceSlug],
-    queryFn: () => getSpaceBySlug(spaceSlug),
-  });
+  // The Shell already holds the Space and its members; only these two lists are page-specific.
   const agents = useQuery({
     // Same keys as every other Agents and Computers reader, so `agent.changed`,
     // `computer.changed` and their member events refresh this page too.
-    queryKey: ["agents", space.data?.id],
-    queryFn: () => listAgents(space.data!.id),
-    enabled: Boolean(space.data),
+    queryKey: ["agents", spaceId],
+    queryFn: () => listAgents(spaceId),
   });
   const computers = useQuery({
-    queryKey: ["computers", space.data?.id],
-    queryFn: () => listComputers(space.data!.id),
-    enabled: Boolean(space.data),
+    queryKey: ["computers", spaceId],
+    queryFn: () => listComputers(spaceId),
   });
   const usageResults = useQueries({
     queries: (computers.data ?? []).map((computer) => ({
@@ -125,19 +113,11 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
       void result.refetch();
     }
   };
-  const sourceUnavailable = space.isError || agents.isError || computers.isError;
-  const sourcePending =
-    space.isPending ||
-    (Boolean(space.data) && (agents.isPending || computers.isPending));
+  const sourceUnavailable = agents.isError || computers.isError;
+  const sourcePending = agents.isPending || computers.isPending;
   const retrySources = () => {
-    if (space.isError) {
-      void space.refetch();
-      return;
-    }
-    if (space.data) {
-      if (agents.isError) void agents.refetch();
-      if (computers.isError) void computers.refetch();
-    }
+    if (agents.isError) void agents.refetch();
+    if (computers.isError) void computers.refetch();
   };
 
   const agentName = (memberId: string) =>
@@ -153,19 +133,7 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
         <div>
           <h1>Agent statistics</h1>
         </div>
-        <div className="llm-usage-range" aria-label="Usage period">
-          {RANGES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={range === option.value ? "llm-usage-range--active" : undefined}
-              aria-pressed={range === option.value}
-              onClick={() => setRange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <UsageRangeSwitch range={range} onChange={setRange} />
       </header>
 
       {sourcePending ? (
