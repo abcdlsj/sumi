@@ -128,7 +128,56 @@ describe("useSpaceEvents", () => {
     await waitFor(() => expect(screen.getByLabelText("Members")).toHaveTextContent("Ada,Mira"));
     expect(screen.getByLabelText("Agents")).toHaveTextContent("Lin,Mira");
   });
+  it("treats an event stamped before the connection opened as live", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let messages = ["first"];
+    const fetchMessages = vi.fn(async () => messages);
+    const onMessage = vi.fn();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MessagesProbe
+          spaceId="space-1"
+          channelId="channel-1"
+          fetchMessages={fetchMessages}
+          onMessage={onMessage}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Messages")).toHaveTextContent("first"));
+    expect(onMessage).not.toHaveBeenCalled();
+
+    messages = ["first", "second"];
+    FakeEventSource.instances[0].emit("message.created", {
+      type: "message.created",
+      occurred_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      data: { channel_id: "channel-1" },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Messages")).toHaveTextContent("first,second"));
+    expect(onMessage).toHaveBeenCalledWith({ type: "message.created", channelId: "channel-1" });
+  });
 });
+
+function MessagesProbe({
+  spaceId,
+  channelId,
+  fetchMessages,
+  onMessage,
+}: {
+  spaceId: string;
+  channelId: string;
+  fetchMessages: () => Promise<string[]>;
+  onMessage: (event: { type: string; channelId: string }) => void;
+}) {
+  useSpaceEvents(spaceId, onMessage);
+  const query = useQuery({ queryKey: ["messages", channelId], queryFn: fetchMessages });
+  return <output aria-label="Messages">{query.data?.join(",") ?? ""}</output>;
+}
 
 function MembersProbe({
   spaceId,
