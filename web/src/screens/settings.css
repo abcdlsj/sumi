@@ -8,10 +8,11 @@
 }
 
 /* Everything under the page header reads in one narrow column; padding, not width plus margin,
-   so the column cannot overflow a narrow viewport. */
+   so the column cannot overflow a narrow viewport. The 760px counts the content box only, so the
+   padding stays outside it and both gutters line up with the header. */
 .settings-page > :not(.settings-header) {
   width: 100%;
-  max-width: 760px;
+  max-width: calc(760px + 2 * var(--page-gutter));
   padding-inline: var(--page-gutter);
 }
 
@@ -19,8 +20,11 @@
   margin: 0;
 }
 
-@media (max-width: 700px) {
+/* The page header switches to the compact gutter at the same breakpoint as the content, so the
+   title and the section rows share one left edge. */
+@media (max-width: 1099px) {
   .settings-page > :not(.settings-header) {
+    max-width: calc(760px + 2 * var(--page-gutter-compact));
     padding-inline: var(--page-gutter-compact);
   }
 }
