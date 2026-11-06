@@ -219,6 +219,8 @@ export function createAppRouter(history?: RouterHistory) {
   return createRouter({
     routeTree,
     history,
+    // Hovering or focusing a link starts downloading that page's code, so a click rarely waits for it.
+    defaultPreload: "intent",
     parseSearch: (searchStr) => Object.fromEntries(new URLSearchParams(searchStr)),
     defaultNotFoundComponent: NotFoundPage,
     defaultErrorComponent: RouteErrorPage,
