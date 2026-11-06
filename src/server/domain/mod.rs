@@ -36,6 +36,8 @@ pub(in crate::server) enum DomainError {
     ItemIsNotAmbientAggregate,
     #[error("run no longer accepts inbox items")]
     RunNotAcceptingItems,
+    #[error("run is not the working run of this agent")]
+    RunNotWorkingForAgent,
     #[error("run item disposition is incomplete")]
     IncompleteItemDisposition,
     #[error("action messages must be replies")]

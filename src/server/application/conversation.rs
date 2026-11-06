@@ -7,7 +7,6 @@ use crate::ids::{
 };
 use crate::server::domain::{
     conversation::{Channel, ChannelKind, Message, MessageContent},
-    execution::RunStatus,
     identity::{AccessLevel, Agent, DriverKind, Member, PermissionAction},
 };
 
@@ -608,10 +607,9 @@ impl CreateAgentAction {
                 return transaction.agent(MemberId::from_uuid(agent_id)).await;
             }
             let run = transaction.run(input.current_run_id).await?;
+            run.require_working_for(input.actor_member_id)
+                .map_err(ApplicationError::Domain)?;
             let run_view = run.view();
-            if run_view.agent_id != input.actor_member_id || run_view.status != RunStatus::Working {
-                return Err(ApplicationError::ContextChanged);
-            }
             if !transaction
                 .has_permission(input.actor_member_id, PermissionAction::AgentCreate)
                 .await?
@@ -733,30 +731,19 @@ impl InviteChannelMember {
         idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<bool, ApplicationError> {
-        port.transact(async |transaction| {
-            if let Some(resource_id) = transaction
-                .resource_for_idempotency(actor, "channel.invite", idempotency_key)
-                .await?
-            {
-                if resource_id != channel_id.into_uuid() {
-                    return Err(ApplicationError::Conflict);
-                }
-                return Ok(false);
-            }
-            let channel = transaction.channel(channel_id).await?;
-            transaction
-                .member_access_level(actor, channel.space_id)
-                .await?;
-            if !transaction
-                .has_permission(actor, PermissionAction::ChannelInvite)
-                .await?
-            {
-                return Err(ApplicationError::PermissionDenied);
-            }
-            transaction
-                .invite_channel_member(actor, channel_id, member_id, idempotency_key, now)
-                .await
-        })
+        apply_channel_membership(
+            port,
+            "channel.invite",
+            PermissionAction::ChannelInvite,
+            ChannelMembership::Invite,
+            ChannelMembershipWrite {
+                actor,
+                channel_id,
+                member_id,
+                idempotency_key,
+                now,
+            },
+        )
         .await
     }
 }
@@ -772,32 +759,83 @@ impl RemoveChannelMember {
         idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<bool, ApplicationError> {
-        port.transact(async |transaction| {
-            if let Some(resource_id) = transaction
-                .resource_for_idempotency(actor, "channel.remove", idempotency_key)
-                .await?
-            {
-                if resource_id != channel_id.into_uuid() {
-                    return Err(ApplicationError::Conflict);
-                }
-                return Ok(false);
-            }
-            let channel = transaction.channel(channel_id).await?;
-            transaction
-                .member_access_level(actor, channel.space_id)
-                .await?;
-            if !transaction
-                .has_permission(actor, PermissionAction::ChannelRemove)
-                .await?
-            {
-                return Err(ApplicationError::PermissionDenied);
-            }
-            transaction
-                .remove_channel_member(actor, channel_id, member_id, idempotency_key, now)
-                .await
-        })
+        apply_channel_membership(
+            port,
+            "channel.remove",
+            PermissionAction::ChannelRemove,
+            ChannelMembership::Remove,
+            ChannelMembershipWrite {
+                actor,
+                channel_id,
+                member_id,
+                idempotency_key,
+                now,
+            },
+        )
         .await
     }
+}
+
+/// Invite and remove differ only in the permission, the idempotency action and the write itself.
+struct ChannelMembershipWrite {
+    actor: MemberId,
+    channel_id: ChannelId,
+    member_id: MemberId,
+    idempotency_key: IdempotencyKey,
+    now: OffsetDateTime,
+}
+
+async fn apply_channel_membership<P: TransactionPort>(
+    port: &mut P,
+    action: &str,
+    permission: PermissionAction,
+    membership: ChannelMembership,
+    write: ChannelMembershipWrite,
+) -> Result<bool, ApplicationError> {
+    let ChannelMembershipWrite {
+        actor,
+        channel_id,
+        member_id,
+        idempotency_key,
+        now,
+    } = write;
+    port.transact(async |transaction| {
+        if let Some(resource_id) = transaction
+            .resource_for_idempotency(actor, action, idempotency_key)
+            .await?
+        {
+            if resource_id != channel_id.into_uuid() {
+                return Err(ApplicationError::Conflict);
+            }
+            return Ok(false);
+        }
+        let channel = transaction.channel(channel_id).await?;
+        transaction
+            .member_access_level(actor, channel.space_id)
+            .await?;
+        if !transaction.has_permission(actor, permission).await? {
+            return Err(ApplicationError::PermissionDenied);
+        }
+        match membership {
+            ChannelMembership::Invite => {
+                transaction
+                    .invite_channel_member(actor, channel_id, member_id, idempotency_key, now)
+                    .await
+            }
+            ChannelMembership::Remove => {
+                transaction
+                    .remove_channel_member(actor, channel_id, member_id, idempotency_key, now)
+                    .await
+            }
+        }
+    })
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum ChannelMembership {
+    Invite,
+    Remove,
 }
 
 pub(in crate::server) struct LeaveChannel;
@@ -836,10 +874,9 @@ impl CreateChannelAction {
                 return transaction.channel(ChannelId::from_uuid(channel_id)).await;
             }
             let run = transaction.run(input.current_run_id).await?;
+            run.require_working_for(input.actor_member_id)
+                .map_err(ApplicationError::Domain)?;
             let run_view = run.view();
-            if run_view.agent_id != input.actor_member_id || run_view.status != RunStatus::Working {
-                return Err(ApplicationError::ContextChanged);
-            }
             if !transaction
                 .has_permission(input.actor_member_id, PermissionAction::ChannelCreate)
                 .await?

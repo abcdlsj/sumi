@@ -183,6 +183,18 @@ impl Run {
         }
     }
 
+    /// Agent-scoped writes require the Run to be that Agent's and still working.
+    pub(in crate::server) fn require_working_for(
+        &self,
+        agent_id: MemberId,
+    ) -> Result<(), DomainError> {
+        let view = self.view();
+        if view.agent_id != agent_id || view.status != RunStatus::Working {
+            return Err(DomainError::RunNotWorkingForAgent);
+        }
+        Ok(())
+    }
+
     pub(in crate::server) fn items(&self) -> impl ExactSizeIterator<Item = RunItemSnapshot> + '_ {
         self.items.iter().map(|item| RunItemSnapshot {
             inbox_item_id: item.inbox_item_id,

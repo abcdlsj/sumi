@@ -8,7 +8,7 @@ use crate::ids::{
 use crate::server::domain::{
     attention::{InboxItem, InboxItemDisposition, InboxItemKind},
     conversation::{Message, MessageContent, MessagePlacement},
-    execution::{Run, RunOutcome, RunStatus},
+    execution::{Run, RunOutcome},
     task::{CloseReason, Task},
 };
 
@@ -52,12 +52,9 @@ impl CreateTaskFromRootMessage {
                 TaskSource::HumanRoot(thread_id) => (thread_id, None, false),
                 TaskSource::AgentRun(run_id) => {
                     let run = transaction.run(run_id).await?;
+                    run.require_working_for(input.actor_member_id)
+                        .map_err(ApplicationError::Domain)?;
                     let run_view = run.view();
-                    if run_view.agent_id != input.actor_member_id
-                        || run_view.status != RunStatus::Working
-                    {
-                        return Err(ApplicationError::ContextChanged);
-                    }
                     let focus_thread_id = run_view.focus_thread_id;
                     let source_thread_id = input.source_thread_id.unwrap_or(focus_thread_id);
                     let run_can_bind =
