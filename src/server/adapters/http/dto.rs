@@ -636,6 +636,7 @@ pub(super) fn attachment_row(row: &AttachmentRow) -> Result<AttachmentResponse, 
 pub(super) async fn task_projection(
     queries: &PostgresQueries,
     task_id: Uuid,
+    viewer: Option<Uuid>,
 ) -> Result<TaskResponse, ApiError> {
     let row = queries
         .task(task_id)
@@ -670,6 +671,12 @@ pub(super) async fn task_projection(
         runs.push(run_projection(queries, run_id).await?);
     }
     let current_run = runs.iter().find(|run| run.outcome.is_none()).cloned();
+    let result_thread = match viewer {
+        Some(viewer) => {
+            readable_result_thread(queries, viewer, current_run.as_ref(), &source, &related).await?
+        }
+        None => None,
+    };
     Ok(TaskResponse {
         id: task_id,
         seq: u64::try_from(row.seq).map_err(|_| ApiError::internal())?,
@@ -682,6 +689,7 @@ pub(super) async fn task_projection(
         assignee_name: row.assignee_name,
         source_thread: source,
         related_threads: related,
+        result_thread,
         result_message,
         close_reason_code: match row.close_reason_code.as_deref() {
             None => None,
@@ -701,6 +709,34 @@ pub(super) async fn task_projection(
         updated_at: timestamp(row.updated_at),
         finished_at: optional_timestamp(row.finished_at),
     })
+}
+
+/// Where a Browser Mark done would publish the Result: the first Linked Thread the viewer can read,
+/// preferring the live Run's Focus, then the Source Thread, then the other Linked Threads. `None` means
+/// the viewer can read no Linked Thread, so the action is not offered.
+async fn readable_result_thread(
+    queries: &PostgresQueries,
+    viewer: Uuid,
+    current_run: Option<&RunResponse>,
+    source: &ThreadReferenceResponse,
+    related: &[ThreadReferenceResponse],
+) -> Result<Option<ThreadReferenceResponse>, ApiError> {
+    let mut candidates: Vec<&ThreadReferenceResponse> = Vec::new();
+    if let Some(focus) = current_run.map(|run| &run.focus) {
+        candidates.push(focus);
+    }
+    candidates.push(source);
+    candidates.extend(related);
+    for candidate in candidates {
+        if queries
+            .thread_readable(candidate.id, viewer)
+            .await
+            .map_err(application_error)?
+        {
+            return Ok(Some(candidate.clone()));
+        }
+    }
+    Ok(None)
 }
 
 pub(super) async fn run_projection(

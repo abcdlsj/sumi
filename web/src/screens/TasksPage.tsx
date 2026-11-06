@@ -204,10 +204,12 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
   const value = task.data;
 
   function markDone(result: string) {
+    const thread = value.result_thread;
+    if (!thread) return;
     change.mutate(
       () =>
         completeTask(value.id, {
-          result_thread_id: value.current_run?.focus.id ?? value.source_thread.id,
+          result_thread_id: thread.id,
           result_markdown: result,
         }),
       { onSuccess: () => setDoneOpen(false) },
@@ -243,9 +245,12 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
         {!value.finished_at ? (
           <section className="task-detail-section"><h2>Actions</h2>
             <div className="task-actions">
-              <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={() => setDoneOpen(true)}><Check /> Mark done</button>
+              {value.result_thread ? (
+                <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={() => setDoneOpen(true)}><Check /> Mark done</button>
+              ) : null}
               {value.status === "in_review" ? <TaskRequestChanges task={value} /> : null}
             </div>
+            {!value.result_thread ? <p className="task-actions-hint">You cannot see any Conversation linked to this Task, so its Result cannot be written here.</p> : null}
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
             {!value.finished_at ? (
               <div className="task-actions-secondary">
@@ -264,6 +269,7 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
       {doneOpen ? (
         <MarkDoneDialog
           task={value}
+          threadId={value.result_thread?.id ?? value.source_thread.id}
           pending={change.isPending}
           onCancel={() => setDoneOpen(false)}
           onConfirm={markDone}
@@ -353,13 +359,12 @@ function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest
 }
 
 /** Finish asks for the result instead of writing a placeholder. */
-function MarkDoneDialog({ task, pending, onCancel, onConfirm }: { task: Task; pending: boolean; onCancel: () => void; onConfirm: (result: string) => void }) {
-  const read = useQuery({ queryKey: ["thread", task.source_thread.id], queryFn: () => readThread(task.source_thread.id) });
+function MarkDoneDialog({ task, threadId, pending, onCancel, onConfirm }: { task: Task; threadId: string; pending: boolean; onCancel: () => void; onConfirm: (result: string) => void }) {
+  // The Result lands in the Thread the Server resolved for this actor; its latest reply is the prefill.
+  const read = useQuery({ queryKey: ["thread", threadId], queryFn: () => readThread(threadId) });
   const [result, setResult] = useState<string | undefined>(undefined);
-  // Without a readable Source Thread there is no reply to offer, and the Task can still finish.
   const prefill = latestReplyText(read.data, task.assignee_agent_member_id);
   const value = result ?? prefill;
-  const resultRequired = !read.isError;
   return (
     <DialogFrame className="confirm-dialog" close={onCancel} labelId="finish-task-title">
       <header>
@@ -379,7 +384,7 @@ function MarkDoneDialog({ task, pending, onCancel, onConfirm }: { task: Task; pe
         </label>
         <footer>
           <button className="command-button" type="button" onClick={onCancel}>Cancel</button>
-          <button className="command-button command-button--accent" type="submit" disabled={pending || (resultRequired && !value.trim())}><Check /> Mark done</button>
+          <button className="command-button command-button--accent" type="submit" disabled={pending || !value.trim()}><Check /> Mark done</button>
         </footer>
       </form>
     </DialogFrame>

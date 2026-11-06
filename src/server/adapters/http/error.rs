@@ -164,6 +164,12 @@ pub(in crate::server::adapters) fn classify(error: &ApplicationError) -> ErrorCl
             message: "Use 1-32 lowercase ASCII letters or numbers separated by single hyphens for the Channel slug. Use topic for the human-readable description; topic supports Unicode.",
             retryable: false,
         },
+        ApplicationError::Domain(DomainError::EmptyTaskResult) => ErrorClass {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_argument",
+            message: "Task Result must not be empty",
+            retryable: false,
+        },
         ApplicationError::Domain(DomainError::InvalidAgentName) => ErrorClass {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_argument",

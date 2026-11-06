@@ -111,7 +111,7 @@ pub(in crate::server::adapters::http) async fn finish_agent_task(
     )
     .await;
     capability_value(
-        &task_projection(&state.read, task_id.into_uuid())
+        &task_projection(&state.read, task_id.into_uuid(), None)
             .await
             .map_err(api_to_capability)?,
     )

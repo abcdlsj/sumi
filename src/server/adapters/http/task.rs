@@ -34,7 +34,7 @@ pub(super) async fn list_tasks(
     jar: CookieJar,
     Path(space_id): Path<Uuid>,
 ) -> Result<Json<Vec<TaskResponse>>, ApiError> {
-    current_member(&state, &jar, space_id).await?;
+    let viewer = current_member(&state, &jar, space_id).await?;
     let ids = state
         .read
         .task_ids(space_id)
@@ -42,7 +42,7 @@ pub(super) async fn list_tasks(
         .map_err(application_error)?;
     let mut tasks = Vec::with_capacity(ids.len());
     for id in ids {
-        tasks.push(task_projection(&state.read, id).await?);
+        tasks.push(task_projection(&state.read, id, Some(viewer)).await?);
     }
     Ok(Json(tasks))
 }
@@ -58,8 +58,8 @@ pub(super) async fn get_task(
         .await
         .map_err(application_error)?
         .ok_or_else(ApiError::not_found)?;
-    current_member(&state, &jar, space_id).await?;
-    Ok(Json(task_detail(&state, task_id).await?))
+    let viewer = current_member(&state, &jar, space_id).await?;
+    Ok(Json(task_detail(&state, task_id, viewer).await?))
 }
 
 pub(super) async fn task_runs(
@@ -130,7 +130,7 @@ pub(super) async fn create_task(
     })?;
     Ok((
         StatusCode::CREATED,
-        Json(task_detail(&state, task.view().id.into_uuid()).await?),
+        Json(task_detail(&state, task.view().id.into_uuid(), actor).await?),
     ))
 }
 
@@ -155,7 +155,7 @@ pub(super) async fn link_task_thread(
     )
     .await
     .map_err(application_error)?;
-    Ok(Json(task_detail(&state, task_id).await?))
+    Ok(Json(task_detail(&state, task_id, actor).await?))
 }
 
 pub(super) async fn unlink_task_thread(
@@ -178,7 +178,7 @@ pub(super) async fn unlink_task_thread(
     )
     .await
     .map_err(application_error)?;
-    Ok(Json(task_detail(&state, task_id).await?))
+    Ok(Json(task_detail(&state, task_id, actor).await?))
 }
 
 pub(super) async fn start_task(
@@ -308,7 +308,7 @@ pub(super) async fn record_task_outcome(
     )
     .await
     .map_err(application_error)?;
-    Ok(Json(task_detail(state, task_id).await?))
+    Ok(Json(task_detail(state, task_id, actor).await?))
 }
 
 pub(super) async fn update_task_action(
@@ -332,7 +332,7 @@ pub(super) async fn update_task_action(
     )
     .await
     .map_err(application_error)?;
-    Ok(Json(task_detail(state, task_id).await?))
+    Ok(Json(task_detail(state, task_id, actor).await?))
 }
 
 pub(super) async fn task_actor(
@@ -361,8 +361,10 @@ pub(super) async fn task_actor(
 pub(super) async fn task_detail(
     state: &RuntimeState,
     task_id: Uuid,
+    viewer: Uuid,
 ) -> Result<TaskResponse, ApiError> {
-    let mut task = task_projection(&state.read, task_id).await?;
+    // The page acts for one viewer, so the projection names the Thread a Mark done would publish to.
+    let mut task = task_projection(&state.read, task_id, Some(viewer)).await?;
     if let Some(agent_id) = task.assignee_agent_member_id {
         task.session_continuity = agent_continuity(
             state,

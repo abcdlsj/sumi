@@ -20,6 +20,8 @@ pub(in crate::server) enum DomainError {
     SourceMismatch,
     #[error("task requires an assignee")]
     AssigneeRequired,
+    #[error("task result must not be empty")]
+    EmptyTaskResult,
     #[error("task review must be decided by another visible member")]
     InvalidReviewer,
     #[error("thread is not linked to the task")]

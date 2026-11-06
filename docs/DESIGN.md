@@ -388,7 +388,7 @@ Driver：
 - Actions 按状态分两组。TODO（未指派）时说明需要先指派 Agent；In Progress 与 In review 显示 Mark done（主色），`Close Task…` 退到次要位置，单独一行，弹窗选择理由 + 可选备注；In review 另有 `Request changes` 与 Mark done 并列。不提供其它状态操作按钮。
 - Mark done 弹确认框，标题 `Finish !{seq}?`，正文 `This becomes the Task result.`，输入框预填 assignee 最近一条回复（非纯文本时留空），可改可删；提交后 Result 显示这段文字，不再是写死的 `Task completed.`。
 - Request changes 在原位展开输入框，不弹窗：标题 `What needs to change?`，占位 `Tell {Agent} what to change.`，主按钮 `Send request`、次按钮 `Cancel`，理由必填，空着时主按钮禁用并提示 `Add one sentence on what to change.`；展开后焦点进入输入框，⌘/Ctrl+Enter 提交，Esc 取消，窄屏下按钮纵向全宽。提交时先向 Source Thread 回复 `@{Agent} {理由}`，再调用现有的 request changes 接口：回复失败提示 `Could not post the reason. Nothing was changed.`；状态变更失败提示 `Reason sent. Status unchanged — retry to move it back to In progress.`，主按钮变 `Retry`，只重试状态变更、不重发回复，避免 assignee 收到两遍。
-- 看不到 Source Thread 时，交付条与 `Request changes` 不出现，Mark done 仍可用，确认框输入框为空。
+- 看不到 Source Thread 时，交付条与 `Request changes` 不出现。Result 发布到操作者能读的第一个 Linked Thread（活跃 Run 的 Focus、Source Thread，其次其他 Linked Thread）；全部 Linked Thread 都不可读时不显示 Mark done，并说明原因。Result 必填，空内容不能提交。
 - Task 创建后不可修改（见「产品不变量」）；不显示 Related Threads 区块，不提供手动 Link/Unlink。
 - Activity 用人话描述谁在做和之前怎么结束：当前执行显示 `Lin is working on this`（青色圆点），历史显示 `Lin finished / paused / stopped / stopped on an error`，附时间和所在 Channel；没人做过时显示 `No one has worked on this yet.`。同一个 Agent 在同一 Channel 连续以同一结果结束的多次执行合并为一行，时间前写明次数（`2 runs · Oct 29, 11:47 AM`）。不显示 Run、Session continuity 或 Reset continuity。
 - Working、Waiting、Failed 是 Run 或 attention 状态，不进入 Task 状态选择器。

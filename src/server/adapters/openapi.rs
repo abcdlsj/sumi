@@ -663,6 +663,9 @@ pub(super) struct TaskResponse {
     pub(super) assignee_name: Option<String>,
     pub(super) source_thread: ThreadReferenceResponse,
     pub(super) related_threads: Vec<ThreadReferenceResponse>,
+    /// The Linked Thread a Browser Mark done publishes the Result to; absent when the viewer can read
+    /// none of them.
+    pub(super) result_thread: Option<ThreadReferenceResponse>,
     pub(super) result_message: Option<MessageResponse>,
     pub(super) close_reason_code: Option<CloseReason>,
     pub(super) close_reason_note: Option<String>,

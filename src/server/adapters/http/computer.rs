@@ -185,7 +185,7 @@ pub(super) async fn current_agent_run(
     };
     let run = run_projection(&state.read, run_id).await?;
     let current_task = match run.task_id {
-        Some(task_id) => Some(task_projection(&state.read, task_id).await?),
+        Some(task_id) => Some(task_projection(&state.read, task_id, None).await?),
         None => None,
     };
     let scope = match run.task_id {

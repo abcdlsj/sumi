@@ -594,6 +594,24 @@ impl PostgresQueries {
             .map_err(map_sqlx)
     }
 
+    pub(in crate::server::adapters) async fn thread_readable(
+        &self,
+        thread_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<bool, ApplicationError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM messages \
+             JOIN channel_members ON channel_members.channel_id = messages.channel_id \
+             WHERE messages.id=$1 AND messages.placement='root' \
+               AND channel_members.member_id=$2)",
+        )
+        .bind(thread_id)
+        .bind(member_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx)
+    }
+
     pub(in crate::server::adapters) async fn task_readable(
         &self,
         task_id: Uuid,

@@ -207,6 +207,7 @@ describe("Task work index", () => {
 
   it("offers Request changes only with an assignee and a readable Source Thread", async () => {
     const unreadable = task("in_review", "Review Web contract", 19, "Lin");
+    unreadable.result_thread = undefined;
     const current = unreadable;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
@@ -226,7 +227,66 @@ describe("Task work index", () => {
     await vi.waitFor(() =>
       expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Mark done" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Mark done" })).not.toBeInTheDocument();
+    expect(screen.getByText("You cannot see any Conversation linked to this Task, so its Result cannot be written here.")).toBeVisible();
+  });
+
+  it("publishes the Result into the readable Linked Thread the Server resolves", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const related = { ...thread("related", 24), channel_slug: "eng" };
+    value.related_threads = [related];
+    value.result_thread = related;
+    const requests: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) {
+        return new Response(JSON.stringify({ error: { code: "permission_denied", message: "denied", retryable: false } }), { status: 403 });
+      }
+      if (path.endsWith(`/threads/${related.id}`)) return json(threadRead(related.id, [reply("agent", "Lin", "Shipped in #eng.")]));
+      if (path.endsWith(`/tasks/${value.id}/done`)) {
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return json({ ...value, status: "done", finished_at: "2026-07-28T11:00:00Z" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark done" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const field = dialog.getByLabelText("Result") as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(field.value).toBe("Shipped in #eng."));
+    fireEvent.click(dialog.getByRole("button", { name: "Mark done" }));
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].body).toEqual({ result_thread_id: related.id, result_markdown: "Shipped in #eng." });
+  });
+
+  it("keeps Mark done disabled while the Result is empty", async () => {
+    const value = task("in_progress", "Review Web contract", 19, "Lin");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`)) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, []));
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark done" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const field = dialog.getByLabelText("Result") as HTMLTextAreaElement;
+    expect(field.value).toBe("");
+    expect(dialog.getByRole("button", { name: "Mark done" })).toBeDisabled();
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(dialog.getByRole("button", { name: "Mark done" })).toBeDisabled();
   });
 
   it("labels a DM Source Thread without a channel link", async () => {
@@ -263,6 +323,7 @@ function task(status: "todo" | "in_progress" | "in_review" | "done" | "closed", 
     assignee_name: assignee,
     source_thread: thread("source", seq),
     related_threads: [],
+    result_thread: thread("source", seq),
     result_message: undefined,
     close_reason_code: undefined,
     close_reason_note: undefined,

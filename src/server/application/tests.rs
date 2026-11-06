@@ -27,7 +27,7 @@ use crate::server::domain::{
     },
     invitation::{Invitation, InvitationStatus},
     pairing::{ComputerOs, Pairing, PairingStatus},
-    task::{CloseReason, Task, TaskSnapshot, TaskStatus},
+    task::{CloseReason, RelatedThreadSnapshot, Task, TaskSnapshot, TaskStatus},
 };
 
 use super::{
@@ -3535,6 +3535,112 @@ async fn result_message_failure_rolls_back_task_completion() {
     );
     assert!(!port.state.messages.contains_key(&result_id));
     assert!(port.state.effects.is_empty());
+}
+
+#[tokio::test]
+async fn a_task_result_must_not_be_empty() {
+    let assignee = member(70);
+    let focus = thread(71);
+    let task_id = task(72);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[assignee]);
+    port.state.tasks.insert(
+        task_id,
+        make_task(task_id, focus, assignee, TaskStatus::InProgress),
+    );
+
+    let error = RecordTaskOutcome::execute(
+        &mut port,
+        RecordTaskOutcomeInput {
+            scope: TaskOutcomeScope::Browser { task_id },
+            actor_member_id: assignee,
+            idempotency_key: idempotency(204),
+            outcome: TaskOutcome::Done {
+                result: TaskResult::Publish(OutcomeMessage {
+                    message_id: message(73),
+                    body_markdown: "   \n".into(),
+                    post_to: TaskPostTarget::Thread(focus),
+                }),
+            },
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        ApplicationError::Domain(DomainError::EmptyTaskResult)
+    );
+    assert_eq!(
+        port.state.tasks[&task_id].view().status,
+        TaskStatus::InProgress
+    );
+    assert!(port.state.messages.is_empty());
+}
+
+/// The actor may read only some of the Linked Threads. The Result still lands in one of them, so
+/// marking a Task done never fails only because the Source Thread is unreadable.
+#[tokio::test]
+async fn a_task_result_lands_in_a_readable_linked_thread() {
+    let actor = member(74);
+    let stranger = member(75);
+    let source = thread(76);
+    let related = thread(77);
+    let task_id = task(78);
+    let result_id = message(79);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, source, &[stranger]);
+    insert_thread(&mut port, related, &[actor]);
+    // The actor left the Source Thread's Channel after the Task linked it, so only the other
+    // Linked Thread is still readable.
+    port.state.tasks.insert(
+        task_id,
+        Task::rehydrate(TaskSnapshot {
+            id: task_id,
+            seq: 1,
+            space_id: space(1),
+            title: "任务".into(),
+            status: TaskStatus::InProgress,
+            source_thread_id: source,
+            creator_member_id: actor,
+            assignee_agent_member_id: Some(actor),
+            result_message_id: None,
+            close_reason: None,
+            close_reason_note: None,
+            related_threads: vec![RelatedThreadSnapshot {
+                thread_id: related,
+                linked_by_member_id: actor,
+                linked_at: OffsetDateTime::UNIX_EPOCH,
+            }],
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            finished_at: None,
+        })
+        .unwrap(),
+    );
+
+    let completed = RecordTaskOutcome::execute(
+        &mut port,
+        RecordTaskOutcomeInput {
+            scope: TaskOutcomeScope::Browser { task_id },
+            actor_member_id: actor,
+            idempotency_key: idempotency(205),
+            outcome: TaskOutcome::Done {
+                result: TaskResult::Publish(OutcomeMessage {
+                    message_id: result_id,
+                    body_markdown: "完成".into(),
+                    post_to: TaskPostTarget::Thread(source),
+                }),
+            },
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(completed.view().status, TaskStatus::Done);
+    assert_eq!(port.state.messages[&result_id].thread_id, related);
 }
 
 #[tokio::test]

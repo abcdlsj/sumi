@@ -127,7 +127,7 @@ pub(in crate::server::adapters::http) async fn execute_agent_action(
             })?;
         if let Some(task_id) = replayed {
             return capability_value(
-                &task_projection(&state.read, task_id)
+                &task_projection(&state.read, task_id, None)
                     .await
                     .map_err(api_to_capability)?,
             );
@@ -197,7 +197,7 @@ pub(in crate::server::adapters::http) async fn execute_agent_action(
         wire_capability::Action::ContextCurrent => {
             let task = match context.task_id {
                 Some(id) => Some(
-                    task_projection(&state.read, id.into_uuid())
+                    task_projection(&state.read, id.into_uuid(), None)
                         .await
                         .map_err(api_to_capability)?,
                 ),
@@ -521,7 +521,7 @@ pub(in crate::server::adapters::http) async fn execute_agent_action(
                 .await;
             }
             capability_value(
-                &task_projection(&state.read, task_id.into_uuid())
+                &task_projection(&state.read, task_id.into_uuid(), None)
                     .await
                     .map_err(api_to_capability)?,
             )
@@ -579,7 +579,7 @@ pub(in crate::server::adapters::http) async fn execute_agent_action(
             )
             .await;
             capability_value(
-                &task_projection(&state.read, task_id.into_uuid())
+                &task_projection(&state.read, task_id.into_uuid(), None)
                     .await
                     .map_err(api_to_capability)?,
             )
@@ -637,7 +637,7 @@ pub(in crate::server::adapters::http) async fn execute_agent_action(
             )
             .await;
             capability_value(
-                &task_projection(&state.read, task_id.into_uuid())
+                &task_projection(&state.read, task_id.into_uuid(), None)
                     .await
                     .map_err(api_to_capability)?,
             )

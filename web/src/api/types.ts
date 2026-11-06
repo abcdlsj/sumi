@@ -688,6 +688,7 @@ export interface components {
             recent_runs: components["schemas"]["RunResponse"][];
             related_threads: components["schemas"]["ThreadReferenceResponse"][];
             result_message?: null | components["schemas"]["MessageResponse"];
+            result_thread?: null | components["schemas"]["ThreadReferenceResponse"];
             runtime_issue_code?: string | null;
             /** Format: int64 */
             seq: number;
