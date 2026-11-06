@@ -136,6 +136,12 @@ pub(in crate::server) enum AgentLifecycle {
     Error,
 }
 
+/// A validated new Agent together with its normalized Display Name, which the Member carries.
+pub(in crate::server) struct NewAgent {
+    pub(in crate::server) agent: Agent,
+    pub(in crate::server) display_name: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::server) struct Agent {
     pub(in crate::server) member_id: MemberId,
@@ -149,11 +155,16 @@ pub(in crate::server) struct Agent {
 }
 
 impl Agent {
-    /// Validates the fields every Agent creation entry accepts, before anything is written.
-    pub(in crate::server) fn validate_new(
+    /// Validates the Agent configuration and builds the Agent. The returned Display Name and Role
+    /// text are normalized, so the caller stores them instead of trimming a second time.
+    pub(in crate::server) fn create(
+        member_id: MemberId,
+        space_id: SpaceId,
+        computer_id: ComputerId,
         display_name: &str,
         role_text: &str,
-    ) -> Result<(), DomainError> {
+        driver_kind: DriverKind,
+    ) -> Result<NewAgent, DomainError> {
         let display_name = display_name.trim();
         if !valid_display_name(display_name) || display_name.chars().count() > DISPLAY_NAME_LIMIT {
             return Err(DomainError::InvalidAgentName);
@@ -162,28 +173,18 @@ impl Agent {
         if role_text.is_empty() || role_text.chars().count() > ROLE_TEXT_LIMIT {
             return Err(DomainError::InvalidRole);
         }
-        Ok(())
-    }
-
-    /// Builds a new Agent Member from an already trimmed Display Name and Role.
-    pub(in crate::server) fn create(
-        member_id: MemberId,
-        space_id: SpaceId,
-        computer_id: ComputerId,
-        display_name: &str,
-        role_text: &str,
-        driver_kind: DriverKind,
-    ) -> Result<Self, DomainError> {
-        Self::validate_new(display_name, role_text)?;
-        Ok(Self {
-            member_id,
-            space_id,
-            computer_id: Some(computer_id),
-            role_text: role_text.trim().to_owned(),
-            role_revision: 1,
-            lifecycle: AgentLifecycle::Provisioning,
-            driver_kind,
-            retired_at: None,
+        Ok(NewAgent {
+            display_name: display_name.to_owned(),
+            agent: Self {
+                member_id,
+                space_id,
+                computer_id: Some(computer_id),
+                role_text: role_text.to_owned(),
+                role_revision: 1,
+                lifecycle: AgentLifecycle::Provisioning,
+                driver_kind,
+                retired_at: None,
+            },
         })
     }
 
@@ -338,6 +339,35 @@ mod tests {
             access_level,
             created_at: OffsetDateTime::UNIX_EPOCH,
         }
+    }
+
+    #[test]
+    fn creation_returns_the_normalized_display_name_and_role() {
+        let created = Agent::create(
+            MemberId::from_uuid(uuid::Uuid::from_u128(1)),
+            SpaceId::from_uuid(uuid::Uuid::from_u128(2)),
+            ComputerId::from_uuid(uuid::Uuid::from_u128(3)),
+            "  Lin  ",
+            "  review boundaries  ",
+            DriverKind::Acp(AcpProvider::Codex),
+        )
+        .expect("a valid Agent");
+
+        assert_eq!(created.display_name, "Lin");
+        assert_eq!(created.agent.role_text, "review boundaries");
+        assert_eq!(created.agent.lifecycle, AgentLifecycle::Provisioning);
+        assert_eq!(
+            Agent::create(
+                MemberId::from_uuid(uuid::Uuid::from_u128(1)),
+                SpaceId::from_uuid(uuid::Uuid::from_u128(2)),
+                ComputerId::from_uuid(uuid::Uuid::from_u128(3)),
+                "Lin Lin",
+                "review",
+                DriverKind::Acp(AcpProvider::Codex),
+            )
+            .err(),
+            Some(DomainError::InvalidAgentName)
+        );
     }
 
     #[test]

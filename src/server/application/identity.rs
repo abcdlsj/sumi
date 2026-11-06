@@ -736,8 +736,15 @@ impl CreateAgent {
             if !actor_access.can_grant(input.access_level) {
                 return Err(ApplicationError::PermissionDenied);
             }
-            Agent::validate_new(&input.display_name, &input.role_text)
-                .map_err(ApplicationError::Domain)?;
+            let created = Agent::create(
+                input.agent_member_id,
+                input.space_id,
+                input.computer_id,
+                &input.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )
+            .map_err(ApplicationError::Domain)?;
             if !transaction
                 .computer_accepts_agent(input.computer_id, input.space_id)
                 .await?
@@ -747,18 +754,11 @@ impl CreateAgent {
             let member = Member {
                 id: input.agent_member_id,
                 space_id: input.space_id,
-                display_name: input.display_name.trim().to_owned(),
+                display_name: created.display_name,
                 access_level: input.access_level,
                 created_at: input.now,
             };
-            let agent = Agent::create(
-                member.id,
-                member.space_id,
-                input.computer_id,
-                &member.display_name,
-                &input.role_text,
-                input.driver_kind,
-            )?;
+            let agent = created.agent;
             transaction.insert_agent(member, agent.clone()).await?;
             transaction
                 .record_resource_idempotency(
@@ -809,8 +809,15 @@ impl CreateAgentAction {
             {
                 return Err(ApplicationError::PermissionDenied);
             }
-            Agent::validate_new(&input.display_name, &input.role_text)
-                .map_err(ApplicationError::Domain)?;
+            let created = Agent::create(
+                input.agent_member_id,
+                run_view.space_id,
+                input.computer_id,
+                &input.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )
+            .map_err(ApplicationError::Domain)?;
             if !transaction
                 .computer_accepts_agent(input.computer_id, run_view.space_id)
                 .await?
@@ -820,18 +827,11 @@ impl CreateAgentAction {
             let member = Member {
                 id: input.agent_member_id,
                 space_id: run_view.space_id,
-                display_name: input.display_name.trim().to_owned(),
+                display_name: created.display_name,
                 access_level: AccessLevel::Member,
                 created_at: input.now,
             };
-            let agent = Agent::create(
-                member.id,
-                member.space_id,
-                input.computer_id,
-                &member.display_name,
-                &input.role_text,
-                input.driver_kind,
-            )?;
+            let agent = created.agent;
             let action = Message::action_reply(
                 input.action_message_id,
                 run_view.focus_thread_id,
