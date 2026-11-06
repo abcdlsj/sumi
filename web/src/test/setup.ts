@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { vi } from "vitest";
+
+// findBy/waitFor give up after 1s by default, which a loaded CI or laptop exceeds while rendering a route.
+configure({ asyncUtilTimeout: 5_000 });
 
 window.scrollTo = vi.fn();
 

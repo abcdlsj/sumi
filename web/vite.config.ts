@@ -17,5 +17,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     exclude: ["e2e/**", "node_modules/**"],
+    // Component tests render whole routes in jsdom; on a loaded machine one test can take several
+    // seconds. These limits only bound how long a failing test waits, not how long a passing one runs.
+    testTimeout: 30_000,
   },
 });
