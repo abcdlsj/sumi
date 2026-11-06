@@ -142,7 +142,7 @@ Driver：
 - release Computer 首次从稳定路径之外运行时，把自身原子复制到 `~/.sumi/bin/sumi` 并从该路径重新执行；已存在的稳定副本优先，防止旧下载文件覆盖已更新版本。debug 构建不自动安装。
 - Computer 在启动后检查更新，此后按配置周期检查。Update Policy 关闭自动更新时，Computer 不自动安装或检查发布物。
 - Computer 在本地校验 target、协议版本和 sha256，再把 artifact 写入私有 staging 目录；协议版本与本二进制不同的 release 不下载。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
-- 有活跃 Run 时只保留 staged artifact。没有活跃 Run 时，Computer 启动一次性 updater 并退出；updater 备份当前二进制与关闭后的 SQLite 文件，再替换二进制并启动新 daemon。
+- 有活跃 Run 时只保留 staged artifact。没有活跃 Run 时，Computer 启动一次性 updater 并退出；updater 备份当前二进制与关闭后的 SQLite 文件，再替换二进制并启动新 daemon。已 staged 的 Release 不因 WebSocket 断开而丢弃：daemon 在每次重连前和退避等待期间都重新检查是否有活跃 Run，没有就激活，不依赖 Server 可达。
 - 新 daemon 完成本地数据库、sandbox、Driver recovery 和 capability socket 初始化后写 readiness 标记 `update/ready-<version>`。readiness 超时或进程提前退出时，updater 恢复旧二进制与 SQLite 备份并重启旧 daemon。
 - Computer 可由用户级服务管理器托管：macOS launchd agent `dev.sumi.computer`，Linux systemd user unit `sumi-computer.service`。服务以 `SUMI_COMPUTER_SERVICE=launchd|systemd` 声明托管方；服务只在非正常退出时重启。托管时 updater 脱离服务的进程组（launchd）或作为独立 transient unit 运行（systemd），daemon 以成功状态退出后，updater 经服务管理器启动、重启新旧 daemon，不自行 spawn。
 - Computer 在 SIGINT 与 SIGTERM 时都按正常关闭流程断开 Server。

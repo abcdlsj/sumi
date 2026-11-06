@@ -7,6 +7,8 @@ pub(super) struct ConnectionChannels<'a> {
     pub(super) yield_interrupts: &'a mut tokio::sync::mpsc::UnboundedReceiver<RunId>,
     /// Staged releases, absent when local policy disables automatic updates.
     pub(super) updates: Option<&'a mut tokio::sync::mpsc::Receiver<update::StagedUpdate>>,
+    /// The staged release outlives this connection: a disconnect must not drop it.
+    pub(super) staged_update: &'a mut Option<update::StagedUpdate>,
 }
 
 /// Why a Computer connection ended.
@@ -102,9 +104,9 @@ where
     let ConnectionChannels {
         yield_interrupts,
         updates,
+        staged_update,
     } = channels;
     let mut updates = updates;
-    let mut staged_update: Option<update::StagedUpdate> = None;
     loop {
         tokio::select! {
             _ = shutdown_signal() => {
@@ -116,7 +118,7 @@ where
             }
             Some(staged) = next_staged_update(updates.as_deref_mut()), if staged_update.is_none() => {
                 tracing::info!(target_version = %staged.version, "Computer update staged; waiting for active Runs");
-                staged_update = Some(staged);
+                *staged_update = Some(staged);
             }
             Some(run_id) = yield_interrupts.recv() => {
                 RunPipelineService::interrupt_yielded(
@@ -132,9 +134,7 @@ where
             }
             _ = heartbeat.tick() => {
                 let live_runs = RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?;
-                if let Some(staged) = staged_update.clone()
-                    && activation_due(&live_runs)
-                {
+                if let Some(staged) = take_activatable(staged_update, &live_runs) {
                     return Ok(ConnectionExit::Activate(staged));
                 }
                 let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,observed_at:time::OffsetDateTime::now_utc()}};
@@ -223,6 +223,19 @@ where
 /// A staged release may take over only while no Run is live, so a live connection keeps running.
 fn activation_due(live_runs: &[RunId]) -> bool {
     live_runs.is_empty()
+}
+
+/// Takes the staged release when no Run is live. The slot belongs to the daemon loop, so a release
+/// staged before a disconnect is still here on the next connection attempt.
+pub(super) fn take_activatable(
+    staged_update: &mut Option<update::StagedUpdate>,
+    live_runs: &[RunId],
+) -> Option<update::StagedUpdate> {
+    if activation_due(live_runs) {
+        staged_update.take()
+    } else {
+        None
+    }
 }
 
 /// Waits for the update checker; an absent receiver waits forever, which disables the branch.
@@ -604,10 +617,27 @@ where
 mod tests {
 
     #[tokio::test]
-    async fn a_staged_release_waits_for_the_last_live_run() {
+    async fn a_staged_release_waits_for_the_last_live_run_and_outlives_a_connection() {
         let run = RunId::from_uuid(Uuid::now_v7());
-        assert!(!super::activation_due(&[run]));
-        assert!(super::activation_due(&[]));
+        let staged = update::StagedUpdate {
+            version: "9.9.9".into(),
+            candidate: std::path::PathBuf::from("/tmp/sumi-9.9.9"),
+        };
+        let mut slot = Some(staged);
+
+        // A live Run keeps the release staged, and the slot survives the connection that found it.
+        assert!(super::take_activatable(&mut slot, &[run]).is_none());
+        assert!(
+            slot.is_some(),
+            "a disconnect must not drop a staged release"
+        );
+        // The next connection attempt reads the same slot; the Run is still live.
+        assert!(super::take_activatable(&mut slot, &[run]).is_none());
+        // The Run ends: the check activates the release exactly once.
+        let activated =
+            super::take_activatable(&mut slot, &[]).expect("an idle Computer activates");
+        assert_eq!(activated.version, "9.9.9");
+        assert!(slot.is_none());
 
         // The update branch never resolves without a checker, so a connection without updates
         // keeps its own future instead of polling for one.

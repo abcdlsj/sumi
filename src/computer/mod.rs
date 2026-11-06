@@ -204,7 +204,20 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
             .build()
     };
     let mut reconnect = reconnect_backoff();
+    // The staged release lives here, not in one connection, so a disconnect keeps it.
+    let mut staged_update: Option<update::StagedUpdate> = None;
     loop {
+        if activate_staged_update_if_idle(
+            &mut storage,
+            &mut staged_update,
+            &computer_home,
+            &restart_args,
+            config.update_ready_timeout_seconds,
+        )
+        .await?
+        {
+            return Ok(());
+        }
         let connection_started = tokio::time::Instant::now();
         // The connection future is created once per attempt and only completes when the connection
         // ends: a staged release is handed to it, never able to cancel it.
@@ -218,19 +231,14 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
             server_socket::ConnectionChannels {
                 yield_interrupts: &mut yield_interrupt_rx,
                 updates: updates.as_mut(),
+                staged_update: &mut staged_update,
             },
         )
         .await;
         match exit {
             Ok(server_socket::ConnectionExit::Closed) => return Ok(()),
             Ok(server_socket::ConnectionExit::Activate(staged)) => {
-                update::launch_updater(
-                    &staged,
-                    &computer_home,
-                    &restart_args,
-                    config.update_ready_timeout_seconds,
-                )
-                .await?;
+                launch_updater(&staged, &computer_home, &restart_args, &config).await?;
                 return Ok(());
             }
             Err(error) => {
@@ -242,10 +250,67 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
                     .next()
                     .expect("an unlimited reconnect backoff always yields a delay");
                 tracing::warn!(%error, ?delay, "Computer connection lost; retrying");
-                tokio::time::sleep(delay).await;
+                // An unreachable Server must not block an update; keep checking while waiting.
+                let deadline = tokio::time::Instant::now() + delay;
+                loop {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    tokio::time::sleep(remaining.min(UPDATE_CHECK_INTERVAL)).await;
+                    if activate_staged_update_if_idle(
+                        &mut storage,
+                        &mut staged_update,
+                        &computer_home,
+                        &restart_args,
+                        config.update_ready_timeout_seconds,
+                    )
+                    .await?
+                    {
+                        return Ok(());
+                    }
+                }
             }
         }
     }
+}
+
+/// How often the daemon re-checks whether a staged release can be activated while it cannot reach
+/// the Server.
+const UPDATE_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Hands over to the updater when a staged release waits and no Run is live. Runs are the only thing
+/// that may delay an update, so an unreachable Server cannot hold one back.
+async fn activate_staged_update_if_idle<P: TransactionPort>(
+    storage: &mut P,
+    staged_update: &mut Option<update::StagedUpdate>,
+    computer_home: &Path,
+    restart_args: &ComputerArgs,
+    ready_timeout_seconds: u64,
+) -> anyhow::Result<bool> {
+    let live_runs = RecoveryService::live_run_ids(storage)
+        .await
+        .map_err(|error| anyhow::anyhow!(error))?;
+    let Some(staged) = server_socket::take_activatable(staged_update, &live_runs) else {
+        return Ok(false);
+    };
+    update::launch_updater(&staged, computer_home, restart_args, ready_timeout_seconds).await?;
+    Ok(true)
+}
+
+async fn launch_updater(
+    staged: &update::StagedUpdate,
+    computer_home: &Path,
+    restart_args: &ComputerArgs,
+    config: &crate::config::ComputerConfig,
+) -> anyhow::Result<()> {
+    update::launch_updater(
+        staged,
+        computer_home,
+        restart_args,
+        config.update_ready_timeout_seconds,
+    )
+    .await
 }
 
 /// What one connection borrows from the daemon loop besides its local state.
