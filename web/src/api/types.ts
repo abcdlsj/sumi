@@ -284,6 +284,11 @@ export interface components {
         ErrorBody: {
             code: string;
             message: string;
+            /**
+             * Format: int64
+             * @description Present only for `rate_limited`, so a client can wait exactly as long as the Server says.
+             */
+            retry_after_seconds?: number | null;
             retryable: boolean;
         };
         /** @description Every Browser API failure, from any adapter layer, is this one body. */

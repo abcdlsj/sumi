@@ -10,7 +10,6 @@ use axum::{
     http::{HeaderMap, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
-use serde_json::json;
 
 /// One fixed-window limit: at most `attempts` per `window` for each key.
 #[derive(Clone, Copy, Debug)]
@@ -134,14 +133,14 @@ impl IntoResponse for RateLimited {
         (
             StatusCode::TOO_MANY_REQUESTS,
             [(header::RETRY_AFTER, self.retry_after_secs.to_string())],
-            axum::Json(json!({
-                "error": {
-                    "code": "rate_limited",
-                    "message": "too many attempts; retry later",
-                    "retryable": true,
-                    "retry_after_seconds": self.retry_after_secs
-                }
-            })),
+            axum::Json(super::ErrorEnvelope {
+                error: super::ErrorBody {
+                    code: "rate_limited",
+                    message: "too many attempts; retry later",
+                    retryable: true,
+                    retry_after_seconds: Some(self.retry_after_secs),
+                },
+            }),
         )
             .into_response()
     }
@@ -239,6 +238,31 @@ mod tests {
                 .check_at(LIMIT, "ada", start + Duration::from_secs(60))
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn the_rejection_reuses_the_error_envelope_with_the_wait() {
+        let response = RateLimited {
+            retry_after_secs: 42,
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("42")
+        );
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["error"]["code"], "rate_limited");
+        assert_eq!(body["error"]["retryable"], true);
+        assert_eq!(body["error"]["retry_after_seconds"], 42);
     }
 
     #[test]

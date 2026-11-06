@@ -247,14 +247,17 @@ pub(in crate::server::adapters) fn token_hash(token: &str) -> String {
 /// Every Browser API failure, from any adapter layer, is this one body.
 #[derive(Serialize, ToSchema)]
 pub(in crate::server::adapters) struct ErrorEnvelope {
-    error: ErrorBody,
+    pub(in crate::server::adapters) error: ErrorBody,
 }
 
 #[derive(Serialize, ToSchema)]
 pub(in crate::server::adapters) struct ErrorBody {
-    code: &'static str,
-    message: &'static str,
-    retryable: bool,
+    pub(in crate::server::adapters) code: &'static str,
+    pub(in crate::server::adapters) message: &'static str,
+    pub(in crate::server::adapters) retryable: bool,
+    /// Present only for `rate_limited`, so a client can wait exactly as long as the Server says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::server::adapters) retry_after_seconds: Option<u64>,
 }
 
 impl From<ApplicationError> for ApiError {
@@ -278,6 +281,7 @@ impl IntoResponse for ApiError {
                     code: self.code,
                     message: self.message,
                     retryable: self.retryable,
+                    retry_after_seconds: None,
                 },
             }),
         )
