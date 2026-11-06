@@ -39,7 +39,8 @@ describe("Computer flows", () => {
 
     expect(await screen.findByRole("heading", { name: "studio.local" })).toBeVisible();
     expect(screen.getByText("aa:bb:cc")).toBeVisible();
-    fireEvent.change(screen.getByLabelText("Space"), { target: { value: space.id } });
+    // One Space needs no choice, so the custom select already holds it.
+    expect(screen.getByRole("combobox", { name: "Space" })).toHaveTextContent("Sumi Lab");
     fireEvent.change(screen.getByLabelText("Computer name"), { target: { value: "Studio" } });
     fireEvent.click(screen.getByRole("button", { name: "Pair Computer" }));
     await waitFor(() => {

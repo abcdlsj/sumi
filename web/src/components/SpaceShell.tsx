@@ -39,6 +39,7 @@ import { ConnectionBanner } from "./Feedback";
 import { PixelIdentity, PresenceIdentity } from "./PixelIdentity";
 import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
+import { SumiSelect } from "./SumiSelect";
 import { ShellSkeleton } from "./Skeleton";
 
 
@@ -666,6 +667,8 @@ function ChannelDialog({
   close: () => void;
   onSubmit: (input: Parameters<typeof createChannel>[1]) => void;
 }) {
+  const [kind, setKind] = useState<"public" | "private">("public");
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -685,7 +688,7 @@ function ChannelDialog({
         </header>
         <form className="channel-create-form" onSubmit={submit}>
           <label>Slug<input name="slug" required maxLength={32} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" data-dialog-initial-focus /></label>
-          <label>Visibility<select name="kind" defaultValue="public"><option value="public">Public</option><option value="private">Private</option></select></label>
+          <label>Visibility<input type="hidden" name="kind" value={kind} /><SumiSelect ariaLabel="Visibility" value={kind} onChange={(value) => setKind(value as "public" | "private")} options={[{ value: "public", label: "Public" }, { value: "private", label: "Private" }]} /></label>
           <label>Topic<input name="topic" maxLength={200} /></label>
           <fieldset className="channel-agent-picker">
             <legend>Initial Agents</legend>

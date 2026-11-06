@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Fingerprint, LoaderCircle, MonitorCheck } from "lucide-react";
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import { confirmPairing, getPairingDetails, listSpaces } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
+import { SumiSelect } from "../components/SumiSelect";
 import { OnboardingSkeleton } from "../components/Skeleton";
 
 export function PairComputerPage() {
@@ -15,6 +16,9 @@ export function PairComputerPage() {
   const navigate = useNavigate();
   const details = useQuery({ queryKey: ["computer-pairing", pairingId, code], queryFn: () => getPairingDetails(pairingId, code), retry: false, enabled: Boolean(code) });
   const spaces = useQuery({ queryKey: ["spaces"], queryFn: listSpaces, retry: false });
+  const [chosenSpaceId, setChosenSpaceId] = useState("");
+  // One Space needs no choice: the pairing confirms into it directly.
+  const spaceId = chosenSpaceId || (spaces.data?.length === 1 ? spaces.data[0].id : "");
   const confirmation = useMutation({
     mutationFn: (input: { space_id: string; name: string; code: string }) => confirmPairing(pairingId, input),
     onSuccess: (computer) => {
@@ -51,11 +55,7 @@ export function PairComputerPage() {
           </dl>
         </div>
         <form className="pairing-form" onSubmit={submit}>
-          <label htmlFor="pair-space">Space</label>
-          <select id="pair-space" name="space_id" required defaultValue={spaces.data?.length === 1 ? spaces.data[0].id : ""}>
-            <option value="" disabled>Select a Space</option>
-            {spaces.data?.map((space) => <option key={space.id} value={space.id}>{space.name} /s/{space.slug}</option>)}
-          </select>
+          <label>Space<input type="hidden" name="space_id" value={spaceId} /><SumiSelect ariaLabel="Space" value={spaceId} onChange={setChosenSpaceId} options={(spaces.data ?? []).map((space) => ({ value: space.id, label: `${space.name} /s/${space.slug}` }))} /></label>
           <label htmlFor="computer-name">Computer name</label>
           <input id="computer-name" name="name" required maxLength={80} defaultValue={details.data.hostname} />
           <button className="primary-action" type="submit" disabled={confirmation.isPending || !code}>
