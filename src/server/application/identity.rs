@@ -472,6 +472,7 @@ pub(in crate::server) struct UpdateAgentInput<'a> {
     pub(in crate::server) agent_id: MemberId,
     pub(in crate::server) role_text: Option<&'a str>,
     pub(in crate::server) lifecycle: Option<AgentLifecycleAction>,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
 }
 
 impl UpdateAgent {
@@ -486,6 +487,18 @@ impl UpdateAgent {
                 .await?;
             if !access.can_manage_space() {
                 return Err(ApplicationError::PermissionDenied);
+            }
+            // A resent restart or suspend must not queue a second Computer command.
+            if super::replayed(
+                transaction,
+                input.actor_id,
+                "agent.update",
+                input.idempotency_key,
+                input.agent_id.into_uuid(),
+            )
+            .await?
+            {
+                return Ok(agent);
             }
             let revision_before = agent.role_revision;
             if let Some(role_text) = input.role_text {
@@ -538,8 +551,20 @@ impl UpdateMemberAccess {
         target_id: MemberId,
         space_id: SpaceId,
         requested: AccessLevel,
+        idempotency_key: IdempotencyKey,
     ) -> Result<Member, ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                actor_id,
+                "member.access",
+                idempotency_key,
+                target_id.into_uuid(),
+            )
+            .await?
+            {
+                return transaction.member(target_id).await;
+            }
             let actor_access = transaction.member_access_level(actor_id, space_id).await?;
             let mut target = transaction.member(target_id).await?;
             if target.space_id != space_id {

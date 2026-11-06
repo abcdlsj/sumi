@@ -154,6 +154,7 @@ pub(super) async fn add_channel_agents(
 pub(super) async fn remove_channel_agent(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path((channel_id, member_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ChannelMembersResponse>, ApiError> {
     let actor_id = channel_member(&state, &jar, channel_id).await?;
@@ -163,6 +164,7 @@ pub(super) async fn remove_channel_agent(
         MemberId::from_uuid(actor_id),
         ChannelId::from_uuid(channel_id),
         MemberId::from_uuid(member_id),
+        IdempotencyKey::from_uuid(idempotency_header(&headers)?),
         OffsetDateTime::now_utc(),
     )
     .await
@@ -524,6 +526,7 @@ pub(super) async fn list_agent_direct_messages(
 pub(super) async fn open_direct_message(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(space_id): Path<Uuid>,
     Json(body): Json<OpenDirectMessageBody>,
 ) -> Result<(StatusCode, Json<DirectMessageResponse>), ApiError> {
@@ -536,6 +539,7 @@ pub(super) async fn open_direct_message(
             space_id: SpaceId::from_uuid(space_id),
             actor_member_id: MemberId::from_uuid(member),
             other_member_id: MemberId::from_uuid(body.member_id),
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now: OffsetDateTime::now_utc(),
         },
     )
@@ -591,6 +595,7 @@ pub(super) async fn member_inbox(
 pub(super) async fn requeue_inbox_item(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<InboxItemResponse>, ApiError> {
     let item_id = InboxItemId::from_uuid(item_id);
@@ -607,6 +612,7 @@ pub(super) async fn requeue_inbox_item(
         RequeueDeadItemInput {
             item_id,
             actor_id: MemberId::from_uuid(actor),
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now: OffsetDateTime::now_utc(),
         },
     )
@@ -621,6 +627,7 @@ pub(super) async fn requeue_inbox_item(
 pub(super) async fn read_inbox_item(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<InboxItemResponse>, ApiError> {
     let item_id = InboxItemId::from_uuid(item_id);
@@ -637,6 +644,7 @@ pub(super) async fn read_inbox_item(
         MarkInboxItemReadInput {
             item_id,
             actor_id: MemberId::from_uuid(actor),
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now: OffsetDateTime::now_utc(),
         },
     )
@@ -650,6 +658,7 @@ pub(super) async fn read_inbox_item(
 pub(super) async fn read_all_inbox_items(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(member_id): Path<Uuid>,
 ) -> Result<Json<MarkAllInboxReadResponse>, ApiError> {
     let target = MemberId::from_uuid(member_id);
@@ -670,6 +679,7 @@ pub(super) async fn read_all_inbox_items(
             actor_id: MemberId::from_uuid(actor),
             target_id: target,
             space_id,
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now: OffsetDateTime::now_utc(),
         },
     )
@@ -791,6 +801,7 @@ pub(super) fn access_level_code(level: AccessLevel) -> AccessLevelCode {
 pub(super) async fn join_channel(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(channel_id): Path<Uuid>,
 ) -> Result<Json<ChannelResponse>, ApiError> {
     let space_id = space_of_channel(&state, channel_id).await?;
@@ -800,6 +811,7 @@ pub(super) async fn join_channel(
         &mut storage,
         MemberId::from_uuid(actor_id),
         ChannelId::from_uuid(channel_id),
+        IdempotencyKey::from_uuid(idempotency_header(&headers)?),
         OffsetDateTime::now_utc(),
     )
     .await
@@ -810,6 +822,7 @@ pub(super) async fn join_channel(
 pub(super) async fn archive_channel(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(channel_id): Path<Uuid>,
 ) -> Result<Json<ChannelResponse>, ApiError> {
     let space_id = space_of_channel(&state, channel_id).await?;
@@ -819,6 +832,7 @@ pub(super) async fn archive_channel(
         &mut storage,
         MemberId::from_uuid(actor_id),
         ChannelId::from_uuid(channel_id),
+        IdempotencyKey::from_uuid(idempotency_header(&headers)?),
         OffsetDateTime::now_utc(),
     )
     .await
@@ -855,22 +869,25 @@ pub(super) async fn read_channel_projection(
 pub(super) async fn follow_thread(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(thread_id): Path<Uuid>,
 ) -> Result<Json<ThreadSubscriptionResponse>, ApiError> {
-    set_subscription(state, jar, thread_id, true).await
+    set_subscription(state, jar, &headers, thread_id, true).await
 }
 
 pub(super) async fn unfollow_thread(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(thread_id): Path<Uuid>,
 ) -> Result<Json<ThreadSubscriptionResponse>, ApiError> {
-    set_subscription(state, jar, thread_id, false).await
+    set_subscription(state, jar, &headers, thread_id, false).await
 }
 
 pub(super) async fn set_subscription(
     state: RuntimeState,
     jar: CookieJar,
+    headers: &HeaderMap,
     thread_id: Uuid,
     following: bool,
 ) -> Result<Json<ThreadSubscriptionResponse>, ApiError> {
@@ -887,6 +904,7 @@ pub(super) async fn set_subscription(
         MemberId::from_uuid(actor_id),
         ThreadId::from_uuid(thread_id),
         following,
+        IdempotencyKey::from_uuid(idempotency_header(headers)?),
         OffsetDateTime::now_utc(),
     )
     .await

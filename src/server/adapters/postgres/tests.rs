@@ -922,6 +922,7 @@ async fn failing_an_orphaned_run_unblocks_the_agent_and_subscription_raises_thre
             let requeued = RequeueDeadItem::execute(
                 &mut adapter,
                 RequeueDeadItemInput {
+                    idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                     item_id: InboxItemId::from_uuid(stale_item),
                     actor_id: MemberId::from_uuid(owner),
                     now: OffsetDateTime::now_utc(),
@@ -952,6 +953,7 @@ async fn failing_an_orphaned_run_unblocks_the_agent_and_subscription_raises_thre
                 RequeueDeadItem::execute(
                     &mut adapter,
                     RequeueDeadItemInput {
+                        idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                         item_id: InboxItemId::from_uuid(stale_item),
                         actor_id: MemberId::from_uuid(owner),
                         now: OffsetDateTime::now_utc(),
@@ -2521,6 +2523,7 @@ async fn resuming_an_agent_queues_resume_before_a_later_run_start() {
     UpdateAgent::execute(
         &mut adapter,
         UpdateAgentInput {
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
             actor_id: MemberId::from_uuid(owner_id),
             agent_id: MemberId::from_uuid(agent_id),
             role_text: None,

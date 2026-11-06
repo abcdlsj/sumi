@@ -566,6 +566,7 @@ pub(super) fn user_response(human: &AuthenticatedHuman) -> UserResponse {
 pub(super) async fn update_space_member(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path((space_id, member_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateMemberBody>,
 ) -> Result<Json<MemberResponse>, ApiError> {
@@ -585,6 +586,7 @@ pub(super) async fn update_space_member(
         MemberId::from_uuid(member_id),
         SpaceId::from_uuid(space_id),
         requested,
+        IdempotencyKey::from_uuid(idempotency_header(&headers)?),
     )
     .await
     .map_err(application_error)?;

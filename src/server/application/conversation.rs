@@ -24,9 +24,21 @@ impl ArchiveChannel {
         port: &mut P,
         actor_member_id: MemberId,
         channel_id: ChannelId,
+        idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<Channel, ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                actor_member_id,
+                "channel.archive",
+                idempotency_key,
+                channel_id.into_uuid(),
+            )
+            .await?
+            {
+                return transaction.channel(channel_id).await;
+            }
             let mut channel = transaction.channel(channel_id).await?;
             let access = transaction
                 .member_access_level(actor_member_id, channel.space_id)
@@ -50,9 +62,21 @@ impl JoinChannel {
         port: &mut P,
         actor_member_id: MemberId,
         channel_id: ChannelId,
+        idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<Channel, ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                actor_member_id,
+                "channel.join",
+                idempotency_key,
+                channel_id.into_uuid(),
+            )
+            .await?
+            {
+                return transaction.channel(channel_id).await;
+            }
             let mut channel = transaction.channel(channel_id).await?;
             transaction
                 .member_access_level(actor_member_id, channel.space_id)
@@ -76,9 +100,26 @@ impl SetThreadSubscription {
         actor_member_id: MemberId,
         thread_id: ThreadId,
         following: bool,
+        idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<bool, ApplicationError> {
+        let action = if following {
+            "thread.follow"
+        } else {
+            "thread.unfollow"
+        };
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                actor_member_id,
+                action,
+                idempotency_key,
+                thread_id.into_uuid(),
+            )
+            .await?
+            {
+                return Ok(following);
+            }
             if !transaction
                 .can_read_thread(actor_member_id, thread_id)
                 .await?
@@ -118,6 +159,7 @@ pub(in crate::server) struct OpenDirectMessageInput {
     pub(in crate::server) space_id: SpaceId,
     pub(in crate::server) actor_member_id: MemberId,
     pub(in crate::server) other_member_id: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
     pub(in crate::server) now: OffsetDateTime,
 }
 
@@ -135,6 +177,15 @@ impl OpenDirectMessage {
             return Err(ApplicationError::Conflict);
         }
         port.transact(async |transaction| {
+            // The pair, not a channel ID, names the DM: a replay finds the DM the first call opened.
+            super::replayed(
+                transaction,
+                input.actor_member_id,
+                "dm.open",
+                input.idempotency_key,
+                input.other_member_id.into_uuid(),
+            )
+            .await?;
             let other = transaction
                 .space_member(input.other_member_id, input.space_id)
                 .await?
@@ -652,9 +703,21 @@ impl RemoveChannelAgent {
         actor: MemberId,
         channel_id: ChannelId,
         agent_id: MemberId,
+        idempotency_key: IdempotencyKey,
         now: OffsetDateTime,
     ) -> Result<(), ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                actor,
+                "channel.remove",
+                idempotency_key,
+                agent_id.into_uuid(),
+            )
+            .await?
+            {
+                return Ok(());
+            }
             transaction
                 .remove_channel_agent(actor, channel_id, agent_id, now)
                 .await

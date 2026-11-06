@@ -336,9 +336,11 @@ async fn run_human_inbox_flow(database: &TestDatabase) -> Result<()> {
         "the sender must not receive an Item for its own Message"
     );
 
-    // Marking the Item read removes it from the queue; repeating the read stays idempotent.
+    // Marking the Item read removes it from the queue; resending the same request replays it.
+    let read_key = Uuid::now_v7().to_string();
     let read: Value = client
         .post(server_url.join(&format!("/api/v1/inbox-items/{reply_item_id}/read"))?)
+        .header("idempotency-key", &read_key)
         .header(header::COOKIE, &owner)
         .send()
         .await?
@@ -346,12 +348,25 @@ async fn run_human_inbox_flow(database: &TestDatabase) -> Result<()> {
         .json()
         .await?;
     ensure!(read["status"] == "handled", "{read:?}");
-    client
+    let replayed: Value = client
         .post(server_url.join(&format!("/api/v1/inbox-items/{reply_item_id}/read"))?)
+        .header("idempotency-key", &read_key)
         .header(header::COOKIE, &owner)
         .send()
         .await?
-        .error_for_status()?;
+        .error_for_status()?
+        .json()
+        .await?;
+    ensure!(replayed == read, "a replay must return the first result");
+    let unkeyed = client
+        .post(server_url.join(&format!("/api/v1/inbox-items/{reply_item_id}/read"))?)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?;
+    ensure!(
+        unkeyed.status() == reqwest::StatusCode::BAD_REQUEST,
+        "a write without Idempotency-Key must be rejected"
+    );
     let drained: Value = client
         .get(server_url.join(&format!("/api/v1/members/{owner_member_id}/inbox"))?)
         .header(header::COOKIE, &owner)

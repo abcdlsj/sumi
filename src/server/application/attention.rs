@@ -1,6 +1,6 @@
 use time::OffsetDateTime;
 
-use crate::ids::{InboxItemId, MemberId, SpaceId};
+use crate::ids::{IdempotencyKey, InboxItemId, MemberId, SpaceId};
 
 use crate::server::domain::{
     attention::{AttentionStrength, InboxItem, InboxItemStatus},
@@ -48,6 +48,7 @@ impl ReadMemberInbox {
 pub(in crate::server) struct RequeueDeadItemInput {
     pub(in crate::server) item_id: InboxItemId,
     pub(in crate::server) actor_id: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
     pub(in crate::server) now: time::OffsetDateTime,
 }
 
@@ -61,6 +62,19 @@ impl RequeueDeadItem {
         input: RequeueDeadItemInput,
     ) -> Result<InboxItemView, ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                input.actor_id,
+                "inbox_item.requeue",
+                input.idempotency_key,
+                input.item_id.into_uuid(),
+            )
+            .await?
+            {
+                return transaction
+                    .inbox_item_view(input.item_id, input.actor_id)
+                    .await;
+            }
             let mut item = transaction.inbox_item(input.item_id).await?;
             let item_view = item.view();
             let access = transaction
@@ -98,6 +112,7 @@ impl RequeueDeadItem {
 pub(in crate::server) struct MarkInboxItemReadInput {
     pub(in crate::server) item_id: InboxItemId,
     pub(in crate::server) actor_id: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
     pub(in crate::server) now: time::OffsetDateTime,
 }
 
@@ -105,6 +120,7 @@ pub(in crate::server) struct MarkAllInboxReadInput {
     pub(in crate::server) actor_id: MemberId,
     pub(in crate::server) target_id: MemberId,
     pub(in crate::server) space_id: SpaceId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
     pub(in crate::server) now: time::OffsetDateTime,
 }
 
@@ -119,6 +135,19 @@ impl MarkInboxItemRead {
         input: MarkInboxItemReadInput,
     ) -> Result<InboxItemView, ApplicationError> {
         port.transact(async |transaction| {
+            if super::replayed(
+                transaction,
+                input.actor_id,
+                "inbox_item.read",
+                input.idempotency_key,
+                input.item_id.into_uuid(),
+            )
+            .await?
+            {
+                return transaction
+                    .inbox_item_view(input.item_id, input.actor_id)
+                    .await;
+            }
             let mut item = transaction.inbox_item(input.item_id).await?;
             let item_view = item.view();
             if input.actor_id != item_view.member_id {
@@ -155,6 +184,18 @@ impl MarkAllInboxRead {
         port.transact(async |transaction| {
             if input.actor_id != input.target_id {
                 return Err(ApplicationError::PermissionDenied);
+            }
+            // The first call already marked every pending Item, so a replay marks none.
+            if super::replayed(
+                transaction,
+                input.actor_id,
+                "inbox.read_all",
+                input.idempotency_key,
+                input.target_id.into_uuid(),
+            )
+            .await?
+            {
+                return Ok(0);
             }
             let owner = transaction
                 .space_member(input.target_id, input.space_id)

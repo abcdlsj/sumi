@@ -132,7 +132,8 @@ Driver：
 - RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
 - Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况；上一连接会话的残留帧必须被丢弃。
-- 所有 HTTP 写操作使用 idempotency key；started、delivery、result、receipt 使用稳定 event ID 幂等。
+- 以 Member 身份发起的 HTTP 写操作都必须带 `Idempotency-Key`（UUID），缺失时返回 invalid_argument。Server 在业务事务内按 (actor, action, key) 写 `idempotency_records`：同一 key 重发同一请求返回当前结果、不再写入，也不重复下发 Computer command；同一 key 用于另一个资源返回 conflict。没有 Member 身份的入口（注册、登录、登出、接受邀请、开始配对）不收该头：注册以邮箱唯一约束防重，接受邀请对同一用户重放返回同一 Member，登录与登出重发没有额外副作用。
+- started、delivery、result、receipt 使用稳定 event ID 幂等。
 
 ### Computer 更新
 

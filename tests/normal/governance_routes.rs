@@ -257,9 +257,10 @@ async fn run_governance_flow(database: &TestDatabase) -> Result<()> {
         .await?;
     ensure!(unfollowed["is_following"] == false);
 
+    let archive_key = Uuid::now_v7().to_string();
     let archived: Value = client
         .post(server_url.join(&format!("/api/v1/channels/{private_id}/archive"))?)
-        .header("idempotency-key", Uuid::now_v7().to_string())
+        .header("idempotency-key", &archive_key)
         .header(header::COOKIE, &owner)
         .send()
         .await?
@@ -267,6 +268,29 @@ async fn run_governance_flow(database: &TestDatabase) -> Result<()> {
         .json()
         .await?;
     ensure!(!archived["archived_at"].is_null(), "{archived}");
+    // A resend whose response was lost replays the archive instead of reporting a conflict.
+    let resent: Value = client
+        .post(server_url.join(&format!("/api/v1/channels/{private_id}/archive"))?)
+        .header("idempotency-key", &archive_key)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    ensure!(resent["archived_at"] == archived["archived_at"], "{resent}");
+    // The same key on another Channel is a different request, not a replay.
+    let reused = client
+        .post(server_url.join(&format!("/api/v1/channels/{public_id}/archive"))?)
+        .header("idempotency-key", &archive_key)
+        .header(header::COOKIE, &owner)
+        .send()
+        .await?;
+    ensure!(
+        reused.status() == StatusCode::CONFLICT,
+        "{}",
+        server.log_text()
+    );
     let again = client
         .post(server_url.join(&format!("/api/v1/channels/{private_id}/archive"))?)
         .header("idempotency-key", Uuid::now_v7().to_string())

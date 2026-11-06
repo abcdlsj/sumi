@@ -694,6 +694,7 @@ pub(super) fn query_error_code(code: QueryErrorCode) -> &'static str {
 pub(super) async fn update_agent(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(agent_id): Path<Uuid>,
     Json(body): Json<UpdateAgentBody>,
 ) -> Result<Json<AgentResponse>, ApiError> {
@@ -707,6 +708,7 @@ pub(super) async fn update_agent(
             agent_id: MemberId::from_uuid(agent_id),
             role_text: body.role_text.as_deref(),
             lifecycle,
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
         },
     )
     .await

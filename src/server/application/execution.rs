@@ -1,8 +1,8 @@
 use time::OffsetDateTime;
 
 use crate::ids::{
-    ChannelId, CommandId, ComputerId, EventId, InboxItemId, MemberId, MessageId, RunId, TaskId,
-    ThreadId,
+    ChannelId, CommandId, ComputerId, EventId, IdempotencyKey, InboxItemId, MemberId, MessageId,
+    RunId, TaskId, ThreadId,
 };
 
 use crate::server::domain::{
@@ -433,6 +433,7 @@ impl AcknowledgeDelivery {
 pub(in crate::server) struct RequestRunCancelInput {
     pub(in crate::server) run_id: RunId,
     pub(in crate::server) requested_by: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
     pub(in crate::server) now: OffsetDateTime,
 }
 
@@ -454,7 +455,16 @@ impl RequestRunCancel {
             {
                 return Err(ApplicationError::PermissionDenied);
             }
-            if run.is_terminal() {
+            if super::replayed(
+                transaction,
+                input.requested_by,
+                "run.cancel",
+                input.idempotency_key,
+                input.run_id.into_uuid(),
+            )
+            .await?
+                || run.is_terminal()
+            {
                 return Ok(run);
             }
             run.request_cancel()?;

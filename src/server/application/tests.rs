@@ -406,6 +406,69 @@ async fn channel_member_actions_require_the_declared_permission() {
     );
 }
 
+/// A restart whose response was lost is resent with the same key; the Computer must get one
+/// restart command, not two, and the same key on another Agent is a conflict.
+#[tokio::test]
+async fn a_resent_agent_restart_queues_one_command() {
+    use crate::server::application::identity::{
+        AgentLifecycleAction, UpdateAgent, UpdateAgentInput,
+    };
+
+    let mut port = MemoryPort::default();
+    let space_id = space(960);
+    let owner_id = member(961);
+    let computer_id = computer(962);
+    port.state.members.insert(
+        owner_id,
+        Member {
+            id: owner_id,
+            space_id,
+            display_name: "Owner".into(),
+            access_level: AccessLevel::Owner,
+            created_at: OffsetDateTime::now_utc(),
+        },
+    );
+    let agents = [member(963), member(964)];
+    for agent_id in agents {
+        port.state.agents.insert(
+            agent_id,
+            Agent {
+                member_id: agent_id,
+                space_id,
+                computer_id: Some(computer_id),
+                role_text: "test".into(),
+                role_revision: 1,
+                lifecycle: AgentLifecycle::Active,
+                driver_kind: DriverKind::Builtin,
+                retired_at: None,
+            },
+        );
+    }
+    let key = IdempotencyKey::from_uuid(Uuid::from_u128(965));
+    let restart = |agent_id| UpdateAgentInput {
+        actor_id: owner_id,
+        agent_id,
+        role_text: None,
+        lifecycle: Some(AgentLifecycleAction::Restart),
+        idempotency_key: key,
+    };
+
+    UpdateAgent::execute(&mut port, restart(agents[0]))
+        .await
+        .expect("restart");
+    UpdateAgent::execute(&mut port, restart(agents[0]))
+        .await
+        .expect("a resend replays the restart");
+    assert_eq!(port.state.restart_commands, vec![agents[0]]);
+    assert_eq!(
+        UpdateAgent::execute(&mut port, restart(agents[1]))
+            .await
+            .err(),
+        Some(ApplicationError::Conflict)
+    );
+    assert_eq!(port.state.restart_commands, vec![agents[0]]);
+}
+
 #[tokio::test]
 async fn command_result_updates_only_its_target_agent_through_the_domain() {
     let mut port = MemoryPort::default();
@@ -5910,6 +5973,7 @@ async fn only_a_governor_requeues_a_dead_item_and_the_queue_hides_it_until_then(
         RequeueDeadItem::execute(
             &mut port,
             RequeueDeadItemInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 item_id,
                 actor_id: plain,
                 now,
@@ -5928,6 +5992,7 @@ async fn only_a_governor_requeues_a_dead_item_and_the_queue_hides_it_until_then(
     let view = RequeueDeadItem::execute(
         &mut port,
         RequeueDeadItemInput {
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
             item_id,
             actor_id: owner,
             now,
@@ -5948,6 +6013,7 @@ async fn only_a_governor_requeues_a_dead_item_and_the_queue_hides_it_until_then(
         RequeueDeadItem::execute(
             &mut port,
             RequeueDeadItemInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 item_id,
                 actor_id: owner,
                 now,
@@ -6006,6 +6072,7 @@ async fn a_human_marks_all_their_pending_inbox_items_read_in_one_transaction() {
     let marked = MarkAllInboxRead::execute(
         &mut port,
         MarkAllInboxReadInput {
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
             actor_id: owner,
             target_id: owner,
             space_id,
@@ -6039,6 +6106,7 @@ async fn a_human_marks_all_their_pending_inbox_items_read_in_one_transaction() {
         MarkAllInboxRead::execute(
             &mut port,
             MarkAllInboxReadInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 actor_id: agent_id,
                 target_id: owner,
                 space_id,
@@ -6053,6 +6121,7 @@ async fn a_human_marks_all_their_pending_inbox_items_read_in_one_transaction() {
         MarkAllInboxRead::execute(
             &mut port,
             MarkAllInboxReadInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 actor_id: owner,
                 target_id: agent_id,
                 space_id,
@@ -6078,6 +6147,7 @@ async fn opening_a_direct_message_twice_reuses_one_channel() {
     let opened = OpenDirectMessage::execute(
         &mut port,
         OpenDirectMessageInput {
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
             channel_id: channel(7303),
             space_id,
             actor_member_id: actor,
@@ -6094,6 +6164,7 @@ async fn opening_a_direct_message_twice_reuses_one_channel() {
     let reopened = OpenDirectMessage::execute(
         &mut port,
         OpenDirectMessageInput {
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
             channel_id: channel(7399),
             space_id,
             actor_member_id: other,
@@ -6111,6 +6182,7 @@ async fn opening_a_direct_message_twice_reuses_one_channel() {
         OpenDirectMessage::execute(
             &mut port,
             OpenDirectMessageInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 channel_id: channel(7398),
                 space_id,
                 actor_member_id: actor,
@@ -6129,6 +6201,7 @@ async fn opening_a_direct_message_twice_reuses_one_channel() {
         OpenDirectMessage::execute(
             &mut port,
             OpenDirectMessageInput {
+                idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
                 channel_id: channel(7397),
                 space_id,
                 actor_member_id: actor,

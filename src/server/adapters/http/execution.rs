@@ -263,6 +263,7 @@ pub(crate) async fn dispatch_available_work(
 pub(super) async fn cancel_run(
     State(state): State<RuntimeState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path((agent_id, run_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     let viewer_id = agent_space_member(&state, &jar, agent_id).await?;
@@ -272,6 +273,7 @@ pub(super) async fn cancel_run(
         RequestRunCancelInput {
             run_id: RunId::from_uuid(run_id),
             requested_by: MemberId::from_uuid(viewer_id),
+            idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
             now: OffsetDateTime::now_utc(),
         },
     )
@@ -583,6 +585,13 @@ pub(super) async fn execute_agent_action(
                             space_id: context.space_id,
                             actor_member_id: MemberId::from_uuid(context.agent_id.into_uuid()),
                             other_member_id: member_id,
+                            idempotency_key: request.idempotency_key.ok_or_else(|| {
+                                capability_error(
+                                    capability::ErrorCode::InvalidArgument,
+                                    "Idempotency key is required",
+                                    false,
+                                )
+                            })?,
                             now: time::OffsetDateTime::now_utc(),
                         },
                     )
