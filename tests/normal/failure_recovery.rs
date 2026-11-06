@@ -708,8 +708,8 @@ async fn provider_session_rows(database_path: &Path) -> Result<Vec<(String, Stri
 async fn publish_mention(fixture: &Fixture, agent_id: Uuid, body: &str) -> Result<Uuid> {
     // A mention only routes to a Channel member, so join the Agent first if it is not already in.
     sqlx::query(
-        "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-         VALUES ($1,$2,$3,now(),0) ON CONFLICT DO NOTHING",
+        "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+         VALUES ($1,$2,$3,now()) ON CONFLICT DO NOTHING",
     )
     .bind(fixture.channel_id)
     .bind(fixture.space_id)
@@ -822,8 +822,8 @@ async fn insert_agent(
     .await?;
     pool.execute(
         sqlx::query(
-            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-             VALUES ($1,$2,$3,now(),0)",
+            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+             VALUES ($1,$2,$3,now())",
         )
         .bind(channel_id)
         .bind(space_id)

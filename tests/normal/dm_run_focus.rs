@@ -96,8 +96,8 @@ async fn run_dm_focus_flow(database: &TestDatabase) -> Result<()> {
     .await?;
     for member_id in [space.owner_member_id, agent_id] {
         sqlx::query(
-            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-             VALUES ($1,$2,$3,now(),0)",
+            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+             VALUES ($1,$2,$3,now())",
         )
         .bind(dm_channel_id)
         .bind(space_id)
