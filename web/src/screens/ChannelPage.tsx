@@ -24,15 +24,15 @@ import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { useOutbox } from "../components/channel/outbox";
 import { messagesQueryOptions, timelinePage, upsertRootMessage, type MessagePages } from "../components/channel/messageCache";
-import { PixelIdentity, PresenceIdentity, SpaceShell } from "../components/SpaceShell";
+import { PixelIdentity, PresenceIdentity, SpacePage } from "../components/SpaceShell";
 import { agentPresence } from "../agentActivity";
 
 export function ChannelPage() {
-  const { spaceSlug, channelSlug } = useParams({
+  const { channelSlug } = useParams({
     from: "/s/$spaceSlug/channels/$channelSlug",
   });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="channel">
+    <SpacePage>
       {({ space, channels, currentMember }) => {
         const channel = channels.find(
           (candidate) => candidate.slug === channelSlug && candidate.joined,
@@ -61,7 +61,7 @@ export function ChannelPage() {
           />
         );
       }}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 export function MessageWorkspace({

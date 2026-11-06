@@ -1,12 +1,39 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "../router";
 
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  readonly listeners = new Map<string, Set<EventListener>>();
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(readonly url: string) {
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListener) {
+    this.listeners.set(type, (this.listeners.get(type) ?? new Set()).add(listener));
+  }
+
+  removeEventListener(type: string, listener: EventListener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  close() {}
+
+  emit(type: string, payload: unknown) {
+    const event = { data: JSON.stringify(payload) } as MessageEvent<string>;
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
 afterEach(() => {
   cleanup();
+  FakeEventSource.instances = [];
   vi.unstubAllGlobals();
   window.localStorage.clear();
 });
@@ -152,6 +179,56 @@ describe("ChannelPage", () => {
     const tools = screen.getByRole("navigation", { name: "Space tools" });
     expect(within(tools).getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/s/sumi-lab/inbox");
     expect(screen.getByRole("link", { name: "design" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps one event stream and the unread marks while moving between Space pages", async () => {
+    const spaceId = "019c0000-0000-7000-8000-000000000201";
+    const ownerId = "019c0000-0000-7000-8000-000000000202";
+    const generalId = "019c0000-0000-7000-8000-000000000203";
+    const designId = "019c0000-0000-7000-8000-000000000204";
+    const owner = { id: ownerId, kind: "human", display_name: "Ada", access_level: "owner", permissions: [] };
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (init?.method) throw new Error(`Unexpected write: ${path}`);
+      if (path.includes("/spaces/by-slug/")) return json({ id: spaceId, name: "Sumi Lab", slug: "sumi-lab", accent: "#F0602F", owner_member_id: ownerId, current_member_id: ownerId, general_channel_id: generalId });
+      if (path === "/api/v1/auth/me") return json({ id: "user", display_name: "Ada", email: "ada@example.test" });
+      if (path.endsWith("/channels")) {
+        return json({
+          can_create: true,
+          channels: [
+            { id: generalId, space_id: spaceId, kind: "public", slug: "general", created_by_member_id: ownerId, joined: true },
+            { id: designId, space_id: spaceId, kind: "public", slug: "design", created_by_member_id: ownerId, joined: true },
+          ],
+        });
+      }
+      if (path.endsWith("/dms") || path.endsWith("/agents") || path.endsWith("/computers") || path.endsWith("/inbox")) return json([]);
+      if (path.endsWith(`/channels/${generalId}/members`)) return json({ members: [owner], can_manage: true });
+      if (path.endsWith(`/channels/${generalId}/messages`)) {
+        return json({ channel_id: generalId, snapshot_channel_seq: 0, messages: [], has_more_before: false, has_more_after: false });
+      }
+      if (path.endsWith("/members")) return json([owner]);
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    renderRoute("/s/sumi-lab/channels/general");
+
+    expect(await screen.findByRole("heading", { name: "#general starts here." })).toBeVisible();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      FakeEventSource.instances[0].emit("message.created", {
+        type: "message.created",
+        space_id: spaceId,
+        data: { channel_id: designId, resource_id: "019c0000-0000-7000-8000-000000000205" },
+      });
+    });
+    const design = screen.getByRole("link", { name: /design/ });
+    expect(within(design).getByLabelText("Unread messages")).toBeVisible();
+
+    const tools = screen.getByRole("navigation", { name: "Space tools" });
+    fireEvent.click(within(tools).getByRole("link", { name: "Inbox" }));
+    expect(await screen.findByRole("heading", { name: "Inbox" })).toBeVisible();
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(within(screen.getByRole("link", { name: /design/ })).getByLabelText("Unread messages")).toBeVisible();
   });
 
   it("creates and opens a DM from conversation navigation", async () => {

@@ -103,6 +103,7 @@ function renderOffice() {
         directMessages={[]}
         members={[currentMember]}
         currentMember={currentMember}
+        subscribeMessages={() => () => undefined}
       />
     </QueryClientProvider>,
   );

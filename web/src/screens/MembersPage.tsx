@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Check,
   Copy,
@@ -25,19 +25,18 @@ import {
   type Space,
 } from "../api/client";
 import { activityLabel, agentPresence } from "../agentActivity";
-import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
+import { PresenceIdentity, SpacePage } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { ListSkeleton } from "../components/Skeleton";
 
 export function MembersPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/members" });
 
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="members">
+    <SpacePage>
       {({ space }) => (
         <MembersWorkspace space={space} />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

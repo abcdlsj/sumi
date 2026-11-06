@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { RouteChrome } from "./RouteChrome";
+import { SpaceLayout } from "./SpaceLayout";
 import { loadLastConversationRoute } from "./conversationMemory";
 import { ChannelPage } from "./screens/ChannelPage";
 import { CompanyOfficePage } from "./screens/CompanyPage";
@@ -48,9 +49,15 @@ const createSpaceRoute = createRoute({
   path: "/spaces/new",
   component: SpaceCreatePage,
 });
-const spaceEntryRoute = createRoute({
+/** Every page of a Space renders inside this one layout, so the Shell and its stream stay mounted. */
+const spaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/s/$spaceSlug",
+  component: SpaceLayout,
+});
+const spaceEntryRoute = createRoute({
+  getParentRoute: () => spaceRoute,
+  path: "/",
   beforeLoad: ({ params }) => {
     const saved = loadLastConversationRoute(params.spaceSlug);
     if (saved?.kind === "dm") {
@@ -67,13 +74,13 @@ const spaceEntryRoute = createRoute({
   },
 });
 const channelRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/channels/$channelSlug",
+  getParentRoute: () => spaceRoute,
+  path: "channels/$channelSlug",
   component: ChannelPage,
 });
 const companyRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/company",
+  getParentRoute: () => spaceRoute,
+  path: "company",
   beforeLoad: ({ params }) => {
     throw redirect({
       to: "/s/$spaceSlug/company/office",
@@ -82,18 +89,18 @@ const companyRoute = createRoute({
   },
 });
 const companyOfficeRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/company/office",
+  getParentRoute: () => spaceRoute,
+  path: "company/office",
   component: CompanyOfficePage,
 });
 const membersRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/members",
+  getParentRoute: () => spaceRoute,
+  path: "members",
   component: MembersPage,
 });
 const insightsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/insights",
+  getParentRoute: () => spaceRoute,
+  path: "insights",
   component: InsightsPage,
 });
 const insightsIndexRoute = createRoute({
@@ -117,33 +124,33 @@ const insightsGraphRoute = createRoute({
   component: AgentGraphRouteContent,
 });
 const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/settings",
+  getParentRoute: () => spaceRoute,
+  path: "settings",
   component: SettingsPage,
 });
 const agentDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/agents/$agentId",
+  getParentRoute: () => spaceRoute,
+  path: "agents/$agentId",
   component: AgentDetailPage,
 });
 const inboxRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/inbox",
+  getParentRoute: () => spaceRoute,
+  path: "inbox",
   component: InboxPage,
 });
 const tasksRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/tasks",
+  getParentRoute: () => spaceRoute,
+  path: "tasks",
   component: TasksPage,
 });
 const taskDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/tasks/$taskId",
+  getParentRoute: () => spaceRoute,
+  path: "tasks/$taskId",
   component: TaskDetailPage,
 });
 const computersRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/computers",
+  getParentRoute: () => spaceRoute,
+  path: "computers",
   component: ComputersPage,
 });
 const pairComputerRoute = createRoute({
@@ -160,8 +167,8 @@ const invitationRoute = createRoute({
   component: InvitationPage,
 });
 const directMessageRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/s/$spaceSlug/dm/$memberId",
+  getParentRoute: () => spaceRoute,
+  path: "dm/$memberId",
   component: DirectMessagePage,
 });
 
@@ -169,24 +176,23 @@ const routeTree = rootRoute.addChildren([
   registerRoute,
   loginRoute,
   createSpaceRoute,
-  spaceEntryRoute,
-  channelRoute,
-  companyRoute,
-  companyOfficeRoute,
-  membersRoute,
-  insightsRoute,
-  insightsIndexRoute,
-  insightsStatsRoute,
-  insightsGraphRoute,
-  settingsRoute,
-  agentDetailRoute,
-  inboxRoute,
-  tasksRoute,
-  taskDetailRoute,
-  computersRoute,
+  spaceRoute.addChildren([
+    spaceEntryRoute,
+    channelRoute,
+    companyRoute,
+    companyOfficeRoute,
+    membersRoute,
+    insightsRoute.addChildren([insightsIndexRoute, insightsStatsRoute, insightsGraphRoute]),
+    settingsRoute,
+    agentDetailRoute,
+    inboxRoute,
+    tasksRoute,
+    taskDetailRoute,
+    computersRoute,
+    directMessageRoute,
+  ]),
   pairComputerRoute,
   invitationRoute,
-  directMessageRoute,
 ]);
 
 export function createAppRouter(history?: RouterHistory) {

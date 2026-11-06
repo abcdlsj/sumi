@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiRequestError,
@@ -37,8 +37,6 @@ import {
   type Computer,
   type DirectMessage,
   type Member,
-  type Space,
-  type User,
 } from "../api/client";
 import { activityLabel, agentPresence, type AgentPresence } from "../agentActivity";
 import {
@@ -51,6 +49,7 @@ import { saveLastConversationRoute } from "../conversationMemory";
 import { applySpaceAccent } from "../spaceAccent";
 import { groupInboxItems } from "../inbox";
 import { DialogFrame } from "./DialogFrame";
+import { SpaceShellValue, useSpaceShell, type SpaceShellContext } from "./spaceShellContext";
 import { AccountMenu } from "./AccountMenu";
 import { ConnectionBanner } from "./Feedback";
 import { PixelIdentity } from "./PixelIdentity";
@@ -60,27 +59,46 @@ import { ShellSkeleton } from "./Skeleton";
 
 export { PixelIdentity } from "./PixelIdentity";
 
-export interface SpaceShellContext {
-  space: Space;
-  user: User;
-  navigationOpen: boolean;
-  channels: Channel[];
-  directMessages: DirectMessage[];
-  members: Member[];
-  currentMember: Member;
+/** Renders a page body from the Space context, for pages that only pass it through. */
+export function SpacePage({ children }: { children: (context: SpaceShellContext) => ReactNode }) {
+  return <>{children(useSpaceShell())}</>;
 }
 
+type ShellSection = "channel" | "dm" | "company" | "members" | "inbox" | "tasks" | "computers" | "insights" | "settings";
+
+/** The sidebar entry the path belongs to; Agent details live under Members. */
+function shellSection(pathname: string): ShellSection | undefined {
+  const segment = pathname.split("/")[3];
+  switch (segment) {
+    case "channels": return "channel";
+    case "agents": return "members";
+    case "dm": case "company": case "members": case "inbox": case "tasks": case "computers": case "insights": case "settings":
+      return segment;
+    default: return undefined;
+  }
+}
+
+/**
+ * The Space layout: mounted once for every page of a Space, so moving between pages keeps the
+ * event stream, the sidebar and its unread marks.
+ */
 export function SpaceShell({
   spaceSlug,
-  active,
   children,
 }: {
   spaceSlug: string;
-  active: "channel" | "dm" | "company" | "members" | "inbox" | "tasks" | "computers" | "insights" | "settings";
-  children: (context: SpaceShellContext) => ReactNode;
+  children: ReactNode;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const active = shellSection(location.pathname);
+  const messageListeners = useRef(new Set<(event: { type: string; channelId: string }) => void>());
+  const subscribeMessages = useCallback((listener: (event: { type: string; channelId: string }) => void) => {
+    messageListeners.current.add(listener);
+    return () => {
+      messageListeners.current.delete(listener);
+    };
+  }, []);
   const authenticationRedirect = useRef(location.href);
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -151,7 +169,9 @@ export function SpaceShell({
     enabled: Boolean(space.data),
     retry: false,
   });
-  const events = useSpaceEvents(space.data?.id, ({ channelId }) => {
+  const events = useSpaceEvents(space.data?.id, (event) => {
+    for (const listener of messageListeners.current) listener(event);
+    const { channelId } = event;
     if (channelId === viewingChannelId(location.pathname, channels.data?.channels, directMessages.data)) {
       return;
     }
@@ -360,15 +380,22 @@ export function SpaceShell({
     toolItem("computers", "Computers", Monitor, "computers"),
     toolItem("settings", "Settings", Settings, "settings"),
   ];
-  const page = children({
-    space: space.data,
-    user: user.data,
-    channels: channels.data.channels,
-    directMessages: availableDirectMessages,
-    members: members.data,
-    currentMember,
-    navigationOpen,
-  });
+  const page = (
+    <SpaceShellValue.Provider
+      value={{
+        space: space.data,
+        user: user.data,
+        channels: channels.data.channels,
+        directMessages: availableDirectMessages,
+        members: members.data,
+        currentMember,
+        navigationOpen,
+        subscribeMessages,
+      }}
+    >
+      {children}
+    </SpaceShellValue.Provider>
+  );
 
   return (
     <>

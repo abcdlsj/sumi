@@ -1,10 +1,10 @@
-import { useLocation, useParams } from "@tanstack/react-router";
+import { useLocation } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Member, Space, User } from "../api/client";
 import { useSignOut } from "../components/signOut";
-import { SpaceShell } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
 import { accentLabel } from "../spaceAccent";
 import {
   type FeatureConfigField,
@@ -16,16 +16,15 @@ import {
 import "./settings.css";
 
 export function SettingsPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/settings" });
   const location = useLocation();
   const hash = String(location.hash).replace(/^#/, "");
   const selectedFeatureId = hash.startsWith("feature-")
     ? hash.slice("feature-".length)
     : undefined;
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="settings">
+    <SpacePage>
       {({ space, user, currentMember }) => <SettingsWorkspace selectedFeatureId={selectedFeatureId} space={space} user={user} currentMember={currentMember} />}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

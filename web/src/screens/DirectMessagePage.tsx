@@ -2,13 +2,13 @@ import { useParams } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
 
 import type { Channel } from "../api/client";
-import { SpaceShell } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
 import { MessageWorkspace } from "./ChannelPage";
 
 export function DirectMessagePage() {
-  const { spaceSlug, memberId } = useParams({ from: "/s/$spaceSlug/dm/$memberId" });
+  const { memberId } = useParams({ from: "/s/$spaceSlug/dm/$memberId" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="dm">
+    <SpacePage>
       {({ space, directMessages, currentMember }) => {
         const dm = directMessages.find((candidate) => candidate.other_member.id === memberId);
         if (!dm) {
@@ -45,6 +45,6 @@ export function DirectMessagePage() {
           />
         );
       }}
-    </SpaceShell>
+    </SpacePage>
   );
 }

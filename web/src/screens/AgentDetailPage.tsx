@@ -9,7 +9,7 @@ import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, agentPresence, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
-import { PresenceIdentity, SpaceShell } from "../components/SpaceShell";
+import { PresenceIdentity, SpacePage } from "../components/SpaceShell";
 import { formatBytes } from "../format";
 import { plainTextPreview } from "../markdownText";
 import { formatDay, formatLongDate, formatRecent } from "../time";
@@ -27,7 +27,7 @@ const agentTabs: { id: AgentTab; label: string; icon: LucideIcon }[] = [
 export function AgentDetailPage() {
   const { spaceSlug, agentId } = useParams({ from: "/s/$spaceSlug/agents/$agentId" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="members">
+    <SpacePage>
       {({ space, currentMember, channels }) => (
         <AgentWorkspace
           agentId={agentId}
@@ -37,7 +37,7 @@ export function AgentDetailPage() {
           canManage={currentMember.access_level === "owner" || currentMember.access_level === "admin"}
         />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

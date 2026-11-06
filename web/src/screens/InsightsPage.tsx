@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getSpaceBySlug } from "../api/client";
 import { InsightsTabs } from "../components/InsightsNavigation";
-import { SpaceShell } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
 import { AGENT_INSIGHTS_FEATURE_ID, useFeatureEnabled } from "../featureRegistry";
 import { AgentGraphWorkspace } from "./AgentGraphPage";
 
@@ -12,7 +12,7 @@ export function InsightsPage() {
   const enabled = useFeatureEnabled(AGENT_INSIGHTS_FEATURE_ID);
   if (!enabled) {
     return (
-      <SpaceShell spaceSlug={spaceSlug} active="insights">
+      <SpacePage>
         {() => (
           <div className="route-status">
             <section className="route-status-panel">
@@ -28,18 +28,18 @@ export function InsightsPage() {
             </section>
           </div>
         )}
-      </SpaceShell>
+      </SpacePage>
     );
   }
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="insights">
+    <SpacePage>
       {() => (
         <div className="insights-page">
           <InsightsTabs spaceSlug={spaceSlug} />
           <Outlet />
         </div>
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

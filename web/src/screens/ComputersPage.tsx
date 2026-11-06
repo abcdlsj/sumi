@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, Monitor, Plus, Trash2, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
@@ -15,15 +15,14 @@ import {
 import { activityLabel } from "../agentActivity";
 import { DRIVER_CHOICES, driverInput } from "../driver";
 import { LlmUsagePanel } from "../components/LlmUsagePanel";
-import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
+import { PixelIdentity, SpacePage } from "../components/SpaceShell";
 import { DialogFrame } from "../components/DialogFrame";
 import { DetailSkeleton } from "../components/Skeleton";
 import { formatDateTime } from "../time";
 
 export function ComputersPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/computers" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="computers">
+    <SpacePage>
       {({ space, currentMember }) => (
         <ComputersWorkspace
           spaceId={space.id}
@@ -36,7 +35,7 @@ export function ComputersPage() {
           isOwner={currentMember.access_level === "owner"}
         />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

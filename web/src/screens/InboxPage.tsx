@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { CheckCheck, Inbox, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -10,7 +10,7 @@ import {
   type Member,
 } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
-import { PixelIdentity, SpaceShell } from "../components/SpaceShell";
+import { PixelIdentity, SpacePage } from "../components/SpaceShell";
 import { notify } from "../feedback";
 import { groupInboxItems, type InboxStack } from "../inbox";
 import { plainTextPreview } from "../markdownText";
@@ -27,9 +27,8 @@ const inboxGroups: Array<{
 ];
 
 export function InboxPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/inbox" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="inbox">
+    <SpacePage>
       {({ space, members, currentMember }) => (
         <InboxWorkspace
           spaceSlug={space.slug}
@@ -38,7 +37,7 @@ export function InboxPage() {
           members={members}
         />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

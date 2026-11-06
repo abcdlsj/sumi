@@ -19,7 +19,7 @@ import {
 } from "../api/client";
 import { DialogFrame } from "../components/DialogFrame";
 import { EmptyState } from "../components/EmptyState";
-import { SpaceShell } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
 import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
@@ -67,9 +67,8 @@ const emptyFacts: Record<TaskFilter, string> = {
 };
 
 export function TasksPage() {
-  const { spaceSlug } = useParams({ from: "/s/$spaceSlug/tasks" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="tasks">
+    <SpacePage>
       {({ space }) => (
         <TaskList
           spaceId={space.id}
@@ -77,7 +76,7 @@ export function TasksPage() {
           currentMemberId={space.current_member_id}
         />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 
@@ -185,11 +184,11 @@ function groupTasks(tasks: Task[]): Array<{ status: TaskStatus; tasks: Task[] }>
 }
 
 export function TaskDetailPage() {
-  const { spaceSlug, taskId } = useParams({ from: "/s/$spaceSlug/tasks/$taskId" });
+  const { taskId } = useParams({ from: "/s/$spaceSlug/tasks/$taskId" });
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="tasks">
+    <SpacePage>
       {({ space, members }) => <TaskDetail taskId={taskId} spaceId={space.id} spaceSlug={space.slug} members={members} />}
-    </SpaceShell>
+    </SpacePage>
   );
 }
 

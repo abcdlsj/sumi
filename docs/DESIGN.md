@@ -320,6 +320,7 @@ Driver：
 - 桌面布局为 Sidebar、Channel、可选 Thread pane 三栏；不再有 Space rail。Thread pane 只在打开时存在（默认 360px），展开时 Channel 自适应收缩。
 - Sidebar 宽 256px，自上而下：Space 头（标识 + 名称）、Space tools（Inbox 带待读计数、Tasks、Members、Computers；开启实验功能后出现 Agent insights、Company）、Channels、Discover、Direct messages，底部固定为账户菜单（头像 + 名字，点开显示邮箱、Settings、Sign out）与 Settings 齿轮。
 - Sidebar 头部有搜索按钮，`⌘K` / `Ctrl+K` 在任何页面打开快速跳转：按名字筛选 Channels、DM、Agents 和 Space 工具页，方向键选择、Enter 打开、Esc 关闭。
+- `/s/$spaceSlug` 是布局路由：同一 Space 内只挂载一个 SpaceShell，切换页面不重建 Sidebar、实时连接与未读标记；该 Shell 持有 Space 唯一的 SSE 连接，需要实时 Message 事件的页面（如 Company Office）订阅 Shell，不另开连接。切换到另一个 Space 时重建 Shell。
 - Sidebar 结构固定：点击任何入口只改变选中项，不在 Sidebar 内插入或移除内容。页面自己的二级列表放在页面内：Computers 的已配对列表是页面左侧 232px 分栏（标题行与页面 header 同高、共用分隔线；低于 700px 变为顶部横向滚动条），Insights 用页内 tab，Settings 是单页。
 - 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用 subtle 底槽 + 白色抬起选中块。
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。

@@ -16,7 +16,7 @@ import {
 import { activityLabel } from "../../agentActivity";
 import { PixelAgent, type AgentPose } from "../../components/company/PixelAgent";
 import { PixelIdentity } from "../../components/PixelIdentity";
-import { useSpaceEvents } from "../../hooks/useSpaceEvents";
+import type { SpaceShellContext } from "../../components/spaceShellContext";
 import { buildGrid, isMoving, routeWalker, samePoint, spawnWalker, stepWalker, type Point, type Rect, type Walker } from "./officeSim";
 import "./office.css";
 
@@ -235,6 +235,7 @@ export function CompanyOfficeView({
   directMessages,
   members,
   currentMember,
+  subscribeMessages,
 }: {
   spaceSlug: string;
   spaceId: string;
@@ -242,6 +243,8 @@ export function CompanyOfficeView({
   directMessages: DirectMessage[];
   members: Member[];
   currentMember: Member;
+  /** New Messages from the Space Shell's event stream; the Office opens no stream of its own. */
+  subscribeMessages: SpaceShellContext["subscribeMessages"];
 }) {
   const reduced = useReducedMotion();
   const agents = useQuery({
@@ -371,15 +374,18 @@ export function CompanyOfficeView({
     }
   }
 
-  useSpaceEvents(spaceId, ({ channelId }) => {
-    const now = Date.now();
-    const pair = dmDirectory.get(channelId);
-    if (pair) {
-      void handleDmMessage(pair, channelId);
-      return;
-    }
-    recordChannelMessage(channelId, now);
+  const onMessage = useRef<(channelId: string) => void>(() => undefined);
+  useEffect(() => {
+    onMessage.current = (channelId) => {
+      const pair = dmDirectory.get(channelId);
+      if (pair) {
+        void handleDmMessage(pair, channelId);
+        return;
+      }
+      recordChannelMessage(channelId, Date.now());
+    };
   });
+  useEffect(() => subscribeMessages(({ channelId }) => onMessage.current(channelId)), [subscribeMessages]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

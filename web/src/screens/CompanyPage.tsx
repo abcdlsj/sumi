@@ -1,6 +1,6 @@
 import { Link, useParams } from "@tanstack/react-router";
 
-import { SpaceShell } from "../components/SpaceShell";
+import { SpacePage } from "../components/SpaceShell";
 import { COMPANY_OFFICE_FEATURE_ID, useFeatureEnabled } from "../featureRegistry";
 import { CompanyOfficeView } from "./company/OfficeView";
 
@@ -9,7 +9,7 @@ export function CompanyOfficePage() {
   const enabled = useFeatureEnabled(COMPANY_OFFICE_FEATURE_ID);
   if (!enabled) {
     return (
-      <SpaceShell spaceSlug={spaceSlug} active="company">
+      <SpacePage>
         {() => (
           <div className="route-status">
             <section className="route-status-panel">
@@ -25,12 +25,12 @@ export function CompanyOfficePage() {
             </section>
           </div>
         )}
-      </SpaceShell>
+      </SpacePage>
     );
   }
   return (
-    <SpaceShell spaceSlug={spaceSlug} active="company">
-      {({ space, channels, directMessages, members, currentMember }) => (
+    <SpacePage>
+      {({ space, channels, directMessages, members, currentMember, subscribeMessages }) => (
         <CompanyOfficeView
           spaceSlug={space.slug}
           spaceId={space.id}
@@ -38,8 +38,9 @@ export function CompanyOfficePage() {
           directMessages={directMessages}
           members={members}
           currentMember={currentMember}
+          subscribeMessages={subscribeMessages}
         />
       )}
-    </SpaceShell>
+    </SpacePage>
   );
 }
