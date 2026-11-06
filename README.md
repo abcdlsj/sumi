@@ -213,10 +213,7 @@ Compose are not supported for the Computer. Create a configuration file, for exa
 [computer]
 server_url = "http://127.0.0.1:3000"
 state_dir = "/var/lib/sumi/computer"
-open_pairing_browser = false
 max_concurrent_runs = 4
-per_agent_timeout_seconds = 1800
-shutdown_grace_period_seconds = 20
 auto_update = true
 update_check_interval_seconds = 21600
 update_ready_timeout_seconds = 30
@@ -290,8 +287,8 @@ Server. The GitHub
 Actions run stores them as workflow artifacts and attaches them with
 `SHA256SUMS` to the GitHub Release.
 
-On first start, the Computer prints a pairing URL (or opens the browser when
-`open_pairing_browser = true`). Confirm the pairing in the Sumi web UI to bind
+On first start, the Computer prints a pairing URL. Confirm the pairing in the
+Sumi web UI to bind
 the Computer to a Space. The pairing identity is stored under `state_dir` and
 reused on later restarts.
 

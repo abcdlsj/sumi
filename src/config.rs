@@ -208,15 +208,12 @@ impl Default for ServerConfig {
 pub(crate) struct ComputerConfig {
     pub(crate) server_url: Url,
     pub(crate) state_dir: PathBuf,
-    pub(crate) open_pairing_browser: bool,
     pub(crate) codex_config_source: Option<PathBuf>,
     pub(crate) codex_auth_source: Option<PathBuf>,
     pub(crate) pi_agent_dir_source: Option<PathBuf>,
     pub(crate) acp: AcpConfig,
     pub(crate) builtin: Option<BuiltinOpenAiConfig>,
     pub(crate) max_concurrent_runs: usize,
-    pub(crate) per_agent_timeout_seconds: u64,
-    pub(crate) shutdown_grace_period_seconds: u64,
     pub(crate) auto_update: bool,
     pub(crate) update_check_interval_seconds: u64,
     pub(crate) update_ready_timeout_seconds: u64,
@@ -227,15 +224,12 @@ impl Default for ComputerConfig {
         Self {
             server_url: Url::parse("http://127.0.0.1:3000").expect("valid default server URL"),
             state_dir: default_computer_state_dir(),
-            open_pairing_browser: true,
             codex_config_source: None,
             codex_auth_source: None,
             pi_agent_dir_source: None,
             acp: AcpConfig::default(),
             builtin: None,
             max_concurrent_runs: 1000,
-            per_agent_timeout_seconds: 30 * 60,
-            shutdown_grace_period_seconds: 20,
             auto_update: true,
             update_check_interval_seconds: 6 * 60 * 60,
             update_ready_timeout_seconds: 30,
@@ -284,14 +278,6 @@ fn validate(config: &SumiConfig) -> Result<()> {
     ensure!(
         config.computer.max_concurrent_runs > 0,
         "computer.max_concurrent_runs must be positive"
-    );
-    ensure!(
-        config.computer.per_agent_timeout_seconds > 0,
-        "computer.per_agent_timeout_seconds must be positive"
-    );
-    ensure!(
-        config.computer.shutdown_grace_period_seconds > 0,
-        "computer.shutdown_grace_period_seconds must be positive"
     );
     ensure!(
         config.computer.update_check_interval_seconds > 0,

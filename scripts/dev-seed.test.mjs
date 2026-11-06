@@ -43,14 +43,13 @@ test("development seed exposes a codex command override for optional codex use",
 
 test("development seed copies local Computer configuration with isolated runtime overrides", () => {
   const config = buildSeedComputerConfig(
-    `[server]\ndatabase_url = "postgres://localhost/sumi_prod"\n\n[computer]\nserver_url = "https://sumi.example.test"\nstate_dir = "/var/lib/sumi"\nopen_pairing_browser = true\ncodex_config_source = "/custom/codex/config.toml"\n\n[computer.builtin]\napi_base = "https://api.deepseek.com"\ntoken = "test-token"\nmodel = "deepseek-v4-pro"\n`,
+    `[server]\ndatabase_url = "postgres://localhost/sumi_prod"\n\n[computer]\nserver_url = "https://sumi.example.test"\nstate_dir = "/var/lib/sumi"\ncodex_config_source = "/custom/codex/config.toml"\n\n[computer.builtin]\napi_base = "https://api.deepseek.com"\ntoken = "test-token"\nmodel = "deepseek-v4-pro"\n`,
     { server: "http://127.0.0.1:3000", stateDir: "/tmp/sumi-seed/computer", codexHome: "/fallback/codex" },
   );
 
   assert.match(config, /database_url = "postgres:\/\/localhost\/sumi_prod"/);
   assert.match(config, /server_url = "http:\/\/127\.0\.0\.1:3000"/);
   assert.match(config, /state_dir = "\/tmp\/sumi-seed\/computer"/);
-  assert.match(config, /open_pairing_browser = false/);
   assert.match(config, /codex_config_source = "\/custom\/codex\/config\.toml"/);
   assert.match(config, /api_base = "https:\/\/api\.deepseek\.com"/);
   assert.match(config, /token = "test-token"/);

@@ -342,7 +342,7 @@ pub fn write_computer_config(path: &Path, server: &Url, state_dir: &Path) -> Res
     std::fs::write(
         path,
         format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nshutdown_grace_period_seconds = 1\n",
+            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\n",
             state_dir.display()
         ),
     )?;
@@ -433,20 +433,8 @@ pub fn write_default_codex_computer_config(
         toml::Value::String(state_dir.display().to_string()),
     );
     computer.insert(
-        "open_pairing_browser".to_owned(),
-        toml::Value::Boolean(false),
-    );
-    computer.insert(
         "max_concurrent_runs".to_owned(),
         toml::Value::Integer(i64::try_from(max_concurrent_runs)?),
-    );
-    computer.insert(
-        "per_agent_timeout_seconds".to_owned(),
-        toml::Value::Integer(600),
-    );
-    computer.insert(
-        "shutdown_grace_period_seconds".to_owned(),
-        toml::Value::Integer(1),
     );
     computer.insert(
         "codex_config_source".to_owned(),
@@ -478,7 +466,7 @@ pub fn write_builtin_computer_config(
     std::fs::write(
         path,
         format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nmax_concurrent_runs = 1\nper_agent_timeout_seconds = 60\nshutdown_grace_period_seconds = 1\n\n[computer.builtin]\napi_base = '{provider_base_url}'\ntoken = 'test-only-provider-key'\nmodel = 'sumi-test-model'\n",
+            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nmax_concurrent_runs = 1\n\n[computer.builtin]\napi_base = '{provider_base_url}'\ntoken = 'test-only-provider-key'\nmodel = 'sumi-test-model'\n",
             state_dir.display(),
         ),
     )?;
@@ -515,7 +503,7 @@ pub fn write_harness_computer_config(
     std::fs::write(
         path,
         format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nmax_concurrent_runs = {max_concurrent_runs}\nper_agent_timeout_seconds = 1200\nshutdown_grace_period_seconds = 1\n{codex_sources}\n[computer.builtin]\napi_base = '{}'\ntoken = '{}'\nmodel = '{}'\ncontext_window_tokens = {}\ncompaction_trigger_ratio = {}\ncompaction_keep_recent_tokens = {}\n",
+            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nmax_concurrent_runs = {max_concurrent_runs}\n{codex_sources}\n[computer.builtin]\napi_base = '{}'\ntoken = '{}'\nmodel = '{}'\ncontext_window_tokens = {}\ncompaction_trigger_ratio = {}\ncompaction_keep_recent_tokens = {}\n",
             state_dir.display(),
             builtin.api_base,
             builtin.token,

@@ -153,7 +153,6 @@ export function buildSeedComputerConfig(
   const forced = new Map([
     ["server_url", JSON.stringify(server)],
     ["state_dir", JSON.stringify(stateDir)],
-    ["open_pairing_browser", "false"],
   ]);
   if (codexHomeFromEnv) {
     forced.set("codex_config_source", JSON.stringify(join(codexHome, "config.toml")));
@@ -162,7 +161,6 @@ export function buildSeedComputerConfig(
   const defaults = new Map([
     ["codex_config_source", JSON.stringify(join(codexHome, "config.toml"))],
     ["codex_auth_source", JSON.stringify(join(codexHome, "auth.json"))],
-    ["shutdown_grace_period_seconds", "1"],
   ]);
   const lines = source.trimEnd().split(/\r?\n/);
   const output = [];

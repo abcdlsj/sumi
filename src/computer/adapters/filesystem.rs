@@ -10,6 +10,7 @@ use crate::{
         ApplicationError, DriverKind, LocalAgent, LocalAgentState, MemoryFile, ports::AgentHomePort,
     },
     ids::AgentId,
+    private_paths::ensure_private_directory,
 };
 
 pub(in crate::computer) struct AgentHomeAdapter {
@@ -36,7 +37,9 @@ impl AgentHomeAdapter {
 
     async fn write_profile(&self, agent: &LocalAgent) -> Result<(), ApplicationError> {
         let home = self.agent_home(agent);
-        create_private_dir(&home).await?;
+        ensure_private_directory(&home)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         for relative in [
             "memory",
             "workspace",
@@ -48,7 +51,9 @@ impl AgentHomeAdapter {
             "runs",
             "logs",
         ] {
-            create_private_dir(&home.join(relative)).await?;
+            ensure_private_directory(&home.join(relative))
+                .await
+                .map_err(|_| ApplicationError::Internal)?;
         }
         if agent.driver == DriverKind::Codex {
             self.install_codex_sources(&home.join("drivers/codex"))
@@ -203,7 +208,9 @@ impl AgentHomeAdapter {
             .map_err(|_| ApplicationError::NotFound)?;
         let relative_parent = path.parent().unwrap_or_else(|| Path::new(""));
         let requested_parent = home.join(relative_parent);
-        create_private_dir(&requested_parent).await?;
+        ensure_private_directory(&requested_parent)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         let parent = tokio::fs::canonicalize(&requested_parent)
             .await
             .map_err(|_| ApplicationError::Internal)?;
@@ -391,7 +398,9 @@ impl AgentHomePort for AgentHomeAdapter {
             .map_err(|_| ApplicationError::NotFound)?;
         let relative_parent = path.parent().unwrap_or_else(|| Path::new(""));
         let requested_parent = memory_root.join(relative_parent);
-        create_private_dir(&requested_parent).await?;
+        ensure_private_directory(&requested_parent)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         let parent = tokio::fs::canonicalize(&requested_parent)
             .await
             .map_err(|_| ApplicationError::Internal)?;
@@ -407,20 +416,6 @@ impl AgentHomePort for AgentHomeAdapter {
         }
         write_private_file(&target, content).await
     }
-}
-
-async fn create_private_dir(path: &Path) -> Result<(), ApplicationError> {
-    tokio::fs::create_dir_all(path)
-        .await
-        .map_err(|_| ApplicationError::Internal)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .await
-            .map_err(|_| ApplicationError::Internal)?;
-    }
-    Ok(())
 }
 
 async fn restrict_file(path: &Path) -> Result<(), ApplicationError> {

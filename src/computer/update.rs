@@ -13,6 +13,7 @@ use tokio::{io::AsyncWriteExt, process::Command, sync::mpsc};
 use crate::{
     cli::{ComputerArgs, Supervisor, UpdaterArgs},
     config::{ComputerConfig, default_sumi_dir},
+    private_paths::ensure_private_directory,
     protocol::update::{ComputerRelease, current_target},
 };
 
@@ -181,13 +182,8 @@ pub(crate) fn start_checker(
             match check_and_stage(&server, &computer_home).await {
                 Ok(Some(update)) => {
                     tracing::info!(target_version = %update.version, "Computer update staged");
-                    loop {
-                        if local_runs_are_inactive(&computer_home.join("daemon.db")).await
-                            && sender.send(update.clone()).await.is_err()
-                        {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    if sender.send(update).await.is_err() {
+                        return;
                     }
                 }
                 Ok(None) => {}
@@ -307,23 +303,6 @@ fn ensure_secure_update_origin(server: &url::Url) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn local_runs_are_inactive(database: &Path) -> bool {
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(database)
-        .read_only(true)
-        .busy_timeout(Duration::from_secs(1));
-    let Ok(mut connection) = sqlx::SqliteConnection::connect_with(&options).await else {
-        return false;
-    };
-    use sqlx::Connection;
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM local_runs WHERE state IN ('queued','starting','running','finalizing','stopping')",
-    )
-    .fetch_one(&mut connection)
-    .await
-    .is_ok_and(|count| count == 0)
-}
-
 pub(crate) async fn launch_updater(
     update: &StagedUpdate,
     computer_home: &Path,
@@ -394,7 +373,7 @@ pub(crate) async fn run_updater(args: UpdaterArgs) -> anyhow::Result<()> {
     wait_for_parent(args.parent_pid).await?;
     let update_root = args.computer_home.join("update");
     if let Err(error) = ensure_private_directory(&update_root).await {
-        restart_after_prepare_failure(&args, error, &update_root).await?;
+        restart_after_prepare_failure(&args, error.into(), &update_root).await?;
         return Ok(());
     }
     let previous = update_root.join("previous-sumi");
@@ -648,16 +627,6 @@ async fn write_executable_atomically(path: &Path, content: &[u8]) -> anyhow::Res
     drop(file);
     make_executable(&pending).await?;
     tokio::fs::rename(pending, path).await?;
-    Ok(())
-}
-
-async fn ensure_private_directory(path: &Path) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(path).await?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
-    }
     Ok(())
 }
 

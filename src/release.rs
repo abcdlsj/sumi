@@ -6,6 +6,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     cli::ComputerReleaseArgs,
+    private_paths::ensure_private_directory,
     protocol::{
         update::{ComputerRelease, current_target},
         version::CURRENT,
@@ -58,16 +59,6 @@ pub(crate) async fn computer(args: ComputerReleaseArgs) -> anyhow::Result<()> {
     )
     .await?;
     println!("{}", target_dir.display());
-    Ok(())
-}
-
-async fn ensure_private_directory(path: &Path) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(path).await?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
-    }
     Ok(())
 }
 

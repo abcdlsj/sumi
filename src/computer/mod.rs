@@ -34,6 +34,7 @@ use crate::{
     cli::ComputerArgs,
     config::{daemon_socket_path, load, runtime_dir_for},
     ids::{AttachmentId, DaemonSessionId, EventId, IdempotencyKey, RunId},
+    private_paths::ensure_private_directory,
     protocol::{
         capability,
         computer::{
@@ -242,11 +243,15 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
             .build()
     };
     let mut reconnect = reconnect_backoff();
+    // A staged release is activated only while no Run is live, so a deferred one stays here and is
+    // retried on this loop rather than by the checker reading the daemon database on the side.
+    let mut staged_update: Option<update::StagedUpdate> = None;
     loop {
         let connection_started = tokio::time::Instant::now();
         enum LoopEvent {
             Connection(anyhow::Result<()>),
             Update(update::StagedUpdate),
+            ActivateUpdate,
         }
         let event = if let Some(receiver) = updates.as_mut() {
             tokio::select! {
@@ -259,7 +264,8 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
                     config.max_concurrent_runs,
                     &mut yield_interrupt_rx,
                 ) => LoopEvent::Connection(result),
-                Some(update) = receiver.recv() => LoopEvent::Update(update),
+                Some(update) = receiver.recv(), if staged_update.is_none() => LoopEvent::Update(update),
+                () = tokio::time::sleep(UPDATE_ACTIVATION_POLL), if staged_update.is_some() => LoopEvent::ActivateUpdate,
             }
         } else {
             LoopEvent::Connection(
@@ -287,26 +293,30 @@ pub(crate) async fn run(args: ComputerArgs) -> anyhow::Result<()> {
                     .expect("an unlimited reconnect backoff always yields a delay");
                 tracing::warn!(%error, ?delay, "Computer connection lost; retrying");
                 tokio::time::sleep(delay).await;
+                continue;
             }
-            LoopEvent::Update(staged) => {
-                if !RecoveryService::live_run_ids(&mut storage)
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error))?
-                    .is_empty()
-                {
-                    tracing::info!(target_version = %staged.version, "Computer update is waiting for active Runs");
-                    continue;
-                }
-                update::launch_updater(
-                    &staged,
-                    &computer_home,
-                    &restart_args,
-                    config.update_ready_timeout_seconds,
-                )
-                .await?;
-                return Ok(());
-            }
+            LoopEvent::Update(staged) => staged_update = Some(staged),
+            LoopEvent::ActivateUpdate => {}
         }
+        let Some(staged) = staged_update.as_ref() else {
+            continue;
+        };
+        if !RecoveryService::live_run_ids(&mut storage)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?
+            .is_empty()
+        {
+            tracing::info!(target_version = %staged.version, "Computer update is waiting for active Runs");
+            continue;
+        }
+        update::launch_updater(
+            staged,
+            &computer_home,
+            &restart_args,
+            config.update_ready_timeout_seconds,
+        )
+        .await?;
+        return Ok(());
     }
 }
 
@@ -725,6 +735,9 @@ where
         }
     }
 }
+
+/// How often a staged release re-checks whether its Runs finished.
+const UPDATE_ACTIVATION_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// Three heartbeat periods; the Server answers the ping sent with every heartbeat.
@@ -1218,18 +1231,6 @@ async fn pair(root: &Path, server: &url::Url) -> anyhow::Result<(PathBuf, Comput
             _ => anyhow::bail!("Server returned an unknown Computer pairing status"),
         }
     }
-}
-
-async fn ensure_private_directory(path: &Path) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(path)
-        .await
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
-    }
-    Ok(())
 }
 
 async fn write_secrets(path: &Path, secrets: &ComputerSecrets) -> anyhow::Result<()> {
