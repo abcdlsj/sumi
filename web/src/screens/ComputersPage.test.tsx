@@ -75,7 +75,8 @@ describe("Computer flows", () => {
     expect(screen.getByRole("link", { name: "Pair Computer" })).toBeVisible();
     expect(screen.getByLabelText("Agent name")).toHaveFocus();
     fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Lin" } });
-    fireEvent.change(screen.getByLabelText("Driver"), { target: { value: "builtin" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Driver" }));
+    fireEvent.click(screen.getByRole("option", { name: "Builtin" }));
     fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Review boundaries." } });
     fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
     await waitFor(() => {

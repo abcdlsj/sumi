@@ -4,7 +4,8 @@ import { type FormEvent, useState } from "react";
 
 import {addChannelAgents, computerInstallCommand, createAgent} from "../../api/client";
 import type {Agent, Computer, Member} from "../../api/types";
-import { DRIVER_CHOICES, driverInput } from "../../driver";
+import { driverInput } from "../../driver";
+import { AgentSetupFields } from "../AgentSetupFields";
 import { DialogFrame } from "../DialogFrame";
 
 /** Starter roles so a first Agent takes one click instead of a blank form. */
@@ -290,14 +291,7 @@ function QuickAgentDialog({
         </fieldset>
         <label className="agent-field">Name<input aria-label="Agent name" required maxLength={40} value={name} onChange={(event) => setName(event.target.value)} data-dialog-initial-focus /></label>
         <label className="agent-field agent-field--wide">Role<textarea aria-label="Role" required maxLength={12000} rows={3} value={role} onChange={(event) => setRole(event.target.value)} /></label>
-        <details className="quick-agent-advanced">
-          <summary>Computer, driver and access</summary>
-          <div>
-            <label className="agent-field">Computer<select name="computer_id" defaultValue={computers[0]?.id}>{computers.map((computer) => <option key={computer.id} value={computer.id}>{computer.name}</option>)}</select></label>
-            <label className="agent-field">Driver<select name="driver" defaultValue="codex">{DRIVER_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></label>
-            <label className="agent-field">Access level<select name="access_level" defaultValue="member"><option value="member">Member</option>{isOwner ? <option value="admin">Admin</option> : null}</select></label>
-          </div>
-        </details>
+        <AgentSetupFields computers={computers} isOwner={isOwner} collapsible />
         {creation.error ? <p className="form-error" role="alert">{creation.error.message}</p> : null}
         <footer>
           <button className="command-button" type="button" onClick={close}>Cancel</button>
