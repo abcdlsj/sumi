@@ -59,18 +59,14 @@ impl PostgresTransaction {
         .execute(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;
-        sqlx::query(
-            "INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) \
-             VALUES($1,$2,$3,$4,$5)",
+        self.insert_space_event(
+            EventId::from_uuid(Uuid::now_v7()),
+            space_id,
+            event_kind,
+            json!({"attachment_id": attachment_uuid}),
+            now,
         )
-        .bind(Uuid::now_v7())
-        .bind(space_id.into_uuid())
-        .bind(event_kind)
-        .bind(json!({"attachment_id": attachment_uuid}))
-        .bind(now)
-        .execute(&mut *self.connection)
-        .await
-        .map_err(map_sqlx)?;
+        .await?;
         Ok(())
     }
 

@@ -416,6 +416,37 @@ impl PostgresAdapter {
             .execute(&mut *transaction)
             .await?;
         }
+        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if version < 13 {
+            if version != 12 {
+                return Err(sqlx::Error::Protocol(format!(
+                    "unsupported schema baseline version {version}"
+                )));
+            }
+            // Browser streams follow `sequence`, the commit order inside a Space, instead of
+            // `created_at`, which the application writes before the commit order is decided.
+            sqlx::raw_sql(
+                "ALTER TABLE outbox_events ADD COLUMN sequence BIGINT; \
+                 WITH ordered AS ( \
+                    SELECT id,row_number() OVER (PARTITION BY space_id ORDER BY created_at,id) AS position \
+                    FROM outbox_events \
+                 ) \
+                 UPDATE outbox_events e SET sequence=ordered.position \
+                    FROM ordered WHERE e.id=ordered.id; \
+                 ALTER TABLE outbox_events ALTER COLUMN sequence SET NOT NULL; \
+                 CREATE UNIQUE INDEX outbox_events_space_sequence ON outbox_events(space_id, sequence); \
+                 DROP INDEX outbox_events_space_cursor; \
+                 ALTER TABLE spaces ADD COLUMN event_sequence BIGINT NOT NULL DEFAULT 0; \
+                 UPDATE spaces s SET event_sequence=COALESCE(( \
+                    SELECT max(e.sequence) FROM outbox_events e WHERE e.space_id=s.id \
+                 ),0); \
+                 INSERT INTO schema_meta (version, applied_at) VALUES (13, now());",
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await
     }
 
@@ -721,7 +752,7 @@ impl PostgresAdapter {
         agent_member_id: MemberId,
         kind: &str,
         payload: serde_json::Value,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<(), ApplicationError> {
         let mut record = payload;
         if let Some(object) = record.as_object_mut() {
             object.insert(
@@ -749,16 +780,27 @@ impl PostgresAdapter {
             object.remove("message_preview");
             object.remove("message_truncated");
         }
-        sqlx::query(
-            "INSERT INTO outbox_events (id,space_id,kind,payload_json,created_at) \
-             VALUES ($1,$2,'agent.activity',$3,now()) ON CONFLICT (id) DO NOTHING",
-        )
-        .bind(event_id.into_uuid())
-        .bind(space_id.into_uuid())
-        .bind(record)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        // The activity event still needs a Space commit position, so it runs in its own
+        // transaction: allocation and insert either both land or neither does.
+        let mut transaction = PostgresTransaction::begin(&self.pool).await?;
+        if let Err(error) = transaction
+            .insert_space_event_once(
+                event_id,
+                space_id,
+                "agent.activity",
+                record,
+                OffsetDateTime::now_utc(),
+            )
+            .await
+        {
+            transaction.rollback().await;
+            return Err(error);
+        }
+        sqlx::query("COMMIT")
+            .execute(&mut *transaction.connection)
+            .await
+            .map_err(map_sqlx)
+            .map(|_| ())
     }
 }
 
@@ -802,19 +844,9 @@ impl TransactionPort for PostgresAdapter {
         &mut self,
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,
     ) -> Result<T, ApplicationError> {
-        let mut transaction = PostgresTransaction {
-            connection: self
-                .pool
-                .acquire()
-                .await
-                .map_err(|_| ApplicationError::Unavailable)?,
-            effects: Vec::new(),
-            notified_computers: std::collections::BTreeSet::new(),
-        };
-        sqlx::query("BEGIN")
-            .execute(&mut *transaction.connection)
+        let mut transaction = PostgresTransaction::begin(&self.pool)
             .await
-            .map_err(map_sqlx)?;
+            .map_err(|_| ApplicationError::Unavailable)?;
         match operation(&mut transaction).await {
             Ok(value) => {
                 if let Err(error) = transaction.flush_effects().await {
@@ -857,6 +889,89 @@ pub(in crate::server::adapters) use query::*;
 use rows::*;
 
 impl PostgresTransaction {
+    async fn begin(pool: &PgPool) -> Result<Self, ApplicationError> {
+        let mut transaction = Self {
+            connection: pool.acquire().await.map_err(map_sqlx)?,
+            effects: Vec::new(),
+            notified_computers: BTreeSet::new(),
+        };
+        sqlx::query("BEGIN")
+            .execute(&mut *transaction.connection)
+            .await
+            .map_err(map_sqlx)?;
+        Ok(transaction)
+    }
+
+    /// Inserts one Browser event under the next commit position of its Space.
+    ///
+    /// `spaces.event_sequence` is bumped by a row lock this transaction keeps until it commits, so
+    /// the allocation order is the commit order: a transaction that allocated a higher sequence
+    /// cannot commit before one holding a lower sequence. That is why the stream can follow
+    /// `sequence` alone, while `created_at` is only the time the application entered the write.
+    async fn insert_space_event(
+        &mut self,
+        event_id: EventId,
+        space_id: SpaceId,
+        kind: &str,
+        payload: serde_json::Value,
+        created_at: OffsetDateTime,
+    ) -> Result<(), ApplicationError> {
+        self.insert_space_event_row(event_id, space_id, kind, payload, created_at, false)
+            .await
+    }
+
+    /// Same as [`Self::insert_space_event`], but a repeated `event_id` is a no-op instead of a
+    /// conflict. Retried best-effort activity events keep their id and must not fail the retry; the
+    /// consumed position stays unused, which readers only skip.
+    async fn insert_space_event_once(
+        &mut self,
+        event_id: EventId,
+        space_id: SpaceId,
+        kind: &str,
+        payload: serde_json::Value,
+        created_at: OffsetDateTime,
+    ) -> Result<(), ApplicationError> {
+        self.insert_space_event_row(event_id, space_id, kind, payload, created_at, true)
+            .await
+    }
+
+    async fn insert_space_event_row(
+        &mut self,
+        event_id: EventId,
+        space_id: SpaceId,
+        kind: &str,
+        payload: serde_json::Value,
+        created_at: OffsetDateTime,
+        idempotent: bool,
+    ) -> Result<(), ApplicationError> {
+        let sequence: i64 = sqlx::query_scalar(
+            "UPDATE spaces SET event_sequence=event_sequence+1 WHERE id=$1 RETURNING event_sequence",
+        )
+        .bind(space_id.into_uuid())
+        .fetch_one(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        let conflict = if idempotent {
+            " ON CONFLICT (id) DO NOTHING"
+        } else {
+            ""
+        };
+        sqlx::query(&format!(
+            "INSERT INTO outbox_events (id,space_id,kind,payload_json,created_at,sequence) \
+             VALUES ($1,$2,$3,$4,$5,$6){conflict}"
+        ))
+        .bind(event_id.into_uuid())
+        .bind(space_id.into_uuid())
+        .bind(kind)
+        .bind(payload)
+        .bind(created_at)
+        .bind(sequence)
+        .execute(&mut *self.connection)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(())
+    }
+
     async fn space_of_member(
         &mut self,
         member_id: MemberId,
@@ -939,17 +1054,14 @@ impl PostgresTransaction {
     async fn flush_effects(&mut self) -> Result<(), ApplicationError> {
         for effect in std::mem::take(&mut self.effects) {
             let (space_id, kind, payload) = self.effect_record(effect).await?;
-            sqlx::query(
-                "INSERT INTO outbox_events (id,space_id,kind,payload_json,created_at) \
-                 VALUES ($1,$2,$3,$4,now())",
+            self.insert_space_event(
+                EventId::from_uuid(Uuid::now_v7()),
+                space_id,
+                kind,
+                payload,
+                OffsetDateTime::now_utc(),
             )
-            .bind(Uuid::now_v7())
-            .bind(space_id.into_uuid())
-            .bind(kind)
-            .bind(payload)
-            .execute(&mut *self.connection)
-            .await
-            .map_err(map_sqlx)?;
+            .await?;
         }
         Ok(())
     }
