@@ -729,6 +729,21 @@ impl PostgresAdapter {
         Ok(super::realtime::BrowserEventPage { events, next })
     }
 
+    /// Position the stream should start from when it has no `Last-Event-ID`: the Space tail.
+    pub(super) async fn space_event_tail(
+        &self,
+        space_id: SpaceId,
+    ) -> Result<super::realtime::EventCursor, ApplicationError> {
+        let tail: i64 = sqlx::query_scalar("SELECT event_sequence FROM spaces WHERE id=$1")
+            .bind(space_id.into_uuid())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx)?;
+        Ok(super::realtime::EventCursor::new(
+            u64::try_from(tail).map_err(|_| ApplicationError::Internal)?,
+        ))
+    }
+
     /// Maps a stream `Last-Event-ID` to its position. `None` means the event is unknown here — it
     /// belongs to another Space or left the outbox — and the stream turns that into
     /// `context_changed` so the Browser rebuilds its projection.

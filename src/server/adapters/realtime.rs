@@ -53,6 +53,7 @@ impl<T: Serialize> BrowserEvent<T> {
 }
 
 use super::http::{ApiError, RuntimeState, application_error, current_member};
+use super::space_events::Wake;
 use crate::ids::MemberId;
 use axum::{
     extract::{Path, State},
@@ -65,6 +66,7 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use futures_util::stream;
 use std::{collections::VecDeque, convert::Infallible};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 pub(super) async fn space_events(
@@ -90,56 +92,32 @@ pub(super) async fn space_events(
     // Subscribe before the first read so a commit between the read and the wait still wakes us.
     let wakeups = state.space_events.subscribe();
     let cursor = match last_event_id {
-        Some(event_id) => Some(
-            state
-                .storage
-                .event_cursor(space_id, event_id)
-                .await
-                .map_err(application_error)?
-                .ok_or_else(ApiError::context_changed)?,
-        ),
-        None => None,
+        // A reconnect continues right after the event the Browser already handled.
+        Some(event_id) => state
+            .storage
+            .event_cursor(space_id, event_id)
+            .await
+            .map_err(application_error)?
+            .ok_or_else(ApiError::context_changed)?,
+        // A first connection starts at the current tail: the Browser rebuilds history from a
+        // projection query, so replaying it through the stream only delays live events.
+        None => state
+            .storage
+            .space_event_tail(space_id)
+            .await
+            .map_err(application_error)?,
     };
-    let initial = state
-        .storage
-        .browser_events(space_id, viewer, cursor)
-        .await
-        .map_err(application_error)?;
-    let cursor = initial
-        .next
-        .or_else(|| initial.events.last().map(|event| event.cursor))
-        .or(cursor);
     let events = stream::unfold(
-        (
-            state.storage,
+        SpaceEventFeed {
+            storage: state.storage,
             space_id,
             viewer,
             cursor,
-            VecDeque::from(initial.events),
+            buffered: VecDeque::new(),
+            paging: true,
             wakeups,
-        ),
-        move |(storage, space_id, viewer, mut cursor, mut buffered, mut wakeups)| async move {
-            loop {
-                if let Some(event) = buffered.pop_front() {
-                    cursor = Some(cursor.map_or(event.cursor, |cursor| cursor.max(event.cursor)));
-                    let event = event.into_sse().ok()?;
-                    return Some((
-                        Ok(event),
-                        (storage, space_id, viewer, cursor, buffered, wakeups),
-                    ));
-                }
-                super::space_events::wait_for_space(&mut wakeups, space_id.into_uuid()).await;
-                let page = match storage.browser_events(space_id, viewer, cursor).await {
-                    Ok(page) => page,
-                    Err(_) => return None,
-                };
-                cursor = page
-                    .next
-                    .or_else(|| page.events.last().map(|event| event.cursor))
-                    .or(cursor);
-                buffered = VecDeque::from(page.events);
-            }
         },
+        SpaceEventFeed::next_event,
     );
     let events = futures_util::StreamExt::take_until(
         events,
@@ -148,4 +126,50 @@ pub(super) async fn space_events(
         }),
     );
     Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+}
+
+/// Reads the Space stream page by page for one Browser connection.
+struct SpaceEventFeed {
+    storage: super::postgres::PostgresAdapter,
+    space_id: SpaceId,
+    viewer: MemberId,
+    /// Position of the last row this stream has handled.
+    cursor: EventCursor,
+    buffered: VecDeque<BrowserEvent<serde_json::Value>>,
+    /// A full page means more rows may already be committed, so the next read runs before any
+    /// wait: a page of invisible events must not need a wake-up to advance.
+    paging: bool,
+    wakeups: broadcast::Receiver<Wake>,
+}
+
+impl SpaceEventFeed {
+    async fn next_event(mut self) -> Option<(Result<SseEvent, Infallible>, Self)> {
+        loop {
+            if let Some(event) = self.buffered.pop_front() {
+                // A full page already moved the cursor past all of its rows, so it never goes back.
+                self.cursor = self.cursor.max(event.cursor);
+                let event = event.into_sse().ok()?;
+                return Some((Ok(event), self));
+            }
+            if !self.paging {
+                super::space_events::wait_for_space(&mut self.wakeups, self.space_id.into_uuid())
+                    .await;
+            }
+            let page = self
+                .storage
+                .browser_events(self.space_id, self.viewer, Some(self.cursor))
+                .await
+                .ok()?;
+            self.paging = page.next.is_some();
+            // An invisible tail still advances the cursor, so re-reading after a wake-up cannot
+            // resend an event the Browser already has.
+            self.cursor = page.next.unwrap_or_else(|| {
+                page.events
+                    .last()
+                    .map(|event| event.cursor)
+                    .unwrap_or(self.cursor)
+            });
+            self.buffered = VecDeque::from(page.events);
+        }
+    }
 }

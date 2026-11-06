@@ -2888,6 +2888,78 @@ async fn a_full_page_of_unreadable_events_still_advances_the_stream() {
     result
 }
 
+/// A first connection starts at the Space tail: committed history is not replayed, and the first
+/// new commit is delivered from that position.
+#[tokio::test]
+async fn a_new_stream_starts_at_the_space_tail() {
+    use super::super::realtime::EventCursor;
+
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_event_tail_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let adapter = PostgresAdapter::new(pool.clone());
+        adapter.initialize_schema().await.unwrap();
+        let (space_id, owner_id, _) = event_test_space(&pool).await;
+
+        commit_events(
+            &pool,
+            space_id,
+            3,
+            "task.updated",
+            json!({"resource_id": Uuid::now_v7()}),
+        )
+        .await;
+        let tail = adapter.space_event_tail(space_id).await.unwrap();
+        assert_eq!(tail, EventCursor::new(3));
+        let history = adapter
+            .browser_events(space_id, owner_id, Some(tail))
+            .await
+            .unwrap();
+        assert!(
+            history.events.is_empty() && history.next.is_none(),
+            "a first connection must not replay committed history"
+        );
+
+        commit_events(
+            &pool,
+            space_id,
+            1,
+            "task.updated",
+            json!({"resource_id": Uuid::now_v7()}),
+        )
+        .await;
+        let live = adapter
+            .browser_events(space_id, owner_id, Some(tail))
+            .await
+            .unwrap();
+        assert_eq!(
+            live.events.len(),
+            1,
+            "only the event after the tail is live"
+        );
+        assert_eq!(live.events[0].cursor, EventCursor::new(4));
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}
+
 /// `Last-Event-ID` names an event, not a position: an id outside this Space has no cursor, and the
 /// stream reports `context_changed` instead of guessing where to continue.
 #[tokio::test]
