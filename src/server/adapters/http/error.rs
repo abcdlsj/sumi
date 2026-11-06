@@ -1,12 +1,15 @@
 use super::*;
 use crate::server::domain::DomainError;
 use serde::Serialize;
+use utoipa::ToSchema;
 
 #[derive(Debug)]
 pub(in crate::server::adapters) struct ApiError {
     pub(in crate::server::adapters) status: StatusCode,
     pub(in crate::server::adapters) code: &'static str,
     pub(in crate::server::adapters) message: &'static str,
+    /// Whether repeating the same request can succeed without changing it.
+    pub(in crate::server::adapters) retryable: bool,
 }
 
 impl ApiError {
@@ -15,6 +18,7 @@ impl ApiError {
             status: StatusCode::UNAUTHORIZED,
             code: "unauthenticated",
             message: "Browser Session is missing or expired",
+            retryable: false,
         }
     }
 
@@ -23,6 +27,7 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_argument",
             message,
+            retryable: false,
         }
     }
 
@@ -31,6 +36,7 @@ impl ApiError {
             status: StatusCode::NOT_FOUND,
             code: "not_found",
             message: "resource was not found",
+            retryable: false,
         }
     }
 
@@ -39,6 +45,7 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "internal",
             message: "Server could not complete the request",
+            retryable: false,
         }
     }
 
@@ -47,6 +54,7 @@ impl ApiError {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "computer_unreachable",
             message: "Computer did not answer the query",
+            retryable: true,
         }
     }
 
@@ -55,6 +63,7 @@ impl ApiError {
             status: StatusCode::CONFLICT,
             code: "context_changed",
             message: "Run context changed before the write; re-read the current context, then retry once",
+            retryable: false,
         }
     }
 }
@@ -210,64 +219,47 @@ pub(super) fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
 }
 
 pub(in crate::server::adapters) fn application_error(error: ApplicationError) -> ApiError {
-    let class = classify(&error);
-    ApiError {
-        status: class.status,
-        code: class.code,
-        message: class.message,
-    }
+    ApiError::from(error)
 }
 
 pub(in crate::server::adapters) fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
-#[derive(Serialize)]
-pub(super) struct ErrorBody {
-    error: ErrorDetail,
+/// Every Browser API failure, from any adapter layer, is this one body.
+#[derive(Serialize, ToSchema)]
+pub(in crate::server::adapters) struct ErrorEnvelope {
+    error: ErrorBody,
 }
 
-#[derive(Serialize)]
-pub(super) struct ErrorDetail {
+#[derive(Serialize, ToSchema)]
+pub(in crate::server::adapters) struct ErrorBody {
     code: &'static str,
     message: &'static str,
     retryable: bool,
 }
 
-pub(in crate::server::adapters) struct HttpError(ApplicationError);
+impl From<ApplicationError> for ApiError {
+    fn from(error: ApplicationError) -> Self {
+        let class = classify(&error);
+        Self {
+            status: class.status,
+            code: class.code,
+            message: class.message,
+            retryable: class.retryable,
+        }
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (
             self.status,
-            Json(json!({
-                "error": {
-                    "code": self.code,
-                    "message": self.message,
-                    "retryable": false
-                }
-            })),
-        )
-            .into_response()
-    }
-}
-
-impl From<ApplicationError> for HttpError {
-    fn from(value: ApplicationError) -> Self {
-        Self(value)
-    }
-}
-
-impl IntoResponse for HttpError {
-    fn into_response(self) -> Response {
-        let class = classify(&self.0);
-        (
-            class.status,
-            Json(ErrorBody {
-                error: ErrorDetail {
-                    code: class.code,
-                    message: class.message,
-                    retryable: class.retryable,
+            Json(ErrorEnvelope {
+                error: ErrorBody {
+                    code: self.code,
+                    message: self.message,
+                    retryable: self.retryable,
                 },
             }),
         )
@@ -291,6 +283,29 @@ mod tests {
         assert_eq!(changed.code, "context_changed");
         assert!(!changed.retryable);
         assert!(changed.message.contains("re-read the current context"));
+    }
+
+    #[tokio::test]
+    async fn the_error_body_carries_the_classified_retryable_flag() {
+        let unavailable = ApiError::from(ApplicationError::Unavailable).into_response();
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(unavailable.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["error"]["code"], "unavailable");
+        assert_eq!(body["error"]["retryable"], true);
+
+        let missing = ApiError::from(ApplicationError::NotFound).into_response();
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(missing.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["error"]["retryable"], false);
     }
 
     #[test]

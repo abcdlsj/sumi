@@ -26,6 +26,7 @@ pub(in crate::server::adapters) fn allow_web_origin(
                     status: StatusCode::FORBIDDEN,
                     code: "permission_denied",
                     message: "request origin is not allowed",
+                    retryable: false,
                 }
                 .into_response();
             }

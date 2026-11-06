@@ -2147,7 +2147,7 @@ pub(in crate::server::adapters) async fn submit_run_result<P: TransactionPort + 
     port: &P,
     principal: ComputerPrincipal,
     result: RunResult,
-) -> Result<StatusCode, HttpError> {
+) -> Result<StatusCode, ApiError> {
     let outcome = match result.status {
         RunTerminalStatus::Completed => RunOutcome::Completed,
         RunTerminalStatus::Yielded => RunOutcome::Yielded,

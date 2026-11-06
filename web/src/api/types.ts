@@ -286,6 +286,7 @@ export interface components {
             message: string;
             retryable: boolean;
         };
+        /** @description Every Browser API failure, from any adapter layer, is this one body. */
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };

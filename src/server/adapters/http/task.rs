@@ -126,6 +126,7 @@ pub(super) async fn create_task(
         status: StatusCode::CONFLICT,
         code: "conflict",
         message: "Task could not be created from this Root Message",
+        retryable: false,
     })?;
     Ok((
         StatusCode::CREATED,

@@ -243,6 +243,7 @@ pub(super) async fn invite_human(
             status: StatusCode::CONFLICT,
             code: "invitation_already_pending",
             message: "this email already has a pending invitation to the Space",
+            retryable: false,
         },
         other => application_error(other),
     })?;
@@ -336,6 +337,7 @@ pub(super) fn invitation_error(error: ApplicationError) -> ApiError {
                 status: StatusCode::NOT_FOUND,
                 code: "invitation_unavailable",
                 message: "invitation link is not usable",
+                retryable: false,
             }
         }
         other => application_error(other),
@@ -349,11 +351,13 @@ pub(super) fn accept_invitation_error(error: ApplicationError) -> ApiError {
             status: StatusCode::FORBIDDEN,
             code: "invitation_email_mismatch",
             message: "invitation was issued to another email",
+            retryable: false,
         },
         ApplicationError::Conflict => ApiError {
             status: StatusCode::CONFLICT,
             code: "already_member",
             message: "signed in Human is already a Member of this Space",
+            retryable: false,
         },
         other => invitation_error(other),
     }

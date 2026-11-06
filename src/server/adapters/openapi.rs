@@ -1,9 +1,9 @@
 use super::http::{
     AddChannelAgentsBody, CloseTaskBody, CompleteTaskBody, CompleteUploadBody, ConfirmPairingBody,
     CreateAgentBody, CreateChannelBody, CreateMessageBody, CreateSpaceBody, CreateTaskBody,
-    CreateUploadBody, InviteHumanBody, LifecycleActionBody, LinkThreadBody, LoginBody,
-    OpenDirectMessageBody, ReadMemoryBody, RegisterBody, UpdateAgentBody, UpdateMemberBody,
-    UpdateMessageBody,
+    CreateUploadBody, ErrorBody, ErrorEnvelope, InviteHumanBody, LifecycleActionBody,
+    LinkThreadBody, LoginBody, OpenDirectMessageBody, ReadMemoryBody, RegisterBody,
+    UpdateAgentBody, UpdateMemberBody, UpdateMessageBody,
 };
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -113,17 +113,6 @@ pub(super) struct RegisterResponse {
 #[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct LoginResponse {
     pub(super) user: UserResponse,
-}
-
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct ErrorEnvelope {
-    error: ErrorBody,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct ErrorBody {
-    code: String,
-    message: String,
-    retryable: bool,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
