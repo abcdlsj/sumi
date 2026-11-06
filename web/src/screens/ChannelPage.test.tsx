@@ -231,6 +231,43 @@ describe("ChannelPage", () => {
     expect(within(screen.getByRole("link", { name: /design/ })).getByLabelText("Unread messages")).toBeVisible();
   });
 
+  it("moves the setup guide on when the Server reports the Computer online", async () => {
+    const spaceId = "019c0000-0000-7000-8000-000000000301";
+    const ownerId = "019c0000-0000-7000-8000-000000000302";
+    const generalId = "019c0000-0000-7000-8000-000000000303";
+    const computerId = "019c0000-0000-7000-8000-000000000304";
+    const owner = { id: ownerId, kind: "human", display_name: "Ada", access_level: "owner", permissions: [] };
+    let computers: unknown[] = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (init?.method) throw new Error(`Unexpected write: ${path}`);
+      if (path.includes("/spaces/by-slug/")) return json({ id: spaceId, name: "Sumi Lab", slug: "sumi-lab", accent: "#F0602F", owner_member_id: ownerId, current_member_id: ownerId, general_channel_id: generalId });
+      if (path === "/api/v1/auth/me") return json({ id: "user", display_name: "Ada", email: "ada@example.test" });
+      if (path.endsWith("/channels")) return json({ can_create: true, channels: [{ id: generalId, space_id: spaceId, kind: "public", slug: "general", created_by_member_id: ownerId, joined: true }] });
+      if (path.endsWith("/computers")) return json(computers);
+      if (path.endsWith("/dms") || path.endsWith("/agents") || path.endsWith("/inbox")) return json([]);
+      if (path.endsWith(`/channels/${generalId}/members`)) return json({ members: [owner], can_manage: true });
+      if (path.endsWith(`/channels/${generalId}/messages`)) {
+        return json({ channel_id: generalId, snapshot_channel_seq: 0, messages: [], has_more_before: false, has_more_after: false });
+      }
+      if (path.endsWith("/members")) return json([owner]);
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    renderRoute("/s/sumi-lab/channels/general");
+
+    expect(await screen.findByText(/Waiting for your Computer to connect/)).toBeVisible();
+    computers = [{ id: computerId, space_id: spaceId, name: "Studio", hostname: "studio.local", os: "macos", status: "online", daemon_version: "0.1.0", last_seen_at: "2026-07-25T00:00:00Z", created_at: "2026-07-25T00:00:00Z" }];
+    act(() => {
+      FakeEventSource.instances[0].emit("computer.changed", {
+        type: "computer.changed",
+        space_id: spaceId,
+        data: { resource_id: computerId, status: "online" },
+      });
+    });
+    expect(await screen.findByText("Studio is online.")).toBeVisible();
+  });
+
   it("creates and opens a DM from conversation navigation", async () => {
     const spaceId = "019c0000-0000-7000-8000-000000000101";
     const ownerId = "019c0000-0000-7000-8000-000000000102";

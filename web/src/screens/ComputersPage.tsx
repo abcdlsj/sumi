@@ -64,7 +64,6 @@ function ComputersWorkspace({
   const computers = useQuery({
     queryKey: ["computers", spaceId],
     queryFn: () => listComputers(spaceId),
-    refetchInterval: 10_000,
   });
   const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: () => listAgents(spaceId) });
   const deletion = useMutation({

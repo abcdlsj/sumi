@@ -207,8 +207,6 @@ export function MessageWorkspace({
     queryFn: () => listComputers(spaceId),
     enabled: Boolean(setup),
     retry: false,
-    // While setup waits for a Computer, check often so the guide moves on by itself.
-    refetchInterval: (query) => (query.state.data?.some((computer) => computer.status === "online") ? false : 4000),
   });
   const [composerInsert, setComposerInsert] = useState<{ text: string; nonce: number }>();
   const latestMainMessageSeq = Math.max(

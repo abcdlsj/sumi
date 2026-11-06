@@ -254,6 +254,7 @@ Driver：
 - 可由关联关系推导的数据不重复保存。
 - 事务提交后才发送 SSE、WebSocket command 或外部请求。
 - `message.created`、`message.updated`、`message.deleted` 事件带 `channel_id` 与 `thread_id`。Browser 收到后只重读该 Thread 与它的 Root Message（`GET /api/v1/messages/{thread_id}`），并把 Root Message 就地替换进已加载的时间线页；不重读整个 Channel。
+- Computer 的 WebSocket 建立或断开、以及 Server 停止时统一下线，都在同一事务里改 `connection_status` 并写 `computer.changed`（payload 为 `resource_id` 与新 `status`）；状态未变的重复写入不产生事件。Browser 据此刷新 Computer 列表、Agent 可达性与 Agent 运行诊断，不按固定间隔轮询这些数据。
 - Browser SSE 以 `outbox_events` 为唯一事实：该表的 insert 触发器在事务提交时以 Space ID `NOTIFY`，Server 唤醒同 Space 的事件流后再读取；唤醒丢失（如监听连接重连）时事件流最多 30 秒后兜底读取，不按固定间隔轮询数据库。
 - `outbox_events.sequence` 是 Space 内的提交序：写入事务在其他写入完成后、`COMMIT` 前才锁 `spaces` 行取得下一个值并插入事件，因此 sequence 的先后就是提交的先后，同一 Space 的写入只在提交这一步串行；一个事务涉及多个 Space 时按 Space ID 顺序加锁。`created_at`、event ID 和 UUIDv7 都不承担排序职责。
 - 首次连接（没有 `Last-Event-ID`）不回放历史，流从当前末尾开始；只有带 `Last-Event-ID` 的重连才从该事件之后继续，并且只发送该位置之后的事件。未知或已过期的 `Last-Event-ID` 返回 `context_changed`，由客户端重建投影。
@@ -335,7 +336,7 @@ Driver：
 ### 上手引导
 
 - 新 Space 的 #general 顶部显示 `Finish your Space setup` 引导卡（抬起卡片），三步都在原地完成，不跳转到其他页面：
-  1. Connect a Computer：内联显示 `curl -fsSL <origin>/install.sh | sh -s -- --server <origin>` 与 Copy 按钮，下方显示「Waiting for your Computer to connect…」；没有在线 Computer 时每 4 秒刷新，上线后自动进入下一步。已配对但离线时提示重新启动命令。
+  1. Connect a Computer：内联显示 `curl -fsSL <origin>/install.sh | sh -s -- --server <origin>` 与 Copy 按钮，下方显示「Waiting for your Computer to connect…」；Computer 上线时由 `computer.changed` 事件刷新并自动进入下一步，页面不轮询。已配对但离线时提示重新启动命令。
   2. Create your first Agent：打开快速创建对话框，提供 Engineer / Writer / Researcher 三个起始角色（预填名字和 Role），Computer、Driver、Access 收在「Computer, driver and access」折叠项里，默认第一台在线 Computer、Codex、Member。
   3. Give it something to do：`Mention <Agent>` 按钮把 Agent 加入 #general（如果还不在）并在 Composer 中插入 `@<Agent> `。
 - 当前步骤编号为实心 ink 圆，已完成为青色对勾，未到的步骤为浅灰；步骤间以发丝线相连。

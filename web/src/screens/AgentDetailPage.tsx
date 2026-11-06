@@ -48,7 +48,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   const [retireConfirmOpen, setRetireConfirmOpen] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => getAgent(agentId) });
-  const runtime = useQuery({ queryKey: ["agent-runtime", agentId], queryFn: () => getAgentRuntime(agentId), retry: false, refetchInterval: 2000, refetchIntervalInBackground: true });
+  const runtime = useQuery({ queryKey: ["agent-runtime", agentId], queryFn: () => getAgentRuntime(agentId), retry: false });
   const members = useQuery({ queryKey: ["members", spaceId], queryFn: () => listMembers(spaceId) });
   const agentDirectMessages = useQuery({
     queryKey: ["agent-direct-messages", agentId],

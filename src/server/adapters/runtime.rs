@@ -38,7 +38,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let state = http::RuntimeState {
         #[cfg(test)]
         pool: pool.clone(),
-        storage,
+        storage: storage.clone(),
         read: PostgresQueries::new(pool.clone()),
         objects: std::sync::Arc::new(AttachmentObjectStore::new(std::sync::Arc::new(
             object_store,
@@ -98,12 +98,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
     shutdown.sockets_closed(SOCKET_CLOSE_TIMEOUT).await;
     // Upgraded Computer sockets run outside the graceful wait and may not reach their own offline
     // write before exit. This process holds every Computer connection, so none is online now.
-    if let Err(error) = sqlx::query(
-        "UPDATE computers SET connection_status='offline' WHERE connection_status='online'",
-    )
-    .execute(&pool)
-    .await
-    {
+    if let Err(error) = storage.disconnect_all_computers().await {
         tracing::warn!(%error, "Computers could not be marked offline on shutdown");
     }
     served

@@ -3112,3 +3112,105 @@ async fn an_event_from_another_space_has_no_cursor() {
         .unwrap();
     result
 }
+
+/// A Computer socket opening or closing reaches the Browser as one `computer.changed` per actual
+/// status change; a repeated write of the same status, such as a superseded session restoring
+/// online, adds none.
+#[tokio::test]
+async fn computer_connection_changes_reach_the_event_stream_once_each() {
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_computer_status_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let adapter = PostgresAdapter::new(pool.clone());
+        adapter.initialize_schema().await.unwrap();
+        let (space_id, owner_id, _) = event_test_space(&pool).await;
+        let computer_id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,created_at) \
+             VALUES ($1,$2,'Laptop','localhost','linux','status-hash','offline',now())",
+        )
+        .bind(computer_id)
+        .bind(space_id.into_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let tail = adapter.space_event_tail(space_id).await.unwrap();
+
+        let online = ComputerConnection::Online {
+            daemon_version: "1.2.3",
+        };
+        adapter
+            .set_computer_connection(computer_id, online)
+            .await
+            .unwrap();
+        adapter
+            .set_computer_connection(
+                computer_id,
+                ComputerConnection::Online {
+                    daemon_version: "1.2.3",
+                },
+            )
+            .await
+            .unwrap();
+        adapter
+            .set_computer_connection(computer_id, ComputerConnection::Offline)
+            .await
+            .unwrap();
+        adapter
+            .set_computer_connection(
+                computer_id,
+                ComputerConnection::Online {
+                    daemon_version: "1.2.4",
+                },
+            )
+            .await
+            .unwrap();
+        adapter.disconnect_all_computers().await.unwrap();
+        adapter.disconnect_all_computers().await.unwrap();
+
+        let page = adapter
+            .browser_events(space_id, owner_id, Some(tail))
+            .await
+            .unwrap();
+        let statuses: Vec<_> = page
+            .events
+            .iter()
+            .map(|event| {
+                assert_eq!(event.event_type, "computer.changed");
+                assert_eq!(
+                    event.data["resource_id"].as_str(),
+                    Some(computer_id.to_string().as_str())
+                );
+                event.data["status"].as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert_eq!(statuses, ["online", "offline", "online", "offline"]);
+        let (status, version): (String, Option<String>) = sqlx::query_as(
+            "SELECT connection_status,daemon_version FROM computers WHERE id=$1",
+        )
+        .bind(computer_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((status.as_str(), version.as_deref()), ("offline", Some("1.2.4")));
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}

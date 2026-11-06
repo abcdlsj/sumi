@@ -105,6 +105,7 @@ export function useSpaceEvents(
       if (payload.type === "agent.changed" || payload.type === "agent.updated" || payload.type === "run.changed") {
         void queryClient.invalidateQueries({ queryKey: ["agents", spaceId] });
         void queryClient.invalidateQueries({ queryKey: ["agent"] });
+        void queryClient.invalidateQueries({ queryKey: ["agent-runtime"] });
       }
       // A new Agent is also a new Member, so the roster changes with it and the
       // Server emits agent.created instead of member.changed.
@@ -113,8 +114,11 @@ export function useSpaceEvents(
         void queryClient.invalidateQueries({ queryKey: ["agent"] });
         void queryClient.invalidateQueries({ queryKey: ["members", spaceId] });
       }
+      // Connection status also decides whether each Agent's Computer is reachable.
       if (payload.type === "computer.changed") {
         void queryClient.invalidateQueries({ queryKey: ["computers", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["agents", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["agent-runtime"] });
       }
       if (payload.type.startsWith("task.")) {
         void queryClient.invalidateQueries({ queryKey: ["tasks", spaceId] });

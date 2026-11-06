@@ -865,6 +865,89 @@ impl PostgresAdapter {
     }
 }
 
+impl PostgresAdapter {
+    /// Records that a Computer's socket opened or closed, and tells its Space when the status
+    /// actually changed. The status write and its `computer.changed` event commit together, so a
+    /// Browser that refetches on the event reads the new status.
+    pub(in crate::server::adapters) async fn set_computer_connection(
+        &self,
+        computer_id: Uuid,
+        connection: ComputerConnection<'_>,
+    ) -> Result<(), ApplicationError> {
+        let now = OffsetDateTime::now_utc();
+        let (status, daemon_version) = match connection {
+            ComputerConnection::Online { daemon_version } => ("online", Some(daemon_version)),
+            ComputerConnection::Offline => ("offline", None),
+        };
+        let mut transaction = PostgresTransaction::begin(&self.pool).await?;
+        // The row lock orders concurrent writers, so each one compares against the status the
+        // previous writer committed and exactly one of them reports a change.
+        let changed = sqlx::query(
+            "WITH previous AS (SELECT id,connection_status FROM computers WHERE id=$1 FOR UPDATE) \
+             UPDATE computers c SET connection_status=$2,\
+             daemon_version=COALESCE($3,c.daemon_version),\
+             last_seen_at=CASE WHEN $2='online' THEN $4 ELSE c.last_seen_at END \
+             FROM previous WHERE c.id=previous.id \
+             RETURNING c.space_id,previous.connection_status<>$2 AS changed",
+        )
+        .bind(computer_id)
+        .bind(status)
+        .bind(daemon_version)
+        .bind(now)
+        .fetch_optional(&mut *transaction.connection)
+        .await
+        .map_err(map_sqlx)?;
+        if let Some(row) = changed
+            && row.get::<bool, _>("changed")
+        {
+            transaction
+                .insert_space_event(
+                    EventId::from_uuid(Uuid::now_v7()),
+                    SpaceId::from_uuid(row.get("space_id")),
+                    "computer.changed",
+                    json!({"resource_id": computer_id, "status": status}),
+                    now,
+                )
+                .await?;
+        }
+        transaction.commit().await.map(|_| ())
+    }
+
+    /// Marks every online Computer offline, with one `computer.changed` event each. Runs when this
+    /// process stops, because it holds every Computer connection.
+    pub(in crate::server::adapters) async fn disconnect_all_computers(
+        &self,
+    ) -> Result<(), ApplicationError> {
+        let now = OffsetDateTime::now_utc();
+        let mut transaction = PostgresTransaction::begin(&self.pool).await?;
+        let rows = sqlx::query(
+            "UPDATE computers SET connection_status='offline' \
+             WHERE connection_status='online' RETURNING id,space_id",
+        )
+        .fetch_all(&mut *transaction.connection)
+        .await
+        .map_err(map_sqlx)?;
+        for row in rows {
+            transaction
+                .insert_space_event(
+                    EventId::from_uuid(Uuid::now_v7()),
+                    SpaceId::from_uuid(row.get("space_id")),
+                    "computer.changed",
+                    json!({"resource_id": row.get::<Uuid, _>("id"), "status": "offline"}),
+                    now,
+                )
+                .await?;
+        }
+        transaction.commit().await.map(|_| ())
+    }
+}
+
+/// Socket state of a Computer as the Server sees it.
+pub(in crate::server::adapters) enum ComputerConnection<'a> {
+    Online { daemon_version: &'a str },
+    Offline,
+}
+
 /// Derives the event ID of one Agent activity from the request that produced it. Only IDs in the
 /// payload take part: labels such as a Channel slug may change between an attempt and its retry.
 fn agent_activity_event_id(origin: Uuid, kind: &str, payload: &serde_json::Value) -> EventId {

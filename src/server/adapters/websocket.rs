@@ -12,7 +12,7 @@ use crate::{
     server::application::ports::ApplicationError,
 };
 
-use super::postgres::PostgresAdapter;
+use super::postgres::{ComputerConnection, PostgresAdapter};
 
 pub(super) async fn replay_commands(
     storage: &PostgresAdapter,
@@ -182,8 +182,14 @@ pub(super) async fn computer_socket(
     let (command_connection, mut command_wakeups) = commands.connect(computer_id);
     // Marked online only after registering, so a superseded session's offline write below can
     // see this connection and restore the status.
-    let _=sqlx::query("UPDATE computers SET connection_status='online',daemon_version=$2,last_seen_at=$3 WHERE id=$1")
-        .bind(computer_id).bind(&hello.daemon_version).bind(OffsetDateTime::now_utc()).execute(&pool).await;
+    mark_connection(
+        &storage,
+        computer_id,
+        ComputerConnection::Online {
+            daemon_version: &hello.daemon_version,
+        },
+    )
+    .await;
     // The Computer sends a heartbeat and a ping every 15 seconds; silence beyond three periods
     // means a half-open socket.
     let mut read_deadline = tokio::time::Instant::now() + COMPUTER_IDLE_TIMEOUT;
@@ -451,17 +457,31 @@ pub(super) async fn computer_socket(
     commands.disconnect(command_connection);
     queries.disconnect(connection);
     tracing::info!(%computer_id, "Computer disconnected");
-    let _ = sqlx::query("UPDATE computers SET connection_status='offline' WHERE id=$1")
-        .bind(computer_id)
-        .execute(&pool)
-        .await;
+    mark_connection(&storage, computer_id, ComputerConnection::Offline).await;
     // A newer session may have registered and written online before this offline write landed.
     // Checking after the write is ordered: a session registering later writes online after it.
     if commands.is_connected(computer_id) {
-        let _ = sqlx::query("UPDATE computers SET connection_status='online' WHERE id=$1")
-            .bind(computer_id)
-            .execute(&pool)
-            .await;
+        mark_connection(
+            &storage,
+            computer_id,
+            ComputerConnection::Online {
+                daemon_version: &hello.daemon_version,
+            },
+        )
+        .await;
+    }
+}
+
+async fn mark_connection(
+    storage: &PostgresAdapter,
+    computer_id: Uuid,
+    connection: ComputerConnection<'_>,
+) {
+    if let Err(error) = storage
+        .set_computer_connection(computer_id, connection)
+        .await
+    {
+        tracing::warn!(%computer_id, %error, "Computer connection status could not be recorded");
     }
 }
 
