@@ -79,6 +79,32 @@ export function PanelSkeleton({ label, short = false }: { label: string; short?:
   );
 }
 
+/** A Space page whose code is still downloading: its header bar over the shape of its content. */
+export function PageSkeleton({ label, body }: { label: string; body: "list" | "detail" | "panel" }) {
+  return (
+    <div className="skeleton-shell-main skeleton-page" role="status" aria-label={label}>
+      <div className="skeleton-shell-header"><Bar width="140px" className="skeleton-bar--title" /></div>
+      <div aria-hidden="true">
+        {body === "list" ? <ListSkeleton label={label} /> : body === "detail" ? <DetailSkeleton label={label} /> : <PanelSkeleton label={label} />}
+      </div>
+    </div>
+  );
+}
+
+/** A page outside any Space (pairing, invitation): the brand bar over one centred card. */
+export function OnboardingSkeleton({ label }: { label: string }) {
+  return (
+    <main className="onboarding-shell" role="status" aria-label={label}>
+      <header className="brand-bar"><Bar width="72px" className="skeleton-bar--title" /></header>
+      <div className="skeleton-onboarding">
+        <Bar width="55%" className="skeleton-bar--title" />
+        <Bar width="80%" />
+        <span className="skeleton-block skeleton-block--short" />
+      </div>
+    </main>
+  );
+}
+
 /** The whole Space shell before the Space itself has loaded. */
 export function ShellSkeleton() {
   return (

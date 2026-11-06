@@ -1604,6 +1604,18 @@ body > #root > .route-status {
   padding: 12px var(--page-gutter) 120px;
 }
 
+.skeleton-onboarding {
+  display: grid;
+  width: min(440px, 100% - 2 * var(--page-gutter-compact));
+  gap: 14px;
+  margin: 72px auto;
+}
+
+.skeleton-page {
+  min-height: 100%;
+  align-content: start;
+}
+
 .skeleton-shell-header {
   display: flex;
   align-items: center;

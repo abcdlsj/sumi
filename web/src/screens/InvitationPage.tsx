@@ -9,6 +9,7 @@ import {
   getInvitation,
 } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
+import { OnboardingSkeleton } from "../components/Skeleton";
 
 export function InvitationPage() {
   const { inviteToken } = useParams({ from: "/invite/$inviteToken" });
@@ -35,7 +36,7 @@ export function InvitationPage() {
   });
 
   if (invitation.isPending) {
-    return <div className="route-status">Checking invitation...</div>;
+    return <OnboardingSkeleton label="Checking invitation" />;
   }
   if (invitation.error || !invitation.data) {
     return (

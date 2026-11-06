@@ -16,8 +16,10 @@ import { LoginPage } from "./screens/LoginPage";
 import { RegisterPage } from "./screens/RegisterPage";
 import { SpaceCreatePage } from "./screens/SpaceCreatePage";
 import { NotFoundPage, RouteErrorPage } from "./components/RoutePages";
+import { OnboardingSkeleton, PageSkeleton, PanelSkeleton } from "./components/Skeleton";
 
 // Pages beyond the conversation load on first visit, so opening a Channel downloads only what it renders.
+// Each one shows its own skeleton inside the Space Shell while its code downloads.
 const CompanyOfficePage = lazyRouteComponent(() => import("./screens/CompanyPage"), "CompanyOfficePage");
 const AgentGraphRouteContent = lazyRouteComponent(() => import("./screens/InsightsPage"), "AgentGraphRouteContent");
 const InsightsPage = lazyRouteComponent(() => import("./screens/InsightsPage"), "InsightsPage");
@@ -97,16 +99,19 @@ const companyOfficeRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "company/office",
   component: CompanyOfficePage,
+  pendingComponent: () => <PageSkeleton label="Opening Company" body="panel" />,
 });
 const membersRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "members",
   component: MembersPage,
+  pendingComponent: () => <PageSkeleton label="Opening Members" body="list" />,
 });
 const insightsRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "insights",
   component: InsightsPage,
+  pendingComponent: () => <PageSkeleton label="Opening Agent insights" body="panel" />,
 });
 const insightsIndexRoute = createRoute({
   getParentRoute: () => insightsRoute,
@@ -122,41 +127,49 @@ const insightsStatsRoute = createRoute({
   getParentRoute: () => insightsRoute,
   path: "stats",
   component: AgentStatisticsPage,
+  pendingComponent: () => <PanelSkeleton label="Opening Agent statistics" />,
 });
 const insightsGraphRoute = createRoute({
   getParentRoute: () => insightsRoute,
   path: "graph",
   component: AgentGraphRouteContent,
+  pendingComponent: () => <PanelSkeleton label="Opening Agent graph" />,
 });
 const settingsRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "settings",
   component: SettingsPage,
+  pendingComponent: () => <PageSkeleton label="Opening Settings" body="detail" />,
 });
 const agentDetailRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "agents/$agentId",
   component: AgentDetailPage,
+  pendingComponent: () => <PageSkeleton label="Opening Agent" body="detail" />,
 });
 const inboxRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "inbox",
   component: InboxPage,
+  pendingComponent: () => <PageSkeleton label="Opening Inbox" body="list" />,
 });
 const tasksRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "tasks",
   component: TasksPage,
+  pendingComponent: () => <PageSkeleton label="Opening Tasks" body="list" />,
 });
 const taskDetailRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "tasks/$taskId",
   component: TaskDetailPage,
+  pendingComponent: () => <PageSkeleton label="Opening Task" body="detail" />,
 });
 const computersRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "computers",
   component: ComputersPage,
+  pendingComponent: () => <PageSkeleton label="Opening Computers" body="detail" />,
 });
 const pairComputerRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -165,11 +178,13 @@ const pairComputerRoute = createRoute({
     code: typeof search.code === "string" ? search.code : typeof search.code === "number" ? String(search.code) : "",
   }),
   component: PairComputerPage,
+  pendingComponent: () => <OnboardingSkeleton label="Opening Computer pairing" />,
 });
 const invitationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invite/$inviteToken",
   component: InvitationPage,
+  pendingComponent: () => <OnboardingSkeleton label="Opening invitation" />,
 });
 const directMessageRoute = createRoute({
   getParentRoute: () => spaceRoute,

@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 
 import { confirmPairing, getPairingDetails, listSpaces } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
+import { OnboardingSkeleton } from "../components/Skeleton";
 
 export function PairComputerPage() {
   const params = useParams({ strict: false });
@@ -30,7 +31,7 @@ export function PairComputerPage() {
   }
 
   if (!code) return <div className="route-status route-status--error">The pairing code is missing from this URL.</div>;
-  if (details.isPending || spaces.isPending) return <div className="route-status">Checking Computer...</div>;
+  if (details.isPending || spaces.isPending) return <OnboardingSkeleton label="Checking Computer" />;
   if (details.error || spaces.error || !details.data) return <div className="route-status route-status--error">{details.error?.message ?? spaces.error?.message ?? "Pairing unavailable."}</div>;
 
   return (

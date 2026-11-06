@@ -354,7 +354,7 @@ Driver：
 
 ### 加载
 
-- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块。骨架是 subtle 底色的平面块，以透明度柔和明暗变化，不使用渐变扫光。
+- 内容加载中显示与最终布局同形的骨架（柔和闪烁，遵循 `prefers-reduced-motion`），不显示「Loading…」文字：Space 打开时是整个 Shell（侧边栏 + 时间线），时间线与 Thread 是消息行，Tasks / Inbox / Members 是列表行，Agent、Task、Computer 详情是标题 + facts + 内容块。对话以外的页面首次打开时先下载页面代码，此时 Sidebar 保持不动，内容区显示 header 条和该页同形的骨架；Space 外的配对与邀请页显示品牌栏和居中卡片骨架。骨架是 subtle 底色的平面块，以透明度柔和明暗变化，不使用渐变扫光。
 
 ### 对话与 Task
 
