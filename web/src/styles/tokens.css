@@ -20,6 +20,21 @@
   --bg-selected: #ffffff;
   --bg-raised: #ffffff;
   --code-bg: #f3f2ef;
+  --bg-panel: #fbfaf9;
+  /* Translucent white over content: drop targets and labels on the Office scene. */
+  --veil: rgb(255 255 255 / 90%);
+  --scrim: rgb(28 27 25 / 22%);
+  --ink-wash: rgb(28 27 25 / 4%);
+  --ink-wash-strong: rgb(28 27 25 / 6%);
+  --ink-outline: rgb(28 27 25 / 10%);
+
+  /* On an ink surface (toasts, the pairing command) */
+  --on-ink: #f4f3f1;
+  --on-ink-muted: rgb(255 255 255 / 60%);
+  --on-ink-hover: rgb(255 255 255 / 10%);
+  --on-ink-active: rgb(255 255 255 / 18%);
+  --on-ink-success: #8fd3a8;
+  --on-ink-danger: #f2a08f;
 
   /* Ink */
   --ink: #1c1b19;
@@ -27,6 +42,7 @@
   --muted: #6f6c65;
   --line: #e6e3de;
   --line-strong: #d3cfc8;
+  --line-hover: #cfccc6;
   --focus: #1c1b19;
 
   /* Signals */
@@ -34,12 +50,15 @@
   --you-soft: #f8ead0;
   --you-ink: #93590f;
   --you-row: #fcf7ee;
+  --you-line: #f1e2c6;
   --live: #2e9c8f;
   --live-soft: #e3f3f0;
   --live-ink: #1f7369;
+  --live-soft-hover: #d4ece7;
   --online: #4aa36a;
   --danger: #c2402a;
   --danger-soft: #fbece8;
+  --danger-line: #ead1cb;
   --warning: #c98512;
 
   /* Space accent: SpaceShell replaces these with the Space's own colour. */
@@ -56,6 +75,10 @@
   --status-done: #4aa36a;
   --status-closed: #c3c0ba;
 
+  /* Human identity marks in onboarding illustrations */
+  --identity-soft: #eeeafb;
+  --identity-ink: #5547a8;
+
   /* Chart series */
   --series-1: #3a5fc8;
   --series-2: #2e9c8f;
@@ -70,6 +93,13 @@
   --shadow-selected: 0 1px 2px rgb(28 27 25 / 6%), 0 0 0 1px rgb(28 27 25 / 4%);
   --shadow-raised: 0 0 0 1px rgb(28 27 25 / 7%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 6%);
   --shadow-popover: 0 0 0 1px rgb(28 27 25 / 6%), 0 8px 24px rgb(28 27 25 / 10%);
+  --shadow-raised-focus: 0 0 0 1px rgb(28 27 25 / 16%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 7%);
+  --shadow-dialog: 0 0 0 1px rgb(28 27 25 / 6%), 0 24px 64px rgb(28 27 25 / 18%);
+  --shadow-drawer: 0 0 0 1px rgb(28 27 25 / 6%), 12px 0 40px rgb(28 27 25 / 14%);
+  --shadow-toast: 0 8px 28px rgb(28 27 25 / 22%);
+  --shadow-chip: 0 0 0 1px rgb(28 27 25 / 8%), 0 1px 2px rgb(28 27 25 / 10%);
+  --shadow-thumb: 0 1px 2px rgb(28 27 25 / 20%);
+  --shadow-pressed: inset 0 1px 3px rgb(0 0 0 / 22%);
 
   /* Type */
   --text-page-title: 16px;

@@ -701,6 +701,32 @@ function humanMessage(seq: number): Message {
   };
 }
 
+describe("Message actions", () => {
+  it("gives each Message's toolbar one Tab stop and moves between its buttons with arrow keys", () => {
+    renderSystemNotices([humanMessage(1), { ...humanMessage(2), id: "human-message-2b", thread_id: "thread-2b" }]);
+
+    const toolbars = screen.getAllByRole("toolbar", { name: "Message actions" });
+    expect(toolbars).toHaveLength(2);
+    for (const toolbar of toolbars) {
+      const tabbable = within(toolbar).getAllByRole("button").filter((button) => button.tabIndex === 0);
+      expect(tabbable.map((button) => button.getAttribute("aria-label"))).toEqual(["Reply in Thread"]);
+    }
+
+    const [first] = toolbars;
+    within(first).getByRole("button", { name: "Reply in Thread" }).focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    const createTask = within(first).getByRole("button", { name: "Create Task" });
+    expect(createTask).toHaveFocus();
+    expect(createTask.tabIndex).toBe(0);
+    expect(within(first).getByRole("button", { name: "Reply in Thread" }).tabIndex).toBe(-1);
+
+    fireEvent.keyDown(first, { key: "End" });
+    expect(within(first).getByRole("button", { name: "Copy link" })).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(within(first).getByRole("button", { name: "Reply in Thread" })).toHaveFocus();
+  });
+});
+
 describe("collapsed message body style", () => {
   it("clamps by height so overflow detection can show the toggle", () => {
     const css = readFileSync(join(process.cwd(), "src/components/channel/channel.css"), "utf8");

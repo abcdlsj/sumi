@@ -15,6 +15,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity } from "../components/PixelIdentity";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "../components/TokenUsageChart";
 import "./agentStatistics.css";
+import { PanelSkeleton } from "../components/Skeleton";
 
 type Range = "24h" | "7d" | "30d";
 
@@ -172,9 +173,7 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
       </header>
 
       {sourcePending ? (
-        <p className="agent-statistics-empty" role="status">
-          Loading Agent statistics…
-        </p>
+        <PanelSkeleton label="Loading Agent statistics" />
       ) : sourceUnavailable ? (
         <div className="agent-statistics-empty" role="status">
           <p>Unable to load Agent statistics sources.</p>
@@ -183,9 +182,7 @@ export function AgentStatisticsWorkspace({ spaceSlug }: { spaceSlug: string }) {
           </button>
         </div>
       ) : usagePending && usageDataResults.length === 0 ? (
-        <p className="agent-statistics-empty" role="status">
-          Loading LLM usage…
-        </p>
+        <PanelSkeleton label="Loading LLM usage" />
       ) : usageUnavailable ? (
         <div className="agent-statistics-empty" role="status">
           <p>Unable to load LLM usage from the selected Computers.</p>

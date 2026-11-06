@@ -21,6 +21,7 @@ import { layoutGraph, type GraphLayoutNode } from "./agentGraphLayout";
 import { formatDateTime } from "../time";
 import { plainTextPreview } from "../markdownText";
 import "./agentGraph.css";
+import { PanelSkeleton } from "../components/Skeleton";
 
 const VIEW_WIDTH = 900;
 const VIEW_HEIGHT = 560;
@@ -256,7 +257,7 @@ export function AgentGraphWorkspace({ spaceId }: { spaceId: string }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  if (graph.isPending) return <div className="route-status">Opening Agent graph...</div>;
+  if (graph.isPending) return <PanelSkeleton label="Opening Agent graph" />;
   if (graph.error) {
     return (
       <div className="route-status route-status--error">

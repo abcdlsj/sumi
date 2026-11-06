@@ -6,7 +6,7 @@ import { type FormEvent, useState } from "react";
 import { createSpace } from "../api/client";
 import { OnboardingProgress } from "./RegisterPage";
 import { SumiLogo } from "../components/SumiLogo";
-import { SPACE_ACCENTS as accents } from "../spaceAccent";
+import { SPACE_ACCENTS as accents, accentTokens } from "../spaceAccent";
 
 export function SpaceCreatePage() {
   const navigate = useNavigate();
@@ -46,7 +46,7 @@ export function SpaceCreatePage() {
 
       <section className="register-stage" aria-labelledby="space-title">
         <div className="stage-copy stage-copy--space">
-          <span className="space-preview-mark" style={{ backgroundColor: accent }} aria-hidden="true"><SumiLogo /></span>
+          <span className="space-preview-mark" style={{ backgroundColor: accent, color: accentTokens(accent)?.["--on-accent"] }} aria-hidden="true"><SumiLogo /></span>
           <h1 id="space-title">Create your Space.</h1>
           <p className="stage-note">Members, Channels and Computers live inside this boundary.</p>
           <p className="space-address" aria-live="polite">/s/{slug || "your-space"}</p>

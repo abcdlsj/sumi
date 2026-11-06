@@ -61,6 +61,24 @@ export function DetailSkeleton({ label }: { label: string }) {
   );
 }
 
+/** A few text lines inside an already loaded page section. */
+export function SectionSkeleton({ label, rows = 3 }: { label: string; rows?: number }) {
+  return (
+    <div className="skeleton skeleton-section" role="status" aria-label={label}>
+      {Array.from({ length: rows }, (_, index) => <Bar key={index} width={WIDTHS[index % WIDTHS.length]} />)}
+    </div>
+  );
+}
+
+/** A chart or canvas area. */
+export function PanelSkeleton({ label, short = false }: { label: string; short?: boolean }) {
+  return (
+    <div className="skeleton skeleton-panel" role="status" aria-label={label}>
+      <span className={short ? "skeleton-block skeleton-block--short" : "skeleton-block"} />
+    </div>
+  );
+}
+
 /** The whole Space shell before the Space itself has loaded. */
 export function ShellSkeleton() {
   return (

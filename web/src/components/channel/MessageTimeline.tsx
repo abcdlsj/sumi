@@ -312,10 +312,10 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
       </div>
       <MessageTime value={message.created_at} />
       {!message.deleted_at && !outgoing ? (
-        <div className="message-actions" role="toolbar" aria-label="Message actions">
+        <MessageToolbar>
           <CopyAction label="Copy text" icon={<Copy aria-hidden="true" />} value={() => messagePreview(message)} />
           <CopyAction label="Copy link" icon={<Link2 aria-hidden="true" />} value={() => messageLink(message.id)} />
-        </div>
+        </MessageToolbar>
       ) : null}
     </article>
   );
@@ -543,7 +543,7 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
       ? "This Message already has a Task"
       : undefined;
   return (
-    <div className="message-actions" role="toolbar" aria-label="Message actions">
+    <MessageToolbar>
       <button
         className="message-action-button"
         type="button"
@@ -570,6 +570,53 @@ function MessageActions({ message, channelId, openThread }: { message: Message; 
       <CopyAction label="Copy text" icon={<Copy aria-hidden="true" />} value={() => messagePreview(message)} />
       <CopyAction label="Copy link" icon={<Link2 aria-hidden="true" />} value={() => messageLink(message.id)} />
       {create.error ? <span className="message-action-error" role="alert">Task creation failed. Retry.</span> : null}
+    </MessageToolbar>
+  );
+}
+
+/**
+ * The actions of one Message, shown on hover or focus. The toolbar is a single Tab stop: arrow keys,
+ * Home and End move between its buttons, so tabbing through a timeline passes each Message once.
+ */
+function MessageToolbar({ children }: { children: ReactNode }) {
+  const toolbar = useRef<HTMLDivElement>(null);
+  const active = useRef(0);
+  const buttons = () => Array.from(toolbar.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+  const rove = (all: HTMLButtonElement[], index: number) => {
+    active.current = index;
+    all.forEach((button, position) => { button.tabIndex = position === index ? 0 : -1; });
+  };
+  // Buttons come and go (a pending Task disables one), so the single Tab stop is re-placed after every render.
+  useLayoutEffect(() => {
+    const all = buttons();
+    rove(all, Math.min(active.current, all.length - 1));
+  });
+  return (
+    <div
+      ref={toolbar}
+      className="message-actions"
+      role="toolbar"
+      aria-label="Message actions"
+      onFocus={(event) => {
+        const all = buttons();
+        const index = all.findIndex((button) => button === (event.target as EventTarget));
+        if (index >= 0) rove(all, index);
+      }}
+      onKeyDown={(event) => {
+        const all = buttons();
+        const index = all.indexOf(document.activeElement as HTMLButtonElement);
+        if (index < 0) return;
+        const next = event.key === "ArrowRight" ? (index + 1) % all.length
+          : event.key === "ArrowLeft" ? (index - 1 + all.length) % all.length
+            : event.key === "Home" ? 0
+              : event.key === "End" ? all.length - 1
+                : undefined;
+        if (next === undefined) return;
+        event.preventDefault();
+        all[next].focus();
+      }}
+    >
+      {children}
     </div>
   );
 }

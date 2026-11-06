@@ -305,7 +305,7 @@ Driver：
   - **For you**（暖色）：有人在等你。时间线不高亮整条 Message；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
   - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
 - Agent 所在 Computer 不可达时，Agent 显示为 Offline：头像不显示呼吸环，角标为中性灰点，不出现在工作状态条中；工作状态条的位置改为一行中性文字 `X is offline · continues when its Computer reconnects`，列入规则与工作状态相同。Computer 重新连接后恢复原状态，界面不提供重试或检测操作。
-- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色。
+- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色；阴影、遮罩、墨底上的文字等组合值同样定义为 token。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
 - 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。Channel 名、Driver 名和时间是文字，使用 Geist。
 - 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
@@ -443,6 +443,7 @@ Driver：
 
 - 所有操作支持键盘，focus 可见；icon button 具有 accessible name。
 - 自定义下拉、折叠分组等交互支持完整键盘操作（方向键、Enter、Esc）。
+- 每条消息的动作条只占一个 Tab 位：Tab 进入时落在第一个按钮（或上次停留的按钮），方向键、Home、End 在条内移动；动作条在 hover 或其中按钮获得键盘焦点时显示。
 - 动画遵循 `prefers-reduced-motion`。
 - 320px、390px、768px、1024px 和 1440px 视口都能完成核心流程，页面不出现横向滚动，事实条等信息在窄栏中换行而不截断。
 - 触屏与手机的调整集中在 `web/src/styles/touch.css`（最后加载）：输入框字号 16px，避免 iOS 聚焦时放大页面；筛选、tab、图标按钮等触控目标至少 36px；手机上的筛选保持一行横向滚动；弹窗在手机上从底部弹出（快速跳转保持在顶部，以免被键盘挡住）；从侧栏抽屉打开弹窗或快速跳转时先收起抽屉。

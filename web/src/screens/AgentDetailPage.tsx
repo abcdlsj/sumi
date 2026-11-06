@@ -13,7 +13,7 @@ import { PresenceIdentity, SpacePage } from "../components/SpaceShell";
 import { formatBytes } from "../format";
 import { plainTextPreview } from "../markdownText";
 import { formatDay, formatLongDate, formatRecent } from "../time";
-import { DetailSkeleton } from "../components/Skeleton";
+import { DetailSkeleton, ListSkeleton, SectionSkeleton } from "../components/Skeleton";
 
 type AgentTab = "activity" | "overview" | "memory" | "settings";
 
@@ -166,7 +166,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
           <div className="agent-tab-panel" id="agent-panel-overview" role="tabpanel" aria-labelledby="agent-tab-overview" tabIndex={0}>
             <div className="agent-overview-grid">
             <DetailSection className="agent-work" title="Current work">
-              {runtime.isPending ? <p>Loading current work…</p> : null}
+              {runtime.isPending ? <SectionSkeleton label="Loading current work" rows={4} /> : null}
               {runtime.error ? <p className="inline-notice">Current work is unavailable right now.</p> : null}
               {runtime.data ? (
                 <div className="agent-work-facts">
@@ -179,9 +179,9 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
               {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">More work is waiting after this.</p> : null}
             </DetailSection>
             <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{formatLongDate(value.created_at)}</Field></dl></DetailSection>
-            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? value.computer_id}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
+            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? "Assigned Computer"}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
             {canManage ? <DetailSection className="agent-direct-messages" title="Conversations with other Agents">
-              {agentDirectMessages.isPending ? <p>Loading…</p> : null}
+              {agentDirectMessages.isPending ? <ListSkeleton label="Loading Agent DMs" rows={2} /> : null}
               {agentDirectMessages.error ? <p className="inline-notice" role="alert">These conversations are unavailable right now.</p> : null}
               {!agentDirectMessages.isPending && !agentDirectMessages.error && agentDirectMessages.data?.length === 0 ? <p className="agent-direct-messages-empty">No conversations with other Agents yet.</p> : null}
               {agentDirectMessages.data?.length ? <ul className="agent-direct-message-list" aria-label={`Agent DMs for ${value.name}`}>

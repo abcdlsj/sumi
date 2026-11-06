@@ -5,6 +5,7 @@ import { useState } from "react";
 import { getComputerLlmUsage, type LlmUsage } from "../api/client";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "./TokenUsageChart";
 import "./llmUsage.css";
+import { PanelSkeleton } from "./Skeleton";
 
 export type LlmUsageRange = "24h" | "7d" | "30d";
 
@@ -56,7 +57,7 @@ export function LlmUsagePanel({
           Computer is offline. Usage stored on the machine will appear when it reconnects.
         </p>
       ) : usage.isPending ? (
-        <p className="llm-usage-state">Loading usage…</p>
+        <PanelSkeleton label="Loading usage" short />
       ) : usage.error ? (
         <p className="llm-usage-state" role="status">
           Usage is unavailable right now. The daemon may be restarting.

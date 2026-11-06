@@ -6,6 +6,7 @@ import { InsightsTabs } from "../components/InsightsNavigation";
 import { SpacePage } from "../components/SpaceShell";
 import { AGENT_INSIGHTS_FEATURE_ID, useFeatureEnabled } from "../featureRegistry";
 import { AgentGraphWorkspace } from "./AgentGraphPage";
+import { PanelSkeleton } from "../components/Skeleton";
 
 export function InsightsPage() {
   const { spaceSlug } = useParams({ from: "/s/$spaceSlug/insights" });
@@ -49,7 +50,7 @@ export function AgentGraphRouteContent() {
     queryKey: ["space", spaceSlug],
     queryFn: () => getSpaceBySlug(spaceSlug),
   });
-  if (space.isPending) return <div className="route-status">Opening Agent graph...</div>;
+  if (space.isPending) return <PanelSkeleton label="Opening Agent graph" />;
   if (!space.data) {
     return (
       <div className="route-status route-status--error">

@@ -146,7 +146,7 @@
   text-decoration: none;
 }
 .office-hot-chip:hover {
-  background: #d4ece7;
+  background: var(--live-soft-hover);
 }
 .office-hot-chip svg {
   width: 12px;
@@ -234,8 +234,8 @@
   gap: 4px;
   padding: 0 6px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 92%);
-  box-shadow: 0 0 0 1px rgb(28 27 25 / 8%), 0 1px 2px rgb(28 27 25 / 10%);
+  background: var(--veil);
+  box-shadow: var(--shadow-chip);
   transform: translateX(-50%);
   color: var(--ink);
   font-size: 9.5px;
