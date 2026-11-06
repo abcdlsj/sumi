@@ -252,6 +252,11 @@ Driver：
 - 可由关联关系推导的数据不重复保存。
 - 事务提交后才发送 SSE、WebSocket command 或外部请求。
 - Browser SSE 以 `outbox_events` 为唯一事实：该表的 insert 触发器在事务提交时以 Space ID `NOTIFY`，Server 唤醒同 Space 的事件流后再读取；唤醒丢失（如监听连接重连）时事件流最多 30 秒后兜底读取，不按固定间隔轮询数据库。
+- `outbox_events.sequence` 是 Space 内的提交序：写入事务先锁 `spaces` 行取得下一个值再插入事件，因此 sequence 的先后就是提交的先后。`created_at`、event ID 和 UUIDv7 都不承担排序职责。
+- 首次连接（没有 `Last-Event-ID`）不回放历史，流从当前末尾开始；只有带 `Last-Event-ID` 的重连才从该事件之后继续，并且只发送该位置之后的事件。未知或已过期的 `Last-Event-ID` 返回 `context_changed`，由客户端重建投影。
+- 事件流每读一页都按 sequence 前进：该页对当前 viewer 不可见的事件同样推进游标，因此私有 Channel 的积压不会卡住流；读到不足一页即表示已追平。
+- 每个事件都有可见性判定：payload 涉及的 Channel 只有其成员能收到，Inbox 事件只发给所属 Member 和治理者。可见性只决定是否发送，不改变游标推进。
+- 客户端把收到的每个事件都当作新事实：用 `occurred_at` 与本地时钟比较来判断“是否回放”不成立，两端时钟有偏差时会丢实时事件或把回放误标为未读。
 - 稳定状态使用 text 和 CHECK 约束；正文、Secret、Provider transcript 不进入 idempotency 或 outbox metadata。
 - 基线后 schema 变更使用前向 migration，不得修改已应用 migration。
 - 性能优化先通过查询、索引和可重建投影解决；写模型保持规范化。
