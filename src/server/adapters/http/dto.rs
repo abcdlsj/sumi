@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::{BTreeMap, HashMap};
 
+use utoipa::ToSchema;
+
 use crate::server::adapters::postgres::{
     ActionAgentRow, ActionChannelRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow, MessageRow,
     MessageTaskRow, PostgresQueries, SpaceRow, TaskRefRow, ThreadReferenceRow,
@@ -16,57 +18,62 @@ pub(super) fn normalize_space_accent(input: &str) -> Option<String> {
         .map(|candidate| (*candidate).to_owned())
 }
 
-#[derive(Deserialize)]
-pub(super) struct RegisterBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct RegisterBody {
     pub(super) display_name: String,
     pub(super) email: String,
     pub(super) password: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct LoginBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct LoginBody {
     pub(super) email: String,
     pub(super) password: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct CreateSpaceBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct CreateSpaceBody {
     pub(super) name: String,
     pub(super) slug: String,
     pub(super) accent: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateChannelBody {
+pub(in crate::server::adapters) struct CreateChannelBody {
     pub(super) slug: String,
+    #[schema(value_type = ChannelKindCode)]
     pub(super) kind: String,
     pub(super) topic: Option<String>,
     #[serde(default)]
     pub(super) agent_member_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddChannelAgentsBody {
+pub(in crate::server::adapters) struct AddChannelAgentsBody {
     pub(super) agent_member_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateAgentBody {
+pub(in crate::server::adapters) struct CreateAgentBody {
     pub(super) computer_id: Uuid,
     pub(super) name: String,
     pub(super) role_text: String,
+    #[schema(value_type = DriverKindCode)]
     pub(super) driver_kind: String,
+    /// Required when `driver_kind` is `acp`; omitted for `builtin`.
     #[serde(default)]
+    #[schema(value_type = Option<AcpProviderCode>)]
     pub(super) driver_provider: Option<String>,
+    #[schema(value_type = AgentAccessLevel)]
     pub(super) access_level: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateMessageBody {
+pub(in crate::server::adapters) struct CreateMessageBody {
     pub(super) body_markdown: String,
     #[serde(default)]
     pub(super) mentions: Vec<Uuid>,
@@ -77,9 +84,9 @@ pub(super) struct CreateMessageBody {
     pub(super) reply_to_message_id: Option<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateMessageBody {
+pub(in crate::server::adapters) struct UpdateMessageBody {
     pub(super) body_markdown: String,
     #[serde(default)]
     pub(super) mentions: Vec<Uuid>,
@@ -88,7 +95,7 @@ pub(super) struct UpdateMessageBody {
 }
 
 #[derive(Deserialize)]
-pub(super) struct BeginPairingBody {
+pub(in crate::server::adapters) struct BeginPairingBody {
     pub(super) token_hash: String,
     pub(super) hostname: String,
     pub(super) os: String,
@@ -100,37 +107,40 @@ pub(super) struct PairingCodeQuery {
     pub(super) code: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct ConfirmPairingBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct ConfirmPairingBody {
     pub(super) code: String,
     pub(super) name: String,
     pub(super) space_id: Uuid,
 }
 
-#[derive(Deserialize)]
-pub(super) struct InviteHumanBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct InviteHumanBody {
     pub(super) email: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct OpenDirectMessageBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct OpenDirectMessageBody {
     pub(super) member_id: Uuid,
 }
 
-#[derive(Deserialize)]
-pub(super) struct UpdateAgentBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct UpdateAgentBody {
     pub(super) role_text: Option<String>,
     pub(super) lifecycle: Option<LifecycleActionBody>,
 }
 
-#[derive(Deserialize)]
-pub(super) struct LifecycleActionBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct LifecycleActionBody {
+    #[schema(value_type = LifecycleActionKind)]
     pub(super) action: String,
+    #[schema(value_type = Option<SuspendMode>)]
     pub(super) mode: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub(super) struct UpdateMemberBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct UpdateMemberBody {
+    #[schema(value_type = Option<AccessLevelCode>)]
     pub(super) access_level: Option<String>,
 }
 
@@ -141,9 +151,9 @@ pub(super) struct AgentActionRequest {
     pub(super) idempotency_key: Option<IdempotencyKey>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ReadMemoryBody {
+pub(in crate::server::adapters) struct ReadMemoryBody {
     pub(super) path: String,
 }
 

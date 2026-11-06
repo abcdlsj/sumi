@@ -20,7 +20,7 @@ export interface components {
             id: string;
             slug: string;
         };
-        AddChannelAgentsRequest: {
+        AddChannelAgentsBody: {
             agent_member_ids: string[];
         };
         /** @enum {string} */
@@ -181,16 +181,16 @@ export interface components {
         };
         /** @enum {string} */
         CloseReason: "invalid" | "duplicate" | "not_needed" | "obsolete" | "other";
-        CloseTaskRequest: {
+        CloseTaskBody: {
             note?: string | null;
             reason: components["schemas"]["CloseReason"];
         };
-        CompleteTaskRequest: {
+        CompleteTaskBody: {
             result_markdown: string;
             /** Format: uuid */
             result_thread_id: string;
         };
-        CompleteUploadRequest: {
+        CompleteUploadBody: {
             sha256: string;
             /** Format: int64 */
             size: number;
@@ -212,13 +212,13 @@ export interface components {
         };
         /** @enum {string} */
         ComputerStatus: "online" | "offline" | "revoked";
-        ConfirmPairingRequest: {
+        ConfirmPairingBody: {
             code: string;
             name: string;
             /** Format: uuid */
             space_id: string;
         };
-        CreateAgentRequest: {
+        CreateAgentBody: {
             access_level: components["schemas"]["AgentAccessLevel"];
             /** Format: uuid */
             computer_id: string;
@@ -227,44 +227,31 @@ export interface components {
             name: string;
             role_text: string;
         };
-        CreateChannelRequest: {
-            agent_member_ids: string[];
+        CreateChannelBody: {
+            agent_member_ids?: string[];
             kind: components["schemas"]["ChannelKind"];
             slug: string;
             topic?: string | null;
         };
-        CreateDirectMessageRequest: {
-            /** Format: uuid */
-            member_id: string;
-        };
-        CreateInvitationRequest: {
-            email: string;
-        };
-        CreateMessageRequest: {
-            attachment_ids: string[];
+        CreateMessageBody: {
+            attachment_ids?: string[];
             body_markdown: string;
-            mention_all: boolean;
-            mentions: string[];
+            mention_all?: boolean;
+            mentions?: string[];
+            /** Format: uuid */
+            reply_to_message_id?: string | null;
         };
-        CreateSpaceRequest: {
+        CreateSpaceBody: {
             accent: string;
             name: string;
             slug: string;
         };
-        CreateTaskRequest: {
+        CreateTaskBody: {
             /** Format: uuid */
             assignee_agent_member_id?: string | null;
             title?: string | null;
         };
-        CreateThreadMessageRequest: {
-            attachment_ids: string[];
-            body_markdown: string;
-            mention_all: boolean;
-            mentions: string[];
-            /** Format: uuid */
-            reply_to_message_id?: string | null;
-        };
-        CreateUploadRequest: {
+        CreateUploadBody: {
             media_type: string;
             original_name: string;
             /** Format: uuid */
@@ -372,24 +359,16 @@ export interface components {
             space_name: string;
             space_slug: string;
         };
-        LifecycleAction: {
-            /** @enum {string} */
-            action: "suspend";
-            mode: components["schemas"]["SuspendMode"];
-        } | {
-            /** @enum {string} */
-            action: "resume";
-        } | {
-            /** @enum {string} */
-            action: "restart";
-        } | {
-            /** @enum {string} */
-            action: "retry";
-        } | {
-            /** @enum {string} */
-            action: "retire";
+        InviteHumanBody: {
+            email: string;
         };
-        LinkTaskThreadRequest: {
+        LifecycleActionBody: {
+            action: components["schemas"]["LifecycleActionKind"];
+            mode?: null | components["schemas"]["SuspendMode"];
+        };
+        /** @enum {string} */
+        LifecycleActionKind: "suspend" | "resume" | "restart" | "retry" | "retire";
+        LinkThreadBody: {
             /** Format: uuid */
             thread_id: string;
         };
@@ -462,7 +441,7 @@ export interface components {
             requests: number;
             series: components["schemas"]["LlmUsageBucketResponse"][];
         };
-        LoginRequest: {
+        LoginBody: {
             email: string;
             password: string;
         };
@@ -584,6 +563,10 @@ export interface components {
             title: string;
             working_elsewhere: boolean;
         };
+        OpenDirectMessageBody: {
+            /** Format: uuid */
+            member_id: string;
+        };
         PairingDetailsResponse: {
             daemon_version: string;
             expires_at: string;
@@ -598,10 +581,10 @@ export interface components {
         PairingStatus: "pending" | "confirmed" | "expired";
         /** @enum {string} */
         ProvisionStatus: "provisioning" | "ready" | "error";
-        ReadMemoryRequest: {
+        ReadMemoryBody: {
             path: string;
         };
-        RegisterRequest: {
+        RegisterBody: {
             display_name: string;
             email: string;
             password: string;
@@ -746,18 +729,17 @@ export interface components {
             /** Format: uuid */
             thread_id: string;
         };
-        UpdateAgentRequest: {
-            lifecycle?: null | components["schemas"]["LifecycleAction"];
+        UpdateAgentBody: {
+            lifecycle?: null | components["schemas"]["LifecycleActionBody"];
             role_text?: string | null;
         };
-        UpdateMemberRequest: {
+        UpdateMemberBody: {
             access_level?: null | components["schemas"]["AccessLevel"];
-            permissions?: string[] | null;
         };
-        UpdateMessageRequest: {
+        UpdateMessageBody: {
             body_markdown: string;
-            mention_all: boolean;
-            mentions: string[];
+            mention_all?: boolean;
+            mentions?: string[];
         };
         UserResponse: {
             display_name: string;
@@ -787,21 +769,21 @@ export type Channel = components["schemas"]["ChannelResponse"];
 export type ChannelList = components["schemas"]["ChannelListResponse"];
 export type ChannelMembers = components["schemas"]["ChannelMembersResponse"];
 export type Computer = components["schemas"]["ComputerResponse"];
-export type ConfirmPairingInput = components["schemas"]["ConfirmPairingRequest"];
-export type CreateAgentInput = components["schemas"]["CreateAgentRequest"];
-export type CreateChannelInput = components["schemas"]["CreateChannelRequest"];
-export type CreateInvitationInput = components["schemas"]["CreateInvitationRequest"];
-export type CreateMessageInput = components["schemas"]["CreateMessageRequest"];
-export type CreateSpaceInput = components["schemas"]["CreateSpaceRequest"];
-export type CreateTaskInput = components["schemas"]["CreateTaskRequest"];
-export type CreateThreadReplyInput = components["schemas"]["CreateThreadMessageRequest"];
+export type ConfirmPairingInput = components["schemas"]["ConfirmPairingBody"];
+export type CreateAgentInput = components["schemas"]["CreateAgentBody"];
+export type CreateChannelInput = components["schemas"]["CreateChannelBody"];
+export type CreateInvitationInput = components["schemas"]["InviteHumanBody"];
+export type CreateMessageInput = components["schemas"]["CreateMessageBody"];
+export type CreateSpaceInput = components["schemas"]["CreateSpaceBody"];
+export type CreateTaskInput = components["schemas"]["CreateTaskBody"];
+export type CreateThreadReplyInput = components["schemas"]["CreateMessageBody"];
 export type DirectMessage = components["schemas"]["DirectMessageResponse"];
 export type ErrorEnvelope = components["schemas"]["ErrorEnvelope"];
 export type InboxItem = components["schemas"]["InboxItemResponse"];
 export type MarkAllInboxRead = components["schemas"]["MarkAllInboxReadResponse"];
 export type Invitation = components["schemas"]["InvitationResponse"];
 export type CreatedInvitation = components["schemas"]["CreatedInvitationResponse"];
-export type LoginInput = components["schemas"]["LoginRequest"];
+export type LoginInput = components["schemas"]["LoginBody"];
 export type LoginResponse = components["schemas"]["LoginResponse"];
 export type LlmUsage = components["schemas"]["LlmUsageResponse"];
 export type LlmUsageBucket = components["schemas"]["LlmUsageBucketResponse"];
@@ -812,7 +794,7 @@ export type MessagePage = components["schemas"]["MessagePageResponse"];
 export type MessageTaskRef = components["schemas"]["MessageTaskRefResponse"];
 export type MessageTaskSummary = components["schemas"]["MessageTaskSummary"];
 export type PairingDetails = components["schemas"]["PairingDetailsResponse"];
-export type RegisterInput = components["schemas"]["RegisterRequest"];
+export type RegisterInput = components["schemas"]["RegisterBody"];
 export type RegisterResponse = components["schemas"]["RegisterResponse"];
 export type Space = components["schemas"]["SpaceResponse"];
 export type Task = components["schemas"]["TaskResponse"];
@@ -821,8 +803,8 @@ export type Run = components["schemas"]["RunResponse"];
 export type ThreadReference = components["schemas"]["ThreadReferenceResponse"];
 export type ThreadRead = components["schemas"]["ThreadReadResponse"];
 export type ThreadSubscription = components["schemas"]["ThreadSubscriptionResponse"];
-export type UpdateAgentInput = components["schemas"]["UpdateAgentRequest"];
-export type CompleteTaskInput = components["schemas"]["CompleteTaskRequest"];
-export type CloseTaskInput = components["schemas"]["CloseTaskRequest"];
-export type UpdateMemberInput = components["schemas"]["UpdateMemberRequest"];
+export type UpdateAgentInput = components["schemas"]["UpdateAgentBody"];
+export type CompleteTaskInput = components["schemas"]["CompleteTaskBody"];
+export type CloseTaskInput = components["schemas"]["CloseTaskBody"];
+export type UpdateMemberInput = components["schemas"]["UpdateMemberBody"];
 export type User = components["schemas"]["UserResponse"];

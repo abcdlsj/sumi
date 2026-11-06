@@ -1,27 +1,30 @@
 use super::*;
 
-#[derive(Deserialize)]
+use utoipa::ToSchema;
+
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct StartTaskBody {
+pub(in crate::server::adapters) struct StartTaskBody {
     assignee_agent_member_id: Uuid,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct LinkThreadBody {
+pub(in crate::server::adapters) struct LinkThreadBody {
     thread_id: Uuid,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CompleteTaskBody {
+pub(in crate::server::adapters) struct CompleteTaskBody {
     result_markdown: String,
     result_thread_id: Uuid,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CloseTaskBody {
+pub(in crate::server::adapters) struct CloseTaskBody {
+    #[schema(value_type = CloseReasonCode)]
     reason: String,
     note: Option<String>,
 }
@@ -370,9 +373,10 @@ pub(super) async fn task_detail(
     Ok(task)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateTaskBody {
+pub(in crate::server::adapters) struct CreateTaskBody {
     pub(super) title: Option<String>,
+    #[schema(value_type = Option<Uuid>)]
     pub(super) assignee_agent_member_id: Option<MemberId>,
 }

@@ -1,3 +1,10 @@
+use super::http::{
+    AddChannelAgentsBody, CloseTaskBody, CompleteTaskBody, CompleteUploadBody, ConfirmPairingBody,
+    CreateAgentBody, CreateChannelBody, CreateMessageBody, CreateSpaceBody, CreateTaskBody,
+    CreateUploadBody, InviteHumanBody, LifecycleActionBody, LinkThreadBody, LoginBody,
+    OpenDirectMessageBody, ReadMemoryBody, RegisterBody, UpdateAgentBody, UpdateMemberBody,
+    UpdateMessageBody,
+};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
@@ -7,40 +14,41 @@ use uuid::Uuid;
 #[openapi(
     info(title = "Sumi Browser API", version = "1"),
     components(schemas(
-        RegisterRequest,
+        RegisterBody,
         UserResponse,
         RegisterResponse,
-        LoginRequest,
+        LoginBody,
         LoginResponse,
         ErrorEnvelope,
         ErrorBody,
-        CreateSpaceRequest,
+        CreateSpaceBody,
         SpaceResponse,
-        ConfirmPairingRequest,
+        ConfirmPairingBody,
         ComputerResponse,
         PairingDetailsResponse,
-        CreateAgentRequest,
+        CreateAgentBody,
         AgentResponse,
         AgentActivityResponse,
         AttentionConfig,
         MemoryFileResponse,
-        ReadMemoryRequest,
+        ReadMemoryBody,
         MemoryContentResponse,
-        UpdateAgentRequest,
-        LifecycleAction,
+        UpdateAgentBody,
+        LifecycleActionBody,
         SuspendMode,
+        LifecycleActionKind,
         MemberResponse,
-        UpdateMemberRequest,
-        CreateInvitationRequest,
+        UpdateMemberBody,
+        InviteHumanBody,
         InvitationResponse,
         CreatedInvitationResponse,
         ChannelResponse,
         ChannelMembersResponse,
         ChannelListResponse,
         DirectMessageResponse,
-        CreateDirectMessageRequest,
-        CreateChannelRequest,
-        AddChannelAgentsRequest,
+        OpenDirectMessageBody,
+        CreateChannelBody,
+        AddChannelAgentsBody,
         MessageAuthor,
         MessageContentResponse,
         MessageTaskSummary,
@@ -48,11 +56,11 @@ use uuid::Uuid;
         MessageResponse,
         ReplyPreviewResponse,
         MessagePageResponse,
-        CreateMessageRequest,
-        UpdateMessageRequest,
+        CreateMessageBody,
+        UpdateMessageBody,
         AttachmentResponse,
-        CreateUploadRequest,
-        CompleteUploadRequest,
+        CreateUploadBody,
+        CompleteUploadBody,
         InboxItemResponse,
         MarkAllInboxReadResponse,
         TaskStatus,
@@ -64,10 +72,10 @@ use uuid::Uuid;
         RuntimeRunState,
         RuntimeDiagnosticsResponse,
         TaskResponse,
-        CreateTaskRequest,
-        LinkTaskThreadRequest,
-        CompleteTaskRequest,
-        CloseTaskRequest,
+        CreateTaskBody,
+        LinkThreadBody,
+        CompleteTaskBody,
+        CloseTaskBody,
         AgentRuntimeResponse,
         AgentGraphResponse,
         AgentGraphNodeResponse,
@@ -78,7 +86,6 @@ use uuid::Uuid;
         LlmUsageBreakdownResponse,
         LlmUsageAgentSeriesResponse,
         LlmUsageAgentModelResponse,
-        CreateThreadMessageRequest,
         ThreadReadResponse,
         ThreadSubscriptionResponse
     ))
@@ -93,12 +100,6 @@ pub(in crate::server) fn write_browser_openapi() -> anyhow::Result<()> {
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct RegisterRequest {
-    display_name: String,
-    email: String,
-    password: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct UserResponse {
     pub(super) id: Uuid,
     pub(super) display_name: String,
@@ -108,11 +109,6 @@ pub(super) struct UserResponse {
 pub(super) struct RegisterResponse {
     pub(super) user: UserResponse,
     pub(super) next: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct LoginRequest {
-    email: String,
-    password: String,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct LoginResponse {
@@ -131,12 +127,6 @@ pub(super) struct ErrorBody {
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateSpaceRequest {
-    name: String,
-    slug: String,
-    accent: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct SpaceResponse {
     pub(super) id: Uuid,
     pub(super) name: String,
@@ -147,12 +137,6 @@ pub(super) struct SpaceResponse {
     pub(super) general_channel_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct ConfirmPairingRequest {
-    code: String,
-    name: String,
-    space_id: Uuid,
-}
 #[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct ComputerResponse {
     pub(super) id: Uuid,
@@ -204,16 +188,6 @@ pub(super) struct AttentionConfig {
     pub(super) ambient_debounce_seconds: u32,
     pub(super) ambient_max_wait_seconds: u32,
     pub(super) max_retry_count: u32,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateAgentRequest {
-    computer_id: Uuid,
-    name: String,
-    role_text: String,
-    driver_kind: DriverKind,
-    /// Required when `driver_kind` is `acp`; omitted for `builtin`.
-    driver_provider: Option<AcpProvider>,
-    access_level: AgentAccessLevel,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -300,10 +274,6 @@ pub(super) struct MemoryFileResponse {
     pub(super) updated_at: String,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct ReadMemoryRequest {
-    path: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct MemoryContentResponse {
     pub(super) path: String,
     pub(super) size: u64,
@@ -312,14 +282,9 @@ pub(super) struct MemoryContentResponse {
     pub(super) content: String,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct UpdateAgentRequest {
-    role_text: Option<String>,
-    lifecycle: Option<LifecycleAction>,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum LifecycleAction {
-    Suspend { mode: SuspendMode },
+#[serde(rename_all = "snake_case")]
+pub(super) enum LifecycleActionKind {
+    Suspend,
     Resume,
     Restart,
     Retry,
@@ -352,15 +317,6 @@ pub(super) enum AccessLevel {
     Owner,
     Admin,
     Member,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct UpdateMemberRequest {
-    access_level: Option<AccessLevel>,
-    permissions: Option<Vec<String>>,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateInvitationRequest {
-    email: String,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct InvitationResponse {
@@ -419,21 +375,6 @@ pub(super) struct DirectMessageResponse {
     pub(super) space_id: Uuid,
     pub(super) other_member: MemberResponse,
     pub(super) created_at: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateDirectMessageRequest {
-    member_id: Uuid,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateChannelRequest {
-    slug: String,
-    kind: ChannelKind,
-    topic: Option<String>,
-    agent_member_ids: Vec<Uuid>,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct AddChannelAgentsRequest {
-    agent_member_ids: Vec<Uuid>,
 }
 
 #[derive(Clone, Serialize, Deserialize, ToSchema)]
@@ -530,20 +471,6 @@ pub(super) struct MessagePageResponse {
     pub(super) has_more_before: bool,
     pub(super) has_more_after: bool,
 }
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateMessageRequest {
-    body_markdown: String,
-    mentions: Vec<Uuid>,
-    mention_all: bool,
-    attachment_ids: Vec<Uuid>,
-}
-
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct UpdateMessageRequest {
-    body_markdown: String,
-    mentions: Vec<Uuid>,
-    mention_all: bool,
-}
 
 #[derive(Clone, Serialize, Deserialize, ToSchema)]
 pub(super) struct AttachmentResponse {
@@ -565,17 +492,6 @@ pub(super) enum AttachmentStatus {
     Uploading,
     Ready,
     Deleted,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateUploadRequest {
-    space_id: Uuid,
-    original_name: String,
-    media_type: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CompleteUploadRequest {
-    size: u64,
-    sha256: String,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -779,25 +695,6 @@ pub(super) enum CloseReason {
     Other,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateTaskRequest {
-    title: Option<String>,
-    assignee_agent_member_id: Option<Uuid>,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct LinkTaskThreadRequest {
-    thread_id: Uuid,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CompleteTaskRequest {
-    result_thread_id: Uuid,
-    result_markdown: String,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CloseTaskRequest {
-    reason: CloseReason,
-    note: Option<String>,
-}
-#[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct AgentRuntimeResponse {
     pub(super) current_run: Option<RunResponse>,
     pub(super) current_task: Option<TaskResponse>,
@@ -900,14 +797,6 @@ pub(super) struct LlmUsageAgentModelResponse {
     pub(super) cached_input_tokens: u64,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
-pub(super) struct CreateThreadMessageRequest {
-    body_markdown: String,
-    mentions: Vec<Uuid>,
-    mention_all: bool,
-    attachment_ids: Vec<Uuid>,
-    reply_to_message_id: Option<Uuid>,
-}
 #[derive(Serialize, Deserialize, ToSchema)]
 pub(super) struct ThreadReadResponse {
     pub(super) thread_id: Uuid,

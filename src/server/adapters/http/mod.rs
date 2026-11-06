@@ -117,16 +117,16 @@ use super::{
         ComputerStatus, CreatedInvitationResponse, DirectMessageResponse,
         DriverKind as DriverKindCode, InboxActivityEventKind, InboxActivityEventResponse,
         InboxItemResponse, InboxKind, InboxPriority, InboxStatus, InvitationResponse,
-        LlmUsageAgentModelResponse, LlmUsageAgentSeriesResponse, LlmUsageBreakdownResponse,
-        LlmUsageBucketResponse, LlmUsageResponse, LoginResponse, MarkAllInboxReadResponse,
-        MemberKind as MemberKindCode, MemberResponse, MemoryContentResponse, MemoryFileResponse,
-        MessageAuthor, MessageContentResponse, MessagePageResponse, MessagePlacement,
-        MessageResponse, MessageTaskRefResponse, MessageTaskSummary, ProvisionStatus,
-        RegisterResponse, ReplyPreviewResponse, RunOutcome, RunResponse, RunStatus,
-        RuntimeDiagnosticsResponse, RuntimeRunState, SessionContinuityResponse,
-        SessionContinuityState as ContinuityStateCode, SpaceResponse, TaskResponse, TaskStatus,
-        ThreadReadResponse, ThreadReferenceResponse, ThreadRelation, ThreadSubscriptionResponse,
-        UserResponse,
+        LifecycleActionKind, LlmUsageAgentModelResponse, LlmUsageAgentSeriesResponse,
+        LlmUsageBreakdownResponse, LlmUsageBucketResponse, LlmUsageResponse, LoginResponse,
+        MarkAllInboxReadResponse, MemberKind as MemberKindCode, MemberResponse,
+        MemoryContentResponse, MemoryFileResponse, MessageAuthor, MessageContentResponse,
+        MessagePageResponse, MessagePlacement, MessageResponse, MessageTaskRefResponse,
+        MessageTaskSummary, ProvisionStatus, RegisterResponse, ReplyPreviewResponse, RunOutcome,
+        RunResponse, RunStatus, RuntimeDiagnosticsResponse, RuntimeRunState,
+        SessionContinuityResponse, SessionContinuityState as ContinuityStateCode, SpaceResponse,
+        SuspendMode, TaskResponse, TaskStatus, ThreadReadResponse, ThreadReferenceResponse,
+        ThreadRelation, ThreadSubscriptionResponse, UserResponse,
     },
     postgres::{ChannelLeaveReplayQuery, PostgresAdapter, PostgresQueries},
     query::QueryRegistry,
@@ -174,15 +174,25 @@ mod tests;
 
 pub(super) use agent_graph::*;
 use attachment::*;
+pub(in crate::server::adapters) use attachment::{CompleteUploadBody, CreateUploadBody};
 use computer::*;
 use conversation::*;
 use dto::*;
+pub(in crate::server::adapters) use dto::{
+    AddChannelAgentsBody, ConfirmPairingBody, CreateAgentBody, CreateChannelBody,
+    CreateMessageBody, CreateSpaceBody, InviteHumanBody, LifecycleActionBody, LoginBody,
+    OpenDirectMessageBody, ReadMemoryBody, RegisterBody, UpdateAgentBody, UpdateMemberBody,
+    UpdateMessageBody,
+};
 pub(super) use error::*;
 pub(super) use execution::*;
 pub(super) use identity::*;
 pub(super) use origin::allow_web_origin;
 pub(super) use rate_limit::*;
 use task::*;
+pub(in crate::server::adapters) use task::{
+    CloseTaskBody, CompleteTaskBody, CreateTaskBody, LinkThreadBody,
+};
 
 pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> Router {
     Router::new()
