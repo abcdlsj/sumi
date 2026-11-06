@@ -3066,7 +3066,7 @@ async fn an_event_from_another_space_has_no_cursor() {
         let pool = PgPool::connect(database_url.as_str()).await.unwrap();
         let adapter = PostgresAdapter::new(pool.clone());
         adapter.initialize_schema().await.unwrap();
-        let (space_id, owner_id, _) = event_test_space(&pool).await;
+        let (space_id, _, _) = event_test_space(&pool).await;
         let (other_space_id, _, _) = event_test_space(&pool).await;
         let payload = json!({"resource_id": Uuid::now_v7()});
         commit_events(&pool, other_space_id, 1, "task.updated", payload.clone()).await;
@@ -3101,7 +3101,6 @@ async fn an_event_from_another_space_has_no_cursor() {
                 .unwrap(),
             Some(EventCursor::new(1))
         );
-        assert!(owner_id.into_uuid() != Uuid::nil());
         pool.close().await;
     }
     .await;

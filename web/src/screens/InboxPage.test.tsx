@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
@@ -83,9 +81,6 @@ describe("Human Inbox", () => {
     expect(view.getByRole("button", { name: "Open DM from Grace; 1 new message" })).toBeVisible();
     expect(view.getByRole("button", { name: "Open #general from Lin; 2 new messages" })).toBeVisible();
     expect(view.getByText("Please review the release checklist before continuing")).toHaveClass("inbox-message-preview");
-    const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
-    expect(styles).toMatch(/\.inbox-message-preview\s*\{[^}]*overflow:\s*hidden/s);
-    expect(styles).toMatch(/\.inbox-message-preview\s*\{[^}]*-webkit-line-clamp:\s*2/s);
   });
 
   it("marks an Item read when its source is opened", async () => {

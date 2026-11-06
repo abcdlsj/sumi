@@ -1,15 +1,8 @@
 use async_trait::async_trait;
 
-use crate::computer::{
-    application::{
-        ApplicationError,
-        ports::{DriverCompletion, ProcessEvidence, SteerOutcome},
-    },
-    core::{
-        home::LocalAgent,
-        input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
-        session::DriverKind,
-    },
+use crate::computer::application::{
+    ApplicationError, AttentionNoticeInput, DispatchedItemInput, DriverKind, LocalAgent, RunInput,
+    ports::{DriverCompletion, ProcessEvidence, SteerOutcome},
 };
 use crate::ids::{AgentId, RunId};
 

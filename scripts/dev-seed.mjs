@@ -20,7 +20,8 @@ import readline from "node:readline";
 
 import { uuidv7 } from "../web/scripts/uuid.mjs";
 
-const SERVER = process.env.SUMI_SEED_SERVER ?? "http://127.0.0.1:3000";
+export const SEED_SERVER = process.env.SUMI_SEED_SERVER ?? "http://127.0.0.1:3000";
+const SERVER = SEED_SERVER;
 export const CODEX_HOME = process.env.SUMI_SEED_CODEX_HOME ?? join(homedir(), ".codex");
 const CODEX_HOME_FROM_ENV =
   process.env.SUMI_SEED_CODEX_HOME !== undefined && process.env.SUMI_SEED_CODEX_HOME !== "";
@@ -92,7 +93,7 @@ export function cleanDevelopmentSeedState(stateRoot) {
   return target;
 }
 
-async function api(method, path, { cookie, body } = {}) {
+export async function api(method, path, { cookie, body } = {}) {
   const headers = { "idempotency-key": uuidv7() };
   if (cookie) headers.cookie = cookie;
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -104,7 +105,7 @@ async function api(method, path, { cookie, body } = {}) {
   return response;
 }
 
-async function waitForHealth() {
+export async function waitForHealth() {
   const startedAt = Date.now();
   const deadline = startedAt + 120_000;
   let nextProgressLog = startedAt + 10_000;
@@ -125,7 +126,7 @@ async function waitForHealth() {
   throw new Error("Sumi server did not become healthy within 120s");
 }
 
-function sessionCookie(response) {
+export function sessionCookie(response) {
   const raw = response.headers.get("set-cookie");
   if (!raw) throw new Error("auth response did not set a session cookie");
   return raw.split(";")[0];

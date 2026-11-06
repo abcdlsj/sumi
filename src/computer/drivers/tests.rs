@@ -12,7 +12,9 @@ use crate::{
     computer::{
         adapters::sqlite::SqliteAdapter,
         application::{
-            ApplicationError, LocalRunState, TerminalStatus,
+            AgentInput, ApplicationError, ContextMessageInput, DispatchedItemInput, DriverKind,
+            LocalRun, LocalRunState, NewRun, RunContextInput, RunInput, RunPriority,
+            SessionFingerprint, SessionScope, TerminalStatus, WorkInput, WorkStrength,
             ports::{
                 ComputerTransaction, DriverCompletion, DriverPort, DriverTurnOutcome,
                 LocalErrorCode, LocalEvent, OpenSessionRequest, ProcessEvidence, SteerOutcome,
@@ -20,15 +22,6 @@ use crate::{
             },
             recovery::RecoveryService,
             run::RunService,
-        },
-        core::{
-            input::{
-                AgentInput, ContextMessageInput, DispatchedItemInput, RunContextInput, RunInput,
-                WorkInput,
-            },
-            scheduler::{RunPriority, WorkStrength},
-            session::{DriverKind, SessionFingerprint, SessionScope},
-            supervisor::{LocalRun, NewRun},
         },
     },
     ids::{AgentId, ChannelId, InboxItemId, MemberId, MessageId, RunId, SpaceId, ThreadId},
@@ -58,7 +51,7 @@ impl FakeClient {
 impl StructuredProviderClient for FakeClient {
     async fn validate(
         &mut self,
-        _: &crate::computer::core::home::LocalAgent,
+        _: &crate::computer::application::LocalAgent,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -105,7 +98,7 @@ impl StructuredProviderClient for FakeClient {
     async fn notice(
         &mut self,
         _: &str,
-        _: &crate::computer::core::input::AttentionNoticeInput,
+        _: &crate::computer::application::AttentionNoticeInput,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }

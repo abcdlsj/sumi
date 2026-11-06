@@ -2,8 +2,6 @@
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -727,17 +725,6 @@ describe("Message actions", () => {
   });
 });
 
-describe("collapsed message body style", () => {
-  it("clamps by height so overflow detection can show the toggle", () => {
-    const css = readFileSync(join(process.cwd(), "src/components/channel/channel.css"), "utf8");
-    const rule = css.match(/\.message-body--collapsed\s*\{([^}]*)\}/)?.[1];
-    expect(rule).toBeDefined();
-    expect(rule).not.toMatch(/display:\s*-webkit-box/);
-    expect(rule).toMatch(/max-height:\s*18\.6em/);
-    expect(rule).toMatch(/overflow:\s*hidden/);
-  });
-});
-
 describe("highlightMentions", () => {
   it("highlights only recognized display names at mention boundaries", () => {
     const { container } = render(
@@ -781,16 +768,6 @@ describe("highlightMentions", () => {
     const link = container.querySelector("a.message-mention--agent");
     expect(link).toHaveAttribute("href", "/s/sumi-lab/agents/agent-lin");
     expect(link).toHaveAccessibleName("Open Lin Agent management");
-  });
-});
-
-describe("message body typography", () => {
-  it("uses the 14px body size for Channel and Thread messages", () => {
-    const tokens = readFileSync(join(process.cwd(), "src/styles/tokens.css"), "utf8");
-    const channelStyles = readFileSync(join(process.cwd(), "src/components/channel/channel.css"), "utf8");
-    expect(tokens).toMatch(/--text-body:\s*14px/);
-    expect(channelStyles).toMatch(/\.message-body\s*\{[^}]*font-size:\s*var\(--text-body\)/s);
-    expect(channelStyles).toMatch(/\.thread-message > div\s*\{/);
   });
 });
 

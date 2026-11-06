@@ -2,22 +2,10 @@ use std::{fs, path::Path};
 
 #[test]
 fn new_modules_do_not_cross_forbidden_dependency_boundaries() {
-    assert_forbidden(
-        "src/protocol",
-        &["crate::server", "crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/server/domain",
-        &["crate::protocol", "crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/server/application",
-        &["crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/computer/core",
-        &["crate::protocol", "crate::server", "crate::driver"],
-    );
+    assert_forbidden("src/protocol", &["crate::server", "crate::computer"]);
+    assert_forbidden("src/server/domain", &["crate::protocol", "crate::computer"]);
+    assert_forbidden("src/server/application", &["crate::computer"]);
+    assert_forbidden("src/computer/core", &["crate::protocol", "crate::server"]);
     assert_forbidden("src/computer/application", &["crate::server"]);
     assert_forbidden(
         "src/computer/adapters",
@@ -26,10 +14,18 @@ fn new_modules_do_not_cross_forbidden_dependency_boundaries() {
             "computer::core",
             "core::{",
             "crate::server",
-            "crate::driver",
         ],
     );
-    assert_forbidden("src/computer/drivers", &["crate::server", "sqlx::postgres"]);
+    // Drivers reach Core types through the application re-exports, like the adapters do.
+    assert_forbidden(
+        "src/computer/drivers",
+        &[
+            "crate::server",
+            "sqlx::postgres",
+            "crate::computer::core",
+            "computer::core",
+        ],
+    );
     assert_forbidden(
         "src/agent_cli",
         &["crate::server", "crate::computer::core", "sqlx"],

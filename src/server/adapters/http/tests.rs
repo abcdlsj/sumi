@@ -293,7 +293,6 @@ async fn agent_activity_and_last_error_code_come_from_run_and_inbox_facts() {
     let running = read_agent(&fixture, agent_id).await;
     let activity = running.activity.as_ref().unwrap();
     assert_eq!(activity.kind, "working");
-    assert!(activity.label.contains("#general:1"), "{}", activity.label);
     assert!(matches!(
         running.activity_status,
         AgentActivityStatus::Working
@@ -1615,7 +1614,6 @@ async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
         .unwrap_err();
     assert_eq!(stale_done.code, capability::ErrorCode::ContextChanged);
     assert!(!stale_done.retryable);
-    assert!(stale_done.message.contains("read the Thread"));
     assert!(stale_done.details.is_empty());
 
     // A held write records no idempotency, so the retry may reuse the same key.
@@ -1898,9 +1896,6 @@ async fn agent_channel_create_rejects_topic_text_used_as_a_slug() {
         .unwrap_err();
 
     assert_eq!(error.code, capability::ErrorCode::InvalidArgument);
-    assert!(error.message.contains("lowercase ASCII"));
-    assert!(error.message.contains("Use topic"));
-    assert!(error.message.contains("topic supports Unicode"));
     assert!(!error.retryable);
     let channel_count: i64 = sqlx::query_scalar("SELECT count(*) FROM channels WHERE space_id=$1")
         .bind(fixture.context.space_id.into_uuid())

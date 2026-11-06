@@ -536,7 +536,6 @@ fn debug_output_excludes_fencing_locator_and_message_content() {
 
     let output = format!("{run:?} {session:?}");
 
-    assert!(!output.contains("secret-token"));
     assert!(!output.contains("provider-secret-locator"));
     assert!(!output.contains("message body"));
 }

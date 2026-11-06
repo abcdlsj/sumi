@@ -14,20 +14,13 @@ use std::{
 use async_trait::async_trait;
 
 use crate::{
-    computer::{
-        application::{
-            ApplicationError,
-            ports::{
-                DriverCompletion, DriverPort, DriverTurnOutcome, OpenSessionRequest, OpenedSession,
-                ProcessEvidence, SteerOutcome,
-            },
-            usage::LlmUsageRecord,
+    computer::application::{
+        ApplicationError, DriverKind, LocalAgent, LocalRun, ProviderSession,
+        ports::{
+            DriverCompletion, DriverPort, DriverTurnOutcome, OpenSessionRequest, OpenedSession,
+            ProcessEvidence, SteerOutcome,
         },
-        core::{
-            home::LocalAgent,
-            session::{DriverKind, ProviderSession},
-            supervisor::LocalRun,
-        },
+        usage::LlmUsageRecord,
     },
     ids::{AgentId, RunId},
 };
@@ -168,7 +161,7 @@ impl<A: StructuredProviderClient, B: StructuredProviderClient> DriverPort for Dr
     async fn notice(
         &mut self,
         run: &LocalRun,
-        notice: &crate::computer::core::input::AttentionNoticeInput,
+        notice: &crate::computer::application::AttentionNoticeInput,
     ) -> Result<(), ApplicationError> {
         let turn = self
             .turns

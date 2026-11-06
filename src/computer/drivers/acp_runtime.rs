@@ -26,16 +26,9 @@ use tokio::{
 };
 
 use crate::{
-    computer::{
-        application::{
-            ApplicationError,
-            ports::{DriverCompletion, DriverTurnOutcome, ProcessEvidence, SteerOutcome},
-        },
-        core::{
-            home::LocalAgent,
-            input::{DispatchedItemInput, RunInput},
-            session::DriverKind,
-        },
+    computer::application::{
+        ApplicationError, DispatchedItemInput, DriverKind, LocalAgent, RunInput,
+        ports::{DriverCompletion, DriverTurnOutcome, ProcessEvidence, SteerOutcome},
     },
     config::{AcpConfig, AcpProcessConfig, daemon_socket_path},
     ids::{AgentId, RunId},
@@ -840,7 +833,7 @@ impl StructuredProviderClient for AcpRuntimeClient {
     async fn notice(
         &mut self,
         _: &str,
-        _: &crate::computer::core::input::AttentionNoticeInput,
+        _: &crate::computer::application::AttentionNoticeInput,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -1026,10 +1019,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        computer::core::{
-            home::LocalAgentState,
-            input::{AgentInput, ContextMessageInput, RunContextInput, WorkInput},
-            scheduler::WorkStrength,
+        computer::application::{
+            AgentInput, ContextMessageInput, LocalAgentState, RunContextInput, WorkInput,
+            WorkStrength,
         },
         ids::{ChannelId, InboxItemId, MemberId, MessageId, SpaceId, ThreadId},
     };
