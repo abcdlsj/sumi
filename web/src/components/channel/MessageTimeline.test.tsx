@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Message, MessagePage } from "../../api/client";
+import type {Message, MessagePage} from "../../api/types";
 import { ExpandableMessageText, MessageTimeline } from "./MessageTimeline";
 
 afterEach(() => {

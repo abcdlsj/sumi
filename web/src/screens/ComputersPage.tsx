@@ -3,15 +3,8 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, Monitor, Plus, Trash2, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import {
-  createAgent,
-  deleteComputer,
-  listAgents,
-  listComputers,
-  computerInstallCommand,
-  type Agent,
-  type Computer,
-} from "../api/client";
+import {createAgent, deleteComputer, listAgents, listComputers, computerInstallCommand} from "../api/client";
+import type {Agent, Computer} from "../api/types";
 import { activityLabel } from "../agentActivity";
 import { DRIVER_CHOICES, driverInput } from "../driver";
 import { LlmUsagePanel } from "../components/LlmUsagePanel";

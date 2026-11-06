@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { LlmUsageBucket } from "../api/client";
+import type {LlmUsageBucket} from "../api/types";
 
 export function TokenUsageChart({ series }: { series: LlmUsageBucket[] }) {
   const maxTokens = useMemo(

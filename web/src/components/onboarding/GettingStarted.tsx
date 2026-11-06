@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, LoaderCircle, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import { addChannelAgents, computerInstallCommand, createAgent, type Agent, type Computer, type Member } from "../../api/client";
+import {addChannelAgents, computerInstallCommand, createAgent} from "../../api/client";
+import type {Agent, Computer, Member} from "../../api/types";
 import { DRIVER_CHOICES, driverInput } from "../../driver";
 import { DialogFrame } from "../DialogFrame";
 

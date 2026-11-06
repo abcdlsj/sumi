@@ -20,24 +20,8 @@ import {
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  ApiRequestError,
-  createChannel,
-  createDirectMessage,
-  currentUser,
-  getSpaceBySlug,
-  joinChannel,
-  listChannels,
-  listAgents,
-  listComputers,
-  listDirectMessages,
-  listInbox,
-  listMembers,
-  type Channel,
-  type Computer,
-  type DirectMessage,
-  type Member,
-} from "../api/client";
+import {ApiRequestError, createChannel, createDirectMessage, currentUser, getSpaceBySlug, joinChannel, listChannels, listAgents, listComputers, listDirectMessages, listInbox, listMembers} from "../api/client";
+import type {Channel, Computer, DirectMessage, Member} from "../api/types";
 import { activityLabel, agentPresence, type AgentPresence } from "../agentActivity";
 import {
   AGENT_INSIGHTS_FEATURE_ID,

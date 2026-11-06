@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Message } from "../../api/client";
+import type {Message} from "../../api/types";
 import { MessageComposer } from "./MessageComposer";
 
 afterEach(() => {

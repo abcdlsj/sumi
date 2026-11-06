@@ -14,16 +14,8 @@ import {
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import {
-  createInvitation,
-  createDirectMessage,
-  listAgents,
-  listMembers,
-  updateMember,
-  type Agent,
-  type Member,
-  type Space,
-} from "../api/client";
+import {createInvitation, createDirectMessage, listAgents, listMembers, updateMember} from "../api/client";
+import type {Agent, Member, Space} from "../api/types";
 import { activityLabel, agentPresence } from "../agentActivity";
 import { PresenceIdentity, SpacePage } from "../components/SpaceShell";
 import { SumiSelect } from "../components/SumiSelect";

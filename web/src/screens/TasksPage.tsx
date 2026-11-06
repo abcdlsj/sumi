@@ -3,20 +3,8 @@ import { Link, useParams } from "@tanstack/react-router";
 import { ArrowUpRight, Check, ListTodo, MessageSquare, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
-import {
-  closeTask,
-  completeTask,
-  getTask,
-  listAgents,
-  listTasks,
-  readThread,
-  type Member,
-  startTask,
-  type Run,
-  type Task,
-  type TaskStatus,
-  type ThreadReference,
-} from "../api/client";
+import {closeTask, completeTask, getTask, listAgents, listTasks, readThread, startTask} from "../api/client";
+import type {Member, Run, Task, TaskStatus, ThreadReference} from "../api/types";
 import { DialogFrame } from "../components/DialogFrame";
 import { EmptyState } from "../components/EmptyState";
 import { SpacePage } from "../components/SpaceShell";

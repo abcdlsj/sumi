@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "../router";
-import type { Run, Task, ThreadReference } from "../api/client";
+import type {Run, Task, ThreadReference} from "../api/types";
 
 const ownerId = "019c0000-0000-7000-8000-000000000002";
 const spaceId = "019c0000-0000-7000-8000-000000000001";

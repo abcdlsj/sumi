@@ -1,4 +1,4 @@
-import type { InboxItem } from "./api/client";
+import type {InboxItem} from "./api/types";
 
 export type InboxStack = {
   id: string;

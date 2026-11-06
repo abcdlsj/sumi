@@ -3,14 +3,8 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Gauge } from "lucide-react";
 
-import {
-  getComputerLlmUsage,
-  getSpaceBySlug,
-  listAgents,
-  listComputers,
-  type LlmUsageAgentSeries,
-  type LlmUsageBucket,
-} from "../api/client";
+import {getComputerLlmUsage, getSpaceBySlug, listAgents, listComputers} from "../api/client";
+import type {LlmUsageAgentSeries, LlmUsageBucket} from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { PixelIdentity } from "../components/PixelIdentity";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "../components/TokenUsageChart";

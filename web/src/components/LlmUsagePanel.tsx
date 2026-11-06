@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Gauge } from "lucide-react";
 import { useState } from "react";
 
-import { getComputerLlmUsage, type LlmUsage } from "../api/client";
+import {getComputerLlmUsage} from "../api/client";
+import type {LlmUsage} from "../api/types";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "./TokenUsageChart";
 import "./llmUsage.css";
 import { PanelSkeleton } from "./Skeleton";

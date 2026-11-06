@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Agent } from "./api/client";
+import type {Agent} from "./api/types";
 
 /** What the UI shows for an Agent: its activity, or offline while its Computer is unreachable. */
 export type AgentPresence = Agent["activity_status"] | "offline";

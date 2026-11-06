@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { LlmUsage } from "../api/client";
+import type {LlmUsage} from "../api/types";
 import { LlmUsagePanel } from "./LlmUsagePanel";
 
 const computerId = "019c0000-0000-7000-8000-000000000001";

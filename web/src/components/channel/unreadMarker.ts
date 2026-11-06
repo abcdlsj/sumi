@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { Message } from "../../api/client";
+import type {Message} from "../../api/types";
 
 const storageKey = (channelId: string) => `sumi.last-read.${channelId}`;
 

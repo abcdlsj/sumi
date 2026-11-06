@@ -3,7 +3,8 @@ import { Link, useParams } from "@tanstack/react-router";
 import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Settings2, Trash2, X, type LucideIcon } from "lucide-react";
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
-import { getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, readThread, retireAgent, revokeMemberPermission, updateAgent, type Channel } from "../api/client";
+import {getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, readThread, retireAgent, revokeMemberPermission, updateAgent} from "../api/client";
+import type {Channel} from "../api/types";
 import { driverLabel } from "../driver";
 import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, agentPresence, useAgentActivity, type AgentActivityItem } from "../agentActivity";

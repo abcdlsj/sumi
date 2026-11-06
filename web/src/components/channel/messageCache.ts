@@ -1,6 +1,7 @@
 import { infiniteQueryOptions, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 
-import { getMessage, listMessages, type Message, type MessagePage } from "../../api/client";
+import {getMessage, listMessages} from "../../api/client";
+import type {Message, MessagePage} from "../../api/types";
 
 /** Pages run newest first; each later page holds the Root Messages before the previous one. */
 export type MessagePages = InfiniteData<MessagePage, unknown>;

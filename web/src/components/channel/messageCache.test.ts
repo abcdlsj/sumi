@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Message, MessagePage } from "../../api/client";
+import type {Message, MessagePage} from "../../api/types";
 import { timelinePage, upsertRootMessage, type MessagePages } from "./messageCache";
 
 function root(seq: number, replyCount = 0): Message {
