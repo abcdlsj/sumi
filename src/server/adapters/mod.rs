@@ -1,4 +1,5 @@
 mod command;
+mod connection_slots;
 mod credential;
 mod http;
 mod object_storage;

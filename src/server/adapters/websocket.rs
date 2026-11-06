@@ -8,7 +8,7 @@ use crate::protocol::{
     version::SUPPORTED,
 };
 use crate::{
-    ids::{ComputerId, EventId, MemberId, SpaceId, ThreadId},
+    ids::{ComputerId, EventId, MemberId},
     server::application::ports::ApplicationError,
 };
 
@@ -103,7 +103,6 @@ use crate::server::domain::attention::AttentionPolicy;
 use crate::server::domain::execution::{DeliveryOutcome as ServerDeliveryOutcome, RunOutcome};
 use axum::extract::ws::{Message as WebSocketMessage, WebSocket};
 use futures_util::StreamExt;
-use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 pub(super) async fn computer_socket(
@@ -117,7 +116,6 @@ pub(super) async fn computer_socket(
 ) {
     // Counted until the last frame is written and the close finishes; shutdown waits for it.
     let _open_socket = shutdown.socket();
-    let pool = storage.pool();
     let Ok(Some(Ok(WebSocketMessage::Text(encoded)))) =
         tokio::time::timeout(COMPUTER_IDLE_TIMEOUT, socket.next()).await
     else {
@@ -261,11 +259,12 @@ pub(super) async fn computer_socket(
             }
             ComputerFrame::QueryResult { result } => queries.resolve(result),
             ComputerFrame::Heartbeat { heartbeat } => {
-                let _ = sqlx::query("UPDATE computers SET last_seen_at=$2 WHERE id=$1")
-                    .bind(computer_id)
-                    .bind(heartbeat.observed_at)
-                    .execute(&pool)
-                    .await;
+                if let Err(error) = storage
+                    .touch_computer(ComputerId::from_uuid(computer_id), heartbeat.observed_at)
+                    .await
+                {
+                    tracing::warn!(%computer_id, %error, "Computer heartbeat could not be recorded");
+                }
                 let replay_watermark = replay_pending_commands(
                     &storage,
                     &mut socket,
@@ -296,39 +295,36 @@ pub(super) async fn computer_socket(
                 }
                 if response.is_ok() {
                     if yielded {
-                        let run = sqlx::query(
-                            "SELECT agent_runs.agent_id,agent_runs.space_id,agent_runs.focus_thread_id,\
-                                    messages.channel_id,messages.channel_seq,channels.slug \
-                             FROM agent_runs JOIN messages ON messages.id=agent_runs.focus_thread_id \
-                                    JOIN channels ON channels.id=messages.channel_id \
-                             WHERE agent_runs.id=$1",
-                        )
-                        .bind(run_id.into_uuid())
-                        .fetch_optional(&pool)
-                        .await;
-                        if let Ok(Some(row)) = run {
-                            let slug = row.get::<Option<String>, _>("slug");
-                            let focus_label = super::http::activity_thread_label(
-                                slug.as_deref(),
-                                row.get("channel_seq"),
-                            );
-                            storage
-                                .record_agent_activity(
-                                    Some(event_id.into_uuid()),
-                                    SpaceId::from_uuid(row.get("space_id")),
-                                    MemberId::from_uuid(row.get("agent_id")),
-                                    "run.yield",
-                                    super::http::agent_activity_details(
-                                        serde_json::json!({
-                                            "run_id": run_id,
-                                            "thread_id": ThreadId::from_uuid(row.get("focus_thread_id")),
-                                            "channel_id": row.get::<Uuid, _>("channel_id"),
-                                            "scope_channel_id": row.get::<Uuid, _>("channel_id"),
-                                        }),
-                                        vec![("focus", focus_label)],
-                                    ),
-                                )
-                                .await;
+                        match storage.run_activity_focus(run_id).await {
+                            Ok(Some(focus)) => {
+                                let focus_label = super::http::activity_thread_label(
+                                    focus.slug.as_deref(),
+                                    focus.channel_seq,
+                                );
+                                storage
+                                    .record_agent_activity(
+                                        Some(event_id.into_uuid()),
+                                        focus.space_id,
+                                        focus.agent_id,
+                                        "run.yield",
+                                        super::http::agent_activity_details(
+                                            serde_json::json!({
+                                                "run_id": run_id,
+                                                "thread_id": focus.thread_id,
+                                                "channel_id": focus.channel_id,
+                                                "scope_channel_id": focus.channel_id,
+                                            }),
+                                            vec![("focus", focus_label)],
+                                        ),
+                                    )
+                                    .await;
+                            }
+                            Ok(None) => {}
+                            Err(error) => tracing::warn!(
+                                %run_id,
+                                %error,
+                                "yielded Run activity could not locate its Focus"
+                            ),
                         }
                     }
                     let _ = send_json(
@@ -429,7 +425,7 @@ pub(super) async fn computer_socket(
                 {
                     if matches!(result.outcome, CommandOutcome::Rejected { .. })
                         && let Err(error) =
-                            apply_rejected_command(&storage, computer_id, &pool, &result).await
+                            apply_rejected_command(&storage, computer_id, &result).await
                     {
                         tracing::error!(
                             %computer_id,
@@ -537,7 +533,6 @@ async fn apply_command_result(
 async fn apply_rejected_command(
     storage: &PostgresAdapter,
     computer_id: Uuid,
-    pool: &PgPool,
     result: &CommandResult,
 ) -> Result<(), ApiError> {
     // A command is acknowledged only after its rejected delivery compensation succeeds. Once the
@@ -577,27 +572,23 @@ async fn apply_rejected_command(
         .await
         .map_err(|_| ApiError::internal())?;
 
-        let row = sqlx::query(
-            "SELECT r.agent_id,r.space_id,r.focus_thread_id,m.channel_id \
-             FROM agent_runs r JOIN messages m ON m.id=r.focus_thread_id WHERE r.id=$1",
-        )
-        .bind(run_id.into_uuid())
-        .fetch_optional(pool)
-        .await
-        .map_err(|_| ApiError::internal())?;
-        if let Some(row) = row {
+        if let Some(focus) = storage
+            .run_activity_focus(run_id)
+            .await
+            .map_err(|_| ApiError::internal())?
+        {
             storage
                 .record_agent_activity_with_id(
                     EventId::from_uuid(result.command_id.into_uuid()),
-                    SpaceId::from_uuid(row.get("space_id")),
-                    MemberId::from_uuid(row.get("agent_id")),
+                    focus.space_id,
+                    focus.agent_id,
                     "run.delivery_rejected",
                     super::http::agent_activity_details(
                         serde_json::json!({
                             "run_id": run_id,
-                            "thread_id": ThreadId::from_uuid(row.get("focus_thread_id")),
-                            "channel_id": row.get::<Uuid, _>("channel_id"),
-                            "scope_channel_id": row.get::<Uuid, _>("channel_id"),
+                            "thread_id": focus.thread_id,
+                            "channel_id": focus.channel_id,
+                            "scope_channel_id": focus.channel_id,
                         }),
                         vec![("delivery_sequence", delivery_sequence.to_string())],
                     ),

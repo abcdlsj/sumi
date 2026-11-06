@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+use super::connection_slots::{ConnectionHandle, ConnectionSlots};
 
 /// In-process wake-up registry for queued Computer commands.
 ///
@@ -12,69 +11,30 @@ use uuid::Uuid;
 /// remains the source of truth, and reconnect/heartbeat replay still guarantees delivery.
 #[derive(Clone, Default)]
 pub(super) struct CommandRegistry {
-    state: Arc<Mutex<RegistryState>>,
+    slots: ConnectionSlots<()>,
 }
 
-#[derive(Default)]
-struct RegistryState {
-    next_connection: u64,
-    computers: HashMap<Uuid, Connection>,
-}
-
-struct Connection {
-    id: u64,
-    wakeups: mpsc::UnboundedSender<()>,
-}
-
-pub(super) struct CommandConnection {
-    computer_id: Uuid,
-    id: u64,
-}
+pub(super) struct CommandConnection(ConnectionHandle);
 
 impl CommandRegistry {
     pub(super) fn connect(
         &self,
         computer_id: Uuid,
     ) -> (CommandConnection, mpsc::UnboundedReceiver<()>) {
-        let (wakeups, receiver) = mpsc::unbounded_channel();
-        let mut state = self.state.lock().expect("command registry lock");
-        state.next_connection += 1;
-        let id = state.next_connection;
-        state
-            .computers
-            .insert(computer_id, Connection { id, wakeups });
-        (CommandConnection { computer_id, id }, receiver)
+        let (handle, receiver) = self.slots.connect(computer_id);
+        (CommandConnection(handle), receiver)
     }
 
     pub(super) fn disconnect(&self, connection: CommandConnection) {
-        let mut state = self.state.lock().expect("command registry lock");
-        // A stale disconnect must not remove a newer connection for the same Computer.
-        if state
-            .computers
-            .get(&connection.computer_id)
-            .is_some_and(|existing| existing.id == connection.id)
-        {
-            state.computers.remove(&connection.computer_id);
-        }
+        self.slots.disconnect(connection.0);
     }
 
     pub(super) fn is_connected(&self, computer_id: Uuid) -> bool {
-        self.state
-            .lock()
-            .expect("command registry lock")
-            .computers
-            .contains_key(&computer_id)
+        self.slots.is_connected(computer_id)
     }
 
     pub(super) fn notify(&self, computer_id: Uuid) {
-        let sender = self
-            .state
-            .lock()
-            .expect("command registry lock")
-            .computers
-            .get(&computer_id)
-            .map(|connection| connection.wakeups.clone());
-        if let Some(sender) = sender {
+        if let Some(sender) = self.slots.sender(computer_id) {
             let _ = sender.send(());
         }
     }

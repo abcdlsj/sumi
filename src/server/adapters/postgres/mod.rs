@@ -61,6 +61,16 @@ use crate::{
 
 const BASELINE: &str = include_str!("../../../../schema/postgres.sql");
 
+/// Where a Run's Focus sits, for Run activity entries.
+pub(super) struct RunActivityFocus {
+    pub(super) agent_id: MemberId,
+    pub(super) space_id: SpaceId,
+    pub(super) thread_id: ThreadId,
+    pub(super) channel_id: Uuid,
+    pub(super) channel_seq: i64,
+    pub(super) slug: Option<String>,
+}
+
 /// Schema version written by `schema/postgres.sql`. Older databases are not upgraded: the
 /// baseline already describes the current schema, so only versions after it get migrations.
 const BASELINE_VERSION: i32 = 12;
@@ -135,10 +145,6 @@ impl PostgresAdapter {
             pool,
             commands: super::command::CommandRegistry::default(),
         }
-    }
-
-    pub(super) fn pool(&self) -> PgPool {
-        self.pool.clone()
     }
 
     pub(super) fn commands(&self) -> super::command::CommandRegistry {
@@ -216,6 +222,47 @@ impl PostgresAdapter {
             .await?;
         }
         transaction.commit().await
+    }
+
+    /// Records that a Computer answered a heartbeat; an unknown Computer is ignored.
+    pub(super) async fn touch_computer(
+        &self,
+        computer_id: ComputerId,
+        observed_at: OffsetDateTime,
+    ) -> Result<(), ApplicationError> {
+        sqlx::query("UPDATE computers SET last_seen_at=$2 WHERE id=$1")
+            .bind(computer_id.into_uuid())
+            .bind(observed_at)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx)?;
+        Ok(())
+    }
+
+    /// The Agent and Channel a Run's Focus belongs to, for Run activity that needs a location.
+    pub(super) async fn run_activity_focus(
+        &self,
+        run_id: RunId,
+    ) -> Result<Option<RunActivityFocus>, ApplicationError> {
+        let row = sqlx::query(
+            "SELECT agent_runs.agent_id,agent_runs.space_id,agent_runs.focus_thread_id,\
+                    messages.channel_id,messages.channel_seq,channels.slug \
+             FROM agent_runs JOIN messages ON messages.id=agent_runs.focus_thread_id \
+                    JOIN channels ON channels.id=messages.channel_id \
+             WHERE agent_runs.id=$1",
+        )
+        .bind(run_id.into_uuid())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(row.map(|row| RunActivityFocus {
+            agent_id: MemberId::from_uuid(row.get("agent_id")),
+            space_id: SpaceId::from_uuid(row.get("space_id")),
+            thread_id: ThreadId::from_uuid(row.get("focus_thread_id")),
+            channel_id: row.get("channel_id"),
+            channel_seq: row.get("channel_seq"),
+            slug: row.get("slug"),
+        }))
     }
 
     pub(super) async fn pending_commands(
