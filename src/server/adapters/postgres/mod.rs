@@ -71,9 +71,9 @@ pub(super) struct RunActivityFocus {
     pub(super) slug: Option<String>,
 }
 
-/// Schema version written by `schema/postgres.sql`. Older databases are not upgraded: the
-/// baseline already describes the current schema, so only versions after it get migrations.
-const BASELINE_VERSION: i32 = 12;
+/// Schema version written by `schema/postgres.sql`, which always describes the current schema.
+/// A database at any other version is refused instead of upgraded.
+const SCHEMA_VERSION: i32 = 14;
 
 /// How many `outbox_events` rows one stream read scans before the stream decides to page on.
 const EVENT_PAGE: usize = 100;
@@ -180,46 +180,17 @@ impl PostgresAdapter {
         let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
             .fetch_one(&mut *transaction)
             .await?;
-        if version < BASELINE_VERSION {
+        if version < SCHEMA_VERSION {
             return Err(sqlx::Error::Protocol(format!(
-                "Server database is at schema version {version}, older than the supported baseline \
-                 {BASELINE_VERSION}; recreate the database from schema/postgres.sql"
+                "Server database is at schema version {version}, older than the supported \
+                 {SCHEMA_VERSION}; recreate the database from schema/postgres.sql"
             )));
         }
-        if version < 13 {
-            // Browser streams follow `sequence`, the commit order inside a Space, instead of
-            // `created_at`, which the application writes before the commit order is decided.
-            sqlx::raw_sql(
-                "ALTER TABLE outbox_events ADD COLUMN sequence BIGINT; \
-                 WITH ordered AS ( \
-                    SELECT id,row_number() OVER (PARTITION BY space_id ORDER BY created_at,id) AS position \
-                    FROM outbox_events \
-                 ) \
-                 UPDATE outbox_events e SET sequence=ordered.position \
-                    FROM ordered WHERE e.id=ordered.id; \
-                 ALTER TABLE outbox_events ALTER COLUMN sequence SET NOT NULL; \
-                 CREATE UNIQUE INDEX outbox_events_space_sequence ON outbox_events(space_id, sequence); \
-                 DROP INDEX outbox_events_space_cursor; \
-                 ALTER TABLE spaces ADD COLUMN event_sequence BIGINT NOT NULL DEFAULT 0; \
-                 UPDATE spaces s SET event_sequence=COALESCE(( \
-                    SELECT max(e.sequence) FROM outbox_events e WHERE e.space_id=s.id \
-                 ),0); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (13, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        if version < 14 {
-            // Columns no code ever wrote or read.
-            sqlx::raw_sql(
-                "ALTER TABLE computer_commands DROP COLUMN result_event_id; \
-                 ALTER TABLE channel_members DROP COLUMN last_read_seq; \
-                 ALTER TABLE users DROP COLUMN disabled_at; \
-                 ALTER TABLE spaces DROP COLUMN deleted_at; \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (14, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
+        if version > SCHEMA_VERSION {
+            return Err(sqlx::Error::Protocol(format!(
+                "Server database is at schema version {version}, newer than this Server supports \
+                 ({SCHEMA_VERSION}); upgrade the Server"
+            )));
         }
         transaction.commit().await
     }

@@ -753,7 +753,8 @@ fn unavailable(error: &ApplicationError, missing: wire::QueryErrorCode) -> wire:
             | ApplicationError::Unauthenticated
             | ApplicationError::Core(_)
             | ApplicationError::Internal
-            | ApplicationError::UnsupportedSchema(_) => wire::QueryErrorCode::Internal,
+            | ApplicationError::SchemaTooOld(_)
+            | ApplicationError::SchemaTooNew(_) => wire::QueryErrorCode::Internal,
         },
     }
 }
@@ -768,7 +769,8 @@ fn computer_error(error: &ApplicationError) -> wire::ComputerErrorCode {
         ApplicationError::Unauthenticated
         | ApplicationError::Core(_)
         | ApplicationError::Internal
-        | ApplicationError::UnsupportedSchema(_) => wire::ComputerErrorCode::Internal,
+        | ApplicationError::SchemaTooOld(_)
+        | ApplicationError::SchemaTooNew(_) => wire::ComputerErrorCode::Internal,
     }
 }
 

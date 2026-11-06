@@ -193,19 +193,30 @@ async fn empty_database_builds_final_schema_with_concurrency_constraints() {
     assert!(event_sequence_index);
     assert_eq!(schema_version, 14);
 
-    // A database below the baseline is refused instead of upgraded.
+    // A database at any other version is refused instead of upgraded or downgraded.
     sqlx::raw_sql(
         "DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (11,now());",
     )
     .execute(&pool)
     .await
     .unwrap();
-    let error = adapter.initialize_schema().await.unwrap_err();
+    let older = adapter.initialize_schema().await.unwrap_err();
     assert!(
-        error
+        older.to_string().contains("older than the supported"),
+        "{older}"
+    );
+    sqlx::raw_sql(
+        "DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (15,now());",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let newer = adapter.initialize_schema().await.unwrap_err();
+    assert!(
+        newer
             .to_string()
-            .contains("older than the supported baseline"),
-        "{error}"
+            .contains("newer than this Server supports"),
+        "{newer}"
     );
     sqlx::raw_sql(
         "DELETE FROM schema_meta; INSERT INTO schema_meta(version,applied_at) VALUES (14,now());",
@@ -2344,74 +2355,6 @@ async fn resuming_an_agent_queues_resume_before_a_later_run_start() {
 /// The migration orders existing events by the only order they have — `(created_at,id)` — and
 /// gives every Space a `event_sequence` that matches its newest event so new allocations continue
 /// where the backfill stopped.
-#[tokio::test]
-async fn schema_v13_backfills_space_event_sequence_in_creation_order() {
-    // A v12 database: the baseline without the commit-order migration.
-    let database = TestDatabase::create_empty("sumi_event_sequence").await;
-    let pool = database.pool.clone();
-    let adapter = PostgresAdapter::new(pool.clone());
-    sqlx::raw_sql(BASELINE).execute(&pool).await.unwrap();
-    let space_id = Uuid::now_v7();
-    let owner_id = Uuid::now_v7();
-    let other_space_id = Uuid::now_v7();
-    let other_owner_id = Uuid::now_v7();
-    sqlx::raw_sql(&format!(
-        "BEGIN; \
-         INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) \
-             VALUES ('{space_id}','backfilled','Backfilled','#F0602F','{owner_id}',now()), \
-                    ('{other_space_id}','untouched','Untouched','#F0602F','{other_owner_id}',now()); \
-         INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) \
-             VALUES ('{owner_id}','{space_id}','human','Owner','owner',now()), \
-                    ('{other_owner_id}','{other_space_id}','human','Owner','owner',now()); \
-         COMMIT;"
-    ))
-    .execute(&pool)
-    .await
-    .unwrap();
-    let newest = OffsetDateTime::now_utc();
-    let oldest = newest - time::Duration::seconds(60);
-    let newest_id = Uuid::now_v7();
-    let oldest_id = Uuid::now_v7();
-    // Inserted newest first: only `created_at` tells the two apart.
-    sqlx::query(
-        "INSERT INTO outbox_events(id,space_id,kind,payload_json,created_at) \
-         VALUES($1,$2,'task.updated','{}',$3),($4,$2,'inbox.changed','{}',$5)",
-    )
-    .bind(newest_id)
-    .bind(space_id)
-    .bind(newest)
-    .bind(oldest_id)
-    .bind(oldest)
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    adapter.initialize_schema().await.unwrap();
-
-    let sequences: Vec<(Uuid, i64)> =
-        sqlx::query_as("SELECT id,sequence FROM outbox_events WHERE space_id=$1 ORDER BY sequence")
-            .bind(space_id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(sequences, vec![(oldest_id, 1), (newest_id, 2)]);
-    let tails: Vec<(Uuid, i64)> =
-        sqlx::query_as("SELECT id,event_sequence FROM spaces ORDER BY event_sequence")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(
-        tails,
-        vec![(other_space_id, 0), (space_id, 2)],
-        "a Space with no events keeps a zero tail"
-    );
-    pool.close().await;
-    database.close().await;
-}
-
-/// `created_at` is written when the application enters the write, so two transactions can commit in
-/// the opposite order. The allocation order is the commit order because the Space row lock is held
-/// until commit: the event that commits last always carries the higher sequence.
 #[tokio::test]
 async fn space_event_sequence_follows_commit_order_not_creation_time() {
     let database = TestDatabase::create("sumi_event_commit_order").await;

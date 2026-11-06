@@ -100,8 +100,10 @@ impl SqliteAdapter {
             .fetch_one(&mut connection)
             .await
             .map_err(map_sqlx)?;
-        if version != BASELINE_VERSION {
-            return Err(ApplicationError::UnsupportedSchema(version));
+        match version.cmp(&BASELINE_VERSION) {
+            std::cmp::Ordering::Less => return Err(ApplicationError::SchemaTooOld(version)),
+            std::cmp::Ordering::Greater => return Err(ApplicationError::SchemaTooNew(version)),
+            std::cmp::Ordering::Equal => {}
         }
         Ok(Self { connection })
     }
@@ -869,7 +871,9 @@ fn application_error_name(value: &ApplicationError) -> &'static str {
         ApplicationError::AlreadyApplied => "already_applied",
         ApplicationError::DriverUnavailable => "driver_unavailable",
         ApplicationError::SessionLost => "session_lost",
-        ApplicationError::Internal | ApplicationError::UnsupportedSchema(_) => "internal",
+        ApplicationError::Internal
+        | ApplicationError::SchemaTooOld(_)
+        | ApplicationError::SchemaTooNew(_) => "internal",
     }
 }
 
@@ -1091,8 +1095,36 @@ mod tests {
             Err(error) => error,
             Ok(_) => panic!("a pre-baseline database must not open"),
         };
-        assert_eq!(error, ApplicationError::UnsupportedSchema(4));
+        assert_eq!(error, ApplicationError::SchemaTooOld(4));
         assert!(error.to_string().contains("delete the daemon database"));
+    }
+
+    #[tokio::test]
+    async fn a_database_from_a_newer_release_is_reported_as_newer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("daemon.db");
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let mut connection = SqliteConnection::connect_with(&options).await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE schema_meta (
+                 version INTEGER PRIMARY KEY CHECK (version > 0),
+                 applied_at TEXT NOT NULL
+             ) STRICT;
+             INSERT INTO schema_meta (version, applied_at) VALUES (6, 'v6');",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        drop(connection);
+
+        let error = match SqliteAdapter::open(&path).await {
+            Err(error) => error,
+            Ok(_) => panic!("a newer database must not open"),
+        };
+        assert_eq!(error, ApplicationError::SchemaTooNew(6));
+        assert!(error.to_string().contains("newer sumi"));
     }
 
     #[tokio::test]

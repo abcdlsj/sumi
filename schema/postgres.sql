@@ -2,15 +2,14 @@ CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TIMESTAMPTZ NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (12, now());
+INSERT INTO schema_meta (version, applied_at) VALUES (14, now());
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     email_normalized TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     display_name TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    disabled_at TIMESTAMPTZ
+    created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE browser_sessions (
@@ -30,7 +29,7 @@ CREATE TABLE spaces (
     accent TEXT NOT NULL,
     owner_member_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    deleted_at TIMESTAMPTZ,
+    event_sequence BIGINT NOT NULL DEFAULT 0,
     UNIQUE (id, owner_member_id)
 );
 
@@ -178,7 +177,6 @@ CREATE TABLE channel_members (
     space_id UUID NOT NULL,
     member_id UUID NOT NULL,
     joined_at TIMESTAMPTZ NOT NULL,
-    last_read_seq BIGINT NOT NULL DEFAULT 0 CHECK (last_read_seq >= 0),
     PRIMARY KEY (channel_id, member_id),
     FOREIGN KEY (channel_id, space_id) REFERENCES channels(id, space_id) ON DELETE RESTRICT,
     FOREIGN KEY (member_id, space_id) REFERENCES members(id, space_id) ON DELETE RESTRICT
@@ -470,7 +468,6 @@ CREATE TABLE computer_commands (
     kind TEXT NOT NULL,
     payload_json JSONB NOT NULL,
     acked_at TIMESTAMPTZ,
-    result_event_id UUID UNIQUE,
     created_at TIMESTAMPTZ NOT NULL,
     UNIQUE (computer_id, computer_seq)
 );
@@ -480,8 +477,11 @@ CREATE TABLE outbox_events (
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE RESTRICT,
     kind TEXT NOT NULL,
     payload_json JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL
+    created_at TIMESTAMPTZ NOT NULL,
+    -- Commit order inside the Space; the Browser stream follows it, not `created_at`.
+    sequence BIGINT NOT NULL
 );
+CREATE UNIQUE INDEX outbox_events_space_sequence ON outbox_events(space_id, sequence);
 
 CREATE TABLE idempotency_records (
     actor_member_id UUID NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
@@ -735,7 +735,6 @@ CREATE INDEX channel_members_member_cursor ON channel_members(member_id);
 CREATE INDEX computers_space_cursor ON computers(space_id, created_at);
 CREATE INDEX agents_space_cursor ON agents(space_id, created_at);
 CREATE INDEX agents_computer_lookup ON agents(computer_id);
-CREATE INDEX outbox_events_space_cursor ON outbox_events(space_id, created_at, id);
 CREATE INDEX tasks_space_cursor ON tasks(space_id, updated_at DESC, id DESC);
 CREATE INDEX agent_runs_task_cursor ON agent_runs(task_id, created_at DESC, id DESC);
 CREATE INDEX inbox_items_pending ON inbox_items(member_id, available_at, id)

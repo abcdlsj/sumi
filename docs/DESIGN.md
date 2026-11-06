@@ -264,8 +264,7 @@ Driver：
 - 稳定状态使用 text 和 CHECK 约束；正文、Secret、Provider transcript 不进入 idempotency 或 outbox metadata。
 - `agent.activity` 是给 Browser 活动列表的派生事实，只存稳定 ID（run、message、task、thread、channel、item、target member）和有长度上限的标签参数（Channel slug、Task 标题、目标名称等，每项最多 280 字符），不存 Message 正文、Task Result、关闭备注或 continuation note。Browser 需要正文时按事件里的 `message_id` 经所在 Thread 的正常读取接口取得，读权限、编辑与软删除都以 `messages` 为准。
 - `agent.activity` 在 Agent 动作提交后写入，不进入动作的业务事务：每个动作的事务入口由 application 层统一持有，活动是可丢失的展示数据，把它并入事务需要每个领域命令都携带展示参数。重复写由事件 ID 防止：事件 ID 由请求来源（Agent 动作的 idempotency key、Run result 的 event ID、command ID）、kind 与 payload 中的 ID 派生，同一请求重发时插入命中已有行而不新增。提交后、写活动前进程退出时，该条活动缺失，直到 Computer 以同一 key 重发。
-- `schema/postgres.sql` 与 `schema/computer.sql` 是当前基线，各自记录基线版本号；两者都只描述当前 schema。数据库低于基线版本时拒绝启动并给出明确错误，由使用者重建空库，不做旧数据迁移。
-- 基线之后新增 schema 变更时追加前向 migration，不得修改已应用 migration。
+- `schema/postgres.sql` 与 `schema/computer.sql` 是当前 schema 的唯一定义，各自记录版本号。schema 变更直接改基线文件并提升版本号，不追加 migration。数据库版本低于或高于本二进制支持的版本时拒绝启动并给出明确错误：低于时由使用者重建空库，高于时需升级程序，不做旧数据迁移。
 - 性能优化先通过查询、索引和可重建投影解决；写模型保持规范化。
 
 ### 运维与诊断
