@@ -8,7 +8,7 @@ use crate::protocol::{
     version::SUPPORTED,
 };
 use crate::{
-    ids::{ComputerId, EventId, MemberId},
+    ids::{ComputerId, DaemonSessionId, EventId, MemberId},
     server::application::ports::ApplicationError,
 };
 
@@ -237,6 +237,13 @@ pub(super) async fn computer_socket(
             continue;
         };
         let Ok(frame) = serde_json::from_str::<ComputerFrame>(&encoded) else {
+            continue;
+        };
+        let Some(frame) = from_current_session(frame, hello.daemon_session_id) else {
+            tracing::warn!(
+                %computer_id,
+                "Computer frame arrived from an earlier daemon session; dropped"
+            );
             continue;
         };
         match frame {
@@ -468,6 +475,23 @@ pub(super) async fn computer_socket(
     }
 }
 
+/// Frames whose fields describe execution state carry the daemon session that produced them. A
+/// reconnecting Computer replays durable results under a new session, so a frame from an earlier
+/// session can still arrive on this socket; applying it would attribute work to a connection the
+/// Server already reconciled.
+fn from_current_session(frame: ComputerFrame, session: DaemonSessionId) -> Option<ComputerFrame> {
+    let frame_session = match &frame {
+        ComputerFrame::Heartbeat { heartbeat } => Some(heartbeat.daemon_session_id),
+        ComputerFrame::RunResult { result } => Some(result.daemon_session_id),
+        ComputerFrame::CommandResult { result } => Some(result.daemon_session_id),
+        _ => None,
+    };
+    match frame_session {
+        Some(frame_session) if frame_session != session => None,
+        _ => Some(frame),
+    }
+}
+
 async fn mark_connection(
     storage: &PostgresAdapter,
     computer_id: Uuid,
@@ -664,28 +688,60 @@ async fn send_json(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use uuid::Uuid;
 
     use super::*;
-    use crate::{
-        ids::DaemonSessionId,
-        protocol::{
-            computer::{CommandSequence, DaemonCapability},
-            version::{ProtocolVersion, ProtocolVersionRange},
-        },
+    use crate::protocol::{
+        computer::{CommandOutcome, CommandSequence, Heartbeat, RunResult, RunTerminalStatus},
+        version::{ProtocolVersion, ProtocolVersionRange},
     };
 
     fn hello(range: ProtocolVersionRange) -> ComputerHello {
         ComputerHello {
             supported_versions: range,
             daemon_version: "1.0.0".into(),
-            capabilities: BTreeSet::from([DaemonCapability::Sandbox]),
             daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             command_watermark: CommandSequence(0),
             live_run_ids: Vec::new(),
         }
+    }
+
+    #[test]
+    fn frames_from_an_earlier_daemon_session_are_dropped() {
+        let session = DaemonSessionId::from_uuid(Uuid::now_v7());
+        let earlier = DaemonSessionId::from_uuid(Uuid::now_v7());
+        let heartbeat = |daemon_session_id| ComputerFrame::Heartbeat {
+            heartbeat: Heartbeat {
+                daemon_session_id,
+                observed_at: OffsetDateTime::now_utc(),
+            },
+        };
+
+        assert!(from_current_session(heartbeat(earlier), session).is_none());
+        assert!(from_current_session(heartbeat(session), session).is_some());
+        let run_result = |daemon_session_id| ComputerFrame::RunResult {
+            result: RunResult {
+                daemon_session_id,
+                event_id: EventId::from_uuid(Uuid::now_v7()),
+                run_id: crate::ids::RunId::from_uuid(Uuid::now_v7()),
+                status: RunTerminalStatus::Completed,
+                item_outcomes: Vec::new(),
+                continuation_note: None,
+                error_code: None,
+            },
+        };
+        assert!(from_current_session(run_result(earlier), session).is_none());
+        assert!(from_current_session(run_result(session), session).is_some());
+        let command_result = |daemon_session_id| ComputerFrame::CommandResult {
+            result: CommandResult {
+                daemon_session_id,
+                command_id: crate::ids::CommandId::from_uuid(Uuid::now_v7()),
+                sequence: CommandSequence(3),
+                outcome: CommandOutcome::Applied,
+            },
+        };
+        assert!(from_current_session(command_result(earlier), session).is_none());
+        assert!(from_current_session(command_result(session), session).is_some());
     }
 
     #[test]
@@ -697,7 +753,7 @@ mod tests {
                 ..
             }
         ));
-        let future = ProtocolVersionRange::new(ProtocolVersion::new(7), ProtocolVersion::new(7));
+        let future = ProtocolVersionRange::new(ProtocolVersion::new(8), ProtocolVersion::new(8));
         assert!(matches!(
             negotiate(&hello(future), false, true),
             ServerHandshake::Rejected {

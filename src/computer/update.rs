@@ -14,7 +14,10 @@ use crate::{
     cli::{ComputerArgs, Supervisor, UpdaterArgs},
     config::{ComputerConfig, default_sumi_dir},
     private_paths::ensure_private_directory,
-    protocol::update::{ComputerRelease, current_target},
+    protocol::{
+        update::{ComputerRelease, current_target},
+        version::CURRENT,
+    },
 };
 
 const MAX_ARTIFACT_BYTES: usize = 200 * 1024 * 1024;
@@ -221,6 +224,12 @@ async fn check_and_stage(
     ensure!(
         release.target == current_target(),
         "release target does not match this Computer"
+    );
+    // The daemon replaces itself with this artifact. A release built for another wire protocol
+    // would reconnect with a schema this Computer cannot speak, so it is refused before download.
+    ensure!(
+        release.protocol_version == CURRENT.value(),
+        "release protocol version does not match this Computer"
     );
     ensure_secure_update_origin(&release.url)?;
 
@@ -695,11 +704,19 @@ mod tests {
 
     /// Serves a manifest whose artifact URL redirects, the way GitHub Release assets do.
     async fn release_server(published: &'static [u8], served: &'static [u8]) -> url::Url {
+        release_server_with(published, served, CURRENT.value()).await
+    }
+
+    async fn release_server_with(
+        published: &'static [u8],
+        served: &'static [u8],
+        protocol_version: u16,
+    ) -> url::Url {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let release = crate::protocol::update::ComputerRelease {
             version: "9.9.9".into(),
-            protocol_version: 4,
+            protocol_version,
             target: current_target().into(),
             url: format!("http://{address}/releases/download/sumi")
                 .parse()
@@ -738,6 +755,20 @@ mod tests {
             tokio::fs::read(staged.candidate).await.unwrap(),
             b"computer binary"
         );
+    }
+
+    #[tokio::test]
+    async fn a_release_for_another_protocol_version_is_not_downloaded() {
+        let server =
+            release_server_with(b"computer binary", b"computer binary", CURRENT.value() + 1).await;
+        let directory = tempdir().unwrap();
+
+        let error = check_and_stage(&server, directory.path())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("protocol version"));
+        assert!(!directory.path().join("update/staged/9.9.9/sumi").exists());
     }
 
     #[tokio::test]

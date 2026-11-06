@@ -124,14 +124,14 @@ Driver：
 
 ### 协议与投递
 
-- 当前 Computer 协议 schema 为 v6，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
+- 当前 Computer 协议 schema 为 v7，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
 - 双方无共同版本时拒绝连接。
 - Computer 每 15 秒发送 heartbeat 与 WebSocket ping；任一端 45 秒内未收到任何帧即判定连接失效并断开，Computer 随即重连。建连 20 秒、单帧发送 30 秒超时。连接持续 60 秒以上后，重连退避从最小间隔重新开始。Server 只在同一 Computer 没有更新的连接时把它标记为 offline。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
 - RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
-- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况；上一连接会话的残留帧必须被丢弃。
+- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况：hello 携带本次连接的 daemon session ID、已持久化的最高 command 序号（Server 只补发其后的命令）和仍持有本地状态的 Run 列表。heartbeat、Run result 与 command result 携带产生它们的 daemon session ID，Server 丢弃与本次握手不同的会话帧。
 - 以 Member 身份发起的 HTTP 写操作都必须带 `Idempotency-Key`（UUID），缺失时返回 invalid_argument。Server 在业务事务内按 (actor, action, key) 写 `idempotency_records`：同一 key 重发同一请求返回当前结果、不再写入，也不重复下发 Computer command；同一 key 用于另一个资源返回 conflict。没有 Member 身份的入口（注册、登录、登出、接受邀请、开始配对）不收该头：注册以邮箱唯一约束防重，接受邀请对同一用户重放返回同一 Member，登录与登出重发没有额外副作用。
 - started、delivery、result、receipt 使用稳定 event ID 幂等。
 
@@ -141,7 +141,7 @@ Driver：
 - Computer 只从已连接 Server 读取 manifest，再从 manifest 中的 HTTPS URL 下载 artifact，并以 manifest 的 sha256 校验；sha256 不符的 artifact 不得写入 staging。生产传输使用 HTTPS。Server 是其所承载 Computer 的更新信任边界，不增加全局发行密钥。
 - release Computer 首次从稳定路径之外运行时，把自身原子复制到 `~/.sumi/bin/sumi` 并从该路径重新执行；已存在的稳定副本优先，防止旧下载文件覆盖已更新版本。debug 构建不自动安装。
 - Computer 在启动后检查更新，此后按配置周期检查。Update Policy 关闭自动更新时，Computer 不自动安装或检查发布物。
-- Computer 在本地校验 target、版本和 sha256，再把 artifact 写入私有 staging 目录。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
+- Computer 在本地校验 target、协议版本和 sha256，再把 artifact 写入私有 staging 目录；协议版本与本二进制不同的 release 不下载。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
 - 有活跃 Run 时只保留 staged artifact。没有活跃 Run 时，Computer 启动一次性 updater 并退出；updater 备份当前二进制与关闭后的 SQLite 文件，再替换二进制并启动新 daemon。
 - 新 daemon 完成本地数据库、sandbox、Driver recovery 和 capability socket 初始化后写 readiness 标记 `update/ready-<version>`。readiness 超时或进程提前退出时，updater 恢复旧二进制与 SQLite 备份并重启旧 daemon。
 - Computer 可由用户级服务管理器托管：macOS launchd agent `dev.sumi.computer`，Linux systemd user unit `sumi-computer.service`。服务以 `SUMI_COMPUTER_SERVICE=launchd|systemd` 声明托管方；服务只在非正常退出时重启。托管时 updater 脱离服务的进程组（launchd）或作为独立 transient unit 运行（systemd），daemon 以成功状态退出后，updater 经服务管理器启动、重启新旧 daemon，不自行 spawn。

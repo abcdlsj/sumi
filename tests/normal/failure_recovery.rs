@@ -249,6 +249,7 @@ async fn server_restart_during_run(database: &TestDatabase) -> Result<()> {
         ))?)
         .bearer_auth(&fixture.computer_token)
         .json(&serde_json::json!({
+            "daemon_session_id": Uuid::now_v7(),
             "event_id": Uuid::now_v7(),
             "run_id": run_id,
             "status": "completed",
@@ -357,6 +358,7 @@ async fn offline_computer_keeps_its_run(database: &TestDatabase) -> Result<()> {
         ))?)
         .bearer_auth(&fixture.computer_token)
         .json(&serde_json::json!({
+            "daemon_session_id": Uuid::now_v7(),
             "event_id": Uuid::now_v7(),
             "run_id": run_id,
             "status": "failed",
@@ -864,9 +866,8 @@ async fn server_shutdown_closes_open_streams(database: &TestDatabase) -> Result<
     socket
         .send(Message::Text(
             serde_json::json!({
-                "supported_versions": {"minimum": 6, "maximum": 6},
+                "supported_versions": {"minimum": 7, "maximum": 7},
                 "daemon_version": "test",
-                "capabilities": [],
                 "daemon_session_id": Uuid::now_v7(),
                 "command_watermark": 0,
                 "live_run_ids": [],

@@ -59,6 +59,16 @@ struct MemoryTransaction {
 impl TransactionPort for MemoryPort {
     type Transaction = MemoryTransaction;
 
+    async fn command_watermark(&mut self) -> Result<u64, ApplicationError> {
+        Ok(self
+            .state
+            .commands
+            .values()
+            .map(|command| command.sequence)
+            .max()
+            .unwrap_or(0))
+    }
+
     async fn transact<T>(
         &mut self,
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,

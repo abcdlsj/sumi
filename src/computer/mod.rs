@@ -38,8 +38,7 @@ use crate::{
     protocol::{
         capability,
         computer::{
-            CommandSequence, ComputerFrame, ComputerHello, DaemonCapability, Heartbeat,
-            ServerFrame, ServerHandshake,
+            CommandSequence, ComputerFrame, ComputerHello, Heartbeat, ServerFrame, ServerHandshake,
         },
         version::SUPPORTED,
     },
@@ -572,13 +571,15 @@ where
     let hello = ComputerHello {
         supported_versions: SUPPORTED,
         daemon_version: env!("CARGO_PKG_VERSION").into(),
-        capabilities: std::collections::BTreeSet::from([
-            DaemonCapability::ProviderSessionResume,
-            DaemonCapability::ProviderSessionReset,
-            DaemonCapability::Sandbox,
-        ]),
         daemon_session_id,
-        command_watermark: CommandSequence(0),
+        // Commands this Computer already persisted are not replayed; the Server sends only the ones
+        // after this sequence.
+        command_watermark: CommandSequence(
+            storage
+                .command_watermark()
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?,
+        ),
         // Runs this daemon still holds. The Server fails the rest of its non-terminal Runs for this
         // Computer, which is how a restart is reported instead of inferred from a timer.
         live_run_ids: RecoveryService::reconnect_run_ids(storage)
@@ -605,9 +606,10 @@ where
             anyhow::bail!("Server rejected Computer protocol: {code:?}")
         }
     }
+    let adapter =
+        ServerConnectionAdapter::new(drivers::prompt::product_contract(), daemon_session_id);
     let mut sent_events = HashSet::new();
-    send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
-    let adapter = ServerConnectionAdapter::new(drivers::prompt::product_contract());
+    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
     let mut driver_observation = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut lost_driver_check = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -642,7 +644,7 @@ where
                 )
                     .await
                     .map_err(|error| anyhow::anyhow!(error))?;
-                send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
+                send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
             }
             _ = heartbeat.tick() => {
                 let live_runs = RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?;
@@ -651,8 +653,7 @@ where
                 {
                     return Ok(ConnectionExit::Activate(staged));
                 }
-                let active_runs = live_runs.len() as u32;
-                let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,active_runs,observed_at:time::OffsetDateTime::now_utc()}};
+                let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,observed_at:time::OffsetDateTime::now_utc()}};
                 send_json(&mut writer, &frame).await?;
                 // The Server answers pings, so the idle timeout on reads detects a dead socket.
                 send_message(&mut writer, WebSocketMessage::Ping(Vec::new().into())).await?;
@@ -672,7 +673,7 @@ where
                 .await
                 .map_err(|error| anyhow::anyhow!(error))?;
                 if changed {
-                    send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
+                    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
                 }
             }
             _ = lost_driver_check.tick() => {
@@ -685,7 +686,7 @@ where
                     .await
                     .map_err(|error| anyhow::anyhow!(error))?
                 {
-                    send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
+                    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
                 }
             }
             incoming=next_server_frame(&mut reader, &mut pending_server_frames)=>{
@@ -700,6 +701,7 @@ where
                             &mut pending_activity_results,
                             storage,
                             &envelope,
+                            daemon_session_id,
                         ).await? {
                             for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
                                 send_json(&mut writer, &frame).await?;
@@ -713,12 +715,12 @@ where
                             .await
                             .map_err(|error| anyhow::anyhow!(error))?;
                         }
-                        send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
+                        send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
                     }
                     ServerFrame::Receipt{receipt}=>{
                         RecoveryService::acknowledge(storage,receipt.event_id).await.map_err(|error|anyhow::anyhow!(error))?;
                         sent_events.remove(&receipt.event_id);
-                        send_next_pending_event(storage, &mut writer, &mut sent_events).await?;
+                        send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
                     },
                     ServerFrame::Query{query}=>{
                         let frame=ServerConnectionAdapter::answer_query(storage,homes,query).await;
@@ -879,6 +881,7 @@ async fn resolve_command_activity<P, R, W>(
     >,
     storage: &mut P,
     envelope: &crate::protocol::computer::CommandEnvelope,
+    daemon_session_id: DaemonSessionId,
 ) -> anyhow::Result<CommandActivity>
 where
     P: TransactionPort,
@@ -919,6 +922,7 @@ where
         writer,
         &ComputerFrame::CommandResult {
             result: CommandResult {
+                daemon_session_id,
                 command_id: envelope.command_id,
                 sequence: envelope.sequence,
                 outcome: CommandOutcome::Rejected { code },
@@ -1090,6 +1094,7 @@ fn route_activity_frame(
 
 async fn send_next_pending_event<P>(
     storage: &mut P,
+    adapter: &ServerConnectionAdapter,
     writer: &mut (impl SinkExt<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
     sent_events: &mut HashSet<EventId>,
 ) -> anyhow::Result<()>
@@ -1105,7 +1110,7 @@ where
         return Ok(());
     };
     let event_id = event.id();
-    let frame = ServerConnectionAdapter::event_frame(event);
+    let frame = adapter.event_frame(event);
     send_json(writer, &frame).await?;
     sent_events.insert(event_id);
     Ok(())
@@ -1538,6 +1543,7 @@ mod tests {
                 &mut pending_results,
                 &mut store,
                 &refused,
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
             )
             .await
             .unwrap(),
@@ -1572,6 +1578,7 @@ mod tests {
                 &mut pending_results,
                 &mut store,
                 &next,
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
             )
             .await
             .unwrap(),
@@ -1588,6 +1595,7 @@ mod tests {
                 &mut pending_results,
                 &mut store,
                 &run_start_envelope(1),
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
             )
             .await
             .is_err(),

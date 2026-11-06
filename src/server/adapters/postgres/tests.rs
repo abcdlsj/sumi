@@ -1049,6 +1049,66 @@ async fn replay_skips_commands_for_terminal_runs() {
     result
 }
 
+/// A reconnecting Computer reports the highest command sequence it persisted; the Server replays only
+/// the commands after it, so an applied command is never re-delivered.
+#[tokio::test]
+async fn reconnect_replay_starts_after_the_reported_command_watermark() {
+    let database = TestDatabase::create("sumi_command_watermark").await;
+    let pool = database.pool.clone();
+    let mut adapter = PostgresAdapter::new(pool.clone());
+    let space = Uuid::now_v7();
+    let owner = Uuid::now_v7();
+    let computer_id = Uuid::now_v7();
+    sqlx::raw_sql(&format!(
+        "BEGIN;
+         INSERT INTO spaces (id,slug,name,accent,owner_member_id,created_at) VALUES ('{space}','space','Space','#F0602F','{owner}',now());
+         INSERT INTO members (id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner}','{space}','human','Owner','owner',now());
+         INSERT INTO computers (id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space}','Computer','localhost','linux','hash','offline',1,now());
+         COMMIT;"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    for _ in 0..2 {
+        adapter
+            .transact(async |transaction| {
+                transaction
+                    .queue_command(
+                        ComputerId::from_uuid(computer_id),
+                        Command::RunStop(RunStop {
+                            run_id: RunId::from_uuid(Uuid::now_v7()),
+                            reason: StopReason::Suspend,
+                        }),
+                    )
+                    .await
+            })
+            .await
+            .unwrap();
+    }
+    let sequences: Vec<i64> = sqlx::query_scalar(
+        "SELECT computer_seq FROM computer_commands WHERE computer_id=$1 ORDER BY computer_seq",
+    )
+    .bind(computer_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let watermark = CommandSequence(u64::try_from(sequences[0]).unwrap());
+    let replayed = crate::server::adapters::websocket::replay_commands(
+        &adapter,
+        ComputerId::from_uuid(computer_id),
+        watermark,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(replayed.len(), 1);
+    assert_eq!(
+        replayed[0].sequence,
+        CommandSequence(u64::try_from(sequences[1]).unwrap())
+    );
+    database.close().await;
+}
+
 /// Concurrent ambient publishers must not lose count or force-time updates, and the schema must
 /// refuse a second open aggregate for one Agent and Thread. Both are SQL-level guarantees, so this
 /// runs against real PostgreSQL.

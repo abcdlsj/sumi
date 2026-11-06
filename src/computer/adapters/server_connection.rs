@@ -18,17 +18,25 @@ use crate::{
         },
         query::QueryService,
     },
-    ids::{AgentId, ChannelId, RunId, ThreadId},
+    ids::{AgentId, ChannelId, DaemonSessionId, RunId, ThreadId},
     protocol::computer as wire,
 };
 
 pub(in crate::computer) struct ServerConnectionAdapter {
     product_contract: String,
+    /// Identifies this connection attempt. Every frame the Server may drop as stale carries it.
+    daemon_session_id: DaemonSessionId,
 }
 
 impl ServerConnectionAdapter {
-    pub(in crate::computer) fn new(product_contract: String) -> Self {
-        Self { product_contract }
+    pub(in crate::computer) fn new(
+        product_contract: String,
+        daemon_session_id: DaemonSessionId,
+    ) -> Self {
+        Self {
+            product_contract,
+            daemon_session_id,
+        }
     }
 
     pub(in crate::computer) async fn receive_with_activity<
@@ -85,6 +93,7 @@ impl ServerConnectionAdapter {
             },
             wire::ComputerFrame::CommandResult {
                 result: wire::CommandResult {
+                    daemon_session_id: self.daemon_session_id,
                     command_id: envelope.command_id,
                     sequence: envelope.sequence,
                     outcome: match execution.status {
@@ -417,7 +426,7 @@ impl ServerConnectionAdapter {
         }
     }
 
-    pub(in crate::computer) fn event_frame(event: LocalEvent) -> wire::ComputerFrame {
+    pub(in crate::computer) fn event_frame(&self, event: LocalEvent) -> wire::ComputerFrame {
         match event {
             LocalEvent::RunStarted { event_id, run_id } => wire::ComputerFrame::RunStarted {
                 started: wire::RunStarted {
@@ -453,6 +462,7 @@ impl ServerConnectionAdapter {
                 error_code,
             } => wire::ComputerFrame::RunResult {
                 result: wire::RunResult {
+                    daemon_session_id: self.daemon_session_id,
                     event_id,
                     run_id,
                     status: terminal_status(status),
@@ -999,7 +1009,10 @@ mod tests {
             .await
             .unwrap();
         let mut homes = AgentHomeAdapter::new(directory.path().join("computer"), None, None, None);
-        let adapter = ServerConnectionAdapter::new("contract".to_owned());
+        let adapter = ServerConnectionAdapter::new(
+            "contract".to_owned(),
+            DaemonSessionId::from_uuid(Uuid::now_v7()),
+        );
         let mut driver = NoopDriver;
         let agent_id = AgentId::from_uuid(Uuid::now_v7());
         let space_id = SpaceId::from_uuid(Uuid::now_v7());

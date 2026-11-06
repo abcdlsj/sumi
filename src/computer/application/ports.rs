@@ -163,6 +163,10 @@ pub(in crate::computer) trait TransactionPort {
         &mut self,
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,
     ) -> Result<T, ApplicationError>;
+
+    /// The highest command sequence this Computer has persisted, so a reconnecting Server replays
+    /// only the commands this Computer never received.
+    async fn command_watermark(&mut self) -> Result<u64, ApplicationError>;
 }
 
 /// Computer-local LLM usage reads. Kept separate from the state snapshot because usage is append-only

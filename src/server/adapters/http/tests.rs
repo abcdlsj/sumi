@@ -9,7 +9,9 @@ use tempfile::TempDir;
 
 use super::*;
 
-use crate::ids::{AgentId, AttachmentId, ChannelId, EventId, IdempotencyKey, SpaceId};
+use crate::ids::{
+    AgentId, AttachmentId, ChannelId, DaemonSessionId, EventId, IdempotencyKey, SpaceId,
+};
 use crate::protocol::computer::{ItemDisposition, ItemOutcome, RunResult, RunTerminalStatus};
 use crate::server::adapters::test_database::TestDatabase;
 
@@ -772,6 +774,7 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
             computer_id: ComputerId::from_uuid(fixture.computer_id),
         },
         RunResult {
+            daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             event_id: EventId::from_uuid(Uuid::now_v7()),
             run_id: fixture.context.run_id,
             status: RunTerminalStatus::Yielded,
@@ -2153,6 +2156,7 @@ async fn yielded_run_emits_agent_activity_event() {
         &fixture.state,
         fixture.computer_id,
         RunResult {
+            daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             event_id: EventId::from_uuid(Uuid::now_v7()),
             run_id: fixture.context.run_id,
             status: RunTerminalStatus::Yielded,

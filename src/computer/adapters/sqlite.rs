@@ -606,6 +606,15 @@ impl LlmUsageStore for SqliteAdapter {
 impl TransactionPort for SqliteAdapter {
     type Transaction = SqliteTransaction;
 
+    async fn command_watermark(&mut self) -> Result<u64, ApplicationError> {
+        let sequence: i64 =
+            sqlx::query_scalar("SELECT COALESCE(MAX(computer_seq),0) FROM local_commands")
+                .fetch_one(&mut self.connection)
+                .await
+                .map_err(map_sqlx)?;
+        u64::try_from(sequence).map_err(|_| ApplicationError::Internal)
+    }
+
     async fn transact<T>(
         &mut self,
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,
@@ -1301,6 +1310,39 @@ mod tests {
         let delivery = restored.view().deliveries.get(&1).unwrap();
         assert_eq!(delivery.item.item_id, item_id);
         assert_eq!(delivery.sequence, 1);
+    }
+
+    /// A reconnecting Server replays commands after the watermark, so it must be the highest sequence
+    /// this Computer persisted, including after a restart.
+    #[tokio::test]
+    async fn command_watermark_is_the_highest_persisted_command_sequence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("daemon.db");
+        let mut adapter = SqliteAdapter::open(&path).await.unwrap();
+        assert_eq!(adapter.command_watermark().await.unwrap(), 0);
+        adapter
+            .transact(async |transaction| {
+                for sequence in [3, 7, 5] {
+                    transaction.insert_command(StoredCommand {
+                        id: CommandId::from_uuid(Uuid::now_v7()),
+                        sequence,
+                        fingerprint: format!("fingerprint-{sequence}"),
+                        command: Command::Stop {
+                            run_id: RunId::from_uuid(Uuid::now_v7()),
+                        },
+                        status: CommandStatus::Applied,
+                        error: None,
+                    })?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(adapter.command_watermark().await.unwrap(), 7);
+        drop(adapter);
+
+        let mut reopened = SqliteAdapter::open(&path).await.unwrap();
+        assert_eq!(reopened.command_watermark().await.unwrap(), 7);
     }
 
     #[tokio::test]
