@@ -2762,3 +2762,197 @@ async fn space_event_sequence_follows_commit_order_not_creation_time() {
         .unwrap();
     result
 }
+
+/// Builds a Space with an Owner who reads the whole Space but is not a member of the given
+/// Channel, so events scoped to that Channel are invisible to them.
+async fn event_test_space(pool: &PgPool) -> (SpaceId, MemberId, Uuid) {
+    let space_id = Uuid::now_v7();
+    let owner_id = Uuid::now_v7();
+    let private_channel_id = Uuid::now_v7();
+    let slug = format!("events-{}", &space_id.simple().to_string()[..12]);
+    sqlx::raw_sql(&format!(
+        "BEGIN; \
+         INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) \
+             VALUES ('{space_id}','{slug}','Events','#F0602F','{owner_id}',now()); \
+         INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) \
+             VALUES ('{owner_id}','{space_id}','human','Owner','owner',now()); \
+         INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) \
+             VALUES ('{private_channel_id}','{space_id}','public','private-log',1,now()); \
+         COMMIT;"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    (
+        SpaceId::from_uuid(space_id),
+        MemberId::from_uuid(owner_id),
+        private_channel_id,
+    )
+}
+
+/// Commits `count` events in one transaction on behalf of the given Space.
+async fn commit_events(
+    pool: &PgPool,
+    space_id: SpaceId,
+    count: usize,
+    kind: &str,
+    payload: serde_json::Value,
+) {
+    let mut transaction = PostgresTransaction::begin(pool).await.unwrap();
+    for _ in 0..count {
+        transaction
+            .insert_space_event(
+                EventId::from_uuid(Uuid::now_v7()),
+                space_id,
+                kind,
+                payload.clone(),
+                OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+    }
+    sqlx::query("COMMIT")
+        .execute(&mut *transaction.connection)
+        .await
+        .unwrap();
+}
+
+/// A page the viewer cannot read still moves the stream to its last row, so the visible event
+/// behind it arrives instead of the stream re-reading the same private page forever.
+#[tokio::test]
+async fn a_full_page_of_unreadable_events_still_advances_the_stream() {
+    use super::super::realtime::EventCursor;
+
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_event_visibility_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let adapter = PostgresAdapter::new(pool.clone());
+        adapter.initialize_schema().await.unwrap();
+        let (space_id, owner_id, private_channel_id) = event_test_space(&pool).await;
+        let visible_payload = json!({"resource_id": Uuid::now_v7()});
+
+        commit_events(
+            &pool,
+            space_id,
+            100,
+            "message.created",
+            json!({"resource_id": Uuid::now_v7(), "channel_id": private_channel_id}),
+        )
+        .await;
+        commit_events(&pool, space_id, 1, "task.updated", visible_payload.clone()).await;
+
+        let private_page = adapter
+            .browser_events(space_id, owner_id, Some(EventCursor::new(0)))
+            .await
+            .unwrap();
+        assert!(
+            private_page.events.is_empty(),
+            "an event scoped to an unreadable Channel must not reach the viewer"
+        );
+        let next = private_page
+            .next
+            .expect("a full page must hand the stream its last scanned row");
+        assert_eq!(next, EventCursor::new(100));
+
+        let following = adapter
+            .browser_events(space_id, owner_id, Some(next))
+            .await
+            .unwrap();
+        assert_eq!(following.events.len(), 1);
+        assert_eq!(following.events[0].event_type, "task.updated");
+        assert_eq!(following.events[0].data, visible_payload);
+        assert!(
+            following.next.is_none(),
+            "a page that is not full means the stream caught up"
+        );
+
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}
+
+/// `Last-Event-ID` names an event, not a position: an id outside this Space has no cursor, and the
+/// stream reports `context_changed` instead of guessing where to continue.
+#[tokio::test]
+async fn an_event_from_another_space_has_no_cursor() {
+    use super::super::realtime::EventCursor;
+
+    let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
+    let database_name = format!("sumi_event_cursor_{}", Uuid::now_v7().simple());
+    let mut admin = PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
+        .await
+        .unwrap();
+    sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let mut database_url = Url::parse(&admin_url).unwrap();
+    database_url.set_path(&format!("/{database_name}"));
+    let result = async {
+        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let adapter = PostgresAdapter::new(pool.clone());
+        adapter.initialize_schema().await.unwrap();
+        let (space_id, owner_id, _) = event_test_space(&pool).await;
+        let (other_space_id, _, _) = event_test_space(&pool).await;
+        let payload = json!({"resource_id": Uuid::now_v7()});
+        commit_events(&pool, other_space_id, 1, "task.updated", payload.clone()).await;
+
+        let foreign_event_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM outbox_events WHERE space_id=$1")
+                .bind(other_space_id.into_uuid())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let foreign_event_id = EventId::from_uuid(foreign_event_id);
+        assert!(
+            adapter
+                .event_cursor(space_id, foreign_event_id)
+                .await
+                .unwrap()
+                .is_none(),
+            "an event of another Space cannot position this stream"
+        );
+
+        commit_events(&pool, space_id, 1, "task.updated", payload).await;
+        let own_event_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM outbox_events WHERE space_id=$1")
+                .bind(space_id.into_uuid())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            adapter
+                .event_cursor(space_id, EventId::from_uuid(own_event_id))
+                .await
+                .unwrap(),
+            Some(EventCursor::new(1))
+        );
+        assert!(owner_id.into_uuid() != Uuid::nil());
+        pool.close().await;
+    }
+    .await;
+
+    sqlx::query(&format!("DROP DATABASE \"{database_name}\" WITH (FORCE)"))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    result
+}

@@ -61,6 +61,9 @@ use crate::{
 
 const BASELINE: &str = include_str!("../../../../schema/postgres.sql");
 
+/// How many `outbox_events` rows one stream read scans before the stream decides to page on.
+const EVENT_PAGE: usize = 100;
+
 #[derive(Clone)]
 pub(super) struct PostgresAdapter {
     pool: PgPool,
@@ -635,52 +638,48 @@ impl PostgresAdapter {
         Ok(Some(RunId::from_uuid(run_id)))
     }
 
-    /// Reads the Space event window as one viewer sees it. `viewer_member_id` filters events whose
-    /// payload names a Channel the viewer cannot read, and Inbox events belonging to another
-    /// Member, so a private Channel does not leak through the stream.
+    /// Reads one page of the Space event stream as one viewer sees it, starting after `cursor`.
+    ///
+    /// `viewer_member_id` filters events whose payload names a Channel the viewer cannot read, and
+    /// Inbox events belonging to another Member, so a private Channel does not leak through the
+    /// stream. Filtering happens after the page is read: the returned `next` is derived from the
+    /// scanned rows, never from the visible ones, so an unreadable backlog cannot stall the stream.
     pub(super) async fn browser_events(
         &self,
         space_id: SpaceId,
         viewer_member_id: MemberId,
-        last_event_id: Option<EventId>,
-    ) -> Result<Option<Vec<super::realtime::BrowserEvent<serde_json::Value>>>, ApplicationError>
-    {
-        let cursor = if let Some(event_id) = last_event_id {
-            let cursor = sqlx::query_as::<_, (time::OffsetDateTime, Uuid)>(
-                "SELECT created_at,id FROM outbox_events WHERE id=$1 AND space_id=$2",
+        cursor: Option<super::realtime::EventCursor>,
+    ) -> Result<super::realtime::BrowserEventPage<serde_json::Value>, ApplicationError> {
+        let rows = if let Some(cursor) = cursor {
+            sqlx::query(
+                "SELECT id,kind,payload_json,created_at,sequence FROM outbox_events \
+                 WHERE space_id=$1 AND sequence>$2 ORDER BY sequence LIMIT $3",
             )
-            .bind(event_id.into_uuid())
             .bind(space_id.into_uuid())
-            .fetch_optional(&self.pool)
+            .bind(sequence_bind(cursor)?)
+            .bind(EVENT_PAGE as i64)
+            .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx)?;
-            let Some(cursor) = cursor else {
-                return Ok(None);
-            };
-            Some(cursor)
+            .map_err(map_sqlx)?
+        } else {
+            sqlx::query(
+                "SELECT id,kind,payload_json,created_at,sequence FROM outbox_events \
+                 WHERE space_id=$1 ORDER BY sequence LIMIT $2",
+            )
+            .bind(space_id.into_uuid())
+            .bind(EVENT_PAGE as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx)?
+        };
+        let next = if rows.len() == EVENT_PAGE {
+            let last = rows.last().ok_or(ApplicationError::Internal)?;
+            Some(super::realtime::EventCursor::new(
+                u64::try_from(last.get::<i64, _>("sequence"))
+                    .map_err(|_| ApplicationError::Internal)?,
+            ))
         } else {
             None
-        };
-        let rows = if let Some((created_at, id)) = cursor {
-            sqlx::query(
-                "SELECT id,kind,payload_json,created_at FROM outbox_events \
-                 WHERE space_id=$1 AND (created_at,id)>($2,$3) ORDER BY created_at,id LIMIT 100",
-            )
-            .bind(space_id.into_uuid())
-            .bind(created_at)
-            .bind(id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_sqlx)?
-        } else {
-            sqlx::query(
-                "SELECT id,kind,payload_json,created_at FROM outbox_events \
-                 WHERE space_id=$1 ORDER BY created_at,id LIMIT 100",
-            )
-            .bind(space_id.into_uuid())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_sqlx)?
         };
         let readable_channels = sqlx::query_scalar::<_, Uuid>(
             "SELECT channel_id FROM channel_members WHERE member_id=$1",
@@ -700,26 +699,58 @@ impl PostgresAdapter {
         .await
         .map_err(map_sqlx)?
         .unwrap_or(false);
-        Ok(Some(
-            rows.into_iter()
-                .map(|row| super::realtime::BrowserEvent {
+        let events = rows
+            .into_iter()
+            .map(|row| {
+                Ok(super::realtime::BrowserEvent {
                     event_id: EventId::from_uuid(row.get("id")),
                     event_type: row.get("kind"),
                     space_id,
                     occurred_at: row.get("created_at"),
                     data: row.get::<serde_json::Value, _>("payload_json"),
+                    cursor: super::realtime::EventCursor::new(
+                        u64::try_from(row.get::<i64, _>("sequence"))
+                            .map_err(|_| ApplicationError::Internal)?,
+                    ),
                 })
-                .filter(|event| {
-                    event_is_visible(
-                        &event.event_type,
-                        &event.data,
-                        viewer_member_id,
-                        governs_space,
-                        &readable_channels,
-                    )
-                })
-                .collect(),
-        ))
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?
+            .into_iter()
+            .filter(|event| {
+                event_is_visible(
+                    &event.event_type,
+                    &event.data,
+                    viewer_member_id,
+                    governs_space,
+                    &readable_channels,
+                )
+            })
+            .collect();
+        Ok(super::realtime::BrowserEventPage { events, next })
+    }
+
+    /// Maps a stream `Last-Event-ID` to its position. `None` means the event is unknown here — it
+    /// belongs to another Space or left the outbox — and the stream turns that into
+    /// `context_changed` so the Browser rebuilds its projection.
+    pub(super) async fn event_cursor(
+        &self,
+        space_id: SpaceId,
+        event_id: EventId,
+    ) -> Result<Option<super::realtime::EventCursor>, ApplicationError> {
+        let sequence: Option<i64> =
+            sqlx::query_scalar("SELECT sequence FROM outbox_events WHERE id=$1 AND space_id=$2")
+                .bind(event_id.into_uuid())
+                .bind(space_id.into_uuid())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_sqlx)?;
+        sequence
+            .map(|sequence| {
+                u64::try_from(sequence)
+                    .map(super::realtime::EventCursor::new)
+                    .map_err(|_| ApplicationError::Internal)
+            })
+            .transpose()
     }
 
     /// Best-effort insert of an ephemeral `agent.activity` event for the Browser feed. A failed
@@ -1337,6 +1368,11 @@ async fn optional_uuid(
         .fetch_optional(&mut **connection)
         .await
         .map_err(map_sqlx)
+}
+
+/// `sequence` is a database `BIGINT`; a cursor that no row can carry fails closed.
+fn sequence_bind(cursor: super::realtime::EventCursor) -> Result<i64, ApplicationError> {
+    i64::try_from(cursor.sequence()).map_err(|_| ApplicationError::Internal)
 }
 
 fn map_sqlx(error: sqlx::Error) -> ApplicationError {

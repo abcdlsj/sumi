@@ -1,10 +1,21 @@
-#[cfg(test)]
-use std::time::Duration;
-
 use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::ids::{EventId, SpaceId};
+
+/// Position of an event in the commit order of its Space.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(super) struct EventCursor(u64);
+
+impl EventCursor {
+    pub(super) fn new(sequence: u64) -> Self {
+        Self(sequence)
+    }
+
+    pub(super) fn sequence(self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub(super) struct BrowserEvent<T> {
@@ -15,48 +26,19 @@ pub(super) struct BrowserEvent<T> {
     #[serde(with = "time::serde::rfc3339")]
     pub(super) occurred_at: OffsetDateTime,
     pub(super) data: T,
+    /// Where this event sits in the Space commit order. Not sent to the Browser: an SSE event is
+    /// identified by `event_id`, and a reconnect resolves that id back to a cursor on the Server.
+    #[serde(skip)]
+    pub(super) cursor: EventCursor,
 }
 
-#[cfg(test)]
-pub(super) struct EventWindow<T> {
-    retention: Duration,
-    events: VecDeque<BrowserEvent<T>>,
-}
-
-#[cfg(test)]
-impl<T: Clone> EventWindow<T> {
-    pub(super) fn new(retention: Duration) -> Self {
-        Self {
-            retention,
-            events: VecDeque::new(),
-        }
-    }
-
-    pub(super) fn publish(&mut self, event: BrowserEvent<T>) {
-        let cutoff = event.occurred_at - self.retention;
-        while self
-            .events
-            .front()
-            .is_some_and(|stored| stored.occurred_at < cutoff)
-        {
-            self.events.pop_front();
-        }
-        self.events.push_back(event);
-    }
-
-    pub(super) fn resume_after(
-        &self,
-        last_event_id: Option<EventId>,
-    ) -> Option<Vec<BrowserEvent<T>>> {
-        let Some(last_event_id) = last_event_id else {
-            return Some(self.events.iter().cloned().collect());
-        };
-        let position = self
-            .events
-            .iter()
-            .position(|event| event.event_id == last_event_id)?;
-        Some(self.events.iter().skip(position + 1).cloned().collect())
-    }
+/// One read of the Space event stream.
+pub(super) struct BrowserEventPage<T> {
+    /// Rows the viewer may see, in commit order.
+    pub(super) events: Vec<BrowserEvent<T>>,
+    /// Cursor after the last scanned row, present only when the read filled a whole page. Invisible
+    /// rows advance it too, so a page of private events cannot pin the stream in place.
+    pub(super) next: Option<EventCursor>,
 }
 
 impl<T: Serialize> BrowserEvent<T> {
@@ -107,35 +89,55 @@ pub(super) async fn space_events(
     let shutdown = state.shutdown.clone();
     // Subscribe before the first read so a commit between the read and the wait still wakes us.
     let wakeups = state.space_events.subscribe();
+    let cursor = match last_event_id {
+        Some(event_id) => Some(
+            state
+                .storage
+                .event_cursor(space_id, event_id)
+                .await
+                .map_err(application_error)?
+                .ok_or_else(ApiError::context_changed)?,
+        ),
+        None => None,
+    };
     let initial = state
         .storage
-        .browser_events(space_id, viewer, last_event_id)
+        .browser_events(space_id, viewer, cursor)
         .await
-        .map_err(application_error)?
-        .ok_or_else(ApiError::context_changed)?;
+        .map_err(application_error)?;
+    let cursor = initial
+        .next
+        .or_else(|| initial.events.last().map(|event| event.cursor))
+        .or(cursor);
     let events = stream::unfold(
         (
             state.storage,
             space_id,
-            last_event_id,
-            VecDeque::from(initial),
+            viewer,
+            cursor,
+            VecDeque::from(initial.events),
             wakeups,
         ),
-        move |(storage, space_id, mut cursor, mut buffered, mut wakeups)| async move {
+        move |(storage, space_id, viewer, mut cursor, mut buffered, mut wakeups)| async move {
             loop {
                 if let Some(event) = buffered.pop_front() {
-                    cursor = Some(event.event_id);
-                    let event = match event.into_sse() {
-                        Ok(event) => event,
-                        Err(_) => return None,
-                    };
-                    return Some((Ok(event), (storage, space_id, cursor, buffered, wakeups)));
+                    cursor = Some(cursor.map_or(event.cursor, |cursor| cursor.max(event.cursor)));
+                    let event = event.into_sse().ok()?;
+                    return Some((
+                        Ok(event),
+                        (storage, space_id, viewer, cursor, buffered, wakeups),
+                    ));
                 }
                 super::space_events::wait_for_space(&mut wakeups, space_id.into_uuid()).await;
-                buffered = match storage.browser_events(space_id, viewer, cursor).await {
-                    Ok(Some(events)) => VecDeque::from(events),
-                    Ok(None) | Err(_) => return None,
+                let page = match storage.browser_events(space_id, viewer, cursor).await {
+                    Ok(page) => page,
+                    Err(_) => return None,
                 };
+                cursor = page
+                    .next
+                    .or_else(|| page.events.last().map(|event| event.cursor))
+                    .or(cursor);
+                buffered = VecDeque::from(page.events);
             }
         },
     );
@@ -146,36 +148,4 @@ pub(super) async fn space_events(
         }),
     );
     Ok(Sse::new(events).keep_alive(KeepAlive::default()))
-}
-
-#[cfg(test)]
-mod tests {
-    use uuid::Uuid;
-
-    use super::*;
-
-    #[test]
-    fn expired_sse_cursor_requires_projection_reload() {
-        let mut window = EventWindow::new(Duration::from_secs(60));
-        let first = EventId::from_uuid(Uuid::now_v7());
-        let second = EventId::from_uuid(Uuid::now_v7());
-        let space_id = SpaceId::from_uuid(Uuid::now_v7());
-        window.publish(BrowserEvent {
-            event_id: first,
-            event_type: "task.updated".into(),
-            space_id,
-            occurred_at: OffsetDateTime::UNIX_EPOCH,
-            data: (),
-        });
-        window.publish(BrowserEvent {
-            event_id: second,
-            event_type: "task.finished".into(),
-            space_id,
-            occurred_at: OffsetDateTime::UNIX_EPOCH + Duration::from_secs(61),
-            data: (),
-        });
-
-        assert!(window.resume_after(Some(first)).is_none());
-        assert!(window.resume_after(Some(second)).unwrap().is_empty());
-    }
 }

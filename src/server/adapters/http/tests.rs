@@ -608,38 +608,40 @@ async fn message_hard_items_attach_same_focus_and_notice_different_focus() {
         .await
         .unwrap();
     assert_eq!(after_terminal, ("pending".into(), 1, 1));
+    let viewer = MemberId::from_uuid(fixture.owner_id);
     let events = fixture
         .state
         .storage
-        .browser_events(
-            fixture.context.space_id,
-            MemberId::from_uuid(fixture.owner_id),
-            None,
-        )
+        .browser_events(fixture.context.space_id, viewer, None)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(
         events
+            .events
             .iter()
             .filter(|event| event.event_type == "message.created")
             .count(),
         3
     );
-    let last_event_id = events.last().unwrap().event_id;
+    let last_event = events.events.last().unwrap();
+    let cursor = fixture
+        .state
+        .storage
+        .event_cursor(fixture.context.space_id, last_event.event_id)
+        .await
+        .unwrap()
+        .expect("a read event maps back to its Space position");
+    assert_eq!(cursor, last_event.cursor);
     assert!(
         fixture
             .state
             .storage
-            .browser_events(
-                fixture.context.space_id,
-                MemberId::from_uuid(fixture.owner_id),
-                Some(last_event_id),
-            )
+            .browser_events(fixture.context.space_id, viewer, Some(cursor))
             .await
             .unwrap()
-            .unwrap()
-            .is_empty()
+            .events
+            .is_empty(),
+        "nothing may follow the event a reconnect names"
     );
     fixture.destroy().await;
 }
@@ -2078,7 +2080,7 @@ async fn agent_write_actions_emit_agent_activity_events() {
         .browser_events(SpaceId::from_uuid(space_id), viewer, None)
         .await
         .unwrap()
-        .unwrap();
+        .events;
     let visible_activity: Vec<&str> = visible
         .iter()
         .filter(|event| event.event_type == "agent.activity")
@@ -2140,7 +2142,7 @@ async fn yielded_run_emits_agent_activity_event() {
         .browser_events(SpaceId::from_uuid(space_id), viewer, None)
         .await
         .unwrap()
-        .unwrap();
+        .events;
     assert_eq!(
         visible
             .iter()
