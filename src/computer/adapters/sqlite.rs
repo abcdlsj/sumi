@@ -606,12 +606,15 @@ impl LlmUsageStore for SqliteAdapter {
 impl TransactionPort for SqliteAdapter {
     type Transaction = SqliteTransaction;
 
+    /// Highest sequence whose command is settled. A command left `pending` was never acknowledged, so
+    /// the Server must still replay it; counting it here would drop it for good.
     async fn command_watermark(&mut self) -> Result<u64, ApplicationError> {
-        let sequence: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(computer_seq),0) FROM local_commands")
-                .fetch_one(&mut self.connection)
-                .await
-                .map_err(map_sqlx)?;
+        let sequence: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(computer_seq),0) FROM local_commands WHERE status<>'pending'",
+        )
+        .fetch_one(&mut self.connection)
+        .await
+        .map_err(map_sqlx)?;
         u64::try_from(sequence).map_err(|_| ApplicationError::Internal)
     }
 
@@ -1312,17 +1315,23 @@ mod tests {
         assert_eq!(delivery.sequence, 1);
     }
 
-    /// A reconnecting Server replays commands after the watermark, so it must be the highest sequence
-    /// this Computer persisted, including after a restart.
+    /// A reconnecting Server replays commands after the watermark, so it must be the highest settled
+    /// sequence this Computer holds, including after a restart. A command still `pending` was never
+    /// acknowledged to the Server and must stay replayable.
     #[tokio::test]
-    async fn command_watermark_is_the_highest_persisted_command_sequence() {
+    async fn command_watermark_stops_before_a_pending_command() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("daemon.db");
         let mut adapter = SqliteAdapter::open(&path).await.unwrap();
         assert_eq!(adapter.command_watermark().await.unwrap(), 0);
         adapter
             .transact(async |transaction| {
-                for sequence in [3, 7, 5] {
+                for (sequence, status) in [
+                    (3, CommandStatus::Applied),
+                    (7, CommandStatus::Rejected),
+                    (5, CommandStatus::Applied),
+                    (9, CommandStatus::Pending),
+                ] {
                     transaction.insert_command(StoredCommand {
                         id: CommandId::from_uuid(Uuid::now_v7()),
                         sequence,
@@ -1330,7 +1339,7 @@ mod tests {
                         command: Command::Stop {
                             run_id: RunId::from_uuid(Uuid::now_v7()),
                         },
-                        status: CommandStatus::Applied,
+                        status,
                         error: None,
                     })?;
                 }

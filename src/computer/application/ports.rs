@@ -164,8 +164,8 @@ pub(in crate::computer) trait TransactionPort {
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,
     ) -> Result<T, ApplicationError>;
 
-    /// The highest command sequence this Computer has persisted, so a reconnecting Server replays
-    /// only the commands this Computer never received.
+    /// The highest command sequence this Computer has settled, so a reconnecting Server replays only
+    /// the commands this Computer never received or never finished.
     async fn command_watermark(&mut self) -> Result<u64, ApplicationError>;
 }
 

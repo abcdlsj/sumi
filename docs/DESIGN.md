@@ -131,7 +131,7 @@ Driver：
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
 - RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
-- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况：hello 携带本次连接的 daemon session ID、已持久化的最高 command 序号（Server 只补发其后的命令）和仍持有本地状态的 Run 列表。heartbeat、Run result 与 command result 携带产生它们的 daemon session ID，Server 丢弃与本次握手不同的会话帧。
+- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况：hello 携带本次连接的 daemon session ID、已结算（applied 或 rejected）的最高 command 序号和仍持有本地状态的 Run 列表；Server 只补发其后的、未 ACK 的命令，仍处 pending 的命令因此一定会被重发。heartbeat、Run result 与 command result 携带产生它们的 daemon session ID，Server 丢弃与本次握手不同的会话帧。
 - 以 Member 身份发起的 HTTP 写操作都必须带 `Idempotency-Key`（UUID），缺失时返回 invalid_argument。Server 在业务事务内按 (actor, action, key) 写 `idempotency_records`：同一 key 重发同一请求返回当前结果、不再写入，也不重复下发 Computer command；同一 key 用于另一个资源返回 conflict。没有 Member 身份的入口（注册、登录、登出、接受邀请、开始配对）不收该头：注册以邮箱唯一约束防重，接受邀请对同一用户重放返回同一 Member，登录与登出重发没有额外副作用。
 - started、delivery、result、receipt 使用稳定 event ID 幂等。
 
