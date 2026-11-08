@@ -121,6 +121,7 @@ Driver：
 - ACP Driver 以全权限运行：session 建立后若 agent 提供全权限 mode（codex `full-access`、claude `bypassPermissions`）则切换到该 mode；`session/request_permission` 选择 allow 选项。Computer 不宣告 fs 与 terminal client capability。
 - ACP 恢复 Provider Session 时，agent 宣告 `sessionCapabilities.resume` 则用 `session/resume`，否则宣告 `loadSession` 则用 `session/load` 并丢弃重放的 `session/update`；两者都不支持或请求失败时 Session 丢失。关闭 Session 仅在宣告 `sessionCapabilities.close` 时发送 `session/close`。
 - ACP 回合以 `session/prompt` 响应结束：`end_turn` 为 Completed，`cancelled` 为 Interrupted，其余 stop reason 与错误为 Failed。interrupt 发送 `session/cancel`。
+- ACP 握手与 Provider 启动分开计时：`initialize` 45 秒（健康的 adapter 一声就到，沉默的进程视为起不来，及时把 Agent 的 Run 判失败），首次 `session/new` 180 秒（首次启动可能经 npx 下载 adapter 包）。
 
 ### 协议与投递
 
@@ -172,6 +173,7 @@ Driver：
 - 一段对话只由一个 Run 回应：hard Item 与 working Run 属于同一 Agent 且同一 Focus Thread 时 attach 到该 Run。两者只有一方带 Task 时，在同一事务把另一方绑定到该 Task（Run 绑定时下发 RunTaskBound，TODO Task 按首个 Task Run 规则推进为 In Progress）；两者带不同 Task 或 Focus 不同时保持 pending 并发送 notice，notice 不泄露正文。
 - Run 进入 working 时，同一 Agent、同一 Focus Thread 上 pending 的 hard Item 按同一规则 attach，补上 dispatched 期间到达的 Item。
 - Run 失败时未处理 Items 返回 pending 并增加 retry_count；超过 max_retry_count 进入 dead，并创建不含正文的 system Item。system Item 自身进入 dead 时不再创建新的 system Item：一个无法处理的 notice 只终结一次，不自行续链。
+- 以 `driver_error` 失败的 Run 让该 Agent 进入 error：Item 仍回 pending，但不自动重派——同一份 Driver 配置再试一次只会同样失败，而且每次尝试都要等到 Driver 放弃才能报错。error 是等人处理的静止状态，标签显示 Error、失败原因取 `last_error_code`：改 Driver（立即回到 active）、Restart 或 Retry setup 都会重新开始尝试。
 - Agent 显式 release 的 Item 不增加 retry_count；重复 command、receipt 丢失和重复 result 不重复计数。
 - 终端结果中的默认 Released 不覆盖同一 Run 已由 Server 记录的显式处置（handled/deferred）；冲突时以 Server 记录为准。
 - Agent 对外暴露的 `last_error_code` 取该 Agent 最近一次终结 Run 的失败原因：其后若有 completed、yielded 或 canceled 的 Run，旧失败原因不再上报；pending Item 自身的 dispatch 错误在无更近失败 Run 时才作为兜底。

@@ -723,6 +723,16 @@ impl CompleteRun {
                 input.now,
             )?;
             transaction.save_run(run.clone()).await?;
+            // A Driver that could not run is not a transient failure: the Agent waits for a Human
+            // instead of spending its retries on attempts that fail the same way.
+            if input.error_code == Some(RunErrorCode::DriverError) {
+                let agent_id = run.view().agent_id;
+                let mut agent = transaction.agent(agent_id).await?;
+                if agent.park_on_driver_error() {
+                    transaction.save_agent(agent).await?;
+                    transaction.emit(Effect::AgentUpdated(agent_id));
+                }
+            }
             transaction
                 .record_completed_run_event(input.event_id, run_id)
                 .await?;

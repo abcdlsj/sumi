@@ -38,7 +38,10 @@ use super::{agent_home, contract::StructuredProviderClient, prompt};
 use crate::computer::application::capability::CapabilityService;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
-// The first start may download the pinned adapter package through npx.
+// An adapter answers `initialize` as soon as it runs, so a silent one is not starting: a wrong or
+// broken command must fail an Agent quickly instead of looking busy for the whole startup budget.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
+// The first start may download the pinned adapter package through npx before the provider boots.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_TURN_ATTEMPTS: u8 = 3;
 
@@ -393,7 +396,7 @@ impl AcpProcess {
                         Implementation::new("sumi", env!("CARGO_PKG_VERSION"))
                             .title("Sumi Computer".to_owned()),
                     ),
-                STARTUP_TIMEOUT,
+                HANDSHAKE_TIMEOUT,
             )
             .await?;
         if initialized.protocol_version != ProtocolVersion::V1 {

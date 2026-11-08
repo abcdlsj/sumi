@@ -647,7 +647,8 @@ describe("Agent failure line", () => {
     renderWithAgent("idle", "unhandled_items");
 
     expect(screen.getByText("stopped on an error", { exact: false })).toBeVisible();
-    expect(screen.getByText("unhandled_items")).toBeVisible();
+    // The reason is readable, not the raw error code.
+    expect(screen.getByText("· Unhandled items.", { exact: false })).toBeVisible();
   });
 
   it("drops the line once the Agent is working again", () => {

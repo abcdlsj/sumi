@@ -4581,6 +4581,7 @@ async fn failed_run_without_reported_disposition_releases_item_and_counts_retry(
     let agent_id = member(1637);
     let focus = thread(1638);
     let mut port = MemoryPort::default();
+    insert_agent(&mut port, agent_id);
     insert_thread(&mut port, focus, &[agent_id]);
     port.state
         .computer_assignments
@@ -4620,6 +4621,12 @@ async fn failed_run_without_reported_disposition_releases_item_and_counts_retry(
     assert_eq!(
         port.state.runs[&run_id].view().error_code,
         Some(RunErrorCode::DriverError)
+    );
+    // A Driver that cannot run parks the Agent: the Item waits instead of being retried into the
+    // same failure.
+    assert_eq!(
+        port.state.agents[&agent_id].lifecycle,
+        AgentLifecycle::Error
     );
 }
 
@@ -4716,6 +4723,7 @@ async fn failed_run_counts_an_automatic_release_as_a_retry() {
     let agent_id = member(1642);
     let focus = thread(1643);
     let mut port = MemoryPort::default();
+    insert_agent(&mut port, agent_id);
     insert_thread(&mut port, focus, &[agent_id]);
     port.state
         .computer_assignments
@@ -4753,6 +4761,23 @@ async fn failed_run_counts_an_automatic_release_as_a_retry() {
     let item = port.state.items[&item_id].view();
     assert_eq!(item.status, InboxItemStatus::Pending);
     assert_eq!(item.retry_count, 1);
+}
+
+/// The Agent a failed Run belongs to. A Driver error parks it, so the test needs it on record.
+fn insert_agent(port: &mut MemoryPort, agent_id: MemberId) {
+    port.state.agents.insert(
+        agent_id,
+        Agent {
+            member_id: agent_id,
+            space_id: space(944),
+            computer_id: Some(computer(999)),
+            role_text: "test".into(),
+            role_revision: 1,
+            lifecycle: AgentLifecycle::Active,
+            driver_kind: DriverKind::Builtin,
+            retired_at: None,
+        },
+    );
 }
 
 fn insert_thread(port: &mut MemoryPort, id: ThreadId, members: &[MemberId]) {

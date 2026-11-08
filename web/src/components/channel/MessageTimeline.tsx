@@ -1238,9 +1238,9 @@ function StoppedStrip({ stopped, errors }: { stopped: Member[]; errors?: Readonl
       {stopped.slice(0, 3).map((member) => {
         const code = errors?.get(member.id);
         return (
-          <p key={member.id} title={code ? runErrorLabel(code) : undefined}>
+          <p key={member.id} title={code}>
             <strong>{member.display_name}</strong> stopped on an error
-            {code ? <> <code>{code}</code></> : null}
+            {code ? <> · {runErrorLabel(code)}</> : null}
           </p>
         );
       })}

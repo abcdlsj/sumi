@@ -294,14 +294,30 @@ impl Agent {
         Ok(())
     }
 
-    pub(in crate::server) fn restart(&self) -> Result<(), DomainError> {
+    pub(in crate::server) fn restart(&mut self) -> Result<(), DomainError> {
         match self.lifecycle {
             AgentLifecycle::Active | AgentLifecycle::Suspended => Ok(()),
-            AgentLifecycle::Retired => Err(DomainError::AgentRetired),
-            AgentLifecycle::Provisioning | AgentLifecycle::Error => {
-                Err(DomainError::InvalidTransition)
+            // A parked Agent has nothing to restart until a Human says so; a restart is that word.
+            AgentLifecycle::Error => {
+                self.lifecycle = AgentLifecycle::Active;
+                Ok(())
             }
+            AgentLifecycle::Retired => Err(DomainError::AgentRetired),
+            AgentLifecycle::Provisioning => Err(DomainError::InvalidTransition),
         }
+    }
+
+    /// Parks the Agent after its Driver could not run, and reports whether the state changed.
+    ///
+    /// Retrying the same Driver cannot help: the next attempt fails the same way, and a failed
+    /// attempt is what returns the Item and hides the reason behind another "working". A Human
+    /// clears this by changing the Driver or restarting the Agent.
+    pub(in crate::server) fn park_on_driver_error(&mut self) -> bool {
+        if self.lifecycle != AgentLifecycle::Active {
+            return false;
+        }
+        self.lifecycle = AgentLifecycle::Error;
+        true
     }
 }
 
@@ -437,10 +453,6 @@ mod tests {
             agent(AgentLifecycle::Provisioning).restart(),
             Err(DomainError::InvalidTransition)
         );
-        assert_eq!(
-            agent(AgentLifecycle::Error).restart(),
-            Err(DomainError::InvalidTransition)
-        );
     }
 
     #[test]
@@ -474,6 +486,28 @@ mod tests {
             retired.change_driver(DriverKind::Builtin),
             Err(DomainError::AgentRetired)
         );
+    }
+
+    #[test]
+    fn a_driver_error_parks_the_agent_until_a_human_restarts_it() {
+        let mut active = agent(AgentLifecycle::Active);
+        assert!(active.park_on_driver_error());
+        assert_eq!(active.lifecycle, AgentLifecycle::Error);
+        // Parking is not a state a retry can repeat: a parked Agent stays parked.
+        assert!(!active.park_on_driver_error());
+
+        // Both Human actions clear the park, because both are a decision to try again.
+        assert_eq!(active.restart(), Ok(()));
+        assert_eq!(active.lifecycle, AgentLifecycle::Active);
+
+        let mut parked = agent(AgentLifecycle::Error);
+        parked.resume().expect_err("resume is not the way out");
+        assert_eq!(
+            parked.retry_provisioning(),
+            Ok(()),
+            "provisioning again installs the Driver afresh"
+        );
+        assert_eq!(parked.lifecycle, AgentLifecycle::Provisioning);
     }
 
     #[test]
