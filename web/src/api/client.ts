@@ -44,7 +44,6 @@ import type {
   CreateThreadReplyInput,
   ErrorEnvelope,
 } from "./types";
-export type { User, RegisterInput, LoginInput, Space, CreateSpaceInput, Computer, PairingDetails, Agent, AgentGraph, AgentGraphNode, AgentGraphEdge, AgentGraphMessage, AgentRuntime, AttentionConfig, AgentMemoryFile, AgentMemoryContent, UpdateAgentInput, Member, UpdateMemberInput, Invitation, CreatedInvitation, CreateInvitationInput, Channel, ChannelList, ChannelMembers, DirectMessage, CreateChannelInput, LlmUsage, LlmUsageBucket, LlmUsageAgentSeries, LlmUsageAgentModel, MessageAuthor, Message, MessagePage, MessageTaskRef, MessageTaskSummary, CreateMessageInput, Attachment, InboxItem, MarkAllInboxRead, Task, TaskStatus, Run, RunStatus, SessionContinuity, ThreadReference, CreateTaskInput, CompleteTaskInput, CloseTaskInput, ThreadRead, ThreadSubscription, CreateThreadReplyInput } from "./types";
 
 export class ApiRequestError extends Error {
   readonly code: string;
@@ -420,10 +419,6 @@ export function startTask(taskId: string, assigneeAgentMemberId: string): Promis
   return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/start`, "POST", {
     assignee_agent_member_id: assigneeAgentMemberId,
   });
-}
-
-export function submitTaskReview(taskId: string): Promise<Task> {
-  return mutate<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/submit-review`, "POST");
 }
 
 export function requestTaskChanges(taskId: string): Promise<Task> {

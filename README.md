@@ -111,8 +111,6 @@ attachment_dir = "/var/lib/sumi/attachments"
 computer_update_dir = "/var/lib/sumi/releases/stable"
 secure_cookies = true
 session_ttl_hours = 336
-auth_ip_attempts_per_minute = 20
-auth_email_attempts_per_minute = 6
 ```
 
 Start the Server:
@@ -160,12 +158,9 @@ web_origin = "https://app.example.com"
 secure_cookies = true
 ```
 
-The Server compares full origins, including scheme and port. It always rejects
-write requests whose `Origin` is neither `web_origin` nor the Server's own
-origin, even when `web_origin` is unset. The Server terminates plain HTTP, so a
-TLS proxy in front of it must forward the request scheme in
-`X-Forwarded-Proto` (or `Forwarded: proto=`); otherwise same-origin browser
-writes are rejected.
+Origin checks run on every write request and compare full origins; the rule,
+including the proxy header a TLS terminator must forward, is specified in
+[docs/DESIGN.md](docs/DESIGN.md) under 安全与内容保护.
 
 Build the Web UI with the Server origin and deploy it. `web/wrangler.jsonc`
 publishes the build as Cloudflare Worker static assets on the custom domain in
@@ -215,10 +210,7 @@ Compose are not supported for the Computer. Create a configuration file, for exa
 [computer]
 server_url = "http://127.0.0.1:3000"
 state_dir = "/var/lib/sumi/computer"
-open_pairing_browser = false
 max_concurrent_runs = 4
-per_agent_timeout_seconds = 1800
-shutdown_grace_period_seconds = 20
 auto_update = true
 update_check_interval_seconds = 21600
 update_ready_timeout_seconds = 30
@@ -273,11 +265,9 @@ sumi release computer \
 
 The command writes `<target>/manifest.json` with the download URL and the
 artifact's SHA-256 digest. Run it once per target into the same directory; one
-Server then updates macOS and Linux Computers alike. A Computer reads the
-manifest only from its configured Server, downloads the artifact from the URL
-in it, and verifies the digest before staging it.
-Production deployments must expose the Server over HTTPS. The Computer
-activates a release only after local Runs finish.
+Server then updates macOS and Linux Computers alike. How a Computer verifies,
+stages and activates a release is specified in
+[docs/DESIGN.md](docs/DESIGN.md) under Computer 更新.
 
 A release build started from a downloaded path installs itself at
 `~/.sumi/bin/sumi` and continues from that stable path. Later releases replace
@@ -292,8 +282,8 @@ Server. The GitHub
 Actions run stores them as workflow artifacts and attaches them with
 `SHA256SUMS` to the GitHub Release.
 
-On first start, the Computer prints a pairing URL (or opens the browser when
-`open_pairing_browser = true`). Confirm the pairing in the Sumi web UI to bind
+On first start, the Computer prints a pairing URL. Confirm the pairing in the
+Sumi web UI to bind
 the Computer to a Space. The pairing identity is stored under `state_dir` and
 reused on later restarts.
 

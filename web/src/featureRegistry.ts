@@ -58,17 +58,10 @@ export function setFeatureEnabled(id: string, enabled: boolean): void {
   const feature = registeredFeature(id);
   if (!feature) return;
   window.localStorage?.setItem(feature.storageKey, enabled ? "1" : "0");
-  // useSyncExternalStore compares snapshots by identity. Replace the map so
-  // subscribers observe each persisted state transition immediately.
-  if (stateCache) {
-    stateCache = new Map(stateCache);
-    stateCache.set(id, enabled);
-  }
   for (const listener of featureListeners) listener();
 }
 
 const featureListeners = new Set<() => void>();
-let stateCache: Map<string, boolean> | undefined;
 
 function subscribe(listener: () => void): () => void {
   featureListeners.add(listener);
@@ -78,14 +71,4 @@ function subscribe(listener: () => void): () => void {
 /** Subscribes the current component to one registered feature's persisted state. */
 export function useFeatureEnabled(id: string): boolean {
   return useSyncExternalStore(subscribe, () => featureEnabled(id));
-}
-
-/** One stable snapshot of every registered feature's enabled state, for list rendering. */
-export function useFeatureStates(): ReadonlyMap<string, boolean> {
-  return useSyncExternalStore(subscribe, () => {
-    stateCache ??= new Map(
-      REGISTERED_FEATURES.map((feature) => [feature.id, featureEnabled(feature.id)]),
-    );
-    return stateCache;
-  });
 }

@@ -25,7 +25,7 @@ pub use context::{
     ContextStrategy, CutPoint, IdentityContext, Summarizer, estimate_messages,
     file_operations_appendix, find_cut_point,
 };
-pub use memory::{MemoryFile, PRIMARY_MEMORY_PATH};
+pub use memory::{MemoryFile, PRIMARY_MEMORY_PATH, list_memory};
 pub use plugin::{AgentPlugin, PluginContext};
 pub use provider::ProviderConfig;
 pub use sandbox::SandboxAdapter;

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "../router";
-import type { Run, Task, ThreadReference } from "../api/client";
+import type {Message, Run, Task, ThreadRead, ThreadReference} from "../api/types";
 
 const ownerId = "019c0000-0000-7000-8000-000000000002";
 const spaceId = "019c0000-0000-7000-8000-000000000001";
@@ -71,6 +71,226 @@ describe("Task work index", () => {
     expect(screen.queryByRole("button", { name: /Reset continuity/i })).not.toBeInTheDocument();
   });
 
+  it("asks for the result before finishing and sends the typed text", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const requests: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, [reply("agent", "Lin", "Done: the contract is documented.")]));
+      if (path.endsWith(`/tasks/${value.id}/done`)) {
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return json({ ...value, status: "done", finished_at: "2026-07-28T11:00:00Z" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark done" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("heading", { name: "Finish !19?" })).toBeVisible();
+    expect(dialog.getByText("This becomes the Task result.")).toBeVisible();
+    const field = dialog.getByLabelText("Result") as HTMLTextAreaElement;
+    expect(field.value).toBe("Done: the contract is documented.");
+    fireEvent.change(field, { target: { value: "None: the contract is documented in #general." } });
+    fireEvent.click(dialog.getByRole("button", { name: "Mark done" }));
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].body).toEqual({ result_thread_id: value.source_thread.id, result_markdown: "None: the contract is documented in #general." });
+  });
+
+  it("shows the assignee's latest reply while review is pending", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`)) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) {
+        return json(threadRead(value.source_thread.id, [
+          reply("agent", "Lin", "Ready for review: the schema is documented."),
+          reply("human", "Ada", "Reading it now."),
+          reply("human", "Ada", "One more question."),
+          reply("human", "Ada", "And another."),
+        ]));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    expect(await screen.findByRole("heading", { name: "Latest from Lin" })).toBeVisible();
+    expect(screen.getAllByText("Ready for review: the schema is documented.")).toHaveLength(1);
+  });
+
+  it("posts the change request reason before moving the Task back", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const calls: Array<{ path: string; body?: unknown; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}/messages`) && init?.method === "POST") {
+        calls.push({ path, body: JSON.parse(String(init.body)), method: init.method });
+        return json(reply("human", "Ada", "@Lin Cover the retry path."), 201);
+      }
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, []));
+
+      if (path.endsWith(`/tasks/${value.id}/request-changes`)) {
+        calls.push({ path, method: init?.method });
+        return json({ ...value, status: "in_progress" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request changes" }));
+    expect(screen.getByRole("heading", { name: "What needs to change?" })).toBeVisible();
+    // The form opens below the action row, so the buttons do not reflow around it.
+    expect(screen.getByRole("heading", { name: "What needs to change?" }).closest(".task-actions")).toBeNull();
+    expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Tell Lin what to change.")).toHaveFocus();
+    expect(screen.getByText("Add one sentence on what to change.")).toBeVisible();
+    fireEvent.change(screen.getByPlaceholderText("Tell Lin what to change."), { target: { value: "Cover the retry path." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[0].body).toMatchObject({
+      body_markdown: "@Lin Cover the retry path.",
+      mentions: ["agent"],
+    });
+    expect(calls[1].path).toContain("/request-changes");
+  });
+
+  it("retries only the status change after the reason was posted", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const calls: string[] = [];
+    let statusAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}/messages`) && init?.method === "POST") {
+        calls.push("reply");
+        return json(reply("human", "Ada", "@Lin Wrap the retry."), 201);
+      }
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, []));
+      if (path.endsWith(`/tasks/${value.id}/request-changes`)) {
+        statusAttempts += 1;
+        calls.push("status");
+        if (statusAttempts === 1) throw new Error("offline");
+        return json({ ...value, status: "in_progress" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request changes" }));
+    fireEvent.change(screen.getByPlaceholderText("Tell Lin what to change."), { target: { value: "Wrap the retry." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+
+    expect(await screen.findByText("Reason sent. Status unchanged — retry to move it back to In progress.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await vi.waitFor(() => expect(statusAttempts).toBe(2));
+    expect(calls).toEqual(["reply", "status", "status"]);
+  });
+
+  it("offers Request changes only with an assignee and a readable Source Thread", async () => {
+    const unreadable = task("in_review", "Review Web contract", 19, "Lin");
+    unreadable.result_thread = undefined;
+    const current = unreadable;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${current.id}`)) return json(current);
+      if (path.endsWith(`/threads/${current.source_thread.id}`)) {
+        return new Response(JSON.stringify({ error: { code: "permission_denied", message: "denied", retryable: false } }), { status: 403 });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${unreadable.id}`);
+
+    expect(await screen.findByText("You cannot see the conversation this Task came from.")).toBeVisible();
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Mark done" })).not.toBeInTheDocument();
+    expect(screen.getByText("You cannot see any Conversation linked to this Task, so its Result cannot be written here.")).toBeVisible();
+  });
+
+  it("publishes the Result into the readable Linked Thread the Server resolves", async () => {
+    const value = task("in_review", "Review Web contract", 19, "Lin");
+    const related = { ...thread("related", 24), channel_slug: "eng" };
+    value.related_threads = [related];
+    value.result_thread = related;
+    const requests: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`) && !init?.method) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) {
+        return new Response(JSON.stringify({ error: { code: "permission_denied", message: "denied", retryable: false } }), { status: 403 });
+      }
+      if (path.endsWith(`/threads/${related.id}`)) return json(threadRead(related.id, [reply("agent", "Lin", "Shipped in #eng.")]));
+      if (path.endsWith(`/tasks/${value.id}/done`)) {
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return json({ ...value, status: "done", finished_at: "2026-07-28T11:00:00Z" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark done" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const field = dialog.getByLabelText("Result") as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(field.value).toBe("Shipped in #eng."));
+    fireEvent.click(dialog.getByRole("button", { name: "Mark done" }));
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].body).toEqual({ result_thread_id: related.id, result_markdown: "Shipped in #eng." });
+  });
+
+  it("keeps Mark done disabled while the Result is empty", async () => {
+    const value = task("in_progress", "Review Web contract", 19, "Lin");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const shell = shellResponse(path);
+      if (shell) return shell;
+      if (path.endsWith("/agents")) return json([{ member_id: "agent", name: "Lin", desired_lifecycle: "active" }]);
+      if (path.endsWith(`/tasks/${value.id}`)) return json(value);
+      if (path.endsWith(`/threads/${value.source_thread.id}`)) return json(threadRead(value.source_thread.id, []));
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    renderRoute(`/s/sumi-lab/tasks/${value.id}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark done" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const field = dialog.getByLabelText("Result") as HTMLTextAreaElement;
+    expect(field.value).toBe("");
+    expect(dialog.getByRole("button", { name: "Mark done" })).toBeDisabled();
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(dialog.getByRole("button", { name: "Mark done" })).toBeDisabled();
+  });
+
   it("labels a DM Source Thread without a channel link", async () => {
     const value = task("in_progress", "DM Task", 21, "Lin");
     value.source_thread = { ...thread("source", 21), channel_slug: null };
@@ -105,6 +325,7 @@ function task(status: "todo" | "in_progress" | "in_review" | "done" | "closed", 
     assignee_name: assignee,
     source_thread: thread("source", seq),
     related_threads: [],
+    result_thread: thread("source", seq),
     result_message: undefined,
     close_reason_code: undefined,
     close_reason_note: undefined,
@@ -115,6 +336,39 @@ function task(status: "todo" | "in_progress" | "in_review" | "done" | "closed", 
     created_at: "2026-07-28T00:00:00Z",
     updated_at: `2026-07-28T0${seq % 9}:00:00Z`,
     finished_at: status === "done" || status === "closed" ? "2026-07-28T10:00:00Z" : undefined,
+  };
+}
+
+function reply(author: "agent" | "human", name: string, body: string): Message {
+  return {
+    id: `reply-${body.slice(0, 8)}`,
+    seq: 0,
+    channel_id: "channel",
+    thread_id: "thread-19",
+    placement: "reply",
+    author: { id: author === "agent" ? "agent" : ownerId, kind: author, display_name: name },
+    content: { type: "text", body_markdown: body },
+    mentions: [],
+    mention_all: false,
+    attachments: [],
+    attention_failures: [],
+    task_refs: [],
+    reply_count: 0,
+    latest_replies: [],
+    created_at: "2026-07-28T05:00:00Z",
+  };
+}
+
+function threadRead(id: string, replies: Message[]): ThreadRead {
+  return {
+    thread_id: id,
+    channel_id: "channel",
+    snapshot_channel_seq: 12,
+    root: reply("human", "Ada", "Please review the contract."),
+    replies,
+    is_following: false,
+    task: undefined,
+    task_relation: "source",
   };
 }
 
@@ -141,6 +395,6 @@ function renderRoute(path: string) {
   render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>);
 }
 
-function json(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }

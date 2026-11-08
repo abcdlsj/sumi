@@ -1,7 +1,6 @@
 use super::*;
-use crate::server::adapters::postgres::{AgentRow, ComputerAgentRow};
+use crate::server::adapters::postgres::AgentRow;
 use crate::server::adapters::websocket::computer_socket;
-use crate::server::domain::identity::valid_display_name;
 
 pub(super) async fn connect_computer(
     State(state): State<RuntimeState>,
@@ -163,14 +162,16 @@ pub(super) async fn current_agent_run(
     Path(agent_id): Path<Uuid>,
 ) -> Result<Json<AgentRuntimeResponse>, ApiError> {
     let viewer_id = agent_space_member(&state, &jar, agent_id).await?;
-    let mut storage = state.storage.clone();
-    let (run_id, another_item_waiting) = ReadCurrentAgentRun::execute(
-        &mut storage,
-        MemberId::from_uuid(agent_id),
-        MemberId::from_uuid(viewer_id),
-    )
-    .await
-    .map_err(application_error)?;
+    let run_id = state
+        .read
+        .active_run_for_visible_agent(agent_id, viewer_id)
+        .await
+        .map_err(application_error)?;
+    let another_item_waiting = state
+        .read
+        .pending_item_for_agent(agent_id)
+        .await
+        .map_err(application_error)?;
     let diagnostics = agent_runtime_diagnostics(&state, agent_id).await;
     let Some(run_id) = run_id else {
         return Ok(Json(AgentRuntimeResponse {
@@ -182,9 +183,9 @@ pub(super) async fn current_agent_run(
             diagnostics,
         }));
     };
-    let run = run_projection(&state.read, run_id.into_uuid()).await?;
+    let run = run_projection(&state.read, run_id).await?;
     let current_task = match run.task_id {
-        Some(task_id) => Some(task_projection(&state.read, task_id).await?),
+        Some(task_id) => Some(task_projection(&state.read, task_id, None).await?),
         None => None,
     };
     let scope = match run.task_id {
@@ -247,9 +248,12 @@ pub(super) async fn delete_computer(
     )
     .await
     .map_err(application_error)?;
-    let computer = ReadPairedComputer::execute(&mut storage, ComputerId::from_uuid(computer_id))
+    let computer = state
+        .read
+        .paired_computer(computer_id)
         .await
-        .map_err(application_error)?;
+        .map_err(application_error)?
+        .ok_or_else(ApiError::not_found)?;
     Ok(Json(computer_response(&computer)))
 }
 
@@ -261,21 +265,13 @@ pub(super) async fn create_agent(
     Json(body): Json<CreateAgentBody>,
 ) -> Result<(StatusCode, Json<AgentResponse>), ApiError> {
     let actor_id = current_member(&state, &jar, space_id).await?;
-    let requested_access = match body.access_level.as_str() {
-        "member" => AccessLevel::Member,
-        "admin" => AccessLevel::Admin,
+    let requested_access = match AccessLevel::parse(&body.access_level) {
+        Some(level @ (AccessLevel::Admin | AccessLevel::Member)) => level,
         _ => return Err(ApiError::invalid("Agent configuration is invalid")),
     };
+    // The domain owns what an Agent may be; the adapter only maps the wire form.
     let name = body.name.trim();
     let role = body.role_text.trim();
-    if !valid_display_name(name)
-        || name.chars().count() > 40
-        || role.is_empty()
-        || role.chars().count() > 12_000
-        || !matches!(body.access_level.as_str(), "member" | "admin")
-    {
-        return Err(ApiError::invalid("Agent configuration is invalid"));
-    }
     let driver_kind = match (body.driver_kind.as_str(), body.driver_provider.as_deref()) {
         ("acp", Some("codex")) => DriverKind::Acp(AcpProvider::Codex),
         ("acp", Some("claude")) => DriverKind::Acp(AcpProvider::Claude),
@@ -396,9 +392,9 @@ pub(super) fn agent_row(row: &AgentRow) -> Result<AgentResponse, ApiError> {
         space_id: row.space_id,
         computer_id: row.computer_id,
         name: row.display_name.clone(),
-        access_level: match row.access_level.as_str() {
-            "admin" => AgentAccessLevel::Admin,
-            "member" => AgentAccessLevel::Member,
+        access_level: match AccessLevel::parse(&row.access_level) {
+            Some(AccessLevel::Admin) => AgentAccessLevel::Admin,
+            Some(AccessLevel::Member) => AgentAccessLevel::Member,
             _ => return Err(ApiError::internal()),
         },
         role_text: row.role_text.clone(),

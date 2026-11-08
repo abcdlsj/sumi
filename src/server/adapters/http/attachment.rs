@@ -1,20 +1,22 @@
 use super::*;
 
-#[derive(Deserialize)]
-pub(super) struct CreateUploadBody {
+use utoipa::ToSchema;
+
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct CreateUploadBody {
     pub(super) space_id: Uuid,
     pub(super) original_name: String,
     pub(super) media_type: String,
 }
 
 #[derive(Deserialize)]
-pub(super) struct AgentCreateUploadBody {
+pub(in crate::server::adapters) struct AgentCreateUploadBody {
     pub(super) original_name: String,
     pub(super) media_type: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct CompleteUploadBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct CompleteUploadBody {
     pub(super) size: u64,
     pub(super) sha256: String,
 }

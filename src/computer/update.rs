@@ -13,7 +13,11 @@ use tokio::{io::AsyncWriteExt, process::Command, sync::mpsc};
 use crate::{
     cli::{ComputerArgs, Supervisor, UpdaterArgs},
     config::{ComputerConfig, default_sumi_dir},
-    protocol::update::{ComputerRelease, current_target},
+    private_paths::ensure_private_directory,
+    protocol::{
+        update::{ComputerRelease, current_target},
+        version::CURRENT,
+    },
 };
 
 const MAX_ARTIFACT_BYTES: usize = 200 * 1024 * 1024;
@@ -181,13 +185,8 @@ pub(crate) fn start_checker(
             match check_and_stage(&server, &computer_home).await {
                 Ok(Some(update)) => {
                     tracing::info!(target_version = %update.version, "Computer update staged");
-                    loop {
-                        if local_runs_are_inactive(&computer_home.join("daemon.db")).await
-                            && sender.send(update.clone()).await.is_err()
-                        {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    if sender.send(update).await.is_err() {
+                        return;
                     }
                 }
                 Ok(None) => {}
@@ -225,6 +224,12 @@ async fn check_and_stage(
     ensure!(
         release.target == current_target(),
         "release target does not match this Computer"
+    );
+    // The daemon replaces itself with this artifact. A release built for another wire protocol
+    // would reconnect with a schema this Computer cannot speak, so it is refused before download.
+    ensure!(
+        release.protocol_version == CURRENT.value(),
+        "release protocol version does not match this Computer"
     );
     ensure_secure_update_origin(&release.url)?;
 
@@ -307,23 +312,6 @@ fn ensure_secure_update_origin(server: &url::Url) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn local_runs_are_inactive(database: &Path) -> bool {
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(database)
-        .read_only(true)
-        .busy_timeout(Duration::from_secs(1));
-    let Ok(mut connection) = sqlx::SqliteConnection::connect_with(&options).await else {
-        return false;
-    };
-    use sqlx::Connection;
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM local_runs WHERE state IN ('queued','starting','running','finalizing','stopping')",
-    )
-    .fetch_one(&mut connection)
-    .await
-    .is_ok_and(|count| count == 0)
-}
-
 pub(crate) async fn launch_updater(
     update: &StagedUpdate,
     computer_home: &Path,
@@ -394,7 +382,7 @@ pub(crate) async fn run_updater(args: UpdaterArgs) -> anyhow::Result<()> {
     wait_for_parent(args.parent_pid).await?;
     let update_root = args.computer_home.join("update");
     if let Err(error) = ensure_private_directory(&update_root).await {
-        restart_after_prepare_failure(&args, error, &update_root).await?;
+        restart_after_prepare_failure(&args, error.into(), &update_root).await?;
         return Ok(());
     }
     let previous = update_root.join("previous-sumi");
@@ -651,16 +639,6 @@ async fn write_executable_atomically(path: &Path, content: &[u8]) -> anyhow::Res
     Ok(())
 }
 
-async fn ensure_private_directory(path: &Path) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(path).await?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
-    }
-    Ok(())
-}
-
 async fn make_executable(path: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -726,11 +704,19 @@ mod tests {
 
     /// Serves a manifest whose artifact URL redirects, the way GitHub Release assets do.
     async fn release_server(published: &'static [u8], served: &'static [u8]) -> url::Url {
+        release_server_with(published, served, CURRENT.value()).await
+    }
+
+    async fn release_server_with(
+        published: &'static [u8],
+        served: &'static [u8],
+        protocol_version: u16,
+    ) -> url::Url {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let release = crate::protocol::update::ComputerRelease {
             version: "9.9.9".into(),
-            protocol_version: 4,
+            protocol_version,
             target: current_target().into(),
             url: format!("http://{address}/releases/download/sumi")
                 .parse()
@@ -769,6 +755,20 @@ mod tests {
             tokio::fs::read(staged.candidate).await.unwrap(),
             b"computer binary"
         );
+    }
+
+    #[tokio::test]
+    async fn a_release_for_another_protocol_version_is_not_downloaded() {
+        let server =
+            release_server_with(b"computer binary", b"computer binary", CURRENT.value() + 1).await;
+        let directory = tempdir().unwrap();
+
+        let error = check_and_stage(&server, directory.path())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("protocol version"));
+        assert!(!directory.path().join("update/staged/9.9.9/sumi").exists());
     }
 
     #[tokio::test]

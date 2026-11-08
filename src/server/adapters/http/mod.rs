@@ -1,53 +1,34 @@
 // HTTP adapter facade and shared request state.
-#![allow(unused_imports)]
-use std::{
-    collections::{BTreeSet, VecDeque},
-    convert::Infallible,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
-use anyhow::Context;
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{
-        DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
-        ws::{Message as WebSocketMessage, WebSocket},
-    },
+    extract::{DefaultBodyLimit, Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{
-        IntoResponse, Response, Sse,
-        sse::{Event as SseEvent, KeepAlive},
-    },
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use futures_util::{StreamExt, stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 #[cfg(test)]
 use sqlx::PgPool;
-use time::{Duration, OffsetDateTime};
-use tower_http::{
-    services::{ServeDir, ServeFile},
-    trace::TraceLayer,
-};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::config::ServerConfig;
 use crate::{
     ids::{
         AgentId, AttachmentId, ChannelId, ComputerId, IdempotencyKey, InboxItemId, MemberId,
         MessageId, RunId, SpaceId, TaskId, ThreadId,
     },
     protocol::{
-        capability,
+        capability as wire_capability,
         computer::{
-            ComputerFrame, ComputerHello, ItemDisposition, LlmUsageQuery, MemoryQuery,
-            MemoryReadQuery, Query as ComputerQuery, QueryErrorCode, QueryResult, RunResult,
-            RunTerminalStatus, RuntimeDiagnosticsQuery, ServerFrame, SessionContinuityQuery,
-            SessionContinuityState, SessionScope,
+            ItemDisposition, LlmUsageQuery, MemoryQuery, MemoryReadQuery, Query as ComputerQuery,
+            QueryErrorCode, QueryResult, RunResult, RunTerminalStatus, RuntimeDiagnosticsQuery,
+            SessionContinuityQuery, SessionContinuityState, SessionScope,
         },
     },
     server::{
@@ -56,22 +37,22 @@ use crate::{
             ReadAttachment, WriteUploadContent, WriteUploadContentInput,
         },
         application::attention::{
-            HardItemRoute, MarkAllInboxRead, MarkAllInboxReadInput, MarkInboxItemRead,
-            MarkInboxItemReadInput, ReadMemberInbox, RequeueDeadItem, RequeueDeadItemInput,
-            RouteHardItem, RouteHardItemInput,
+            MarkAllInboxRead, MarkAllInboxReadInput, MarkInboxItemRead, MarkInboxItemReadInput,
+            ReadMemberInbox, RequeueDeadItem, RequeueDeadItemInput, RouteHardItem,
+            RouteHardItemInput,
+        },
+        application::channel::{
+            AddChannelAgents, ArchiveChannel, CreateChannel, CreateChannelAction,
+            CreateChannelActionInput, CreateChannelInput, InviteChannelMember, JoinChannel,
+            LeaveChannel, RemoveChannelAgent, RemoveChannelMember, SetThreadSubscription,
         },
         application::computer::{
             AuthenticateComputer, BeginPairing, BeginPairingInput, ConfirmPairing,
-            ConfirmPairingInput, ListSpaceComputers, ReadPairedComputer, ReadPairing,
-            ReadPairingStatus,
+            ConfirmPairingInput, ListSpaceComputers, ReadPairing, ReadPairingStatus,
         },
-        application::conversation::{
-            AddChannelAgents, ArchiveChannel, CreateAgent, CreateAgentAction,
-            CreateAgentActionInput, CreateAgentInput, CreateChannel, CreateChannelAction,
-            CreateChannelActionInput, CreateChannelInput, DeleteMessage, EditMessage,
-            EditMessageInput, InviteChannelMember, JoinChannel, LeaveChannel, ListDirectMessages,
-            OpenDirectMessage, OpenDirectMessageInput, PublishMessage, RemoveChannelAgent,
-            RemoveChannelMember, SetThreadSubscription,
+        application::message::{
+            DeleteMessage, EditMessage, EditMessageInput, ListDirectMessages, OpenDirectMessage,
+            OpenDirectMessageInput, PublishMessage,
         },
         application::task::{
             CreateTaskFromRootMessage, CreateTaskInput, LinkThreadInput, LinkThreadToTask,
@@ -83,16 +64,16 @@ use crate::{
             execution::{
                 AcknowledgeDelivery, AcknowledgeDeliveryInput, AuthorizeRunCapability, CompleteRun,
                 CompleteRunInput, DispatchRun, DispatchRunInput, FindDispatchableWork,
-                ItemDispositionInput, ReadAgentChannel, ReadCurrentAgentRun,
+                ItemDispositionInput, RecordObservedRead, RecordObservedReadInput,
                 RecordRunItemDisposition, RecordRunItemDispositionInput, RequestRunCancel,
-                RequestRunCancelInput, StartRun, StartRunInput, SyncComputerRuns,
-                SyncComputerRunsInput,
+                RequestRunCancelInput, StartRun, StartRunInput,
             },
             identity::{
                 AgentLifecycleAction, AuthenticateHuman, AuthenticateHumanInput,
                 AuthenticateSession, AuthorizeAgentAccess, AuthorizeAgentGovernance,
                 AuthorizeAttachmentAccess, AuthorizeChannelAccess, AuthorizeComputerGovernance,
-                AuthorizeSpaceAccess, AuthorizeSpaceGovernance, CloseSession, CreateSpace,
+                AuthorizeSpaceAccess, AuthorizeSpaceGovernance, CloseSession, CreateAgent,
+                CreateAgentAction, CreateAgentActionInput, CreateAgentInput, CreateSpace,
                 CreateSpaceInput, DeleteComputer, RegisterHuman, RegisterHumanInput, RetireAgent,
                 SetPermission, UpdateAgent, UpdateAgentInput, UpdateMemberAccess,
             },
@@ -104,8 +85,8 @@ use crate::{
                 ApplicationError, AuthenticatedHuman, DirectMessageView,
                 InboxActivityEventKind as InboxActivityEventKindView, InboxItemView, InboxScope,
                 InvitationView, MemberKind, MessageDraft, PairedComputer, RawInvitationToken,
-                RawPairingCode, RawSessionToken, RunCapabilityProof, ServerTransaction,
-                SpaceMemberView, TransactionPort,
+                RawPairingCode, RawSessionToken, RunCapabilityProof, SpaceMemberView,
+                TransactionPort,
             },
         },
         domain::{
@@ -137,19 +118,22 @@ use super::{
         ComputerStatus, CreatedInvitationResponse, DirectMessageResponse,
         DriverKind as DriverKindCode, InboxActivityEventKind, InboxActivityEventResponse,
         InboxItemResponse, InboxKind, InboxPriority, InboxStatus, InvitationResponse,
-        LlmUsageAgentModelResponse, LlmUsageAgentSeriesResponse, LlmUsageBreakdownResponse,
-        LlmUsageBucketResponse, LlmUsageResponse, LoginResponse, MarkAllInboxReadResponse,
-        MemberKind as MemberKindCode, MemberResponse, MemoryContentResponse, MemoryFileResponse,
-        MessageAuthor, MessageContentResponse, MessagePageResponse, MessagePlacement,
-        MessageResponse, MessageTaskRefResponse, MessageTaskSummary, ProvisionStatus,
-        RegisterResponse, ReplyPreviewResponse, RunOutcome, RunResponse, RunStatus,
-        RuntimeDiagnosticsResponse, RuntimeRunState, SessionContinuityResponse,
-        SessionContinuityState as ContinuityStateCode, SpaceResponse, TaskResponse, TaskStatus,
-        ThreadReadResponse, ThreadReferenceResponse, ThreadRelation, ThreadSubscriptionResponse,
-        UserResponse,
+        LifecycleActionKind, LlmUsageAgentModelResponse, LlmUsageAgentSeriesResponse,
+        LlmUsageBreakdownResponse, LlmUsageBucketResponse, LlmUsageResponse, LoginResponse,
+        MarkAllInboxReadResponse, MemberKind as MemberKindCode, MemberResponse,
+        MemoryContentResponse, MemoryFileResponse, MessageAuthor, MessageContentResponse,
+        MessagePageResponse, MessagePlacement, MessageResponse, MessageTaskRefResponse,
+        MessageTaskSummary, ProvisionStatus, RegisterResponse, ReplyPreviewResponse, RunOutcome,
+        RunResponse, RunStatus, RuntimeDiagnosticsResponse, RuntimeRunState,
+        SessionContinuityResponse, SessionContinuityState as ContinuityStateCode, SpaceResponse,
+        SuspendMode, TaskResponse, TaskStatus, ThreadReadResponse, ThreadReferenceResponse,
+        ThreadRelation, ThreadSubscriptionResponse, UserResponse,
     },
     postgres::{ChannelLeaveReplayQuery, PostgresAdapter, PostgresQueries},
     query::QueryRegistry,
+};
+use crate::server::application::ports::{
+    IdentityTransaction, ObservationScope, ObservedMessage, PublishOutcome,
 };
 
 const SESSION_COOKIE: &str = "sumi_session";
@@ -162,6 +146,8 @@ pub(super) struct RuntimeState {
     pub(super) read: PostgresQueries,
     pub(super) objects: Arc<AttachmentObjectStore>,
     pub(super) session_lifetime: SessionLifetime,
+    /// Marks the session cookie `Secure` when the Server is served over TLS.
+    pub(super) secure_cookies: bool,
     pub(super) attachment_max_bytes: u64,
     pub(super) queries: QueryRegistry,
     pub(super) agent_graph_cache: AgentGraphCache,
@@ -174,30 +160,42 @@ pub(super) struct RuntimeState {
 
 mod agent_graph;
 mod attachment;
+mod capability;
 mod computer;
 mod conversation;
 mod dto;
 mod error;
-mod execution;
 mod identity;
 mod origin;
 mod rate_limit;
+mod run;
 mod task;
 
 #[cfg(test)]
 mod tests;
 
 pub(super) use agent_graph::*;
-pub(super) use attachment::*;
-pub(super) use computer::*;
-pub(super) use conversation::*;
-pub(super) use dto::*;
+use attachment::*;
+pub(in crate::server::adapters) use attachment::{CompleteUploadBody, CreateUploadBody};
+pub(in crate::server::adapters::http) use capability::*;
+use computer::*;
+use conversation::*;
+use dto::*;
+pub(in crate::server::adapters) use dto::{
+    AddChannelAgentsBody, ConfirmPairingBody, CreateAgentBody, CreateChannelBody,
+    CreateMessageBody, CreateSpaceBody, InviteHumanBody, LifecycleActionBody, LoginBody,
+    OpenDirectMessageBody, ReadMemoryBody, RegisterBody, UpdateAgentBody, UpdateMemberBody,
+    UpdateMessageBody,
+};
 pub(super) use error::*;
-pub(super) use execution::*;
 pub(super) use identity::*;
 pub(super) use origin::allow_web_origin;
 pub(super) use rate_limit::*;
-pub(super) use task::*;
+pub(in crate::server::adapters) use run::*;
+use task::*;
+pub(in crate::server::adapters) use task::{
+    CloseTaskBody, CompleteTaskBody, CreateTaskBody, LinkThreadBody,
+};
 
 pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> Router {
     Router::new()
@@ -214,7 +212,3 @@ pub(super) fn api_router(state: RuntimeState, attachment_body_limit: usize) -> R
         .route("/members/{member_id}/inbox/read", post(read_all_inbox_items))
         .route("/attachments/uploads", post(create_upload)).route("/attachments/{attachment_id}/content", axum::routing::put(upload_content).layer(DefaultBodyLimit::max(attachment_body_limit))).route("/attachments/{attachment_id}/complete", post(complete_upload)).route("/attachments/{attachment_id}/download", get(download_attachment)).route("/computers/{computer_id}", axum::routing::delete(delete_computer)).with_state(state)
 }
-use crate::server::application::ports::{
-    AttachmentTransaction, CollaborationTransaction, EffectSink, ExecutionTransaction,
-    IdentityTransaction, ObservationScope, ObservedMessage, PublishOutcome, TaskTransaction,
-};

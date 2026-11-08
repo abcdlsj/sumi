@@ -3,14 +3,15 @@ import { Link } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
 import { type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { apiUrl, createTaskFromRootMessage, type Attachment, type Member, type Message, type MessagePage, type MessageTaskRef, type MessageTaskSummary } from "../../api/client";
+import {apiUrl, createTaskFromRootMessage} from "../../api/client";
+import type {Attachment, Member, Message, MessagePage, MessageTaskRef, MessageTaskSummary} from "../../api/types";
 import { formatBytes } from "../../format";
 import { plainTextPreview } from "../../markdownText";
 import { formatClock, formatDayDivider, formatFullDateTime } from "../../time";
 import { AGENT_ACTIVITY_LABELS, useAgentActivity, type AgentPresence } from "../../agentActivity";
 import { runErrorLabel } from "../../agentErrors";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
-import { PixelIdentity, PresenceIdentity } from "../SpaceShell";
+import { PixelIdentity, PresenceIdentity } from "../PixelIdentity";
 import { TaskStatusIcon } from "../taskStatusIcon";
 import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
@@ -323,7 +324,7 @@ export function CompactMessage({ message, activityStatus, spaceSlug, members, di
 
 // Shown only on hover or focus; the title keeps the full date for pointer users.
 function MessageTime({ value }: { value: string }) {
-  return <time className="message-hover-time" dateTime={value} title={formatFullTime(value)}>{formatMessageTime(value)}</time>;
+  return <time className="message-hover-time" dateTime={value} title={formatFullDateTime(value)}>{formatClock(value)}</time>;
 }
 
 function MessageAvatar({
@@ -1260,7 +1261,7 @@ function WorkingStrip({ workers, steps }: { workers: Member[]; steps?: ReadonlyM
   } else if (workers.length > 2) {
     text = `${workers[0].display_name} and ${workers.length - 1} others are working`;
   }
-  const detail = first && latest ? `Last action: ${AGENT_ACTIVITY_LABELS[latest.kind]} · ${formatMessageTime(latest.occurredAt)}` : undefined;
+  const detail = first && latest ? `Last action: ${AGENT_ACTIVITY_LABELS[latest.kind]} · ${formatClock(latest.occurredAt)}` : undefined;
   return (
     <div className="timeline-working" role="status" aria-live="polite">
       {workers.length ? (
@@ -1274,14 +1275,6 @@ function WorkingStrip({ workers, steps }: { workers: Member[]; steps?: ReadonlyM
       ) : null}
     </div>
   );
-}
-
-function formatFullTime(value: string): string {
-  return formatFullDateTime(value);
-}
-
-function formatMessageTime(value: string): string {
-  return formatClock(value);
 }
 
 const MESSAGE_GROUP_GAP_MS = 5 * 60 * 1000;

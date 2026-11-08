@@ -25,21 +25,10 @@ pub(crate) struct ServerConfig {
     /// Origin of a Web UI deployed apart from the Server, such as `https://app.example.com`.
     pub(crate) web_origin: Option<Url>,
     pub(crate) attachment_dir: PathBuf,
-    pub(crate) attachment_s3: Option<AttachmentS3Config>,
     pub(crate) attachment_max_bytes: u64,
     pub(crate) computer_update_dir: Option<PathBuf>,
     pub(crate) secure_cookies: bool,
     pub(crate) session_ttl_hours: i64,
-    pub(crate) auth_ip_attempts_per_minute: u32,
-    pub(crate) auth_email_attempts_per_minute: u32,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct AttachmentS3Config {
-    pub(crate) bucket: String,
-    pub(crate) region: String,
-    pub(crate) endpoint: Option<String>,
-    pub(crate) allow_http: bool,
 }
 
 /// Per-provider overrides for the ACP agent process.
@@ -206,13 +195,10 @@ impl Default for ServerConfig {
             web_dist: PathBuf::from("web/dist"),
             web_origin: None,
             attachment_dir: default_sumi_dir().join("server/attachments"),
-            attachment_s3: None,
             attachment_max_bytes: 100 * 1024 * 1024,
             computer_update_dir: None,
             secure_cookies: false,
             session_ttl_hours: 24 * 14,
-            auth_ip_attempts_per_minute: 20,
-            auth_email_attempts_per_minute: 6,
         }
     }
 }
@@ -222,15 +208,12 @@ impl Default for ServerConfig {
 pub(crate) struct ComputerConfig {
     pub(crate) server_url: Url,
     pub(crate) state_dir: PathBuf,
-    pub(crate) open_pairing_browser: bool,
     pub(crate) codex_config_source: Option<PathBuf>,
     pub(crate) codex_auth_source: Option<PathBuf>,
     pub(crate) pi_agent_dir_source: Option<PathBuf>,
     pub(crate) acp: AcpConfig,
     pub(crate) builtin: Option<BuiltinOpenAiConfig>,
     pub(crate) max_concurrent_runs: usize,
-    pub(crate) per_agent_timeout_seconds: u64,
-    pub(crate) shutdown_grace_period_seconds: u64,
     pub(crate) auto_update: bool,
     pub(crate) update_check_interval_seconds: u64,
     pub(crate) update_ready_timeout_seconds: u64,
@@ -241,15 +224,12 @@ impl Default for ComputerConfig {
         Self {
             server_url: Url::parse("http://127.0.0.1:3000").expect("valid default server URL"),
             state_dir: default_computer_state_dir(),
-            open_pairing_browser: true,
             codex_config_source: None,
             codex_auth_source: None,
             pi_agent_dir_source: None,
             acp: AcpConfig::default(),
             builtin: None,
             max_concurrent_runs: 1000,
-            per_agent_timeout_seconds: 30 * 60,
-            shutdown_grace_period_seconds: 20,
             auto_update: true,
             update_check_interval_seconds: 6 * 60 * 60,
             update_ready_timeout_seconds: 30,
@@ -282,14 +262,6 @@ fn validate(config: &SumiConfig) -> Result<()> {
         "server.session_ttl_hours must be positive"
     );
     ensure!(
-        config.server.auth_ip_attempts_per_minute > 0,
-        "server.auth_ip_attempts_per_minute must be positive"
-    );
-    ensure!(
-        config.server.auth_email_attempts_per_minute > 0,
-        "server.auth_email_attempts_per_minute must be positive"
-    );
-    ensure!(
         (1..=100 * 1024 * 1024).contains(&config.server.attachment_max_bytes),
         "server.attachment_max_bytes must be between 1 and 104857600"
     );
@@ -303,27 +275,9 @@ fn validate(config: &SumiConfig) -> Result<()> {
             "server.web_origin must be an origin such as https://app.example.com"
         );
     }
-    if let Some(s3) = &config.server.attachment_s3 {
-        ensure!(
-            !s3.bucket.trim().is_empty(),
-            "server.attachment_s3.bucket must not be empty"
-        );
-        ensure!(
-            !s3.region.trim().is_empty(),
-            "server.attachment_s3.region must not be empty"
-        );
-    }
     ensure!(
         config.computer.max_concurrent_runs > 0,
         "computer.max_concurrent_runs must be positive"
-    );
-    ensure!(
-        config.computer.per_agent_timeout_seconds > 0,
-        "computer.per_agent_timeout_seconds must be positive"
-    );
-    ensure!(
-        config.computer.shutdown_grace_period_seconds > 0,
-        "computer.shutdown_grace_period_seconds must be positive"
     );
     ensure!(
         config.computer.update_check_interval_seconds > 0,

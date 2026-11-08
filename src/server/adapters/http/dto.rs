@@ -1,10 +1,16 @@
 use super::*;
 use std::collections::{BTreeMap, HashMap};
 
-use crate::server::adapters::postgres::{
-    ActionAgentRow, ActionChannelRow, AgentRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow,
-    MessageRow, MessageTaskRow, PostgresQueries, RunRow, SpaceRow, TaskRefRow, TaskRow,
-    ThreadReferenceRow,
+use utoipa::ToSchema;
+
+use crate::server::domain::task::TaskStatus as DomainTaskStatus;
+use crate::server::{
+    adapters::postgres::{
+        ActionAgentRow, ActionChannelRow, AttachmentRow, AuthorRow, ChannelRow, MemberRow,
+        MessageRow, MessageTaskRow, PostgresQueries, SpaceRow, TaskRefRow, ThreadReferenceRow,
+    },
+    application::ports::MemberKind,
+    domain::identity::AccessLevel,
 };
 
 pub(super) const SPACE_ACCENTS: [&str; 4] = ["#F0602F", "#E8B42D", "#3C9E8F", "#6C5CE7"];
@@ -17,57 +23,62 @@ pub(super) fn normalize_space_accent(input: &str) -> Option<String> {
         .map(|candidate| (*candidate).to_owned())
 }
 
-#[derive(Deserialize)]
-pub(super) struct RegisterBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct RegisterBody {
     pub(super) display_name: String,
     pub(super) email: String,
     pub(super) password: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct LoginBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct LoginBody {
     pub(super) email: String,
     pub(super) password: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct CreateSpaceBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct CreateSpaceBody {
     pub(super) name: String,
     pub(super) slug: String,
     pub(super) accent: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateChannelBody {
+pub(in crate::server::adapters) struct CreateChannelBody {
     pub(super) slug: String,
+    #[schema(value_type = ChannelKindCode)]
     pub(super) kind: String,
     pub(super) topic: Option<String>,
     #[serde(default)]
     pub(super) agent_member_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AddChannelAgentsBody {
+pub(in crate::server::adapters) struct AddChannelAgentsBody {
     pub(super) agent_member_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateAgentBody {
+pub(in crate::server::adapters) struct CreateAgentBody {
     pub(super) computer_id: Uuid,
     pub(super) name: String,
     pub(super) role_text: String,
+    #[schema(value_type = DriverKindCode)]
     pub(super) driver_kind: String,
+    /// Required when `driver_kind` is `acp`; omitted for `builtin`.
     #[serde(default)]
+    #[schema(value_type = Option<AcpProviderCode>)]
     pub(super) driver_provider: Option<String>,
+    #[schema(value_type = AgentAccessLevel)]
     pub(super) access_level: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CreateMessageBody {
+pub(in crate::server::adapters) struct CreateMessageBody {
     pub(super) body_markdown: String,
     #[serde(default)]
     pub(super) mentions: Vec<Uuid>,
@@ -78,9 +89,9 @@ pub(super) struct CreateMessageBody {
     pub(super) reply_to_message_id: Option<Uuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct UpdateMessageBody {
+pub(in crate::server::adapters) struct UpdateMessageBody {
     pub(super) body_markdown: String,
     #[serde(default)]
     pub(super) mentions: Vec<Uuid>,
@@ -89,7 +100,7 @@ pub(super) struct UpdateMessageBody {
 }
 
 #[derive(Deserialize)]
-pub(super) struct BeginPairingBody {
+pub(in crate::server::adapters) struct BeginPairingBody {
     pub(super) token_hash: String,
     pub(super) hostname: String,
     pub(super) os: String,
@@ -101,50 +112,53 @@ pub(super) struct PairingCodeQuery {
     pub(super) code: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct ConfirmPairingBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct ConfirmPairingBody {
     pub(super) code: String,
     pub(super) name: String,
     pub(super) space_id: Uuid,
 }
 
-#[derive(Deserialize)]
-pub(super) struct InviteHumanBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct InviteHumanBody {
     pub(super) email: String,
 }
 
-#[derive(Deserialize)]
-pub(super) struct OpenDirectMessageBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct OpenDirectMessageBody {
     pub(super) member_id: Uuid,
 }
 
-#[derive(Deserialize)]
-pub(super) struct UpdateAgentBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct UpdateAgentBody {
     pub(super) role_text: Option<String>,
     pub(super) lifecycle: Option<LifecycleActionBody>,
 }
 
-#[derive(Deserialize)]
-pub(super) struct LifecycleActionBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct LifecycleActionBody {
+    #[schema(value_type = LifecycleActionKind)]
     pub(super) action: String,
+    #[schema(value_type = Option<SuspendMode>)]
     pub(super) mode: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub(super) struct UpdateMemberBody {
+#[derive(Deserialize, ToSchema)]
+pub(in crate::server::adapters) struct UpdateMemberBody {
+    #[schema(value_type = Option<AccessLevelCode>)]
     pub(super) access_level: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct AgentActionRequest {
-    pub(super) context: capability::RunContext,
-    pub(super) action: capability::Action,
+    pub(super) context: wire_capability::RunContext,
+    pub(super) action: wire_capability::Action,
     pub(super) idempotency_key: Option<IdempotencyKey>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ReadMemoryBody {
+pub(in crate::server::adapters) struct ReadMemoryBody {
     pub(super) path: String,
 }
 
@@ -210,30 +224,32 @@ pub(super) async fn member_row(
         .map_err(application_error)?;
     Ok(MemberResponse {
         id,
-        kind: match row.kind.as_str() {
-            "human" => MemberKindCode::Human,
-            "agent" => MemberKindCode::Agent,
-            _ => return Err(ApiError::internal()),
-        },
+        kind: member_kind_code(&row.kind)?,
         display_name: row.display_name.clone(),
-        access_level: match row.access_level.as_str() {
-            "owner" => AccessLevelCode::Owner,
-            "admin" => AccessLevelCode::Admin,
-            "member" => AccessLevelCode::Member,
-            _ => return Err(ApiError::internal()),
-        },
+        access_level: access_level_code(
+            AccessLevel::parse(&row.access_level).ok_or_else(ApiError::internal)?,
+        ),
         permissions,
     })
 }
 
-fn task_status_code(value: &str) -> Result<TaskStatus, ApiError> {
-    Ok(match value {
-        "todo" => TaskStatus::Todo,
-        "in_progress" => TaskStatus::InProgress,
-        "in_review" => TaskStatus::InReview,
-        "done" => TaskStatus::Done,
-        "closed" => TaskStatus::Closed,
-        _ => return Err(ApiError::internal()),
+/// Stored text to API enum: the domain parse decides what exists, so a new status needs one edit.
+pub(super) fn task_status_code(value: &str) -> Result<TaskStatus, ApiError> {
+    let status = DomainTaskStatus::parse(value).ok_or_else(ApiError::internal)?;
+    Ok(match status {
+        DomainTaskStatus::Todo => TaskStatus::Todo,
+        DomainTaskStatus::InProgress => TaskStatus::InProgress,
+        DomainTaskStatus::InReview => TaskStatus::InReview,
+        DomainTaskStatus::Done => TaskStatus::Done,
+        DomainTaskStatus::Closed => TaskStatus::Closed,
+    })
+}
+
+pub(super) fn member_kind_code(value: &str) -> Result<MemberKindCode, ApiError> {
+    let kind = MemberKind::parse(value).ok_or_else(ApiError::internal)?;
+    Ok(match kind {
+        MemberKind::Human => MemberKindCode::Human,
+        MemberKind::Agent => MemberKindCode::Agent,
     })
 }
 
@@ -492,11 +508,7 @@ impl Related<'_> {
             .ok_or_else(ApiError::internal)?;
         Ok(MessageAuthor {
             id: author.id,
-            kind: match author.kind.as_str() {
-                "human" => MemberKindCode::Human,
-                "agent" => MemberKindCode::Agent,
-                _ => return Err(ApiError::internal()),
-            },
+            kind: member_kind_code(&author.kind)?,
             display_name: author.display_name.clone(),
         })
     }
@@ -624,6 +636,7 @@ pub(super) fn attachment_row(row: &AttachmentRow) -> Result<AttachmentResponse, 
 pub(super) async fn task_projection(
     queries: &PostgresQueries,
     task_id: Uuid,
+    viewer: Option<Uuid>,
 ) -> Result<TaskResponse, ApiError> {
     let row = queries
         .task(task_id)
@@ -658,25 +671,25 @@ pub(super) async fn task_projection(
         runs.push(run_projection(queries, run_id).await?);
     }
     let current_run = runs.iter().find(|run| run.outcome.is_none()).cloned();
+    let result_thread = match viewer {
+        Some(viewer) => {
+            readable_result_thread(queries, viewer, current_run.as_ref(), &source, &related).await?
+        }
+        None => None,
+    };
     Ok(TaskResponse {
         id: task_id,
         seq: u64::try_from(row.seq).map_err(|_| ApiError::internal())?,
         space_id: row.space_id,
         title: row.title,
-        status: match row.status.as_str() {
-            "todo" => TaskStatus::Todo,
-            "in_progress" => TaskStatus::InProgress,
-            "in_review" => TaskStatus::InReview,
-            "done" => TaskStatus::Done,
-            "closed" => TaskStatus::Closed,
-            _ => return Err(ApiError::internal()),
-        },
+        status: task_status_code(&row.status)?,
         creator_member_id: row.creator_member_id,
         creator_name: row.creator_name,
         assignee_agent_member_id: row.assignee_agent_member_id,
         assignee_name: row.assignee_name,
         source_thread: source,
         related_threads: related,
+        result_thread,
         result_message,
         close_reason_code: match row.close_reason_code.as_deref() {
             None => None,
@@ -696,6 +709,34 @@ pub(super) async fn task_projection(
         updated_at: timestamp(row.updated_at),
         finished_at: optional_timestamp(row.finished_at),
     })
+}
+
+/// Where a Browser Mark done would publish the Result: the first Linked Thread the viewer can read,
+/// preferring the live Run's Focus, then the Source Thread, then the other Linked Threads. `None` means
+/// the viewer can read no Linked Thread, so the action is not offered.
+async fn readable_result_thread(
+    queries: &PostgresQueries,
+    viewer: Uuid,
+    current_run: Option<&RunResponse>,
+    source: &ThreadReferenceResponse,
+    related: &[ThreadReferenceResponse],
+) -> Result<Option<ThreadReferenceResponse>, ApiError> {
+    let mut candidates: Vec<&ThreadReferenceResponse> = Vec::new();
+    if let Some(focus) = current_run.map(|run| &run.focus) {
+        candidates.push(focus);
+    }
+    candidates.push(source);
+    candidates.extend(related);
+    for candidate in candidates {
+        if queries
+            .thread_readable(candidate.id, viewer)
+            .await
+            .map_err(application_error)?
+        {
+            return Ok(Some(candidate.clone()));
+        }
+    }
+    Ok(None)
 }
 
 pub(super) async fn run_projection(

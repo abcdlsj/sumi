@@ -1376,10 +1376,7 @@ details.system-event .system-event-heading {
   font-size: var(--text-small);
 }
 
-.quick-agent-advanced > div {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+.quick-agent-advanced .agent-setup-fields {
   margin-top: 10px;
 }
 
@@ -1932,7 +1929,7 @@ details.system-event .system-event-heading {
     right: 4px;
   }
 
-  .quick-agent-advanced > div {
+  .quick-agent-advanced .agent-setup-fields {
     grid-template-columns: minmax(0, 1fr);
   }
 

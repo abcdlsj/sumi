@@ -16,26 +16,13 @@ pub(in crate::computer) enum ScopeRequirement {
     BoundTask,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::computer) struct AuthorizedCapability {
     pub(in crate::computer) agent_id: AgentId,
     pub(in crate::computer) space_id: SpaceId,
     pub(in crate::computer) task_id: Option<TaskId>,
     pub(in crate::computer) focus_thread_id: ThreadId,
     pub(in crate::computer) run_id: RunId,
-}
-
-impl std::fmt::Debug for AuthorizedCapability {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("AuthorizedCapability")
-            .field("agent_id", &self.agent_id)
-            .field("space_id", &self.space_id)
-            .field("task_id", &self.task_id)
-            .field("focus_thread_id", &self.focus_thread_id)
-            .field("run_id", &self.run_id)
-            .finish()
-    }
 }
 
 pub(in crate::computer) struct CapabilityService;

@@ -61,6 +61,20 @@ use crate::{
 
 const BASELINE: &str = include_str!("../../../../schema/postgres.sql");
 
+/// Where a Run's Focus sits, for Run activity entries.
+pub(super) struct RunActivityFocus {
+    pub(super) agent_id: MemberId,
+    pub(super) space_id: SpaceId,
+    pub(super) thread_id: ThreadId,
+    pub(super) channel_id: Uuid,
+    pub(super) channel_seq: i64,
+    pub(super) slug: Option<String>,
+}
+
+/// Schema version written by `schema/postgres.sql`, which always describes the current schema.
+/// A database at any other version is refused instead of upgraded.
+const SCHEMA_VERSION: i32 = 14;
+
 /// How many `outbox_events` rows one stream read scans before the stream decides to page on.
 const EVENT_PAGE: usize = 100;
 
@@ -133,10 +147,6 @@ impl PostgresAdapter {
         }
     }
 
-    pub(super) fn pool(&self) -> PgPool {
-        self.pool.clone()
-    }
-
     pub(super) fn commands(&self) -> super::command::CommandRegistry {
         self.commands.clone()
     }
@@ -170,300 +180,60 @@ impl PostgresAdapter {
         let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
             .fetch_one(&mut *transaction)
             .await?;
-        if version < 3 {
-            if version != 2 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE spaces ADD COLUMN accent TEXT NOT NULL DEFAULT '#F0602F'; \
-                 ALTER TABLE spaces ALTER COLUMN accent DROP DEFAULT; \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (3, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
+        if version < SCHEMA_VERSION {
+            return Err(sqlx::Error::Protocol(format!(
+                "Server database is at schema version {version}, older than the supported \
+                 {SCHEMA_VERSION}; recreate the database from schema/postgres.sql"
+            )));
         }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 5 {
-            if version != 4 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE messages DROP CONSTRAINT messages_content_kind_check; \
-                 ALTER TABLE messages ADD CONSTRAINT messages_content_kind_check CHECK (content_kind IN ('text', 'channel_created', 'agent_created', 'system_notice')); \
-                 ALTER TABLE messages DROP CONSTRAINT messages_check; \
-                 ALTER TABLE messages ADD CONSTRAINT messages_check CHECK (\
-                    (content_kind = 'text' AND body_markdown IS NOT NULL AND action_channel_id IS NULL AND action_agent_member_id IS NULL)\
-                    OR (content_kind = 'channel_created' AND placement = 'reply' AND body_markdown IS NULL AND action_channel_id IS NOT NULL AND action_agent_member_id IS NULL)\
-                    OR (content_kind = 'agent_created' AND placement = 'reply' AND body_markdown IS NULL AND action_channel_id IS NULL AND action_agent_member_id IS NOT NULL)\
-                    OR (content_kind = 'system_notice' AND body_markdown IS NOT NULL AND action_channel_id IS NULL AND action_agent_member_id IS NULL)\
-                 ); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (5, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 6 {
-            if version != 5 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE channels ADD CONSTRAINT channels_slug_form_check CHECK ( \
-                    kind = 'direct' OR ( \
-                        char_length(slug) BETWEEN 1 AND 32 \
-                        AND slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' \
-                    ) \
-                 ); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (6, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 7 {
-            if version != 6 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE inbox_items ADD COLUMN ambient_channel_id UUID; \
-                 UPDATE inbox_items i SET ambient_channel_id=t.channel_id \
-                    FROM messages t WHERE i.thread_id=t.id AND i.kind='channel_activity'; \
-                 DROP INDEX IF EXISTS inbox_items_open_ambient_aggregate; \
-                 WITH channel_aggregates AS MATERIALIZED ( \
-                    SELECT member_id,ambient_channel_id, \
-                           (array_agg(id ORDER BY id))[1] AS winner_id, \
-                           min(first_message_seq) AS first_message_seq, \
-                           max(last_message_seq) AS last_message_seq, \
-                           sum(aggregated_count)::integer AS aggregated_count, \
-                           min(force_at) AS force_at, \
-                           min(available_at) AS available_at \
-                    FROM inbox_items \
-                    WHERE kind='channel_activity' AND strength='ambient' \
-                      AND status='pending' AND retry_count=0 \
-                    GROUP BY member_id,ambient_channel_id \
-                 ), updated_winners AS ( \
-                    UPDATE inbox_items i SET first_message_seq=a.first_message_seq, \
-                        last_message_seq=a.last_message_seq,aggregated_count=a.aggregated_count, \
-                        force_at=a.force_at,available_at=a.available_at \
-                    FROM channel_aggregates a WHERE i.id=a.winner_id \
-                    RETURNING i.id \
-                 ) \
-                 DELETE FROM inbox_items i \
-                 USING channel_aggregates a JOIN updated_winners w ON w.id=a.winner_id \
-                 WHERE i.member_id=a.member_id AND i.ambient_channel_id=a.ambient_channel_id \
-                   AND i.id<>a.winner_id; \
-                 CREATE UNIQUE INDEX inbox_items_open_thread_ambient_aggregate \
-                    ON inbox_items(member_id, thread_id) \
-                    WHERE strength = 'ambient' AND kind = 'thread_activity' AND status = 'pending' AND retry_count = 0; \
-                 CREATE UNIQUE INDEX inbox_items_open_channel_ambient_aggregate \
-                    ON inbox_items(member_id, ambient_channel_id) \
-                    WHERE strength = 'ambient' AND kind = 'channel_activity' AND status = 'pending' AND retry_count = 0; \
-                 CREATE TABLE inbox_activity_events ( \
-                    inbox_item_id UUID NOT NULL REFERENCES inbox_items(id) ON DELETE RESTRICT, \
-                    channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE RESTRICT, \
-                    channel_seq BIGINT NOT NULL CHECK (channel_seq > 0), \
-                    kind TEXT NOT NULL CHECK (kind IN ('message', 'member_joined', 'member_left')), \
-                    message_id UUID REFERENCES messages(id) ON DELETE RESTRICT, \
-                    member_id UUID REFERENCES members(id) ON DELETE RESTRICT, \
-                    created_at TIMESTAMPTZ NOT NULL, \
-                    PRIMARY KEY (inbox_item_id, channel_seq), \
-                    CHECK ( \
-                        (kind = 'message' AND message_id IS NOT NULL AND member_id IS NULL) \
-                        OR (kind IN ('member_joined', 'member_left') AND message_id IS NULL AND member_id IS NOT NULL) \
-                    ) \
-                 ); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (7, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 8 {
-            if version != 7 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE agent_runs ADD COLUMN observed_thread_seq BIGINT; \
-                 ALTER TABLE member_permissions DROP CONSTRAINT IF EXISTS member_permissions_action_code_check; \
-                 ALTER TABLE member_permissions ADD CONSTRAINT member_permissions_action_code_check CHECK (action_code IN ('channel.create', 'channel.invite', 'channel.remove', 'agent.create')); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (8, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 9 {
-            if version != 8 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_error_code_check; \
-                 UPDATE agent_runs SET error_code='internal' \
-                    WHERE outcome_code='failed' AND error_code IS NULL; \
-                 ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_error_code_check CHECK ( \
-                    (outcome_code = 'failed' AND error_code IS NOT NULL) \
-                    OR (outcome_code IS DISTINCT FROM 'failed' AND error_code IS NULL) \
-                 ); \
-                 ALTER TABLE run_items ADD COLUMN IF NOT EXISTS delivery_outcome TEXT; \
-                 ALTER TABLE run_items ADD COLUMN IF NOT EXISTS delivery_event_id UUID; \
-                 ALTER TABLE run_items ADD COLUMN IF NOT EXISTS delivery_receipt_at TIMESTAMPTZ; \
-                 ALTER TABLE run_items ADD COLUMN IF NOT EXISTS disposition_at TIMESTAMPTZ; \
-                 ALTER TABLE run_items DROP CONSTRAINT IF EXISTS run_items_delivery_outcome_check; \
-                 ALTER TABLE run_items ADD CONSTRAINT run_items_delivery_outcome_check CHECK ( \
-                    delivery_outcome IN ('accepted', 'too_late', 'unsupported') \
-                    OR delivery_outcome IS NULL \
-                 ); \
-                 ALTER TABLE run_items DROP CONSTRAINT IF EXISTS run_items_delivery_receipt_check; \
-                 ALTER TABLE run_items ADD CONSTRAINT run_items_delivery_receipt_check CHECK ( \
-                    (delivery_outcome IS NULL AND delivery_event_id IS NULL AND delivery_receipt_at IS NULL) \
-                    OR (delivery_outcome IS NOT NULL AND delivery_event_id IS NOT NULL AND delivery_receipt_at IS NOT NULL) \
-                 ); \
-                 UPDATE run_items SET disposition_at=attached_at \
-                    WHERE disposition IS NOT NULL AND disposition_at IS NULL; \
-                 ALTER TABLE run_items DROP CONSTRAINT IF EXISTS run_items_disposition_at_check; \
-                 ALTER TABLE run_items ADD CONSTRAINT run_items_disposition_at_check CHECK ( \
-                    (disposition IS NULL AND disposition_at IS NULL) \
-                    OR (disposition IS NOT NULL AND disposition_at IS NOT NULL) \
-                 ); \
-                 CREATE UNIQUE INDEX IF NOT EXISTS run_items_delivery_event_id_key \
-                    ON run_items(delivery_event_id); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (9, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 10 {
-            if version != 9 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "CREATE TABLE run_observations ( \
-                    run_id UUID NOT NULL REFERENCES agent_runs(id) ON DELETE RESTRICT, \
-                    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('channel', 'channel_roots', 'thread')), \
-                    scope_id UUID NOT NULL, \
-                    observed_seq BIGINT NOT NULL CHECK (observed_seq >= 0), \
-                    consecutive_holds INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_holds >= 0), \
-                    PRIMARY KEY (run_id, scope_kind, scope_id) \
-                 ); \
-                 INSERT INTO run_observations(run_id,scope_kind,scope_id,observed_seq) \
-                    SELECT id,'thread',focus_thread_id,observed_thread_seq FROM agent_runs \
-                    WHERE observed_thread_seq IS NOT NULL; \
-                 ALTER TABLE agent_runs DROP COLUMN observed_thread_seq; \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (10, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 11 {
-            if version != 10 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            sqlx::raw_sql(
-                "CREATE OR REPLACE FUNCTION notify_space_event() RETURNS trigger LANGUAGE plpgsql AS $$ \
-                 BEGIN PERFORM pg_notify('sumi_space_events', NEW.space_id::text); RETURN NULL; END; $$; \
-                 DROP TRIGGER IF EXISTS outbox_events_notify ON outbox_events; \
-                 CREATE TRIGGER outbox_events_notify AFTER INSERT ON outbox_events \
-                    FOR EACH ROW EXECUTE FUNCTION notify_space_event(); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (11, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 12 {
-            if version != 11 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            // Codex Agents move to the ACP Driver; queued configuration commands are rewritten to
-            // the protocol v6 Driver shape.
-            sqlx::raw_sql(
-                "ALTER TABLE agents DROP CONSTRAINT agents_driver_kind_check; \
-                 UPDATE agents SET driver_kind='acp', \
-                    driver_config_json=driver_config_json || '{\"provider\":\"codex\"}'::jsonb \
-                    WHERE driver_kind='codex'; \
-                 ALTER TABLE agents ADD CONSTRAINT agents_driver_kind_check \
-                    CHECK (driver_kind IN ('acp', 'builtin')); \
-                 ALTER TABLE agents ADD CONSTRAINT agents_driver_provider_check \
-                    CHECK ((driver_kind = 'acp') = (driver_config_json ? 'provider')); \
-                 UPDATE computer_commands SET payload_json=jsonb_set(payload_json, '{payload,driver}', \
-                    CASE payload_json #>> '{payload,driver}' \
-                        WHEN 'codex' THEN '{\"kind\":\"acp\",\"provider\":\"codex\"}'::jsonb \
-                        ELSE '{\"kind\":\"builtin\"}'::jsonb END) \
-                    WHERE kind IN ('agent.provision', 'agent.configure') \
-                    AND jsonb_typeof(payload_json #> '{payload,driver}') = 'string'; \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (12, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let version: i32 = sqlx::query_scalar("SELECT max(version) FROM schema_meta")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if version < 13 {
-            if version != 12 {
-                return Err(sqlx::Error::Protocol(format!(
-                    "unsupported schema baseline version {version}"
-                )));
-            }
-            // Browser streams follow `sequence`, the commit order inside a Space, instead of
-            // `created_at`, which the application writes before the commit order is decided.
-            sqlx::raw_sql(
-                "ALTER TABLE outbox_events ADD COLUMN sequence BIGINT; \
-                 WITH ordered AS ( \
-                    SELECT id,row_number() OVER (PARTITION BY space_id ORDER BY created_at,id) AS position \
-                    FROM outbox_events \
-                 ) \
-                 UPDATE outbox_events e SET sequence=ordered.position \
-                    FROM ordered WHERE e.id=ordered.id; \
-                 ALTER TABLE outbox_events ALTER COLUMN sequence SET NOT NULL; \
-                 CREATE UNIQUE INDEX outbox_events_space_sequence ON outbox_events(space_id, sequence); \
-                 DROP INDEX outbox_events_space_cursor; \
-                 ALTER TABLE spaces ADD COLUMN event_sequence BIGINT NOT NULL DEFAULT 0; \
-                 UPDATE spaces s SET event_sequence=COALESCE(( \
-                    SELECT max(e.sequence) FROM outbox_events e WHERE e.space_id=s.id \
-                 ),0); \
-                 INSERT INTO schema_meta (version, applied_at) VALUES (13, now());",
-            )
-            .execute(&mut *transaction)
-            .await?;
+        if version > SCHEMA_VERSION {
+            return Err(sqlx::Error::Protocol(format!(
+                "Server database is at schema version {version}, newer than this Server supports \
+                 ({SCHEMA_VERSION}); upgrade the Server"
+            )));
         }
         transaction.commit().await
+    }
+
+    /// Records that a Computer answered a heartbeat; an unknown Computer is ignored.
+    pub(super) async fn touch_computer(
+        &self,
+        computer_id: ComputerId,
+        observed_at: OffsetDateTime,
+    ) -> Result<(), ApplicationError> {
+        sqlx::query("UPDATE computers SET last_seen_at=$2 WHERE id=$1")
+            .bind(computer_id.into_uuid())
+            .bind(observed_at)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx)?;
+        Ok(())
+    }
+
+    /// The Agent and Channel a Run's Focus belongs to, for Run activity that needs a location.
+    pub(super) async fn run_activity_focus(
+        &self,
+        run_id: RunId,
+    ) -> Result<Option<RunActivityFocus>, ApplicationError> {
+        let row = sqlx::query(
+            "SELECT agent_runs.agent_id,agent_runs.space_id,agent_runs.focus_thread_id,\
+                    messages.channel_id,messages.channel_seq,channels.slug \
+             FROM agent_runs JOIN messages ON messages.id=agent_runs.focus_thread_id \
+                    JOIN channels ON channels.id=messages.channel_id \
+             WHERE agent_runs.id=$1",
+        )
+        .bind(run_id.into_uuid())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx)?;
+        Ok(row.map(|row| RunActivityFocus {
+            agent_id: MemberId::from_uuid(row.get("agent_id")),
+            space_id: SpaceId::from_uuid(row.get("space_id")),
+            thread_id: ThreadId::from_uuid(row.get("focus_thread_id")),
+            channel_id: row.get("channel_id"),
+            channel_seq: row.get("channel_seq"),
+            slug: row.get("slug"),
+        }))
     }
 
     pub(super) async fn pending_commands(

@@ -1,7 +1,7 @@
 import { useParams } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
 
-import type { Channel } from "../api/client";
+import type {Channel} from "../api/types";
 import { SpacePage } from "../components/SpaceShell";
 import { MessageWorkspace } from "./ChannelPage";
 

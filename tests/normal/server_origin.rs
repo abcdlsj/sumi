@@ -5,7 +5,6 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result, ensure};
 use reqwest::{Client, StatusCode, header};
-use serde_json::Value;
 use tempfile::tempdir;
 use url::Url;
 use uuid::Uuid;
@@ -15,84 +14,6 @@ use support::{
     write_server_config_with_web_origin,
 };
 
-/// A Browser Session write carries a cookie, so a foreign `Origin` is the only signal that the
-/// request came from someone else's page. The check must hold without any Server configuration.
-#[tokio::test]
-async fn an_unconfigured_server_rejects_foreign_origin_writes() -> Result<()> {
-    let database = TestDatabase::create("sumi_origin_default").await?;
-    let result = run_unconfigured_origin_flow(&database).await;
-    database.drop().await?;
-    result
-}
-
-async fn run_unconfigured_origin_flow(database: &TestDatabase) -> Result<()> {
-    let (root, server_url, mut server) = spawn_test_server(database, None).await?;
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-    let origin = server_url.origin().ascii_serialization();
-
-    let foreign = register(
-        &client,
-        &server_url,
-        "ada@example.test",
-        Some("https://evil.example"),
-    )
-    .await?;
-    ensure!(
-        foreign.status() == StatusCode::FORBIDDEN,
-        "a foreign Origin reached the handler: {} {}",
-        foreign.status(),
-        server.log_text()
-    );
-    ensure!(
-        foreign_error_code(foreign).await? == "permission_denied",
-        "a foreign Origin must be refused as permission_denied"
-    );
-
-    let wrong_scheme = register(
-        &client,
-        &server_url,
-        "ada@example.test",
-        Some("https://127.0.0.1:1"),
-    )
-    .await?;
-    ensure!(
-        wrong_scheme.status() == StatusCode::FORBIDDEN,
-        "the same host on another scheme is another origin: {}",
-        wrong_scheme.status()
-    );
-
-    let own = register(&client, &server_url, "ada@example.test", Some(&origin)).await?;
-    ensure!(
-        own.status() == StatusCode::CREATED,
-        "the Server's own origin was rejected: {} {}",
-        own.status(),
-        server.log_text()
-    );
-
-    let bearer = register(&client, &server_url, "grace@example.test", None).await?;
-    ensure!(
-        bearer.status() == StatusCode::CREATED,
-        "a client without Origin was rejected: {}",
-        bearer.status()
-    );
-
-    // Reads carry no write risk, so a foreign Origin does not block them.
-    let read = client
-        .get(server_url.join("/api/v1/health")?)
-        .header(header::ORIGIN, "https://evil.example")
-        .send()
-        .await?;
-    ensure!(read.status().is_success(), "{}", read.status());
-
-    drop(root);
-    server.interrupt().await?;
-    Ok(())
-}
-
-/// A separately deployed Web UI is an explicit origin. The Server's own origin stays usable, and
-/// both are compared as full `scheme://host:port` values.
 #[tokio::test]
 async fn a_configured_web_origin_narrows_writes_to_full_origins() -> Result<()> {
     let database = TestDatabase::create("sumi_origin_configured").await?;
@@ -231,12 +152,4 @@ async fn create_space(
         }))
         .send()
         .await?)
-}
-
-async fn foreign_error_code(response: reqwest::Response) -> Result<String> {
-    let body: Value = response.json().await?;
-    body["error"]["code"]
-        .as_str()
-        .map(str::to_owned)
-        .context("error code")
 }

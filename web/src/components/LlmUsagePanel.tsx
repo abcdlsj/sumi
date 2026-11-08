@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Gauge } from "lucide-react";
 import { useState } from "react";
 
-import { getComputerLlmUsage, type LlmUsage } from "../api/client";
+import {getComputerLlmUsage} from "../api/client";
+import type {LlmUsage} from "../api/types";
 import { BreakdownTable, StatCard, TokenUsageChart, formatCount } from "./TokenUsageChart";
 import "./llmUsage.css";
 import { PanelSkeleton } from "./Skeleton";
@@ -14,6 +15,25 @@ const RANGES: Array<{ value: LlmUsageRange; label: string }> = [
   { value: "7d", label: "7d" },
   { value: "30d", label: "30d" },
 ];
+
+/** The 24h / 7d / 30d switch shared by every usage view. */
+export function UsageRangeSwitch({ range, onChange }: { range: LlmUsageRange; onChange: (range: LlmUsageRange) => void }) {
+  return (
+    <div className="llm-usage-range" aria-label="Usage period">
+      {RANGES.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={range === option.value ? "llm-usage-range--active" : undefined}
+          aria-pressed={range === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function LlmUsagePanel({
   computerId,
@@ -37,19 +57,7 @@ export function LlmUsagePanel({
         <div>
           <h3 id="llm-usage-heading">LLM usage</h3>
         </div>
-        <div className="llm-usage-range" aria-label="Usage period">
-          {RANGES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={range === option.value ? "llm-usage-range--active" : undefined}
-              aria-pressed={range === option.value}
-              onClick={() => setRange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <UsageRangeSwitch range={range} onChange={setRange} />
       </header>
 
       {!online ? (

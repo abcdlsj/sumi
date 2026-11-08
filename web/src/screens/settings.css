@@ -1,23 +1,32 @@
 .settings-page {
   display: grid;
-  width: min(100%, 760px);
   /* The page scrolls; rows keep their content height instead of shrinking. */
   grid-auto-rows: max-content;
   gap: 28px;
   align-content: start;
-  padding: 28px var(--page-gutter) 48px;
+  padding-bottom: 48px;
 }
 
-.settings-page > .settings-header {
-  display: grid;
-  gap: 4px;
-  padding: 0;
-  border: 0;
+/* Everything under the page header reads in one narrow column; padding, not width plus margin,
+   so the column cannot overflow a narrow viewport. The 760px counts the content box only, so the
+   padding stays outside it and both gutters line up with the header. */
+.settings-page > :not(.settings-header) {
+  width: 100%;
+  max-width: calc(760px + 2 * var(--page-gutter));
+  padding-inline: var(--page-gutter);
 }
 
 .settings-page > .settings-header h1 {
-  font-size: 22px;
-  letter-spacing: -.015em;
+  margin: 0;
+}
+
+/* The page header switches to the compact gutter at the same breakpoint as the content, so the
+   title and the section rows share one left edge. */
+@media (max-width: 1099px) {
+  .settings-page > :not(.settings-header) {
+    max-width: calc(760px + 2 * var(--page-gutter-compact));
+    padding-inline: var(--page-gutter-compact);
+  }
 }
 
 .settings-group {

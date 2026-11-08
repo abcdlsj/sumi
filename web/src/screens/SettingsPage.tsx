@@ -2,7 +2,7 @@ import { useLocation } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Member, Space, User } from "../api/client";
+import type {Member, Space, User} from "../api/types";
 import { useSignOut } from "../components/signOut";
 import { SpacePage } from "../components/SpaceShell";
 import { accentLabel } from "../spaceAccent";

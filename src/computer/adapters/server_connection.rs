@@ -18,33 +18,25 @@ use crate::{
         },
         query::QueryService,
     },
-    ids::{AgentId, ChannelId, RunId, ThreadId},
+    ids::{AgentId, ChannelId, DaemonSessionId, RunId, ThreadId},
     protocol::computer as wire,
 };
 
 pub(in crate::computer) struct ServerConnectionAdapter {
     product_contract: String,
+    /// Identifies this connection attempt. Every frame the Server may drop as stale carries it.
+    daemon_session_id: DaemonSessionId,
 }
 
 impl ServerConnectionAdapter {
-    pub(in crate::computer) fn new(product_contract: String) -> Self {
-        Self { product_contract }
-    }
-
-    #[cfg(test)]
-    pub(in crate::computer) async fn receive<
-        P: TransactionPort,
-        D: DriverPort,
-        H: AgentHomePort,
-    >(
-        &self,
-        store: &mut P,
-        driver: &mut D,
-        homes: &mut H,
-        envelope: wire::CommandEnvelope,
-    ) -> Result<Vec<wire::ComputerFrame>, ApplicationError> {
-        self.receive_with_activity(store, driver, homes, envelope, None)
-            .await
+    pub(in crate::computer) fn new(
+        product_contract: String,
+        daemon_session_id: DaemonSessionId,
+    ) -> Self {
+        Self {
+            product_contract,
+            daemon_session_id,
+        }
     }
 
     pub(in crate::computer) async fn receive_with_activity<
@@ -101,6 +93,7 @@ impl ServerConnectionAdapter {
             },
             wire::ComputerFrame::CommandResult {
                 result: wire::CommandResult {
+                    daemon_session_id: self.daemon_session_id,
                     command_id: envelope.command_id,
                     sequence: envelope.sequence,
                     outcome: match execution.status {
@@ -433,7 +426,7 @@ impl ServerConnectionAdapter {
         }
     }
 
-    pub(in crate::computer) fn event_frame(event: LocalEvent) -> wire::ComputerFrame {
+    pub(in crate::computer) fn event_frame(&self, event: LocalEvent) -> wire::ComputerFrame {
         match event {
             LocalEvent::RunStarted { event_id, run_id } => wire::ComputerFrame::RunStarted {
                 started: wire::RunStarted {
@@ -469,6 +462,7 @@ impl ServerConnectionAdapter {
                 error_code,
             } => wire::ComputerFrame::RunResult {
                 result: wire::RunResult {
+                    daemon_session_id: self.daemon_session_id,
                     event_id,
                     run_id,
                     status: terminal_status(status),
@@ -768,7 +762,9 @@ fn unavailable(error: &ApplicationError, missing: wire::QueryErrorCode) -> wire:
             ApplicationError::AlreadyApplied
             | ApplicationError::Unauthenticated
             | ApplicationError::Core(_)
-            | ApplicationError::Internal => wire::QueryErrorCode::Internal,
+            | ApplicationError::Internal
+            | ApplicationError::SchemaTooOld(_)
+            | ApplicationError::SchemaTooNew(_) => wire::QueryErrorCode::Internal,
         },
     }
 }
@@ -782,7 +778,9 @@ fn computer_error(error: &ApplicationError) -> wire::ComputerErrorCode {
         ApplicationError::SessionLost => wire::ComputerErrorCode::SessionUnavailable,
         ApplicationError::Unauthenticated
         | ApplicationError::Core(_)
-        | ApplicationError::Internal => wire::ComputerErrorCode::Internal,
+        | ApplicationError::Internal
+        | ApplicationError::SchemaTooOld(_)
+        | ApplicationError::SchemaTooNew(_) => wire::ComputerErrorCode::Internal,
     }
 }
 
@@ -1011,12 +1009,15 @@ mod tests {
             .await
             .unwrap();
         let mut homes = AgentHomeAdapter::new(directory.path().join("computer"), None, None, None);
-        let adapter = ServerConnectionAdapter::new("contract".to_owned());
+        let adapter = ServerConnectionAdapter::new(
+            "contract".to_owned(),
+            DaemonSessionId::from_uuid(Uuid::now_v7()),
+        );
         let mut driver = NoopDriver;
         let agent_id = AgentId::from_uuid(Uuid::now_v7());
         let space_id = SpaceId::from_uuid(Uuid::now_v7());
         adapter
-            .receive(
+            .receive_with_activity(
                 &mut store,
                 &mut driver,
                 &mut homes,
@@ -1036,6 +1037,7 @@ mod tests {
                         },
                     }),
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1052,7 +1054,7 @@ mod tests {
         };
         let run_id = RunId::from_uuid(Uuid::now_v7());
         let frames = adapter
-            .receive(
+            .receive_with_activity(
                 &mut store,
                 &mut driver,
                 &mut homes,
@@ -1075,6 +1077,7 @@ mod tests {
                         channel_members: Vec::new(),
                     }),
                 },
+                None,
             )
             .await
             .unwrap();

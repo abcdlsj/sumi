@@ -17,6 +17,29 @@ pub(in crate::server) enum TaskStatus {
 }
 
 impl TaskStatus {
+    pub(in crate::server) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Todo => "todo",
+            Self::InProgress => "in_progress",
+            Self::InReview => "in_review",
+            Self::Done => "done",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// Parses the stored form; `None` means the row holds no known status.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Todo,
+            Self::InProgress,
+            Self::InReview,
+            Self::Done,
+            Self::Closed,
+        ]
+        .into_iter()
+        .find(|status| status.as_str() == value)
+    }
+
     pub(in crate::server) fn is_finished(self) -> bool {
         matches!(self, Self::Done | Self::Closed)
     }

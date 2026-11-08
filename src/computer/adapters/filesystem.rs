@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
+use time::OffsetDateTime;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
@@ -10,6 +11,7 @@ use crate::{
         ApplicationError, DriverKind, LocalAgent, LocalAgentState, MemoryFile, ports::AgentHomePort,
     },
     ids::AgentId,
+    private_paths::ensure_private_directory,
 };
 
 pub(in crate::computer) struct AgentHomeAdapter {
@@ -36,7 +38,9 @@ impl AgentHomeAdapter {
 
     async fn write_profile(&self, agent: &LocalAgent) -> Result<(), ApplicationError> {
         let home = self.agent_home(agent);
-        create_private_dir(&home).await?;
+        ensure_private_directory(&home)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         for relative in [
             "memory",
             "workspace",
@@ -48,7 +52,9 @@ impl AgentHomeAdapter {
             "runs",
             "logs",
         ] {
-            create_private_dir(&home.join(relative)).await?;
+            ensure_private_directory(&home.join(relative))
+                .await
+                .map_err(|_| ApplicationError::Internal)?;
         }
         if agent.driver == DriverKind::Codex {
             self.install_codex_sources(&home.join("drivers/codex"))
@@ -203,7 +209,9 @@ impl AgentHomeAdapter {
             .map_err(|_| ApplicationError::NotFound)?;
         let relative_parent = path.parent().unwrap_or_else(|| Path::new(""));
         let requested_parent = home.join(relative_parent);
-        create_private_dir(&requested_parent).await?;
+        ensure_private_directory(&requested_parent)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         let parent = tokio::fs::canonicalize(&requested_parent)
             .await
             .map_err(|_| ApplicationError::Internal)?;
@@ -299,58 +307,28 @@ impl AgentHomePort for AgentHomeAdapter {
         &mut self,
         agent_id: AgentId,
     ) -> Result<Vec<MemoryFile>, ApplicationError> {
-        let root = tokio::fs::canonicalize(self.agent_home_for_id(agent_id).join("memory"))
+        // The runtime owns the Memory traversal, including never following a symlink out of the root.
+        let files = sumi_agent_core::list_memory(&self.agent_home_for_id(agent_id).join("memory"))
             .await
-            .map_err(|_| ApplicationError::NotFound)?;
-        let mut files = Vec::new();
-        let mut pending = vec![root.clone()];
-        while let Some(directory) = pending.pop() {
-            let mut entries = tokio::fs::read_dir(&directory)
-                .await
-                .map_err(|_| ApplicationError::Internal)?;
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|_| ApplicationError::Internal)?
-            {
-                let path = entry.path();
-                let metadata = tokio::fs::symlink_metadata(&path)
-                    .await
-                    .map_err(|_| ApplicationError::Internal)?;
-                // Never follow a symlink that may escape the Memory root.
-                if metadata.file_type().is_symlink() {
-                    continue;
-                }
-                if metadata.is_dir() {
-                    pending.push(path);
-                    continue;
-                }
-                if !metadata.is_file() {
-                    continue;
-                }
-                let Ok(relative) = path.strip_prefix(&root) else {
-                    continue;
-                };
-                let Some(relative) = relative.to_str() else {
-                    continue;
-                };
-                let content = tokio::fs::read(&path)
-                    .await
-                    .map_err(|_| ApplicationError::Internal)?;
-                let updated_at = metadata
-                    .modified()
-                    .map_err(|_| ApplicationError::Internal)?
-                    .into();
-                files.push(MemoryFile {
-                    path: relative.to_owned(),
-                    size: content.len() as u64,
-                    sha256: hex::encode(Sha256::digest(&content)),
-                    updated_at,
-                });
-            }
-        }
-        files.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(files)
+            .map_err(|error| match error {
+                sumi_agent_core::AgentError::NotFound => ApplicationError::NotFound,
+                _ => ApplicationError::Internal,
+            })?;
+        files
+            .into_iter()
+            .map(|file| {
+                Ok(MemoryFile {
+                    path: file.path,
+                    size: file.size,
+                    sha256: file.sha256,
+                    updated_at: OffsetDateTime::from_unix_timestamp(
+                        i64::try_from(file.modified_at_unix)
+                            .map_err(|_| ApplicationError::Internal)?,
+                    )
+                    .map_err(|_| ApplicationError::Internal)?,
+                })
+            })
+            .collect()
     }
 
     async fn read_memory(
@@ -391,7 +369,9 @@ impl AgentHomePort for AgentHomeAdapter {
             .map_err(|_| ApplicationError::NotFound)?;
         let relative_parent = path.parent().unwrap_or_else(|| Path::new(""));
         let requested_parent = memory_root.join(relative_parent);
-        create_private_dir(&requested_parent).await?;
+        ensure_private_directory(&requested_parent)
+            .await
+            .map_err(|_| ApplicationError::Internal)?;
         let parent = tokio::fs::canonicalize(&requested_parent)
             .await
             .map_err(|_| ApplicationError::Internal)?;
@@ -407,20 +387,6 @@ impl AgentHomePort for AgentHomeAdapter {
         }
         write_private_file(&target, content).await
     }
-}
-
-async fn create_private_dir(path: &Path) -> Result<(), ApplicationError> {
-    tokio::fs::create_dir_all(path)
-        .await
-        .map_err(|_| ApplicationError::Internal)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .await
-            .map_err(|_| ApplicationError::Internal)?;
-    }
-    Ok(())
 }
 
 async fn restrict_file(path: &Path) -> Result<(), ApplicationError> {

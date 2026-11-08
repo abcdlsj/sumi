@@ -25,7 +25,7 @@ pub(super) async fn register(
     .await
     .map_err(application_error)?;
     Ok((
-        session_cookie(jar, &session.token),
+        session_cookie(jar, &session.token, state.secure_cookies),
         (
             StatusCode::CREATED,
             Json(RegisterResponse {
@@ -63,7 +63,7 @@ pub(super) async fn login(
     .await
     .map_err(application_error)?;
     Ok((
-        session_cookie(jar, &session.token),
+        session_cookie(jar, &session.token, state.secure_cookies),
         Json(LoginResponse {
             user: user_response(&session.human),
         }),
@@ -79,7 +79,7 @@ pub(super) async fn logout(
         let _ = CloseSession::execute(&mut storage, &token).await;
     }
     (
-        jar.remove(Cookie::from(SESSION_COOKIE)),
+        clear_session_cookie(jar, state.secure_cookies),
         StatusCode::NO_CONTENT,
     )
 }
@@ -243,6 +243,7 @@ pub(super) async fn invite_human(
             status: StatusCode::CONFLICT,
             code: "invitation_already_pending",
             message: "this email already has a pending invitation to the Space",
+            retryable: false,
         },
         other => application_error(other),
     })?;
@@ -336,6 +337,7 @@ pub(super) fn invitation_error(error: ApplicationError) -> ApiError {
                 status: StatusCode::NOT_FOUND,
                 code: "invitation_unavailable",
                 message: "invitation link is not usable",
+                retryable: false,
             }
         }
         other => application_error(other),
@@ -349,11 +351,13 @@ pub(super) fn accept_invitation_error(error: ApplicationError) -> ApiError {
             status: StatusCode::FORBIDDEN,
             code: "invitation_email_mismatch",
             message: "invitation was issued to another email",
+            retryable: false,
         },
         ApplicationError::Conflict => ApiError {
             status: StatusCode::CONFLICT,
             code: "already_member",
             message: "signed in Human is already a Member of this Space",
+            retryable: false,
         },
         other => invitation_error(other),
     }
@@ -461,13 +465,8 @@ pub(super) async fn list_members(
 }
 
 pub(super) fn permission_action(action_code: &str) -> Result<PermissionAction, ApiError> {
-    match action_code {
-        "channel.create" => Ok(PermissionAction::ChannelCreate),
-        "channel.invite" => Ok(PermissionAction::ChannelInvite),
-        "channel.remove" => Ok(PermissionAction::ChannelRemove),
-        "agent.create" => Ok(PermissionAction::AgentCreate),
-        _ => Err(ApiError::invalid("Permission action code is not supported")),
-    }
+    PermissionAction::parse(action_code)
+        .ok_or_else(|| ApiError::invalid("Permission action code is not supported"))
 }
 
 pub(super) async fn set_permission(
@@ -533,12 +532,24 @@ pub(super) fn require_session_token(jar: &CookieJar) -> Result<RawSessionToken, 
     session_token(jar).ok_or_else(ApiError::unauthenticated)
 }
 
-pub(super) fn session_cookie(jar: CookieJar, token: &RawSessionToken) -> CookieJar {
+/// Sets the session cookie; `secure` keeps it off plain-HTTP transports.
+pub(super) fn session_cookie(jar: CookieJar, token: &RawSessionToken, secure: bool) -> CookieJar {
     let cookie = Cookie::build((SESSION_COOKIE, token.expose().to_owned()))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .build();
+    jar.add(cookie)
+}
+
+/// Expires the session cookie on the path it was set on, so the browser drops it.
+pub(super) fn clear_session_cookie(jar: CookieJar, secure: bool) -> CookieJar {
+    let mut cookie = Cookie::build(SESSION_COOKIE)
+        .path("/")
+        .secure(secure)
+        .build();
+    cookie.make_removal();
     jar.add(cookie)
 }
 
@@ -590,9 +601,8 @@ pub(super) async fn update_space_member(
     let Some(requested) = body.access_level.as_deref() else {
         return Err(ApiError::invalid("access_level is required"));
     };
-    let requested = match requested {
-        "admin" => AccessLevel::Admin,
-        "member" => AccessLevel::Member,
+    let requested = match AccessLevel::parse(requested) {
+        Some(level @ (AccessLevel::Admin | AccessLevel::Member)) => level,
         _ => return Err(ApiError::invalid("access_level must be admin or member")),
     };
     let mut storage = state.storage.clone();

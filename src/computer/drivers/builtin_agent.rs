@@ -15,18 +15,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    computer::{
-        application::{
-            ApplicationError,
-            capability::CapabilityService,
-            ports::{DriverCompletion, DriverTurnOutcome, ProcessEvidence, SteerOutcome},
-            usage::LlmUsageRecord,
-        },
-        core::{
-            home::LocalAgent,
-            input::{AttentionNoticeInput, DispatchedItemInput, RunInput},
-            session::DriverKind,
-        },
+    computer::application::{
+        ApplicationError, AttentionNoticeInput, DispatchedItemInput, DriverKind, LocalAgent,
+        RunInput,
+        capability::CapabilityService,
+        ports::{DriverCompletion, DriverTurnOutcome, ProcessEvidence, SteerOutcome},
+        usage::LlmUsageRecord,
     },
     config::{ComputerConfig, daemon_socket_path},
     ids::{AgentId, RunId},
@@ -313,9 +307,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        computer::core::{
-            input::{AgentInput, ContextMessageInput, RunContextInput, WorkInput},
-            scheduler::WorkStrength,
+        computer::application::{
+            AgentInput, ContextMessageInput, RunContextInput, WorkInput, WorkStrength,
         },
         config::{BuiltinOpenAiConfig, ComputerConfig, ConfigSecret},
         ids::{ChannelId, InboxItemId, MemberId, MessageId, SpaceId, ThreadId},

@@ -15,6 +15,7 @@ function activityEvent(
   data: Partial<AgentActivityEvent["data"]> = {},
 ): AgentActivityEvent {
   return {
+    type: "agent.activity",
     event_id: eventId,
     occurred_at: "2026-08-03T00:00:00Z",
     data: {

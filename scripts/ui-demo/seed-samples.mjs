@@ -6,14 +6,14 @@
 // states. Idempotent: re-running fills only what is missing.
 //
 // Requires the dev-seed Space (sumi-dev) to exist first. Run through
-// `mise run demo`; standalone: SUMI_SEED_SERVER=http://127.0.0.1:3001 \
+// `mise run demo`; standalone: SUMI_SEED_SERVER=http://127.0.0.1:3000 \
 //   node scripts/ui-demo/seed-samples.mjs
 
 import { createHash } from "node:crypto";
 
+import { api, SEED_SERVER, waitForHealth } from "../dev-seed.mjs";
 import { uuidv7 } from "../../web/scripts/uuid.mjs";
 
-const SERVER = process.env.SUMI_SEED_SERVER ?? "http://127.0.0.1:3001";
 const OWNER_EMAIL = process.env.SUMI_SEED_EMAIL ?? "dev@example.test";
 const OWNER_PASSWORD = process.env.SUMI_SEED_PASSWORD ?? "correct horse battery staple";
 const OWNER_NAME = "abcdlsj";
@@ -25,15 +25,8 @@ const SPACE_SLUG = "sumi-dev";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...args) => console.log("[samples]", ...args);
 
-async function request(method, path, { cookie, body } = {}) {
-  const headers = { "idempotency-key": uuidv7() };
-  if (cookie) headers.cookie = cookie;
-  if (body !== undefined) headers["content-type"] = "application/json";
-  const response = await fetch(new URL(path, SERVER), {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+async function request(method, path, options) {
+  const response = await api(method, path, options);
   const json = await response.json().catch(() => undefined);
   return { response, json };
 }
@@ -70,20 +63,6 @@ async function registerOrLogin(email, password, displayName) {
     return cookie;
   }
   return login(email, password);
-}
-
-async function waitForHealth() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL("/api/v1/health", SERVER));
-      if (response.ok) return;
-    } catch {
-      // Server not up yet.
-    }
-    await sleep(300);
-  }
-  throw new Error("Sumi server did not become healthy within 30s");
 }
 
 async function getSpace(cookie) {
@@ -254,7 +233,7 @@ async function ensureUploadedAttachment(cookie, spaceId, name, content) {
     }),
     201,
   );
-  const upload = await fetch(new URL(opened.upload_path, SERVER), {
+  const upload = await fetch(new URL(opened.upload_path, SEED_SERVER), {
     method: "PUT",
     headers: { cookie, "idempotency-key": uuidv7() },
     body: content,

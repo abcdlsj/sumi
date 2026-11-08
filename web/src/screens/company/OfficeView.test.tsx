@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Agent, Member } from "../../api/client";
+import type {Agent, Member} from "../../api/types";
 import { CompanyOfficeView } from "./OfficeView";
 
 vi.mock("@tanstack/react-router", () => ({

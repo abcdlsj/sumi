@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Message } from "../../api/client";
+import type {Message} from "../../api/types";
 import { useOutbox } from "./outbox";
 
 const input = { body_markdown: "Hello", mentions: [], mention_all: false, attachment_ids: [] };

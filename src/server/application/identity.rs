@@ -1,12 +1,16 @@
 use time::OffsetDateTime;
 
-use crate::ids::{AttachmentId, ChannelId, ComputerId, IdempotencyKey, MemberId, SpaceId};
+use crate::ids::{
+    AttachmentId, ChannelId, ComputerId, IdempotencyKey, MemberId, MessageId, RunId, SpaceId,
+};
 
 use crate::server::domain::{
     access::{HumanRegistration, SessionLifetime, SpaceAccess, normalize_email},
     attention::{InboxItemDisposition, InboxItemStatus},
+    conversation::{Message, MessageContent},
     identity::{
-        AccessLevel, Agent, AgentLifecycle, Computer, ComputerLifecycle, Member, PermissionAction,
+        AccessLevel, Agent, AgentLifecycle, Computer, ComputerLifecycle, DriverKind, Member,
+        PermissionAction,
     },
 };
 
@@ -677,6 +681,179 @@ impl DeleteComputer {
                 )
                 .await?;
             Ok(computer)
+        })
+        .await
+    }
+}
+
+pub(in crate::server) struct CreateAgentActionInput {
+    pub(in crate::server) agent_member_id: MemberId,
+    pub(in crate::server) display_name: String,
+    pub(in crate::server) role_text: String,
+    pub(in crate::server) computer_id: ComputerId,
+    pub(in crate::server) driver_kind: DriverKind,
+    pub(in crate::server) action_message_id: MessageId,
+    pub(in crate::server) actor_member_id: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
+    pub(in crate::server) current_run_id: RunId,
+    pub(in crate::server) now: OffsetDateTime,
+}
+
+pub(in crate::server) struct CreateAgentInput {
+    pub(in crate::server) agent_member_id: MemberId,
+    pub(in crate::server) space_id: SpaceId,
+    pub(in crate::server) display_name: String,
+    pub(in crate::server) access_level: AccessLevel,
+    pub(in crate::server) role_text: String,
+    pub(in crate::server) computer_id: ComputerId,
+    pub(in crate::server) driver_kind: DriverKind,
+    pub(in crate::server) actor_member_id: MemberId,
+    pub(in crate::server) idempotency_key: IdempotencyKey,
+    pub(in crate::server) now: OffsetDateTime,
+}
+
+pub(in crate::server) struct CreateAgent;
+
+impl CreateAgent {
+    pub(in crate::server) async fn execute<P: TransactionPort>(
+        port: &mut P,
+        input: CreateAgentInput,
+    ) -> Result<Agent, ApplicationError> {
+        port.transact(async |transaction| {
+            if let Some(agent_id) = transaction
+                .resource_for_idempotency(
+                    input.actor_member_id,
+                    "agent.create",
+                    input.idempotency_key,
+                )
+                .await?
+            {
+                return transaction.agent(MemberId::from_uuid(agent_id)).await;
+            }
+            let actor_access = transaction
+                .member_access_level(input.actor_member_id, input.space_id)
+                .await?;
+            if !actor_access.can_grant(input.access_level) {
+                return Err(ApplicationError::PermissionDenied);
+            }
+            let created = Agent::create(
+                input.agent_member_id,
+                input.space_id,
+                input.computer_id,
+                &input.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )
+            .map_err(ApplicationError::Domain)?;
+            if !transaction
+                .computer_accepts_agent(input.computer_id, input.space_id)
+                .await?
+            {
+                return Err(ApplicationError::Conflict);
+            }
+            let member = Member {
+                id: input.agent_member_id,
+                space_id: input.space_id,
+                display_name: created.display_name,
+                access_level: input.access_level,
+                created_at: input.now,
+            };
+            let agent = created.agent;
+            transaction.insert_agent(member, agent.clone()).await?;
+            transaction
+                .record_resource_idempotency(
+                    input.actor_member_id,
+                    "agent.create",
+                    input.idempotency_key,
+                    agent.member_id.into_uuid(),
+                )
+                .await?;
+            transaction.emit(Effect::AgentCreated {
+                agent_id: agent.member_id,
+                computer_id: input.computer_id,
+            });
+            Ok(agent)
+        })
+        .await
+    }
+}
+
+pub(in crate::server) struct CreateAgentAction;
+
+impl CreateAgentAction {
+    pub(in crate::server) async fn execute<P: TransactionPort>(
+        port: &mut P,
+        input: CreateAgentActionInput,
+    ) -> Result<Agent, ApplicationError> {
+        port.transact(async |transaction| {
+            if let Some(agent_id) = transaction
+                .resource_for_idempotency(
+                    input.actor_member_id,
+                    "agent.create",
+                    input.idempotency_key,
+                )
+                .await?
+            {
+                return transaction.agent(MemberId::from_uuid(agent_id)).await;
+            }
+            let run = transaction.run(input.current_run_id).await?;
+            run.require_working_for(input.actor_member_id)
+                .map_err(ApplicationError::Domain)?;
+            let run_view = run.view();
+            if !transaction
+                .has_permission(input.actor_member_id, PermissionAction::AgentCreate)
+                .await?
+                || !transaction
+                    .can_read_thread(input.actor_member_id, run_view.focus_thread_id)
+                    .await?
+            {
+                return Err(ApplicationError::PermissionDenied);
+            }
+            let created = Agent::create(
+                input.agent_member_id,
+                run_view.space_id,
+                input.computer_id,
+                &input.display_name,
+                &input.role_text,
+                input.driver_kind,
+            )
+            .map_err(ApplicationError::Domain)?;
+            if !transaction
+                .computer_accepts_agent(input.computer_id, run_view.space_id)
+                .await?
+            {
+                return Err(ApplicationError::Conflict);
+            }
+            let member = Member {
+                id: input.agent_member_id,
+                space_id: run_view.space_id,
+                display_name: created.display_name,
+                access_level: AccessLevel::Member,
+                created_at: input.now,
+            };
+            let agent = created.agent;
+            let action = Message::action_reply(
+                input.action_message_id,
+                run_view.focus_thread_id,
+                input.actor_member_id,
+                MessageContent::AgentCreated(agent.member_id),
+                input.now,
+            )?;
+            transaction.insert_agent(member, agent.clone()).await?;
+            transaction.insert_message(action).await?;
+            transaction
+                .record_resource_idempotency(
+                    input.actor_member_id,
+                    "agent.create",
+                    input.idempotency_key,
+                    agent.member_id.into_uuid(),
+                )
+                .await?;
+            transaction.emit(Effect::AgentCreated {
+                agent_id: agent.member_id,
+                computer_id: input.computer_id,
+            });
+            Ok(agent)
         })
         .await
     }

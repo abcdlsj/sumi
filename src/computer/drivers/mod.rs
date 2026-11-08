@@ -1,6 +1,4 @@
-mod acp;
 mod acp_runtime;
-mod builtin;
 mod builtin_agent;
 mod contract;
 pub(in crate::computer) mod prompt;
@@ -16,28 +14,20 @@ use std::{
 use async_trait::async_trait;
 
 use crate::{
-    computer::{
-        application::{
-            ApplicationError,
-            ports::{
-                DriverCompletion, DriverPort, DriverTurnOutcome, OpenSessionRequest, OpenedSession,
-                ProcessEvidence, SteerOutcome,
-            },
-            usage::LlmUsageRecord,
+    computer::application::{
+        ApplicationError, DriverKind, LocalAgent, LocalRun, ProviderSession,
+        ports::{
+            DriverCompletion, DriverPort, DriverTurnOutcome, OpenSessionRequest, OpenedSession,
+            ProcessEvidence, SteerOutcome,
         },
-        core::{
-            home::LocalAgent,
-            session::{DriverKind, ProviderSession},
-            supervisor::LocalRun,
-        },
+        usage::LlmUsageRecord,
     },
     ids::{AgentId, RunId},
 };
 
 use self::{
-    acp_runtime::AcpRuntimeClient,
-    builtin_agent::BuiltinRuntimeClient,
-    contract::{ProviderBackend, ProviderOpen},
+    acp_runtime::AcpRuntimeClient, builtin_agent::BuiltinRuntimeClient,
+    contract::StructuredProviderClient,
 };
 
 pub(in crate::computer) fn agent_home(computer_home: &Path, agent_id: AgentId) -> PathBuf {
@@ -55,12 +45,8 @@ pub(in crate::computer) fn runtime(
         builtin.set_usage_sink(sink);
     }
     Ok(DriverAdapter::new(
-        acp::AcpAdapter::new(AcpRuntimeClient::new(
-            computer_home.to_owned(),
-            &config.acp,
-            driver_secret,
-        )),
-        builtin::BuiltinAdapter::new(builtin),
+        AcpRuntimeClient::new(computer_home.to_owned(), &config.acp, driver_secret),
+        builtin,
     ))
 }
 
@@ -77,7 +63,7 @@ struct ActiveTurn {
     locator: String,
 }
 
-impl<A, B> DriverAdapter<A, B> {
+impl<A: StructuredProviderClient, B: StructuredProviderClient> DriverAdapter<A, B> {
     pub(in crate::computer) fn new(acp: A, builtin: B) -> Self {
         Self {
             acp,
@@ -87,11 +73,7 @@ impl<A, B> DriverAdapter<A, B> {
         }
     }
 
-    fn backend_mut(&mut self, kind: DriverKind) -> &mut dyn ProviderBackend
-    where
-        A: ProviderBackend,
-        B: ProviderBackend,
-    {
+    fn backend_mut(&mut self, kind: DriverKind) -> &mut dyn StructuredProviderClient {
         match kind {
             DriverKind::Codex | DriverKind::Claude | DriverKind::Pi => &mut self.acp,
             DriverKind::Builtin => &mut self.builtin,
@@ -100,7 +82,7 @@ impl<A, B> DriverAdapter<A, B> {
 }
 
 #[async_trait(?Send)]
-impl<A: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<A, B> {
+impl<A: StructuredProviderClient, B: StructuredProviderClient> DriverPort for DriverAdapter<A, B> {
     async fn validate(&mut self, agent: &LocalAgent) -> Result<(), ApplicationError> {
         self.backend_mut(agent.driver).validate(agent).await
     }
@@ -111,21 +93,23 @@ impl<A: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<A, B> 
     ) -> Result<OpenedSession, ApplicationError> {
         let driver = request.fingerprint.driver;
         let backend = self.backend_mut(driver);
-        let opened = if let Some(locator) = request.resume_locator.as_deref() {
-            backend.resume(request.agent_id, driver, locator).await?
+        if let Some(locator) = request.resume_locator.as_deref() {
+            if backend
+                .resume_session(request.agent_id, driver, locator)
+                .await?
+            {
+                Ok(OpenedSession {
+                    locator: locator.to_owned(),
+                    resumed: true,
+                })
+            } else {
+                Err(ApplicationError::SessionLost)
+            }
         } else {
-            backend.open(request.agent_id, driver).await?
-        };
-        match opened {
-            ProviderOpen::Opened(locator) => Ok(OpenedSession {
-                locator,
+            Ok(OpenedSession {
+                locator: backend.create_session(request.agent_id, driver).await?,
                 resumed: false,
-            }),
-            ProviderOpen::Resumed(locator) => Ok(OpenedSession {
-                locator,
-                resumed: true,
-            }),
-            ProviderOpen::Lost => Err(ApplicationError::SessionLost),
+            })
         }
     }
 
@@ -177,7 +161,7 @@ impl<A: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<A, B> 
     async fn notice(
         &mut self,
         run: &LocalRun,
-        notice: &crate::computer::core::input::AttentionNoticeInput,
+        notice: &crate::computer::application::AttentionNoticeInput,
     ) -> Result<(), ApplicationError> {
         let turn = self
             .turns
@@ -206,7 +190,7 @@ impl<A: ProviderBackend, B: ProviderBackend> DriverPort for DriverAdapter<A, B> 
 
     async fn close_session(&mut self, session: &ProviderSession) -> Result<(), ApplicationError> {
         self.backend_mut(session.view().fingerprint.driver)
-            .close(session.view().locator)
+            .delete_session(session.view().locator)
             .await
     }
 

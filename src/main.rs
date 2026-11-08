@@ -3,6 +3,7 @@ mod cli;
 mod computer;
 mod config;
 mod ids;
+mod private_paths;
 mod protocol;
 mod release;
 mod server;

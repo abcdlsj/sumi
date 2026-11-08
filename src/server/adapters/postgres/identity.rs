@@ -504,7 +504,7 @@ impl PostgresTransaction {
     ) -> Result<Option<(AuthenticatedHuman, String)>, ApplicationError> {
         let row = sqlx::query(
             "SELECT id,display_name,email_normalized,password_hash FROM users \
-             WHERE email_normalized=$1 AND disabled_at IS NULL",
+             WHERE email_normalized=$1",
         )
         .bind(email_normalized)
         .fetch_optional(&mut *self.connection)
@@ -916,7 +916,7 @@ impl PostgresTransaction {
         let row = sqlx::query(
             "SELECT u.id,u.display_name,u.email_normalized \
              FROM browser_sessions s JOIN users u ON u.id=s.user_id \
-             WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.disabled_at IS NULL",
+             WHERE s.token_hash=$1 AND s.expires_at>$2",
         )
         .bind(token_hash)
         .bind(now)

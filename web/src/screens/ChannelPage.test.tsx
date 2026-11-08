@@ -118,7 +118,8 @@ describe("ChannelPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create Channel" }));
     const dialog = screen.getByRole("dialog", { name: "Create Channel" });
     fireEvent.change(within(dialog).getByLabelText("Slug"), { target: { value: "design" } });
-    fireEvent.change(within(dialog).getByLabelText("Visibility"), { target: { value: "private" } });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Visibility" }));
+    fireEvent.click(within(dialog).getByRole("option", { name: "Private" }));
     fireEvent.change(within(dialog).getByLabelText("Topic"), { target: { value: "Decisions" } });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: /Lin/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Create Channel" }));

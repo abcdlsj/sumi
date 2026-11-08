@@ -1,0 +1,1052 @@
+//! The Server WebSocket connection: handshake, heartbeats, command replay and frame routing.
+
+use super::pairing::ComputerSecrets;
+use super::*;
+
+pub(super) struct ConnectionChannels<'a> {
+    pub(super) yield_interrupts: &'a mut tokio::sync::mpsc::UnboundedReceiver<RunId>,
+    /// Staged releases, absent when local policy disables automatic updates.
+    pub(super) updates: Option<&'a mut tokio::sync::mpsc::Receiver<update::StagedUpdate>>,
+    /// The staged release outlives this connection: a disconnect must not drop it.
+    pub(super) staged_update: &'a mut Option<update::StagedUpdate>,
+}
+
+/// Why a Computer connection ended.
+pub(super) enum ConnectionExit {
+    /// The Server closed the connection, or the daemon is shutting down.
+    Closed,
+    /// No Run is live and a staged release waits; the caller launches the updater.
+    Activate(update::StagedUpdate),
+}
+
+/// Resolves on SIGINT or, on Unix, SIGTERM, which service managers send to stop a daemon.
+pub(super) async fn connect<P, D, H>(
+    server: &url::Url,
+    secrets: &ComputerSecrets,
+    storage: &mut P,
+    driver: &mut D,
+    homes: &mut H,
+    max_concurrent_runs: usize,
+    channels: ConnectionChannels<'_>,
+) -> anyhow::Result<ConnectionExit>
+where
+    P: TransactionPort + LlmUsageStore,
+    D: DriverPort,
+    H: AgentHomePort,
+{
+    let mut endpoint = server.join(&format!("api/v1/computers/{}/connect", secrets.computer_id))?;
+    endpoint
+        .set_scheme(match endpoint.scheme() {
+            "https" => "wss",
+            _ => "ws",
+        })
+        .map_err(|_| anyhow::anyhow!("invalid Sumi Server URL"))?;
+    let mut request = endpoint.as_str().into_client_request()?;
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {}", secrets.token).parse()?,
+    );
+    let (socket, _) =
+        tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(request))
+            .await
+            .context("Computer WebSocket connection timed out")?
+            .context("failed to connect Computer WebSocket")?;
+    let (mut writer, reader) = socket.split();
+    let mut reader = IdleTimeout::new(reader, SERVER_IDLE_TIMEOUT);
+    let daemon_session_id = DaemonSessionId::from_uuid(Uuid::now_v7());
+    let hello = ComputerHello {
+        supported_versions: SUPPORTED,
+        daemon_version: env!("CARGO_PKG_VERSION").into(),
+        daemon_session_id,
+        // Commands this Computer already persisted are not replayed; the Server sends only the ones
+        // after this sequence.
+        command_watermark: CommandSequence(
+            storage
+                .command_watermark()
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?,
+        ),
+        // Runs this daemon still holds. The Server fails the rest of its non-terminal Runs for this
+        // Computer, which is how a restart is reported instead of inferred from a timer.
+        live_run_ids: RecoveryService::reconnect_run_ids(storage)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?,
+    };
+    send_json(&mut writer, &hello).await?;
+    let handshake = reader
+        .next()
+        .await
+        .context("Server closed during handshake")??;
+    let WebSocketMessage::Text(handshake) = handshake else {
+        anyhow::bail!("Server returned a non-text Computer handshake");
+    };
+    match serde_json::from_str::<ServerHandshake>(&handshake)? {
+        ServerHandshake::Welcome { .. } => {
+            tracing::info!(
+                computer_id = %secrets.computer_id,
+                daemon_session_id = %daemon_session_id,
+                "Computer connected to Server"
+            );
+        }
+        ServerHandshake::Rejected { code, .. } => {
+            anyhow::bail!("Server rejected Computer protocol: {code:?}")
+        }
+    }
+    let adapter =
+        ServerConnectionAdapter::new(drivers::prompt::product_contract(), daemon_session_id);
+    let mut sent_events = HashSet::new();
+    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+    let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+    let mut driver_observation = tokio::time::interval(std::time::Duration::from_millis(250));
+    let mut lost_driver_check = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut pending_server_frames = VecDeque::new();
+    let mut pending_activity_results = BTreeMap::new();
+    let ConnectionChannels {
+        yield_interrupts,
+        updates,
+        staged_update,
+    } = channels;
+    let mut updates = updates;
+    loop {
+        tokio::select! {
+            _ = shutdown_signal() => {
+                tracing::info!(
+                    computer_id = %secrets.computer_id,
+                    "Computer disconnected from Server on shutdown"
+                );
+                return Ok(ConnectionExit::Closed);
+            }
+            Some(staged) = next_staged_update(updates.as_deref_mut()), if staged_update.is_none() => {
+                tracing::info!(target_version = %staged.version, "Computer update staged; waiting for active Runs");
+                *staged_update = Some(staged);
+            }
+            Some(run_id) = yield_interrupts.recv() => {
+                RunPipelineService::interrupt_yielded(
+                    storage,
+                    driver,
+                    run_id,
+                    homes,
+                    max_concurrent_runs,
+                )
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error))?;
+                send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+            }
+            _ = heartbeat.tick() => {
+                let live_runs = RecoveryService::live_run_ids(storage).await.map_err(|error|anyhow::anyhow!(error))?;
+                if let Some(staged) = take_activatable(staged_update, &live_runs) {
+                    return Ok(ConnectionExit::Activate(staged));
+                }
+                let frame=ComputerFrame::Heartbeat{heartbeat:Heartbeat{daemon_session_id,observed_at:time::OffsetDateTime::now_utc()}};
+                send_json(&mut writer, &frame).await?;
+                // The Server answers pings, so the idle timeout on reads detects a dead socket.
+                send_message(&mut writer, WebSocketMessage::Ping(Vec::new().into())).await?;
+            }
+            _ = driver_observation.tick() => {
+                let completions = driver
+                    .poll_completions()
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error))?;
+                let changed = RunPipelineService::finish_driver_turns(
+                    storage,
+                    driver,
+                    completions,
+                    homes,
+                    max_concurrent_runs,
+                )
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?;
+                if changed {
+                    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+                }
+            }
+            _ = lost_driver_check.tick() => {
+                if RunPipelineService::fail_lost_drivers(
+                    storage,
+                    driver,
+                    homes,
+                    max_concurrent_runs,
+                )
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error))?
+                {
+                    send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+                }
+            }
+            incoming=next_server_frame(&mut reader, &mut pending_server_frames)=>{
+                match incoming? {
+                    ServerFrame::Command{envelope}=>{
+                        // A rejected command leaves local state and the outbox untouched, so only an
+                        // applicable one runs the Driver pipeline.
+                        if let CommandActivity::Ready(channel_activity) = resolve_command_activity(
+                            &mut reader,
+                            &mut writer,
+                            &mut pending_server_frames,
+                            &mut pending_activity_results,
+                            storage,
+                            &envelope,
+                            daemon_session_id,
+                        ).await? {
+                            for frame in adapter.receive_with_activity(storage,driver,homes,*envelope,channel_activity).await.map_err(|error|anyhow::anyhow!(error))?{
+                                send_json(&mut writer, &frame).await?;
+                            }
+                            SchedulerService::dispatch(
+                                storage,
+                                driver,
+                                homes,
+                                max_concurrent_runs,
+                            )
+                            .await
+                            .map_err(|error| anyhow::anyhow!(error))?;
+                        }
+                        send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+                    }
+                    ServerFrame::Receipt{receipt}=>{
+                        RecoveryService::acknowledge(storage,receipt.event_id).await.map_err(|error|anyhow::anyhow!(error))?;
+                        sent_events.remove(&receipt.event_id);
+                        send_next_pending_event(storage, &adapter, &mut writer, &mut sent_events).await?;
+                    },
+                    ServerFrame::Query{query}=>{
+                        let frame=ServerConnectionAdapter::answer_query(storage,homes,query).await;
+                        send_json(&mut writer, &frame).await?;
+                    }
+                    ServerFrame::Shutdown{code}=>anyhow::bail!("Server stopped Computer connection: {code:?}"),
+                    ServerFrame::ChannelActivityResult { result } => {
+                        pending_activity_results.insert(result.query_id, result);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A staged release may take over only while no Run is live, so a live connection keeps running.
+fn activation_due(live_runs: &[RunId]) -> bool {
+    live_runs.is_empty()
+}
+
+/// Takes the staged release when no Run is live. The slot belongs to the daemon loop, so a release
+/// staged before a disconnect is still here on the next connection attempt.
+pub(super) fn take_activatable(
+    staged_update: &mut Option<update::StagedUpdate>,
+    live_runs: &[RunId],
+) -> Option<update::StagedUpdate> {
+    if activation_due(live_runs) {
+        staged_update.take()
+    } else {
+        None
+    }
+}
+
+/// Waits for the update checker; an absent receiver waits forever, which disables the branch.
+async fn next_staged_update(
+    updates: Option<&mut tokio::sync::mpsc::Receiver<update::StagedUpdate>>,
+) -> Option<update::StagedUpdate> {
+    match updates {
+        Some(updates) => updates.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Three heartbeat periods; the Server answers the ping sent with every heartbeat.
+const SERVER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(super) const STABLE_CONNECTION: std::time::Duration = std::time::Duration::from_secs(60);
+
+async fn send_message<W>(writer: &mut W, message: WebSocketMessage) -> anyhow::Result<()>
+where
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    tokio::time::timeout(SEND_TIMEOUT, writer.send(message))
+        .await
+        .context("Server did not accept a frame within the send timeout")??;
+    Ok(())
+}
+
+async fn send_json<W>(writer: &mut W, value: &impl Serialize) -> anyhow::Result<()>
+where
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    send_message(
+        writer,
+        WebSocketMessage::Text(serde_json::to_string(value)?.into()),
+    )
+    .await
+}
+
+/// Ends a WebSocket stream with a timeout error once no frame of any kind arrives for `idle`.
+/// A half-open TCP connection otherwise blocks reads until the kernel gives up retransmitting.
+struct IdleTimeout<S> {
+    inner: S,
+    idle: std::time::Duration,
+    deadline: std::pin::Pin<Box<tokio::time::Sleep>>,
+}
+
+impl<S> IdleTimeout<S> {
+    fn new(inner: S, idle: std::time::Duration) -> Self {
+        Self {
+            inner,
+            idle,
+            deadline: Box::pin(tokio::time::sleep(idle)),
+        }
+    }
+}
+
+impl<S> Stream for IdleTimeout<S>
+where
+    S: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::future::Future;
+        let this = &mut *self;
+        match std::pin::Pin::new(&mut this.inner).poll_next(context) {
+            std::task::Poll::Ready(item) => {
+                let next = tokio::time::Instant::now() + this.idle;
+                this.deadline.as_mut().reset(next);
+                std::task::Poll::Ready(item)
+            }
+            std::task::Poll::Pending => match this.deadline.as_mut().poll(context) {
+                std::task::Poll::Ready(()) => std::task::Poll::Ready(Some(Err(
+                    tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Server sent nothing within the idle timeout",
+                    )),
+                ))),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+        }
+    }
+}
+
+async fn next_server_frame<R>(
+    reader: &mut R,
+    pending: &mut VecDeque<ServerFrame>,
+) -> anyhow::Result<ServerFrame>
+where
+    R: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    if let Some(frame) = pending.pop_front() {
+        return Ok(frame);
+    }
+    loop {
+        let incoming = reader.next().await.context("Computer WebSocket closed")??;
+        let WebSocketMessage::Text(encoded) = incoming else {
+            continue;
+        };
+        return Ok(serde_json::from_str::<ServerFrame>(&encoded)?);
+    }
+}
+
+struct ChannelActivityRequest {
+    run_id: crate::ids::RunId,
+    agent_id: crate::ids::AgentId,
+    channel_id: crate::ids::ChannelId,
+    through_sequence: u64,
+}
+
+/// One RunStart Channel activity read. A query the Server cannot answer is a command-level failure,
+/// not a connection failure.
+enum ChannelActivityFetch {
+    Ready(crate::protocol::computer::ChannelActivitySnapshot),
+    Rejected(crate::protocol::computer::ChannelActivityQueryErrorCode),
+}
+
+/// What the connection loop does with one incoming command after its Channel activity read.
+enum CommandActivity {
+    /// Apply the command; a RunStart carries the snapshot its Driver needs.
+    Ready(Option<crate::protocol::computer::ChannelActivitySnapshot>),
+    /// The command was rejected on the wire and local state was not touched.
+    Rejected,
+}
+
+/// Reads the Channel activity a RunStart needs, rejecting only that command when the Server cannot
+/// answer the query. Terminating the connection instead would replay a command this Computer cannot
+/// apply, and every replay would fail the same way.
+async fn resolve_command_activity<P, R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    pending: &mut VecDeque<ServerFrame>,
+    pending_activity_results: &mut BTreeMap<
+        crate::ids::QueryId,
+        crate::protocol::computer::ChannelActivityResultEnvelope,
+    >,
+    storage: &mut P,
+    envelope: &crate::protocol::computer::CommandEnvelope,
+    daemon_session_id: DaemonSessionId,
+) -> anyhow::Result<CommandActivity>
+where
+    P: TransactionPort,
+    R: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    use crate::protocol::computer::{Command, CommandOutcome, CommandResult, ComputerFrame};
+
+    let Command::RunStart(start) = &envelope.command else {
+        return Ok(CommandActivity::Ready(None));
+    };
+    let activity = fetch_channel_activity(
+        reader,
+        writer,
+        pending,
+        pending_activity_results,
+        storage,
+        ChannelActivityRequest {
+            run_id: start.run_id,
+            agent_id: start.agent_id,
+            channel_id: start.focus.channel_id,
+            through_sequence: start.channel_snapshot_sequence,
+        },
+    )
+    .await?;
+    let code = match activity {
+        ChannelActivityFetch::Ready(snapshot) => return Ok(CommandActivity::Ready(Some(snapshot))),
+        ChannelActivityFetch::Rejected(code) => channel_activity_rejection_code(code),
+    };
+    tracing::warn!(
+        command_id = %envelope.command_id.into_uuid(),
+        sequence = envelope.sequence.0,
+        run_id = %start.run_id,
+        error_code = ?code,
+        "Computer command rejected"
+    );
+    send_json(
+        writer,
+        &ComputerFrame::CommandResult {
+            result: CommandResult {
+                daemon_session_id,
+                command_id: envelope.command_id,
+                sequence: envelope.sequence,
+                outcome: CommandOutcome::Rejected { code },
+            },
+        },
+    )
+    .await?;
+    Ok(CommandActivity::Rejected)
+}
+
+/// The Server fails the rejected Run with this code, so it must describe why the Computer could not
+/// start it.
+fn channel_activity_rejection_code(
+    code: crate::protocol::computer::ChannelActivityQueryErrorCode,
+) -> crate::protocol::computer::ComputerErrorCode {
+    use crate::protocol::computer::{ChannelActivityQueryErrorCode, ComputerErrorCode};
+
+    match code {
+        ChannelActivityQueryErrorCode::InvalidRequest
+        | ChannelActivityQueryErrorCode::PermissionDenied => ComputerErrorCode::InvalidCommand,
+        ChannelActivityQueryErrorCode::Unavailable | ChannelActivityQueryErrorCode::Internal => {
+            ComputerErrorCode::Internal
+        }
+    }
+}
+
+async fn fetch_channel_activity<P, R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    pending: &mut VecDeque<ServerFrame>,
+    pending_activity_results: &mut BTreeMap<
+        crate::ids::QueryId,
+        crate::protocol::computer::ChannelActivityResultEnvelope,
+    >,
+    storage: &mut P,
+    request: ChannelActivityRequest,
+) -> anyhow::Result<ChannelActivityFetch>
+where
+    P: TransactionPort,
+    R: Stream<Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    W: Sink<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    use crate::protocol::computer::{
+        ChannelActivityQuery, ChannelActivitySnapshot, ComputerFrame, ServerFrame,
+    };
+    let after = storage
+        .transact(async |transaction| {
+            Ok(transaction
+                .channel_context(request.agent_id, request.channel_id)?
+                .map_or(0, |context| context.through_sequence))
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!(error))?;
+    let mut next_after = after;
+    let mut messages = Vec::new();
+    while next_after < request.through_sequence {
+        let query_id = crate::ids::QueryId::from_uuid(Uuid::now_v7());
+        send_json(
+            writer,
+            &ComputerFrame::ChannelActivityQuery {
+                query: ChannelActivityQuery {
+                    query_id,
+                    run_id: request.run_id,
+                    agent_id: request.agent_id,
+                    channel_id: request.channel_id,
+                    after_sequence: next_after,
+                    through_sequence: request.through_sequence,
+                    limit: 256,
+                },
+            },
+        )
+        .await?;
+        let mut deferred = VecDeque::new();
+        let result = if let Some(result) = pending_activity_results.remove(&query_id) {
+            result
+        } else {
+            loop {
+                let frame = if let Some(frame) = pending.pop_front() {
+                    frame
+                } else {
+                    let frame = match reader.next().await {
+                        Some(Ok(frame)) => frame,
+                        Some(Err(error)) => {
+                            pending.extend(deferred);
+                            return Err(anyhow::anyhow!(error)
+                                .context("Server failed during Channel activity query"));
+                        }
+                        None => {
+                            pending.extend(deferred);
+                            return Err(anyhow::anyhow!(
+                                "Server closed during Channel activity query"
+                            ));
+                        }
+                    };
+                    let WebSocketMessage::Text(encoded) = frame else {
+                        continue;
+                    };
+                    match serde_json::from_str::<ServerFrame>(&encoded) {
+                        Ok(frame) => frame,
+                        Err(error) => {
+                            pending.extend(deferred);
+                            return Err(error.into());
+                        }
+                    }
+                };
+                if let Some(result) =
+                    route_activity_frame(frame, query_id, &mut deferred, pending_activity_results)
+                {
+                    break result;
+                }
+            }
+        };
+        pending.extend(deferred);
+        let result = match channel_activity_fetch(result) {
+            ChannelActivityFetch::Ready(snapshot) => snapshot,
+            rejected @ ChannelActivityFetch::Rejected(_) => return Ok(rejected),
+        };
+        let Some(last) = result.messages.last().map(|entry| entry.message.sequence) else {
+            break;
+        };
+        next_after = last;
+        messages.extend(result.messages);
+    }
+    Ok(ChannelActivityFetch::Ready(ChannelActivitySnapshot {
+        channel_id: request.channel_id,
+        snapshot_sequence: request.through_sequence,
+        messages,
+    }))
+}
+
+fn channel_activity_fetch(
+    envelope: crate::protocol::computer::ChannelActivityResultEnvelope,
+) -> ChannelActivityFetch {
+    match envelope.result {
+        crate::protocol::computer::ChannelActivityQueryResult::Snapshot(snapshot) => {
+            ChannelActivityFetch::Ready(snapshot)
+        }
+        crate::protocol::computer::ChannelActivityQueryResult::Unavailable { code } => {
+            ChannelActivityFetch::Rejected(code)
+        }
+    }
+}
+
+fn route_activity_frame(
+    frame: crate::protocol::computer::ServerFrame,
+    query_id: crate::ids::QueryId,
+    deferred: &mut VecDeque<crate::protocol::computer::ServerFrame>,
+    pending_results: &mut BTreeMap<
+        crate::ids::QueryId,
+        crate::protocol::computer::ChannelActivityResultEnvelope,
+    >,
+) -> Option<crate::protocol::computer::ChannelActivityResultEnvelope> {
+    use crate::protocol::computer::ServerFrame;
+
+    match frame {
+        ServerFrame::ChannelActivityResult { result } if result.query_id == query_id => {
+            Some(result)
+        }
+        ServerFrame::ChannelActivityResult { result } => {
+            pending_results.insert(result.query_id, result);
+            None
+        }
+        other => {
+            deferred.push_back(other);
+            None
+        }
+    }
+}
+
+async fn send_next_pending_event<P>(
+    storage: &mut P,
+    adapter: &ServerConnectionAdapter,
+    writer: &mut (impl SinkExt<WebSocketMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+    sent_events: &mut HashSet<EventId>,
+) -> anyhow::Result<()>
+where
+    P: TransactionPort,
+{
+    let Some(event) = RecoveryService::pending_results(storage)
+        .await
+        .map_err(|error| anyhow::anyhow!(error))?
+        .into_iter()
+        .find(|event| !sent_events.contains(&event.id()))
+    else {
+        return Ok(());
+    };
+    let event_id = event.id();
+    let frame = adapter.event_frame(event);
+    send_json(writer, &frame).await?;
+    sent_events.insert(event_id);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[tokio::test]
+    async fn a_staged_release_waits_for_the_last_live_run_and_outlives_a_connection() {
+        let run = RunId::from_uuid(Uuid::now_v7());
+        let staged = update::StagedUpdate {
+            version: "9.9.9".into(),
+            candidate: std::path::PathBuf::from("/tmp/sumi-9.9.9"),
+        };
+        let mut slot = Some(staged);
+
+        // A live Run keeps the release staged, and the slot survives the connection that found it.
+        assert!(super::take_activatable(&mut slot, &[run]).is_none());
+        assert!(
+            slot.is_some(),
+            "a disconnect must not drop a staged release"
+        );
+        // The next connection attempt reads the same slot; the Run is still live.
+        assert!(super::take_activatable(&mut slot, &[run]).is_none());
+        // The Run ends: the check activates the release exactly once.
+        let activated =
+            super::take_activatable(&mut slot, &[]).expect("an idle Computer activates");
+        assert_eq!(activated.version, "9.9.9");
+        assert!(slot.is_none());
+
+        // The update branch never resolves without a checker, so a connection without updates
+        // keeps its own future instead of polling for one.
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                super::next_staged_update(None)
+            )
+            .await
+            .is_err()
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<update::StagedUpdate>(1);
+        drop(sender);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                super::next_staged_update(Some(&mut receiver))
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "a closed checker channel disables the branch"
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_ends_a_silent_stream_and_spares_an_active_one() {
+        use futures_util::StreamExt;
+
+        let idle = std::time::Duration::from_millis(50);
+        let mut silent = super::IdleTimeout::new(
+            futures_util::stream::pending::<
+                Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>,
+            >(),
+            idle,
+        );
+        assert!(matches!(
+            silent.next().await,
+            Some(Err(tokio_tungstenite::tungstenite::Error::Io(error)))
+                if error.kind() == std::io::ErrorKind::TimedOut
+        ));
+
+        // Frames arriving faster than the idle period keep the stream open for longer than it.
+        let pongs = futures_util::stream::iter(0..6).then(|_| async {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Ok(WebSocketMessage::Pong(Vec::new().into()))
+        });
+        let mut active = super::IdleTimeout::new(Box::pin(pongs), idle);
+        for _ in 0..6 {
+            assert!(matches!(
+                active.next().await,
+                Some(Ok(WebSocketMessage::Pong(_)))
+            ));
+        }
+    }
+
+    use super::*;
+    use application::{ports::LlmUsageStore, usage::LlmUsageRecord};
+    use time::{Duration, OffsetDateTime};
+
+    #[test]
+    fn interleaved_activity_results_are_cached_by_query_id() {
+        use crate::protocol::computer::{
+            ChannelActivityResultEnvelope, ChannelActivitySnapshot, ServerFrame, ShutdownCode,
+        };
+
+        let target = crate::ids::QueryId::from_uuid(Uuid::now_v7());
+        let other = crate::ids::QueryId::from_uuid(Uuid::now_v7());
+        let snapshot = |query_id| ChannelActivityResultEnvelope {
+            query_id,
+            result: crate::protocol::computer::ChannelActivityQueryResult::Snapshot(
+                ChannelActivitySnapshot {
+                    channel_id: crate::ids::ChannelId::from_uuid(Uuid::now_v7()),
+                    snapshot_sequence: 1,
+                    messages: Vec::new(),
+                },
+            ),
+        };
+        let mut deferred = VecDeque::new();
+        let mut pending = BTreeMap::new();
+
+        assert!(
+            route_activity_frame(
+                ServerFrame::ChannelActivityResult {
+                    result: snapshot(other),
+                },
+                target,
+                &mut deferred,
+                &mut pending,
+            )
+            .is_none()
+        );
+        assert!(pending.contains_key(&other));
+        assert!(deferred.is_empty());
+
+        let result = route_activity_frame(
+            ServerFrame::ChannelActivityResult {
+                result: snapshot(target),
+            },
+            target,
+            &mut deferred,
+            &mut pending,
+        )
+        .expect("target query result should complete the fetch");
+        assert_eq!(result.query_id, target);
+
+        assert!(
+            route_activity_frame(
+                ServerFrame::Shutdown {
+                    code: ShutdownCode::ServerShutdown,
+                },
+                target,
+                &mut deferred,
+                &mut pending,
+            )
+            .is_none()
+        );
+        assert!(matches!(
+            deferred.pop_front(),
+            Some(ServerFrame::Shutdown {
+                code: ShutdownCode::ServerShutdown
+            })
+        ));
+        assert!(pending.contains_key(&other));
+    }
+
+    /// A Server end of the Computer connection in memory: it answers RunStart Channel activity
+    /// queries so a test can drive the real command path without a socket.
+    #[derive(Default)]
+    struct FakeServerState {
+        incoming: VecDeque<ServerFrame>,
+        written: Vec<ComputerFrame>,
+        closed: bool,
+        refuse_activity_queries: Option<crate::protocol::computer::ChannelActivityQueryErrorCode>,
+    }
+
+    #[derive(Clone)]
+    struct FakeServer(std::rc::Rc<std::cell::RefCell<FakeServerState>>);
+
+    impl FakeServer {
+        fn new(
+            refuse_activity_queries: Option<
+                crate::protocol::computer::ChannelActivityQueryErrorCode,
+            >,
+        ) -> Self {
+            Self(std::rc::Rc::new(std::cell::RefCell::new(FakeServerState {
+                refuse_activity_queries,
+                ..FakeServerState::default()
+            })))
+        }
+
+        fn written(&self) -> Vec<ComputerFrame> {
+            self.0.borrow().written.clone()
+        }
+
+        fn close(&self) {
+            self.0.borrow_mut().closed = true;
+        }
+    }
+
+    impl Sink<WebSocketMessage> for FakeServer {
+        type Error = tokio_tungstenite::tungstenite::Error;
+
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn start_send(
+            self: std::pin::Pin<&mut Self>,
+            message: WebSocketMessage,
+        ) -> Result<(), Self::Error> {
+            use crate::protocol::computer::{
+                ChannelActivityQueryResult, ChannelActivityResultEnvelope, ComputerFrame,
+                ServerFrame,
+            };
+
+            let WebSocketMessage::Text(encoded) = message else {
+                return Ok(());
+            };
+            let frame: ComputerFrame = serde_json::from_str(&encoded).map_err(|_| {
+                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Computer wrote a frame the Server cannot read",
+                ))
+            })?;
+            let mut state = self.0.borrow_mut();
+            if let (ComputerFrame::ChannelActivityQuery { query }, Some(code)) =
+                (&frame, state.refuse_activity_queries)
+            {
+                state
+                    .incoming
+                    .push_back(ServerFrame::ChannelActivityResult {
+                        result: ChannelActivityResultEnvelope {
+                            query_id: query.query_id,
+                            result: ChannelActivityQueryResult::Unavailable { code },
+                        },
+                    });
+            }
+            state.written.push(frame);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    impl futures_util::Stream for FakeServer {
+        type Item = Result<WebSocketMessage, tokio_tungstenite::tungstenite::Error>;
+
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            let mut state = self.0.borrow_mut();
+            if state.closed {
+                return std::task::Poll::Ready(None);
+            }
+            match state.incoming.pop_front() {
+                Some(frame) => std::task::Poll::Ready(Some(Ok(WebSocketMessage::Text(
+                    serde_json::to_string(&frame).unwrap().into(),
+                )))),
+                None => std::task::Poll::Pending,
+            }
+        }
+    }
+
+    /// A RunStart whose Channel activity query the Server refuses is a business failure, not a
+    /// transport failure: the command is rejected on the wire and the connection keeps serving
+    /// commands. Dropping the connection instead replayed the same command forever.
+    #[tokio::test]
+    async fn a_refused_activity_query_rejects_the_run_start_and_keeps_the_connection() {
+        use crate::protocol::computer::{
+            ChannelActivityQueryErrorCode, CommandOutcome, ComputerErrorCode, ComputerFrame,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = SqliteAdapter::open(&directory.path().join("daemon.db"))
+            .await
+            .unwrap();
+        let mut reader = FakeServer::new(Some(ChannelActivityQueryErrorCode::PermissionDenied));
+        let mut writer = reader.clone();
+        let mut pending = VecDeque::new();
+        let mut pending_results = BTreeMap::new();
+
+        let refused = run_start_envelope(5);
+        assert!(matches!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &refused,
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
+            )
+            .await
+            .unwrap(),
+            CommandActivity::Rejected
+        ));
+        let written = writer.written();
+        assert!(
+            matches!(written[0], ComputerFrame::ChannelActivityQuery { .. }),
+            "the Computer must ask the Server before judging the command"
+        );
+        assert!(
+            matches!(
+                &written[1],
+                ComputerFrame::CommandResult { result }
+                    if result.command_id == refused.command_id
+                        && result.sequence == refused.sequence
+                        && result.outcome
+                            == CommandOutcome::Rejected {
+                                code: ComputerErrorCode::InvalidCommand,
+                            }
+            ),
+            "the Server reconciles a rejected RunStart; it must receive that rejection"
+        );
+
+        // The connection keeps serving commands: this RunStart has nothing to read.
+        let next = run_start_envelope(0);
+        assert!(matches!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &next,
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
+            )
+            .await
+            .unwrap(),
+            CommandActivity::Ready(Some(snapshot)) if snapshot.snapshot_sequence == 0
+        ));
+
+        // Only a transport failure ends the connection.
+        reader.close();
+        assert!(
+            resolve_command_activity(
+                &mut reader,
+                &mut writer,
+                &mut pending,
+                &mut pending_results,
+                &mut store,
+                &run_start_envelope(1),
+                DaemonSessionId::from_uuid(Uuid::now_v7()),
+            )
+            .await
+            .is_err(),
+            "losing the Server during a query is a transport failure"
+        );
+    }
+
+    fn run_start_envelope(
+        channel_snapshot_sequence: u64,
+    ) -> crate::protocol::computer::CommandEnvelope {
+        use crate::protocol::computer::{
+            Command, CommandEnvelope, CommandSequence, FocusSnapshot, MessageContent,
+            MessageSnapshot, RunStart,
+        };
+
+        let thread_id = crate::ids::ThreadId::from_uuid(Uuid::now_v7());
+        CommandEnvelope {
+            command_id: crate::ids::CommandId::from_uuid(Uuid::now_v7()),
+            sequence: CommandSequence(1),
+            command: Command::RunStart(RunStart {
+                run_id: RunId::from_uuid(Uuid::now_v7()),
+                agent_id: crate::ids::AgentId::from_uuid(Uuid::now_v7()),
+                task: None,
+                focus: FocusSnapshot {
+                    thread_id,
+                    channel_id: crate::ids::ChannelId::from_uuid(Uuid::now_v7()),
+                    root: MessageSnapshot {
+                        message_id: crate::ids::MessageId::from_uuid(Uuid::now_v7()),
+                        author_member_id: crate::ids::MemberId::from_uuid(Uuid::now_v7()),
+                        sequence: 1,
+                        content: MessageContent::Text {
+                            markdown: "root".to_owned(),
+                        },
+                        created_at: OffsetDateTime::now_utc(),
+                    },
+                    replies: Vec::new(),
+                    message_sequence: 1,
+                },
+                channel_snapshot_sequence,
+                dispatched_items: Vec::new(),
+                channel_members: Vec::new(),
+            }),
+        }
+    }
+
+    fn usage_record(id: Uuid, created_at: OffsetDateTime) -> LlmUsageRecord {
+        LlmUsageRecord {
+            id,
+            run_id: RunId::from_uuid(Uuid::now_v7()),
+            agent_id: crate::ids::AgentId::from_uuid(Uuid::now_v7()),
+            driver_kind: "builtin".to_owned(),
+            model: Some("test-model".to_owned()),
+            input_tokens: 1,
+            output_tokens: 2,
+            cached_input_tokens: 0,
+            cache_write_tokens: 0,
+            duration_ms: Some(1),
+            created_at,
+        }
+    }
+
+    #[tokio::test]
+    async fn usage_writer_continues_after_one_insert_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("daemon.db");
+        // The daemon opens the state adapter before starting the usage worker, which initializes
+        // the local schema. Mirror that ordering in the regression test.
+        let adapter = SqliteAdapter::open(&database_path).await.unwrap();
+        drop(adapter);
+
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_usage_writer(database_path.clone(), receiver));
+        let now = OffsetDateTime::now_utc();
+        let first = usage_record(Uuid::now_v7(), now);
+        let duplicate = first.clone();
+        let second = usage_record(Uuid::now_v7(), now);
+        sender.send(first.clone()).unwrap();
+        sender.send(duplicate).unwrap();
+        sender.send(second.clone()).unwrap();
+        drop(sender);
+        worker.await.unwrap();
+
+        let mut adapter = SqliteAdapter::open(&database_path).await.unwrap();
+        let rows = adapter
+            .llm_usage_since(now.checked_sub(Duration::hours(1)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row.id == first.id));
+        assert!(rows.iter().any(|row| row.id == second.id));
+    }
+}

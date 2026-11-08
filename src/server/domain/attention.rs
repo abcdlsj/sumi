@@ -41,19 +41,22 @@ pub(in crate::server) struct AmbientAggregate {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::server) struct AmbientAggregateView {
+pub(in crate::server) struct AmbientAggregateSnapshot {
     pub(in crate::server) first_message_seq: u64,
     pub(in crate::server) last_message_seq: u64,
     pub(in crate::server) aggregated_count: u32,
     pub(in crate::server) force_at: OffsetDateTime,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::server) struct AmbientAggregateSnapshot {
-    pub(in crate::server) first_message_seq: u64,
-    pub(in crate::server) last_message_seq: u64,
-    pub(in crate::server) aggregated_count: u32,
-    pub(in crate::server) force_at: OffsetDateTime,
+impl From<AmbientAggregate> for AmbientAggregateSnapshot {
+    fn from(aggregate: AmbientAggregate) -> Self {
+        Self {
+            first_message_seq: aggregate.first_message_seq,
+            last_message_seq: aggregate.last_message_seq,
+            aggregated_count: aggregate.aggregated_count,
+            force_at: aggregate.force_at,
+        }
+    }
 }
 
 impl AmbientAggregate {
@@ -147,7 +150,7 @@ pub(in crate::server) struct InboxItemView {
     pub(in crate::server) retry_count: u32,
     pub(in crate::server) requeue_count: u32,
     pub(in crate::server) handled_at: Option<OffsetDateTime>,
-    pub(in crate::server) ambient: Option<AmbientAggregateView>,
+    pub(in crate::server) ambient: Option<AmbientAggregateSnapshot>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -265,12 +268,7 @@ impl InboxItem {
             retry_count: self.retry_count,
             requeue_count: self.requeue_count,
             handled_at: self.handled_at,
-            ambient: self.ambient.map(|ambient| AmbientAggregateView {
-                first_message_seq: ambient.first_message_seq,
-                last_message_seq: ambient.last_message_seq,
-                aggregated_count: ambient.aggregated_count,
-                force_at: ambient.force_at,
-            }),
+            ambient: self.ambient.map(AmbientAggregateSnapshot::from),
         }
     }
 

@@ -20,6 +20,8 @@ pub(in crate::server) enum DomainError {
     SourceMismatch,
     #[error("task requires an assignee")]
     AssigneeRequired,
+    #[error("task result must not be empty")]
+    EmptyTaskResult,
     #[error("task review must be decided by another visible member")]
     InvalidReviewer,
     #[error("thread is not linked to the task")]
@@ -36,6 +38,8 @@ pub(in crate::server) enum DomainError {
     ItemIsNotAmbientAggregate,
     #[error("run no longer accepts inbox items")]
     RunNotAcceptingItems,
+    #[error("run is not the working run of this agent")]
+    RunNotWorkingForAgent,
     #[error("run item disposition is incomplete")]
     IncompleteItemDisposition,
     #[error("action messages must be replies")]
@@ -50,6 +54,8 @@ pub(in crate::server) enum DomainError {
     AgentRetired,
     #[error("agent role text is required")]
     InvalidRole,
+    #[error("agent display name must be 1-40 letters or underscores")]
+    InvalidAgentName,
     #[error("channel cannot be joined without an invitation")]
     ChannelNotJoinable,
     #[error("computer still has assigned agents")]

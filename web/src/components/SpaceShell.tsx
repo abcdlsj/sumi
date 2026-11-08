@@ -20,24 +20,8 @@ import {
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  ApiRequestError,
-  createChannel,
-  createDirectMessage,
-  currentUser,
-  getSpaceBySlug,
-  joinChannel,
-  listChannels,
-  listAgents,
-  listComputers,
-  listDirectMessages,
-  listInbox,
-  listMembers,
-  type Channel,
-  type Computer,
-  type DirectMessage,
-  type Member,
-} from "../api/client";
+import {ApiRequestError, createChannel, createDirectMessage, currentUser, getSpaceBySlug, joinChannel, listChannels, listAgents, listDirectMessages, listInbox, listMembers} from "../api/client";
+import type {Channel, DirectMessage, Member} from "../api/types";
 import { activityLabel, agentPresence, type AgentPresence } from "../agentActivity";
 import {
   AGENT_INSIGHTS_FEATURE_ID,
@@ -52,12 +36,12 @@ import { DialogFrame } from "./DialogFrame";
 import { SpaceShellValue, useSpaceShell, type SpaceShellContext } from "./spaceShellContext";
 import { AccountMenu } from "./AccountMenu";
 import { ConnectionBanner } from "./Feedback";
-import { PixelIdentity } from "./PixelIdentity";
+import { PixelIdentity, PresenceIdentity } from "./PixelIdentity";
 import { QuickSwitcher, type QuickSwitcherItem } from "./QuickSwitcher";
 import { SumiMark } from "./SumiMark";
+import { SumiSelect } from "./SumiSelect";
 import { ShellSkeleton } from "./Skeleton";
 
-export { PixelIdentity } from "./PixelIdentity";
 
 /** Renders a page body from the Space context, for pages that only pass it through. */
 export function SpacePage({ children }: { children: (context: SpaceShellContext) => ReactNode }) {
@@ -157,11 +141,6 @@ export function SpaceShell({
     enabled: Boolean(space.data),
     retry: false,
   });
-  const computers = useQuery({
-    queryKey: ["computers", space.data?.id],
-    queryFn: () => listComputers(space.data!.id),
-    enabled: active === "computers" && Boolean(space.data),
-  });
   // Shares the Inbox page cache, so reading there clears the count here.
   const inbox = useQuery({
     queryKey: ["inbox", space.data?.id, space.data?.current_member_id],
@@ -228,8 +207,7 @@ export function SpaceShell({
     space.error ??
     user.error ??
     channels.error ??
-    members.error ??
-    (active === "computers" ? computers.error : undefined);
+    members.error;
 
   const spaceAccent = space.data?.accent;
   useEffect(() => applySpaceAccent(spaceAccent), [spaceAccent]);
@@ -308,7 +286,7 @@ export function SpaceShell({
     space.isPending ||
     user.isPending ||
     channels.isPending ||
-    members.isPending || (active === "computers" && computers.isPending)
+    members.isPending
   ) {
     return <ShellSkeleton />;
   }
@@ -333,15 +311,6 @@ export function SpaceShell({
   );
   const inboxCount = groupInboxItems(inbox.data ?? []).length;
   const spaceSlugValue = space.data.slug;
-  const contextNavigation =
-    active === "computers" && computers.data?.length ? (
-      <ComputersNavigation
-        computers={computers.data ?? []}
-        spaceSlug={spaceSlugValue}
-        activeHash={location.hash}
-        canManage={["owner", "admin"].includes(currentMember.access_level)}
-      />
-    ) : null;
   const toolItem = (id: string, label: string, Icon: LucideIcon, path: string): QuickSwitcherItem => ({
     id: `tool-${id}`,
     label,
@@ -656,15 +625,7 @@ export function SpaceShell({
         />
       ) : null}
 
-        {contextNavigation ? (
-          // Section lists live beside the page so the sidebar stays put.
-          <div className="space-section">
-            <nav className="section-nav" aria-label="Paired computers">
-              {contextNavigation}
-            </nav>
-            <div className="section-main">{page}</div>
-          </div>
-        ) : page}
+        {page}
       </main>
     </>
   );
@@ -673,24 +634,6 @@ export function SpaceShell({
 function RouteFailure({ error, retry }: { error: unknown; retry: () => void }) {
   const message = error instanceof ApiRequestError ? error.message : "The Server did not return a usable response.";
   return <main className="route-status route-status--error"><section className="route-status-panel" role="alert"><h1>Could not open this Space.</h1><p>{message}</p><button className="command-button command-button--accent" type="button" onClick={retry}>Retry</button></section></main>;
-}
-
-function ComputersNavigation({ computers, spaceSlug, activeHash, canManage }: { computers: Computer[]; spaceSlug: string; activeHash: string; canManage: boolean }) {
-  const normalizedHash = activeHash.replace(/^#/, "");
-  return <>
-    <div className="nav-section-heading">
-      <p className="nav-label">Paired computers <span>{computers.length}</span></p>
-      {canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer" aria-label="Pair Computer" title="Pair Computer"><Plus /></Link> : null}
-    </div>
-    {computers.map((computer) => {
-      const hash = `computer-${computer.id}`;
-      const selected = normalizedHash === hash;
-      return <Link key={computer.id} className={`context-entity-row computer-context-row${selected ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={hash}>
-        <Monitor aria-hidden="true" />
-        <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status}<em>v{computer.daemon_version}</em></small></span>
-      </Link>;
-    })}
-  </>;
 }
 
 function viewingChannelId(
@@ -724,6 +667,8 @@ function ChannelDialog({
   close: () => void;
   onSubmit: (input: Parameters<typeof createChannel>[1]) => void;
 }) {
+  const [kind, setKind] = useState<"public" | "private">("public");
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -743,7 +688,7 @@ function ChannelDialog({
         </header>
         <form className="channel-create-form" onSubmit={submit}>
           <label>Slug<input name="slug" required maxLength={32} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" data-dialog-initial-focus /></label>
-          <label>Visibility<select name="kind" defaultValue="public"><option value="public">Public</option><option value="private">Private</option></select></label>
+          <label>Visibility<input type="hidden" name="kind" value={kind} /><SumiSelect ariaLabel="Visibility" value={kind} onChange={(value) => setKind(value as "public" | "private")} options={[{ value: "public", label: "Public" }, { value: "private", label: "Private" }]} /></label>
           <label>Topic<input name="topic" maxLength={200} /></label>
           <fieldset className="channel-agent-picker">
             <legend>Initial Agents</legend>
@@ -872,17 +817,3 @@ function DirectMessageNavigationItem({ member, activityStatus, role, active, hre
   );
 }
 
-export function PresenceIdentity({ name, kind = "human", seed, activityStatus }: { name: string; kind?: "human" | "agent"; seed: string; activityStatus?: AgentPresence }) {
-  if (kind !== "agent" || !activityStatus) {
-    return <PixelIdentity name={name} kind={kind} seed={seed} />;
-  }
-  const label = activityLabel(activityStatus);
-  // Working breathes a teal ring around the seal; idle stays silent; only
-  // error and suspended add a corner dot.
-  return (
-    <span className={`presence-identity presence-identity--${activityStatus}`}>
-      <PixelIdentity name={name} kind={kind} seed={seed} />
-      <span className={`presence-dot presence-dot--${activityStatus}`} role="img" aria-label={`${name} is ${label}`} title={`${name} · ${label}`} />
-    </span>
-  );
-}

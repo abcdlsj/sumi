@@ -6,9 +6,10 @@ use crate::ids::{
 };
 
 use crate::server::domain::{
+    DomainError,
     attention::{InboxItem, InboxItemDisposition, InboxItemKind},
     conversation::{Message, MessageContent, MessagePlacement},
-    execution::{Run, RunOutcome, RunStatus},
+    execution::{Run, RunOutcome},
     task::{CloseReason, Task},
 };
 
@@ -52,12 +53,9 @@ impl CreateTaskFromRootMessage {
                 TaskSource::HumanRoot(thread_id) => (thread_id, None, false),
                 TaskSource::AgentRun(run_id) => {
                     let run = transaction.run(run_id).await?;
+                    run.require_working_for(input.actor_member_id)
+                        .map_err(ApplicationError::Domain)?;
                     let run_view = run.view();
-                    if run_view.agent_id != input.actor_member_id
-                        || run_view.status != RunStatus::Working
-                    {
-                        return Err(ApplicationError::ContextChanged);
-                    }
                     let focus_thread_id = run_view.focus_thread_id;
                     let source_thread_id = input.source_thread_id.unwrap_or(focus_thread_id);
                     let run_can_bind =
@@ -431,7 +429,10 @@ async fn resolve_outcome_message(
     let Some(message) = message else {
         return Ok(None);
     };
-    let thread_id = match message.post_to {
+    if message.body_markdown.trim().is_empty() {
+        return Err(DomainError::EmptyTaskResult.into());
+    }
+    let requested = match message.post_to {
         TaskPostTarget::Focus => match run {
             Some(run) => run.view().focus_thread_id,
             None => task.view().source_thread_id,
@@ -439,9 +440,27 @@ async fn resolve_outcome_message(
         TaskPostTarget::Source => task.view().source_thread_id,
         TaskPostTarget::Thread(thread_id) => thread_id,
     };
-    if !task.linked_to(thread_id) || !transaction.can_read_thread(actor, thread_id).await? {
-        return Err(ApplicationError::PermissionDenied);
+    if !task.linked_to(requested) {
+        return Err(DomainError::FocusOutsideTask.into());
     }
+    // The actor may read only some of the Linked Threads. The Result belongs in one of them, so it
+    // falls back to the first readable Thread in priority order instead of failing the whole write.
+    let source = task.view().source_thread_id;
+    let focus = run.map(|run| run.view().focus_thread_id);
+    let mut candidates = vec![requested];
+    candidates.extend(focus);
+    candidates.push(source);
+    candidates.extend(task.related_threads().map(|link| link.thread_id));
+    let mut thread_id = None;
+    for candidate in candidates {
+        if task.linked_to(candidate) && transaction.can_read_thread(actor, candidate).await? {
+            thread_id = Some(candidate);
+            break;
+        }
+    }
+    let Some(thread_id) = thread_id else {
+        return Err(ApplicationError::PermissionDenied);
+    };
     Ok(Some(Message {
         id: message.message_id,
         thread_id,

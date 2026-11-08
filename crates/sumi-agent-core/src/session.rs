@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::types::{Message, TokenUsage};
+use super::types::Message;
 
 /// Append-only provider transcript plus embedding-owned metadata.
 ///
@@ -56,20 +56,6 @@ impl Session {
         usage.input_tokens.max(0) as usize + trailing
     }
 
-    pub fn token_usage(&self) -> TokenUsage {
-        self.messages
-            .iter()
-            .filter_map(|message| message.usage.as_ref())
-            .fold(TokenUsage::default(), |mut total, usage| {
-                total.input_tokens += usage.input_tokens;
-                total.output_tokens += usage.output_tokens;
-                total.total_tokens += usage.total_tokens;
-                total.cached_input_tokens += usage.cached_input_tokens;
-                total.cache_write_tokens += usage.cache_write_tokens;
-                total
-            })
-    }
-
     /// Strips image attachments from all user messages.
     /// Returns true if any images were removed.
     pub fn strip_image_attachments(&mut self, add_note: bool) -> bool {
@@ -106,31 +92,6 @@ const IMAGE_UNSUPPORTED_NOTE: &str = "[System note: Image payloads were omitted 
 mod tests {
     use super::*;
     use crate::types::{TokenUsage, ToolResult};
-
-    #[test]
-    fn token_usage_aggregates_cache_metrics() {
-        let mut session = Session::default();
-        for (input, cached, written) in [(2000, 1500, 300), (2500, 2200, 0)] {
-            session.add(Message {
-                role: "assistant".into(),
-                usage: Some(TokenUsage {
-                    input_tokens: input,
-                    output_tokens: 100,
-                    total_tokens: input + 100,
-                    cached_input_tokens: cached,
-                    cache_write_tokens: written,
-                    source: "openai_chat_completions".into(),
-                }),
-                ..Default::default()
-            });
-        }
-
-        let usage = session.token_usage();
-        assert_eq!(usage.input_tokens, 4500);
-        assert_eq!(usage.output_tokens, 200);
-        assert_eq!(usage.cached_input_tokens, 3700);
-        assert_eq!(usage.cache_write_tokens, 300);
-    }
 
     #[test]
     fn metadata_round_trips_and_keeps_embedding_state() {

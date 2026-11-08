@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { v7 as uuidv7 } from "uuid";
 
-import type { Message } from "../../api/client";
-import type { ComposerInput } from "./MessageComposer";
+import type {CreateMessageInput, Message} from "../../api/types";
 
 /** A message the reader sent that the Server has not confirmed yet. */
 export interface OutgoingMessage {
   key: string;
   /** Fixed at queue time so Retry cannot post the message twice. */
   idempotencyKey: string;
-  input: ComposerInput;
+  input: CreateMessageInput;
   createdAt: string;
   status: "sending" | "failed";
   error?: string;
@@ -23,7 +22,7 @@ type Delivery = Pick<OutgoingMessage, "key" | "idempotencyKey" | "input">;
  * Discard when it fails, so nothing the reader typed is lost.
  */
 export function useOutbox(
-  send: (input: ComposerInput, idempotencyKey: string) => Promise<Message>,
+  send: (input: CreateMessageInput, idempotencyKey: string) => Promise<Message>,
   onSent: (message: Message) => void,
 ) {
   const [items, setItems] = useState<OutgoingMessage[]>([]);
@@ -48,7 +47,7 @@ export function useOutbox(
     );
   }, []);
 
-  const queue = useCallback((input: ComposerInput) => {
+  const queue = useCallback((input: CreateMessageInput) => {
     counter.current += 1;
     const key = `outgoing-${Date.now().toString(36)}-${counter.current}`;
     const outgoing: OutgoingMessage = {
@@ -86,8 +85,8 @@ export function provisionalMessage(item: OutgoingMessage, author: Message["autho
     latest_replies: [],
     author,
     content: { type: "text", body_markdown: item.input.body_markdown },
-    mentions: item.input.mentions,
-    mention_all: item.input.mention_all,
+    mentions: item.input.mentions ?? [],
+    mention_all: item.input.mention_all ?? false,
     attachments: [],
     attention_failures: [],
     task_refs: [],

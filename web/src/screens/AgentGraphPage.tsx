@@ -9,12 +9,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import {
-  getAgentGraph,
-  type AgentGraphEdge,
-  type AgentGraphMessage,
-  type AgentGraphNode,
-} from "../api/client";
+import {getAgentGraph} from "../api/client";
+import type {AgentGraphEdge, AgentGraphMessage, AgentGraphNode} from "../api/types";
 import { PixelIdentity } from "../components/PixelIdentity";
 import { buildAgentIdenticon } from "../components/agentIdenticon";
 import { layoutGraph, type GraphLayoutNode } from "./agentGraphLayout";

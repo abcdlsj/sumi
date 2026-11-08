@@ -260,7 +260,10 @@ fn application_failure(error: ApplicationError) -> wire::Response<serde_json::Va
             "local capability service is unavailable",
             true,
         ),
-        ApplicationError::AlreadyApplied | ApplicationError::Internal => failure(
+        ApplicationError::AlreadyApplied
+        | ApplicationError::Internal
+        | ApplicationError::SchemaTooOld(_)
+        | ApplicationError::SchemaTooNew(_) => failure(
             wire::ErrorCode::Internal,
             "local capability service failed",
             false,

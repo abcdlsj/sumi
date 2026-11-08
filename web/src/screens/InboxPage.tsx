@@ -3,14 +3,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { CheckCheck, Inbox, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import {
-  listInbox,
-  markAllInboxRead,
-  markInboxItemRead,
-  type Member,
-} from "../api/client";
+import {listInbox, markAllInboxRead, markInboxItemRead} from "../api/client";
+import type {Member} from "../api/types";
 import { EmptyState } from "../components/EmptyState";
-import { PixelIdentity, SpacePage } from "../components/SpaceShell";
+import { PixelIdentity } from "../components/PixelIdentity";
+import { SpacePage } from "../components/SpaceShell";
 import { notify } from "../feedback";
 import { groupInboxItems, type InboxStack } from "../inbox";
 import { plainTextPreview } from "../markdownText";

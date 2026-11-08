@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Message, ThreadRead } from "../../api/client";
+import type {Message, ThreadRead} from "../../api/types";
 import { ThreadPane } from "./ThreadPane";
 
 afterEach(() => {

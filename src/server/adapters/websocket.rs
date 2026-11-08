@@ -8,7 +8,7 @@ use crate::protocol::{
     version::SUPPORTED,
 };
 use crate::{
-    ids::{ComputerId, EventId, MemberId, SpaceId, ThreadId},
+    ids::{ComputerId, DaemonSessionId, EventId, MemberId},
     server::application::ports::ApplicationError,
 };
 
@@ -103,7 +103,6 @@ use crate::server::domain::attention::AttentionPolicy;
 use crate::server::domain::execution::{DeliveryOutcome as ServerDeliveryOutcome, RunOutcome};
 use axum::extract::ws::{Message as WebSocketMessage, WebSocket};
 use futures_util::StreamExt;
-use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 pub(super) async fn computer_socket(
@@ -117,7 +116,6 @@ pub(super) async fn computer_socket(
 ) {
     // Counted until the last frame is written and the close finishes; shutdown waits for it.
     let _open_socket = shutdown.socket();
-    let pool = storage.pool();
     let Ok(Some(Ok(WebSocketMessage::Text(encoded)))) =
         tokio::time::timeout(COMPUTER_IDLE_TIMEOUT, socket.next()).await
     else {
@@ -241,6 +239,13 @@ pub(super) async fn computer_socket(
         let Ok(frame) = serde_json::from_str::<ComputerFrame>(&encoded) else {
             continue;
         };
+        let Some(frame) = from_current_session(frame, hello.daemon_session_id) else {
+            tracing::warn!(
+                %computer_id,
+                "Computer frame arrived from an earlier daemon session; dropped"
+            );
+            continue;
+        };
         match frame {
             ComputerFrame::ChannelActivityQuery { query } => {
                 let application = storage.clone();
@@ -261,11 +266,12 @@ pub(super) async fn computer_socket(
             }
             ComputerFrame::QueryResult { result } => queries.resolve(result),
             ComputerFrame::Heartbeat { heartbeat } => {
-                let _ = sqlx::query("UPDATE computers SET last_seen_at=$2 WHERE id=$1")
-                    .bind(computer_id)
-                    .bind(heartbeat.observed_at)
-                    .execute(&pool)
-                    .await;
+                if let Err(error) = storage
+                    .touch_computer(ComputerId::from_uuid(computer_id), heartbeat.observed_at)
+                    .await
+                {
+                    tracing::warn!(%computer_id, %error, "Computer heartbeat could not be recorded");
+                }
                 let replay_watermark = replay_pending_commands(
                     &storage,
                     &mut socket,
@@ -296,39 +302,36 @@ pub(super) async fn computer_socket(
                 }
                 if response.is_ok() {
                     if yielded {
-                        let run = sqlx::query(
-                            "SELECT agent_runs.agent_id,agent_runs.space_id,agent_runs.focus_thread_id,\
-                                    messages.channel_id,messages.channel_seq,channels.slug \
-                             FROM agent_runs JOIN messages ON messages.id=agent_runs.focus_thread_id \
-                                    JOIN channels ON channels.id=messages.channel_id \
-                             WHERE agent_runs.id=$1",
-                        )
-                        .bind(run_id.into_uuid())
-                        .fetch_optional(&pool)
-                        .await;
-                        if let Ok(Some(row)) = run {
-                            let slug = row.get::<Option<String>, _>("slug");
-                            let focus_label = super::http::activity_thread_label(
-                                slug.as_deref(),
-                                row.get("channel_seq"),
-                            );
-                            storage
-                                .record_agent_activity(
-                                    Some(event_id.into_uuid()),
-                                    SpaceId::from_uuid(row.get("space_id")),
-                                    MemberId::from_uuid(row.get("agent_id")),
-                                    "run.yield",
-                                    super::http::agent_activity_details(
-                                        serde_json::json!({
-                                            "run_id": run_id,
-                                            "thread_id": ThreadId::from_uuid(row.get("focus_thread_id")),
-                                            "channel_id": row.get::<Uuid, _>("channel_id"),
-                                            "scope_channel_id": row.get::<Uuid, _>("channel_id"),
-                                        }),
-                                        vec![("focus", focus_label)],
-                                    ),
-                                )
-                                .await;
+                        match storage.run_activity_focus(run_id).await {
+                            Ok(Some(focus)) => {
+                                let focus_label = super::activity::activity_thread_label(
+                                    focus.slug.as_deref(),
+                                    focus.channel_seq,
+                                );
+                                storage
+                                    .record_agent_activity(
+                                        Some(event_id.into_uuid()),
+                                        focus.space_id,
+                                        focus.agent_id,
+                                        "run.yield",
+                                        super::activity::agent_activity_details(
+                                            serde_json::json!({
+                                                "run_id": run_id,
+                                                "thread_id": focus.thread_id,
+                                                "channel_id": focus.channel_id,
+                                                "scope_channel_id": focus.channel_id,
+                                            }),
+                                            vec![("focus", focus_label)],
+                                        ),
+                                    )
+                                    .await;
+                            }
+                            Ok(None) => {}
+                            Err(error) => tracing::warn!(
+                                %run_id,
+                                %error,
+                                "yielded Run activity could not locate its Focus"
+                            ),
                         }
                     }
                     let _ = send_json(
@@ -429,7 +432,7 @@ pub(super) async fn computer_socket(
                 {
                     if matches!(result.outcome, CommandOutcome::Rejected { .. })
                         && let Err(error) =
-                            apply_rejected_command(&storage, computer_id, &pool, &result).await
+                            apply_rejected_command(&storage, computer_id, &result).await
                     {
                         tracing::error!(
                             %computer_id,
@@ -469,6 +472,23 @@ pub(super) async fn computer_socket(
             },
         )
         .await;
+    }
+}
+
+/// Frames whose fields describe execution state carry the daemon session that produced them. A
+/// reconnecting Computer replays durable results under a new session, so a frame from an earlier
+/// session can still arrive on this socket; applying it would attribute work to a connection the
+/// Server already reconciled.
+fn from_current_session(frame: ComputerFrame, session: DaemonSessionId) -> Option<ComputerFrame> {
+    let frame_session = match &frame {
+        ComputerFrame::Heartbeat { heartbeat } => Some(heartbeat.daemon_session_id),
+        ComputerFrame::RunResult { result } => Some(result.daemon_session_id),
+        ComputerFrame::CommandResult { result } => Some(result.daemon_session_id),
+        _ => None,
+    };
+    match frame_session {
+        Some(frame_session) if frame_session != session => None,
+        _ => Some(frame),
     }
 }
 
@@ -537,7 +557,6 @@ async fn apply_command_result(
 async fn apply_rejected_command(
     storage: &PostgresAdapter,
     computer_id: Uuid,
-    pool: &PgPool,
     result: &CommandResult,
 ) -> Result<(), ApiError> {
     // A command is acknowledged only after its rejected delivery compensation succeeds. Once the
@@ -577,27 +596,23 @@ async fn apply_rejected_command(
         .await
         .map_err(|_| ApiError::internal())?;
 
-        let row = sqlx::query(
-            "SELECT r.agent_id,r.space_id,r.focus_thread_id,m.channel_id \
-             FROM agent_runs r JOIN messages m ON m.id=r.focus_thread_id WHERE r.id=$1",
-        )
-        .bind(run_id.into_uuid())
-        .fetch_optional(pool)
-        .await
-        .map_err(|_| ApiError::internal())?;
-        if let Some(row) = row {
+        if let Some(focus) = storage
+            .run_activity_focus(run_id)
+            .await
+            .map_err(|_| ApiError::internal())?
+        {
             storage
                 .record_agent_activity_with_id(
                     EventId::from_uuid(result.command_id.into_uuid()),
-                    SpaceId::from_uuid(row.get("space_id")),
-                    MemberId::from_uuid(row.get("agent_id")),
+                    focus.space_id,
+                    focus.agent_id,
                     "run.delivery_rejected",
-                    super::http::agent_activity_details(
+                    super::activity::agent_activity_details(
                         serde_json::json!({
                             "run_id": run_id,
-                            "thread_id": ThreadId::from_uuid(row.get("focus_thread_id")),
-                            "channel_id": row.get::<Uuid, _>("channel_id"),
-                            "scope_channel_id": row.get::<Uuid, _>("channel_id"),
+                            "thread_id": focus.thread_id,
+                            "channel_id": focus.channel_id,
+                            "scope_channel_id": focus.channel_id,
                         }),
                         vec![("delivery_sequence", delivery_sequence.to_string())],
                     ),
@@ -673,28 +688,60 @@ async fn send_json(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use uuid::Uuid;
 
     use super::*;
-    use crate::{
-        ids::DaemonSessionId,
-        protocol::{
-            computer::{CommandSequence, DaemonCapability},
-            version::{ProtocolVersion, ProtocolVersionRange},
-        },
+    use crate::protocol::{
+        computer::{CommandOutcome, CommandSequence, Heartbeat, RunResult, RunTerminalStatus},
+        version::{ProtocolVersion, ProtocolVersionRange},
     };
 
     fn hello(range: ProtocolVersionRange) -> ComputerHello {
         ComputerHello {
             supported_versions: range,
             daemon_version: "1.0.0".into(),
-            capabilities: BTreeSet::from([DaemonCapability::Sandbox]),
             daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             command_watermark: CommandSequence(0),
             live_run_ids: Vec::new(),
         }
+    }
+
+    #[test]
+    fn frames_from_an_earlier_daemon_session_are_dropped() {
+        let session = DaemonSessionId::from_uuid(Uuid::now_v7());
+        let earlier = DaemonSessionId::from_uuid(Uuid::now_v7());
+        let heartbeat = |daemon_session_id| ComputerFrame::Heartbeat {
+            heartbeat: Heartbeat {
+                daemon_session_id,
+                observed_at: OffsetDateTime::now_utc(),
+            },
+        };
+
+        assert!(from_current_session(heartbeat(earlier), session).is_none());
+        assert!(from_current_session(heartbeat(session), session).is_some());
+        let run_result = |daemon_session_id| ComputerFrame::RunResult {
+            result: RunResult {
+                daemon_session_id,
+                event_id: EventId::from_uuid(Uuid::now_v7()),
+                run_id: crate::ids::RunId::from_uuid(Uuid::now_v7()),
+                status: RunTerminalStatus::Completed,
+                item_outcomes: Vec::new(),
+                continuation_note: None,
+                error_code: None,
+            },
+        };
+        assert!(from_current_session(run_result(earlier), session).is_none());
+        assert!(from_current_session(run_result(session), session).is_some());
+        let command_result = |daemon_session_id| ComputerFrame::CommandResult {
+            result: CommandResult {
+                daemon_session_id,
+                command_id: crate::ids::CommandId::from_uuid(Uuid::now_v7()),
+                sequence: CommandSequence(3),
+                outcome: CommandOutcome::Applied,
+            },
+        };
+        assert!(from_current_session(command_result(earlier), session).is_none());
+        assert!(from_current_session(command_result(session), session).is_some());
     }
 
     #[test]
@@ -706,7 +753,7 @@ mod tests {
                 ..
             }
         ));
-        let future = ProtocolVersionRange::new(ProtocolVersion::new(7), ProtocolVersion::new(7));
+        let future = ProtocolVersionRange::new(ProtocolVersion::new(8), ProtocolVersion::new(8));
         assert!(matches!(
             negotiate(&hello(future), false, true),
             ServerHandshake::Rejected {

@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fmt};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -18,21 +18,11 @@ pub(crate) struct CommandSequence(pub(crate) u64);
 #[serde(transparent)]
 pub(crate) struct DeliverySequence(pub(crate) u64);
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum DaemonCapability {
-    ActiveTurnSteer,
-    ProviderSessionResume,
-    ProviderSessionReset,
-    Sandbox,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ComputerHello {
     pub(crate) supported_versions: ProtocolVersionRange,
     pub(crate) daemon_version: String,
-    pub(crate) capabilities: BTreeSet<DaemonCapability>,
     pub(crate) daemon_session_id: DaemonSessionId,
     pub(crate) command_watermark: CommandSequence,
     /// Runs this daemon still holds locally, plus terminal Runs whose result is still pending delivery.
@@ -831,7 +821,6 @@ impl fmt::Debug for MemoryReadResult {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Heartbeat {
     pub(crate) daemon_session_id: DaemonSessionId,
-    pub(crate) active_runs: u32,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) observed_at: OffsetDateTime,
 }
@@ -846,6 +835,7 @@ pub(crate) struct CommandAck {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CommandResult {
+    pub(crate) daemon_session_id: DaemonSessionId,
     pub(crate) command_id: CommandId,
     pub(crate) sequence: CommandSequence,
     pub(crate) outcome: CommandOutcome,
@@ -887,6 +877,7 @@ pub(crate) enum DeliveryOutcome {
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RunResult {
+    pub(crate) daemon_session_id: DaemonSessionId,
     pub(crate) event_id: EventId,
     pub(crate) run_id: RunId,
     pub(crate) status: RunTerminalStatus,
@@ -959,20 +950,17 @@ pub(crate) enum ShutdownCode {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use serde_json::json;
     use uuid::Uuid;
 
     use super::{
         AttentionNotice, AttentionStrength, ChannelActivityQueryErrorCode,
         ChannelActivityQueryResult, ChannelActivityResultEnvelope, ChannelActivitySnapshot,
-        Command, CommandEnvelope, CommandSequence, ComputerFrame, ComputerHello, DaemonCapability,
-        FocusSnapshot, InboxSourceKind, MemoryFileProjection, MemoryReadResult, MessageContent,
-        MessageSnapshot, NoticeLocation, Query, QueryEnvelope, QueryErrorCode, QueryResult,
-        QueryResultEnvelope, RunStart, RunStop, RuntimeDiagnosticsQuery, RuntimeDiagnosticsResult,
-        RuntimeRunState, ServerFrame, SessionContinuityQuery, SessionScope, StopReason,
-        TaskSnapshot, TaskStatus,
+        Command, CommandEnvelope, CommandSequence, ComputerFrame, ComputerHello, FocusSnapshot,
+        InboxSourceKind, MemoryFileProjection, MemoryReadResult, MessageContent, MessageSnapshot,
+        NoticeLocation, Query, QueryEnvelope, QueryErrorCode, QueryResult, QueryResultEnvelope,
+        RunStart, RunStop, RuntimeDiagnosticsQuery, RuntimeDiagnosticsResult, RuntimeRunState,
+        ServerFrame, SessionContinuityQuery, SessionScope, StopReason, TaskSnapshot, TaskStatus,
     };
     use crate::{
         ids::{
@@ -984,20 +972,21 @@ mod tests {
     use time::OffsetDateTime;
 
     #[test]
-    fn hello_exchanges_version_range_and_daemon_capabilities() {
+    fn hello_syncs_session_watermark_and_live_runs() {
         let hello = ComputerHello {
             supported_versions: SUPPORTED,
             daemon_version: "0.1.0".to_owned(),
-            capabilities: BTreeSet::from([DaemonCapability::ActiveTurnSteer]),
             daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             command_watermark: CommandSequence(12),
-            live_run_ids: Vec::new(),
+            live_run_ids: vec![RunId::from_uuid(Uuid::now_v7())],
         };
         let value = serde_json::to_value(hello).unwrap();
 
-        assert_eq!(value["supported_versions"]["minimum"], 6);
-        assert_eq!(value["supported_versions"]["maximum"], 6);
-        assert_eq!(value["capabilities"][0], "active_turn_steer");
+        assert_eq!(value["supported_versions"]["minimum"], 7);
+        assert_eq!(value["supported_versions"]["maximum"], 7);
+        assert_eq!(value["command_watermark"], 12);
+        assert!(value.get("capabilities").is_none());
+        assert_eq!(value["live_run_ids"].as_array().unwrap().len(), 1);
     }
 
     #[test]

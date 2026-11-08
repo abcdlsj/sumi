@@ -3,16 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Bell, BellOff, X } from "lucide-react";
 import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 
-import {
-  createThreadReply,
-  readThread,
-  setThreadSubscription,
-  type Member,
-  type Message,
-  type ThreadRead,
-} from "../../api/client";
+import {createThreadReply, readThread, setThreadSubscription} from "../../api/client";
+import type {CreateMessageInput, Member, Message, ThreadRead} from "../../api/types";
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
-import { MessageComposer, type ComposerInput } from "./MessageComposer";
+import { MessageComposer } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
 import { provisionalMessage, useOutbox } from "./outbox";
 import { refreshRootMessage } from "./messageCache";
@@ -93,7 +87,7 @@ export function ThreadPane({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [close]);
 
-  async function sendReply(input: ComposerInput, idempotencyKey: string): Promise<Message> {
+  async function sendReply(input: CreateMessageInput, idempotencyKey: string): Promise<Message> {
     if (!thread.data) throw new Error("Thread is unavailable");
     return createThreadReply(
       threadId,
@@ -123,7 +117,7 @@ export function ThreadPane({
   const outbox = useOutbox(sendReply, addReply);
   const selfMemberId = useSelfMemberId();
   const self = members.find((member) => member.id === selfMemberId);
-  function queueReply(input: ComposerInput) {
+  function queueReply(input: CreateMessageInput) {
     outbox.queue(input);
     window.requestAnimationFrame(() => scrollToBottom());
   }

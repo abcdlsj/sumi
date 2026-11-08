@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentGraph, AgentGraphEdge, AgentGraphNode } from "../api/client";
+import type {AgentGraph, AgentGraphEdge, AgentGraphNode} from "../api/types";
 import { AgentGraphWorkspace, INITIAL_GRAPH_VIEW } from "./AgentGraphPage";
 import { layoutGraph } from "./agentGraphLayout";
 

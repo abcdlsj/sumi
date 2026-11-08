@@ -2,22 +2,10 @@ use std::{fs, path::Path};
 
 #[test]
 fn new_modules_do_not_cross_forbidden_dependency_boundaries() {
-    assert_forbidden(
-        "src/protocol",
-        &["crate::server", "crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/server/domain",
-        &["crate::protocol", "crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/server/application",
-        &["crate::computer", "crate::driver"],
-    );
-    assert_forbidden(
-        "src/computer/core",
-        &["crate::protocol", "crate::server", "crate::driver"],
-    );
+    assert_forbidden("src/protocol", &["crate::server", "crate::computer"]);
+    assert_forbidden("src/server/domain", &["crate::protocol", "crate::computer"]);
+    assert_forbidden("src/server/application", &["crate::computer"]);
+    assert_forbidden("src/computer/core", &["crate::protocol", "crate::server"]);
     assert_forbidden("src/computer/application", &["crate::server"]);
     assert_forbidden(
         "src/computer/adapters",
@@ -26,10 +14,18 @@ fn new_modules_do_not_cross_forbidden_dependency_boundaries() {
             "computer::core",
             "core::{",
             "crate::server",
-            "crate::driver",
         ],
     );
-    assert_forbidden("src/computer/drivers", &["crate::server", "sqlx::postgres"]);
+    // Drivers reach Core types through the application re-exports, like the adapters do.
+    assert_forbidden(
+        "src/computer/drivers",
+        &[
+            "crate::server",
+            "sqlx::postgres",
+            "crate::computer::core",
+            "computer::core",
+        ],
+    );
     assert_forbidden(
         "src/agent_cli",
         &["crate::server", "crate::computer::core", "sqlx"],
@@ -43,6 +39,7 @@ fn new_modules_do_not_cross_forbidden_dependency_boundaries() {
     assert_scoped_visibility("src/agent_cli");
     assert_http_handlers_do_not_own_write_transactions();
     assert_http_handlers_delegate_postgres_reads();
+    assert_websocket_delegates_postgres_access();
     assert_websocket_does_not_apply_agent_lifecycle();
 }
 
@@ -113,6 +110,23 @@ fn assert_http_handlers_delegate_postgres_reads() {
             );
         }
     });
+}
+
+fn assert_websocket_delegates_postgres_access() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/adapters");
+    // `space_events.rs` only holds a LISTEN connection; it never runs a statement.
+    for file in ["websocket.rs", "realtime.rs"] {
+        let path = root.join(file);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for forbidden in ["sqlx::query", "sqlx::raw_sql", "PgPool", "PgRow"] {
+            assert!(
+                !source.contains(forbidden),
+                "{} reads or writes PostgreSQL through {forbidden}; use PostgresAdapter or PostgresQueries",
+                path.display()
+            );
+        }
+    }
 }
 
 fn assert_websocket_does_not_apply_agent_lifecycle() {

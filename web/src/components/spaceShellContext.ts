@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import type { Channel, DirectMessage, Member, Space, User } from "../api/client";
+import type {Channel, DirectMessage, Member, Space, User} from "../api/types";
 
 export interface SpaceShellContext {
   space: Space;

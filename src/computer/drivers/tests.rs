@@ -7,15 +7,14 @@ use async_trait::async_trait;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use super::{
-    DriverAdapter, acp::AcpAdapter, acp_runtime::AcpRuntimeClient, builtin::BuiltinAdapter,
-    contract::StructuredProviderClient,
-};
+use super::{DriverAdapter, acp_runtime::AcpRuntimeClient, contract::StructuredProviderClient};
 use crate::{
     computer::{
         adapters::sqlite::SqliteAdapter,
         application::{
-            ApplicationError, LocalRunState, TerminalStatus,
+            AgentInput, ApplicationError, ContextMessageInput, DispatchedItemInput, DriverKind,
+            LocalRun, LocalRunState, NewRun, RunContextInput, RunInput, RunPriority,
+            SessionFingerprint, SessionScope, TerminalStatus, WorkInput, WorkStrength,
             ports::{
                 ComputerTransaction, DriverCompletion, DriverPort, DriverTurnOutcome,
                 LocalErrorCode, LocalEvent, OpenSessionRequest, ProcessEvidence, SteerOutcome,
@@ -23,15 +22,6 @@ use crate::{
             },
             recovery::RecoveryService,
             run::RunService,
-        },
-        core::{
-            input::{
-                AgentInput, ContextMessageInput, DispatchedItemInput, RunContextInput, RunInput,
-                WorkInput,
-            },
-            scheduler::{RunPriority, WorkStrength},
-            session::{DriverKind, SessionFingerprint, SessionScope},
-            supervisor::{LocalRun, NewRun},
         },
     },
     ids::{AgentId, ChannelId, InboxItemId, MemberId, MessageId, RunId, SpaceId, ThreadId},
@@ -61,7 +51,7 @@ impl FakeClient {
 impl StructuredProviderClient for FakeClient {
     async fn validate(
         &mut self,
-        _: &crate::computer::core::home::LocalAgent,
+        _: &crate::computer::application::LocalAgent,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -108,7 +98,7 @@ impl StructuredProviderClient for FakeClient {
     async fn notice(
         &mut self,
         _: &str,
-        _: &crate::computer::core::input::AttentionNoticeInput,
+        _: &crate::computer::application::AttentionNoticeInput,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -144,8 +134,8 @@ impl StructuredProviderClient for FakeClient {
 
 #[tokio::test]
 async fn codex_session_resumes_and_lost_locator_is_reported() {
-    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
-    let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
+    let codex = FakeClient::new("codex", SteerOutcome::Unsupported);
+    let builtin = FakeClient::new("builtin", SteerOutcome::Accepted);
     let mut driver = DriverAdapter::new(codex, builtin);
     let request = open_request(DriverKind::Codex, None);
     let opened = driver.open_or_resume(request).await.unwrap();
@@ -169,8 +159,8 @@ async fn codex_session_resumes_and_lost_locator_is_reported() {
 
 #[tokio::test]
 async fn builtin_session_resumes_without_crossing_driver_boundary() {
-    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
-    let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
+    let codex = FakeClient::new("codex", SteerOutcome::Unsupported);
+    let builtin = FakeClient::new("builtin", SteerOutcome::Accepted);
     let mut driver = DriverAdapter::new(codex, builtin);
     let opened = driver
         .open_or_resume(open_request(DriverKind::Builtin, None))
@@ -190,8 +180,8 @@ async fn builtin_session_resumes_without_crossing_driver_boundary() {
 
 #[tokio::test]
 async fn unsupported_steer_does_not_start_a_second_turn() {
-    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
-    let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
+    let codex = FakeClient::new("codex", SteerOutcome::Unsupported);
+    let builtin = FakeClient::new("builtin", SteerOutcome::Accepted);
     let mut driver = DriverAdapter::new(codex, builtin);
     let opened = driver
         .open_or_resume(open_request(DriverKind::Codex, None))
@@ -215,13 +205,13 @@ async fn unsupported_steer_does_not_start_a_second_turn() {
         driver.steer(&run, 1).await.unwrap(),
         SteerOutcome::Unsupported
     );
-    assert_eq!(driver.acp.client.turns_started, 1);
+    assert_eq!(driver.acp.turns_started, 1);
 }
 
 #[tokio::test]
 async fn waiting_for_one_completion_preserves_other_runs() {
-    let codex = AcpAdapter::new(FakeClient::new("codex", SteerOutcome::Unsupported));
-    let builtin = BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted));
+    let codex = FakeClient::new("codex", SteerOutcome::Unsupported);
+    let builtin = FakeClient::new("builtin", SteerOutcome::Accepted);
     let mut driver = DriverAdapter::new(codex, builtin);
     let target = RunId::from_uuid(Uuid::now_v7());
     let other = RunId::from_uuid(Uuid::now_v7());
@@ -279,8 +269,8 @@ async fn a_failing_acp_process_keeps_other_agents_completions_and_loses_only_its
     fake_agent_home(&computer_home, failing_agent, true);
 
     let mut driver = DriverAdapter::new(
-        AcpAdapter::new(AcpRuntimeClient::new(computer_home, &config, [5_u8; 32])),
-        BuiltinAdapter::new(FakeClient::new("builtin", SteerOutcome::Accepted)),
+        AcpRuntimeClient::new(computer_home, &config, [5_u8; 32]),
+        FakeClient::new("builtin", SteerOutcome::Accepted),
     );
     let healthy_session = driver
         .open_or_resume(session_request(healthy_agent))

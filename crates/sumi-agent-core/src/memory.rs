@@ -18,7 +18,7 @@ pub struct MemoryFile {
     pub modified_at_unix: u64,
 }
 
-pub(crate) async fn list_memory(root: &Path) -> Result<Vec<MemoryFile>, AgentError> {
+pub async fn list_memory(root: &Path) -> Result<Vec<MemoryFile>, AgentError> {
     let canonical_root = tokio::fs::canonicalize(root)
         .await
         .map_err(|_| AgentError::NotFound)?;

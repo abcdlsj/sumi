@@ -249,6 +249,7 @@ async fn server_restart_during_run(database: &TestDatabase) -> Result<()> {
         ))?)
         .bearer_auth(&fixture.computer_token)
         .json(&serde_json::json!({
+            "daemon_session_id": Uuid::now_v7(),
             "event_id": Uuid::now_v7(),
             "run_id": run_id,
             "status": "completed",
@@ -357,6 +358,7 @@ async fn offline_computer_keeps_its_run(database: &TestDatabase) -> Result<()> {
         ))?)
         .bearer_auth(&fixture.computer_token)
         .json(&serde_json::json!({
+            "daemon_session_id": Uuid::now_v7(),
             "event_id": Uuid::now_v7(),
             "run_id": run_id,
             "status": "failed",
@@ -708,8 +710,8 @@ async fn provider_session_rows(database_path: &Path) -> Result<Vec<(String, Stri
 async fn publish_mention(fixture: &Fixture, agent_id: Uuid, body: &str) -> Result<Uuid> {
     // A mention only routes to a Channel member, so join the Agent first if it is not already in.
     sqlx::query(
-        "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-         VALUES ($1,$2,$3,now(),0) ON CONFLICT DO NOTHING",
+        "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+         VALUES ($1,$2,$3,now()) ON CONFLICT DO NOTHING",
     )
     .bind(fixture.channel_id)
     .bind(fixture.space_id)
@@ -822,8 +824,8 @@ async fn insert_agent(
     .await?;
     pool.execute(
         sqlx::query(
-            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at,last_read_seq) \
-             VALUES ($1,$2,$3,now(),0)",
+            "INSERT INTO channel_members (channel_id,space_id,member_id,joined_at) \
+             VALUES ($1,$2,$3,now())",
         )
         .bind(channel_id)
         .bind(space_id)
@@ -864,9 +866,8 @@ async fn server_shutdown_closes_open_streams(database: &TestDatabase) -> Result<
     socket
         .send(Message::Text(
             serde_json::json!({
-                "supported_versions": {"minimum": 6, "maximum": 6},
+                "supported_versions": {"minimum": 7, "maximum": 7},
                 "daemon_version": "test",
-                "capabilities": [],
                 "daemon_session_id": Uuid::now_v7(),
                 "command_watermark": 0,
                 "live_run_ids": [],

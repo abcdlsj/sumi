@@ -3,19 +3,14 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, Monitor, Plus, Trash2, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import {
-  createAgent,
-  deleteComputer,
-  listAgents,
-  listComputers,
-  computerInstallCommand,
-  type Agent,
-  type Computer,
-} from "../api/client";
+import {createAgent, deleteComputer, listAgents, listComputers, computerInstallCommand} from "../api/client";
+import type {Agent, Computer} from "../api/types";
 import { activityLabel } from "../agentActivity";
-import { DRIVER_CHOICES, driverInput } from "../driver";
+import { driverInput } from "../driver";
+import { AgentSetupFields } from "../components/AgentSetupFields";
 import { LlmUsagePanel } from "../components/LlmUsagePanel";
-import { PixelIdentity, SpacePage } from "../components/SpaceShell";
+import { PixelIdentity } from "../components/PixelIdentity";
+import { SpacePage } from "../components/SpaceShell";
 import { DialogFrame } from "../components/DialogFrame";
 import { DetailSkeleton } from "../components/Skeleton";
 import { formatDateTime } from "../time";
@@ -127,7 +122,7 @@ function ComputersWorkspace({
     });
   }
 
-  return (
+  const workspace = (
     <section className="computers-workspace" aria-label="Computers">
       {computers.isPending || agents.isPending ? <DetailSkeleton label="Loading Computers" /> : null}
       {computers.error || agents.error ? (
@@ -175,6 +170,30 @@ function ComputersWorkspace({
         />
       ) : null}
     </section>
+  );
+
+  // The paired list is this page's own column, so the sidebar never changes shape. The wrapper
+  // stays mounted without it, so pairing the first Computer does not remount the page.
+  const paired = computers.data ?? [];
+  return (
+    <div className={paired.length ? "space-section" : "space-section space-section--page"}>
+      {paired.length ? <nav className="section-nav" aria-label="Paired computers">
+        <div className="nav-section-heading">
+          <p className="nav-label">Paired computers <span>{paired.length}</span></p>
+          {canManage ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash="pair-computer" aria-label="Pair Computer" title="Pair Computer"><Plus /></Link> : null}
+        </div>
+        {paired.map((computer) => {
+          const hash = `computer-${computer.id}`;
+          return (
+            <Link key={computer.id} className={`context-entity-row computer-context-row${activeHash === hash ? " context-entity-row--active" : ""}`} to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={hash}>
+              <Monitor aria-hidden="true" />
+              <span><strong title={computer.name}>{computer.name}</strong><small title={`${computer.status} · daemon v${computer.daemon_version}`}><i className={`computer-presence computer-presence--${computer.status}`} aria-hidden="true" />{computer.status}<em>v{computer.daemon_version}</em></small></span>
+            </Link>
+          );
+        })}
+      </nav> : null}
+      <div className="section-main">{workspace}</div>
+    </div>
   );
 }
 
@@ -303,11 +322,9 @@ function AgentDialog({ submit, close, pending, error, computers, selectedCompute
     <DialogFrame className="agent-dialog" close={close} labelId="create-agent-title">
         <header><h2 id="create-agent-title">Create Agent</h2><button className="icon-button" type="button" aria-label="Close Create Agent" onClick={close}><X /></button></header>
         <form className="agent-create-form" onSubmit={submit}>
-          <label className="agent-field agent-field--wide">Computer *<select name="computer_id" required defaultValue={selectedComputerId ?? computers[0]?.id ?? ""} disabled={computers.length === 0}>{computers.map((computer) => <option key={computer.id} value={computer.id}>{computer.name} · {computer.hostname}</option>)}</select></label>
+          <AgentSetupFields computers={computers} isOwner={isOwner} defaultComputerId={selectedComputerId} />
           <label className="agent-field">Name *<input name="name" aria-label="Agent name" required maxLength={40} placeholder="e.g. Iris" data-dialog-initial-focus /></label>
           <label className="agent-field agent-field--wide">Role *<textarea name="role_text" aria-label="Role" required maxLength={12000} placeholder="Describe responsibilities and boundaries…" /></label>
-          <label className="agent-field">Driver<select name="driver">{DRIVER_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></label>
-          <label className="agent-field">Access Level<select name="access_level"><option value="member">Member</option>{isOwner ? <option value="admin">Admin</option> : null}</select></label>
           {computers.length === 0 ? <p className="agent-create-prerequisite">Bring a paired Computer online before creating an Agent.</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <footer><button className="command-button" type="button" onClick={close}>Cancel</button><button className="command-button command-button--accent" type="submit" disabled={pending || computers.length === 0}>{pending ? "Creating…" : "Create Agent"}</button></footer>

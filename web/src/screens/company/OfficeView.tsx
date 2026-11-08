@@ -3,16 +3,8 @@ import { Link } from "@tanstack/react-router";
 import { ListTodo, MessageCircle, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  listAgents,
-  listChannelMembers,
-  listMemberDirectMessages,
-  listMessages,
-  type Agent,
-  type Channel,
-  type DirectMessage,
-  type Member,
-} from "../../api/client";
+import {listAgents, listChannelMembers, listMemberDirectMessages, listMessages} from "../../api/client";
+import type {Agent, Channel, DirectMessage, Member} from "../../api/types";
 import { activityLabel } from "../../agentActivity";
 import { PixelAgent, type AgentPose } from "../../components/company/PixelAgent";
 import { PixelIdentity } from "../../components/PixelIdentity";

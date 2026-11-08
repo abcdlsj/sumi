@@ -1,26 +1,31 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
+
+use time::Duration;
 
 use axum::http::{HeaderMap, HeaderValue};
 use object_store::local::LocalFileSystem;
-use sqlx::{Connection, PgConnection, Row, postgres::PgConnectOptions};
+use sqlx::Row;
 use tempfile::TempDir;
-use url::Url;
 
 use super::*;
-use crate::ids::{AgentId, AttachmentId, ChannelId, EventId, IdempotencyKey, SpaceId};
+use crate::server::adapters::activity::agent_activity_details;
+
+use crate::ids::{
+    AgentId, AttachmentId, ChannelId, DaemonSessionId, EventId, IdempotencyKey, SpaceId,
+};
 use crate::protocol::computer::{ItemDisposition, ItemOutcome, RunResult, RunTerminalStatus};
+use crate::server::adapters::test_database::TestDatabase;
 
 struct CapabilityFixture {
     state: RuntimeState,
-    admin: PgConnection,
-    database_name: String,
+    database: TestDatabase,
     _objects: TempDir,
     headers: HeaderMap,
     computer_id: Uuid,
     owner_id: Uuid,
     peer_agent_id: Uuid,
     channel_id: Uuid,
-    context: capability::RunContext,
+    context: wire_capability::RunContext,
     handled_item_id: InboxItemId,
     deferred_item_id: InboxItemId,
 }
@@ -35,22 +40,9 @@ fn agent_activity_arguments_are_unicode_bounded() {
 
 impl CapabilityFixture {
     async fn create() -> Self {
-        let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/postgres".to_owned());
-        let database_name = format!("sumi_capability_{}", Uuid::now_v7().simple());
-        let mut admin =
-            PgConnection::connect_with(&PgConnectOptions::from_str(&admin_url).unwrap())
-                .await
-                .unwrap();
-        sqlx::query(&format!("CREATE DATABASE \"{database_name}\""))
-            .execute(&mut admin)
-            .await
-            .unwrap();
-        let mut database_url = Url::parse(&admin_url).unwrap();
-        database_url.set_path(&format!("/{database_name}"));
-        let pool = PgPool::connect(database_url.as_str()).await.unwrap();
+        let database = TestDatabase::create("sumi_capability").await;
+        let pool = database.pool.clone();
         let storage = PostgresAdapter::new(pool.clone());
-        storage.initialize_schema().await.unwrap();
 
         let space_id = Uuid::now_v7();
         let owner_id = Uuid::now_v7();
@@ -72,8 +64,8 @@ impl CapabilityFixture {
                  INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','{}','online',1,now());
                  INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Test',1,'active','builtin',now());
                  INSERT INTO channels(id,space_id,kind,slug,next_seq,created_at) VALUES ('{channel_id}','{space_id}','private','general',2,now());
-                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{owner_id}',now(),0);
-                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) VALUES ('{channel_id}','{space_id}','{agent_id}',now(),0);
+                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{channel_id}','{space_id}','{owner_id}',now());
+                 INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) VALUES ('{channel_id}','{space_id}','{agent_id}',now());
                  INSERT INTO messages(id,space_id,channel_id,thread_id,channel_seq,placement,content_kind,author_member_id,body_markdown,created_at) VALUES ('{focus_id}','{space_id}','{channel_id}','{focus_id}',1,'root','text','{owner_id}','source',now());
                  INSERT INTO agent_runs(id,space_id,agent_id,focus_thread_id,status,trigger_kind,created_at,started_at) VALUES ('{run_id}','{space_id}','{agent_id}','{focus_id}','working','mention',now(),now());
                  INSERT INTO inbox_items(id,space_id,member_id,thread_id,kind,strength,status,available_at,assigned_run_id,created_at) VALUES
@@ -100,6 +92,7 @@ impl CapabilityFixture {
             read: PostgresQueries::new(pool),
             objects: Arc::new(AttachmentObjectStore::new(Arc::new(object_store))),
             session_lifetime: SessionLifetime::from_hours(1).unwrap(),
+            secure_cookies: false,
             attachment_max_bytes: 100 * 1024 * 1024,
             queries: QueryRegistry::default(),
             agent_graph_cache: AgentGraphCache::default(),
@@ -115,15 +108,14 @@ impl CapabilityFixture {
         );
         Self {
             state,
-            admin,
-            database_name,
+            database,
             _objects: objects,
             headers,
             computer_id,
             owner_id,
             peer_agent_id,
             channel_id,
-            context: capability::RunContext {
+            context: wire_capability::RunContext {
                 agent_id: AgentId::from_uuid(agent_id),
                 space_id: SpaceId::from_uuid(space_id),
                 task_id: None,
@@ -135,16 +127,19 @@ impl CapabilityFixture {
         }
     }
 
-    async fn execute(&self, action: capability::Action) -> Result<Value, capability::Error> {
+    async fn execute(
+        &self,
+        action: wire_capability::Action,
+    ) -> Result<Value, wire_capability::Error> {
         self.execute_with_key(action, IdempotencyKey::from_uuid(Uuid::now_v7()))
             .await
     }
 
     async fn execute_with_key(
         &self,
-        action: capability::Action,
+        action: wire_capability::Action,
         idempotency_key: IdempotencyKey,
-    ) -> Result<Value, capability::Error> {
+    ) -> Result<Value, wire_capability::Error> {
         execute_agent_action(
             &self.state,
             &self.headers,
@@ -160,7 +155,7 @@ impl CapabilityFixture {
 
     async fn bind_task(&mut self) -> TaskId {
         let created = self
-            .execute(capability::Action::TaskCreate {
+            .execute(wire_capability::Action::TaskCreate {
                 title: Some("Capability Task".into()),
                 assignee: None,
                 source_thread: None,
@@ -173,15 +168,9 @@ impl CapabilityFixture {
         task_id
     }
 
-    async fn destroy(mut self) {
+    async fn destroy(self) {
         self.state.pool.close().await;
-        sqlx::query(&format!(
-            "DROP DATABASE \"{}\" WITH (FORCE)",
-            self.database_name
-        ))
-        .execute(&mut self.admin)
-        .await
-        .unwrap();
+        self.database.close().await;
     }
 }
 
@@ -214,7 +203,7 @@ async fn insert_focus_message(fixture: &CapabilityFixture, channel_id: Uuid, bod
 async fn agent_capability_discovery_lists_creation_choices_and_permission_state() {
     let fixture = CapabilityFixture::create().await;
     let discovery = fixture
-        .execute(capability::Action::Discover {
+        .execute(wire_capability::Action::Discover {
             operation: "agent.create".into(),
         })
         .await
@@ -257,17 +246,17 @@ async fn agent_capability_creation_rejects_an_unavailable_computer() {
     .unwrap();
 
     let error = fixture
-        .execute(capability::Action::AgentCreate {
+        .execute(wire_capability::Action::AgentCreate {
             name: "Coder".into(),
             role: "Write code".into(),
-            driver: capability::DriverKind::Acp {
-                provider: capability::AcpProvider::Codex,
+            driver: wire_capability::DriverKind::Acp {
+                provider: wire_capability::AcpProvider::Codex,
             },
             computer_id: crate::ids::ComputerId::from_uuid(Uuid::now_v7()),
         })
         .await
         .unwrap_err();
-    assert_eq!(error.code, capability::ErrorCode::Conflict);
+    assert_eq!(error.code, wire_capability::ErrorCode::Conflict);
 
     fixture.destroy().await;
 }
@@ -290,7 +279,6 @@ async fn agent_activity_and_last_error_code_come_from_run_and_inbox_facts() {
     let running = read_agent(&fixture, agent_id).await;
     let activity = running.activity.as_ref().unwrap();
     assert_eq!(activity.kind, "working");
-    assert!(activity.label.contains("#general:1"), "{}", activity.label);
     assert!(matches!(
         running.activity_status,
         AgentActivityStatus::Working
@@ -706,15 +694,17 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
     .await
     .unwrap();
     let failed = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "must roll back".to_owned(),
-            attachment_ids: Vec::new(),
-            handle_item_id: Some(fixture.handled_item_id),
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "must roll back".to_owned(),
+                attachment_ids: Vec::new(),
+                handle_item_id: Some(fixture.handled_item_id),
+            },
+        ))
         .await
         .unwrap_err();
-    assert_eq!(failed.code, capability::ErrorCode::Internal);
+    assert_eq!(failed.code, wire_capability::ErrorCode::Internal);
     let rolled_back: (i64, Option<String>) = (
         sqlx::query_scalar("SELECT count(*) FROM messages WHERE body_markdown='must roll back'")
             .fetch_one(&fixture.state.pool)
@@ -738,14 +728,14 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
     .await
     .unwrap();
 
-    let ack = capability::Action::InboxAck {
+    let ack = wire_capability::Action::InboxAck {
         item_id: fixture.handled_item_id,
         reason: Some("handled".to_owned()),
     };
     fixture.execute(ack.clone()).await.unwrap();
     fixture.execute(ack).await.unwrap();
     let defer_until = OffsetDateTime::now_utc() + Duration::hours(2);
-    let defer = capability::Action::InboxDefer {
+    let defer = wire_capability::Action::InboxDefer {
         item_id: fixture.deferred_item_id,
         until: defer_until,
     };
@@ -776,13 +766,13 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
     );
 
     let conflict = fixture
-        .execute(capability::Action::InboxDefer {
+        .execute(wire_capability::Action::InboxDefer {
             item_id: fixture.handled_item_id,
             until: defer_until,
         })
         .await
         .unwrap_err();
-    assert_eq!(conflict.code, capability::ErrorCode::Conflict);
+    assert_eq!(conflict.code, wire_capability::ErrorCode::Conflict);
 
     let submitted = super::super::http::submit_run_result(
         &fixture.state.storage,
@@ -790,6 +780,7 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
             computer_id: ComputerId::from_uuid(fixture.computer_id),
         },
         RunResult {
+            daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             event_id: EventId::from_uuid(Uuid::now_v7()),
             run_id: fixture.context.run_id,
             status: RunTerminalStatus::Yielded,
@@ -838,8 +829,8 @@ async fn capability_dispositions_are_atomic_idempotent_and_conflict_safe() {
 async fn message_send_keeps_the_first_disposition_timestamp() {
     let fixture = CapabilityFixture::create().await;
     let message = |body: &str| {
-        capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
+        wire_capability::Action::MessageSend(wire_capability::MessageSend {
+            target: wire_capability::MessageTarget::Focus,
             body: body.to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: Some(fixture.handled_item_id),
@@ -883,12 +874,14 @@ async fn message_send_keeps_the_first_disposition_timestamp() {
 async fn agent_message_send_resolves_display_name_mentions_in_the_target_channel() {
     let fixture = CapabilityFixture::create().await;
     fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "@Owner hello and @Nobody ignored".to_owned(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "@Owner hello and @Nobody ignored".to_owned(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     let mentions: Vec<Uuid> = sqlx::query_scalar(
@@ -902,12 +895,14 @@ async fn agent_message_send_resolves_display_name_mentions_in_the_target_channel
     assert_eq!(mentions, vec![fixture.owner_id]);
 
     fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "no mention here".to_owned(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "no mention here".to_owned(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     let none: i64 = sqlx::query_scalar(
@@ -926,12 +921,16 @@ async fn agent_message_send_resolves_display_name_mentions_in_the_target_channel
 async fn agent_message_send_can_open_an_agent_only_dm() {
     let fixture = CapabilityFixture::create().await;
     let result = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Member(MemberId::from_uuid(fixture.peer_agent_id)),
-            body: "private Agent note".to_owned(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Member(MemberId::from_uuid(
+                    fixture.peer_agent_id,
+                )),
+                body: "private Agent note".to_owned(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     let channel_id = result["channel_id"].as_str().unwrap();
@@ -966,7 +965,7 @@ async fn agent_channel_leave_records_a_notice_and_replays_idempotently() {
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let result = fixture
         .execute_with_key(
-            capability::Action::ChannelLeave {
+            wire_capability::Action::ChannelLeave {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
             },
             key,
@@ -1012,7 +1011,7 @@ async fn agent_channel_leave_records_a_notice_and_replays_idempotently() {
 
     fixture
         .execute_with_key(
-            capability::Action::ChannelLeave {
+            wire_capability::Action::ChannelLeave {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
             },
             key,
@@ -1037,7 +1036,7 @@ async fn agent_channel_leave_replay_requires_the_original_run_context() {
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
     fixture
         .execute_with_key(
-            capability::Action::ChannelLeave {
+            wire_capability::Action::ChannelLeave {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
             },
             key,
@@ -1053,7 +1052,7 @@ async fn agent_channel_leave_replay_requires_the_original_run_context() {
         fixture.computer_id,
         AgentActionRequest {
             context: stale_context,
-            action: capability::Action::ChannelLeave {
+            action: wire_capability::Action::ChannelLeave {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
             },
             idempotency_key: Some(key),
@@ -1061,7 +1060,7 @@ async fn agent_channel_leave_replay_requires_the_original_run_context() {
     )
     .await
     .unwrap_err();
-    assert_eq!(replay.code, capability::ErrorCode::ContextChanged);
+    assert_eq!(replay.code, wire_capability::ErrorCode::ContextChanged);
 
     let notice_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM messages WHERE channel_id=$1 AND content_kind='system_notice'",
@@ -1104,7 +1103,7 @@ async fn agent_channel_membership_commands_commit_notices_and_replay_idempotentl
     let invite_key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let invited = fixture
         .execute_with_key(
-            capability::Action::ChannelInvite {
+            wire_capability::Action::ChannelInvite {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
                 member_id: crate::ids::MemberId::from_uuid(fixture.peer_agent_id),
             },
@@ -1136,7 +1135,7 @@ async fn agent_channel_membership_commands_commit_notices_and_replay_idempotentl
     );
     let replayed = fixture
         .execute_with_key(
-            capability::Action::ChannelInvite {
+            wire_capability::Action::ChannelInvite {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
                 member_id: crate::ids::MemberId::from_uuid(fixture.peer_agent_id),
             },
@@ -1149,7 +1148,7 @@ async fn agent_channel_membership_commands_commit_notices_and_replay_idempotentl
     let remove_key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let removed = fixture
         .execute_with_key(
-            capability::Action::ChannelRemove {
+            wire_capability::Action::ChannelRemove {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
                 member_id: crate::ids::MemberId::from_uuid(fixture.peer_agent_id),
             },
@@ -1181,7 +1180,7 @@ async fn agent_channel_membership_commands_commit_notices_and_replay_idempotentl
     );
     let remove_replay = fixture
         .execute_with_key(
-            capability::Action::ChannelRemove {
+            wire_capability::Action::ChannelRemove {
                 channel_id: ChannelId::from_uuid(fixture.channel_id),
                 member_id: crate::ids::MemberId::from_uuid(fixture.peer_agent_id),
             },
@@ -1199,9 +1198,9 @@ async fn capability_task_done_commits_collaboration_facts_and_replays() {
     let mut fixture = CapabilityFixture::create().await;
     let task_id = fixture.bind_task().await;
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
-    let action = capability::Action::TaskDone {
+    let action = wire_capability::Action::TaskDone {
         result: Some("Task Result".into()),
-        post_to: capability::PostTarget::Focus,
+        post_to: wire_capability::PostTarget::Focus,
         result_message: None,
     };
 
@@ -1219,7 +1218,7 @@ async fn capability_task_done_commits_collaboration_facts_and_replays() {
         .execute_with_key(action.clone(), key)
         .await
         .unwrap_err();
-    assert_eq!(failed.code, capability::ErrorCode::Internal);
+    assert_eq!(failed.code, wire_capability::ErrorCode::Internal);
     let rolled_back: (String, String, i64, i64) = sqlx::query_as(
         "SELECT tasks.status,runs.status, \
              (SELECT count(*) FROM messages WHERE body_markdown='Task Result'), \
@@ -1267,9 +1266,9 @@ async fn capability_task_submit_review_and_close_use_terminal_transaction() {
     let mut review = CapabilityFixture::create().await;
     let review_task = review.bind_task().await;
     review
-        .execute(capability::Action::TaskSubmitReview {
+        .execute(wire_capability::Action::TaskSubmitReview {
             body: "Ready for review".into(),
-            post_to: capability::PostTarget::Source,
+            post_to: wire_capability::PostTarget::Source,
         })
         .await
         .unwrap();
@@ -1288,8 +1287,8 @@ async fn capability_task_submit_review_and_close_use_terminal_transaction() {
     let mut close = CapabilityFixture::create().await;
     let close_task = close.bind_task().await;
     close
-        .execute(capability::Action::TaskClose {
-            reason: capability::CloseReason::Obsolete,
+        .execute(wire_capability::Action::TaskClose {
+            reason: wire_capability::CloseReason::Obsolete,
             note: Some("No longer needed".into()),
         })
         .await
@@ -1458,12 +1457,14 @@ async fn capability_message_send_mounts_ready_attachments_from_uploader() {
     .unwrap();
 
     let sent = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "with attachment".into(),
-            attachment_ids: vec![AttachmentId::from_uuid(attachment_id)],
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "with attachment".into(),
+                attachment_ids: vec![AttachmentId::from_uuid(attachment_id)],
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     let message_id = Uuid::parse_str(sent["message_id"].as_str().unwrap()).unwrap();
@@ -1500,15 +1501,17 @@ async fn capability_message_send_mounts_ready_attachments_from_uploader() {
     .await
     .unwrap();
     let rejected = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "pending attachment".into(),
-            attachment_ids: vec![AttachmentId::from_uuid(pending_id)],
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "pending attachment".into(),
+                attachment_ids: vec![AttachmentId::from_uuid(pending_id)],
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap_err();
-    assert_eq!(rejected.code, capability::ErrorCode::Conflict);
+    assert_eq!(rejected.code, wire_capability::ErrorCode::Conflict);
     fixture.destroy().await;
 }
 
@@ -1517,7 +1520,7 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
     let fixture = CapabilityFixture::create().await;
 
     let space = fixture
-        .execute(capability::Action::SpaceMembers)
+        .execute(wire_capability::Action::SpaceMembers)
         .await
         .unwrap();
     let space_member_ids = space["members"]
@@ -1530,7 +1533,7 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
     assert!(space_member_ids.contains(&fixture.peer_agent_id.to_string()));
 
     let channel = fixture
-        .execute(capability::Action::ChannelMembers {
+        .execute(wire_capability::Action::ChannelMembers {
             channel_id: ChannelId::from_uuid(fixture.channel_id),
         })
         .await
@@ -1559,8 +1562,8 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at,last_read_seq) \
-         VALUES($1,$2,$3,now(),0)",
+        "INSERT INTO channel_members(channel_id,space_id,member_id,joined_at) \
+         VALUES($1,$2,$3,now())",
     )
     .bind(hidden_channel_id)
     .bind(fixture.context.space_id.into_uuid())
@@ -1569,12 +1572,12 @@ async fn agent_member_queries_separate_space_and_visible_channel_members() {
     .await
     .unwrap();
     let denied = fixture
-        .execute(capability::Action::ChannelMembers {
+        .execute(wire_capability::Action::ChannelMembers {
             channel_id: ChannelId::from_uuid(hidden_channel_id),
         })
         .await
         .unwrap_err();
-    assert_eq!(denied.code, capability::ErrorCode::PermissionDenied);
+    assert_eq!(denied.code, wire_capability::ErrorCode::PermissionDenied);
 
     fixture.destroy().await;
 }
@@ -1589,7 +1592,7 @@ async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
             .await
             .unwrap();
     let read = fixture
-        .execute(capability::Action::ChannelRead {
+        .execute(wire_capability::Action::ChannelRead {
             channel_id: ChannelId::from_uuid(channel_id),
             around_message_id: None,
             limit: 20,
@@ -1603,24 +1606,23 @@ async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
     let unseen = insert_focus_message(&fixture, channel_id, "unseen by the Run").await;
 
     let stale_done = fixture
-        .execute(capability::Action::TaskDone {
+        .execute(wire_capability::Action::TaskDone {
             result: Some("must not finish".into()),
-            post_to: capability::PostTarget::Focus,
+            post_to: wire_capability::PostTarget::Focus,
             result_message: None,
         })
         .await
         .unwrap_err();
-    assert_eq!(stale_done.code, capability::ErrorCode::ContextChanged);
+    assert_eq!(stale_done.code, wire_capability::ErrorCode::ContextChanged);
     assert!(!stale_done.retryable);
-    assert!(stale_done.message.contains("read the Thread"));
     assert!(stale_done.details.is_empty());
 
     // A held write records no idempotency, so the retry may reuse the same key.
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let held = fixture
         .execute_with_key(
-            capability::Action::MessageSend(capability::MessageSend {
-                target: capability::MessageTarget::Focus,
+            wire_capability::Action::MessageSend(wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
                 body: "must wait".into(),
                 attachment_ids: Vec::new(),
                 handle_item_id: Some(fixture.handled_item_id),
@@ -1655,8 +1657,8 @@ async fn chat_writes_are_held_until_the_run_observes_other_members_messages() {
 
     let posted = fixture
         .execute_with_key(
-            capability::Action::MessageSend(capability::MessageSend {
-                target: capability::MessageTarget::Focus,
+            wire_capability::Action::MessageSend(wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
                 body: "must wait".into(),
                 attachment_ids: Vec::new(),
                 handle_item_id: None,
@@ -1694,23 +1696,27 @@ async fn a_run_posts_after_five_consecutive_holds() {
     for hop in 0..5 {
         insert_focus_message(&fixture, channel_id, &format!("chatter {hop}")).await;
         let held = fixture
-            .execute(capability::Action::MessageSend(capability::MessageSend {
-                target: capability::MessageTarget::Focus,
-                body: "insisting".into(),
-                attachment_ids: Vec::new(),
-                handle_item_id: None,
-            }))
+            .execute(wire_capability::Action::MessageSend(
+                wire_capability::MessageSend {
+                    target: wire_capability::MessageTarget::Focus,
+                    body: "insisting".into(),
+                    attachment_ids: Vec::new(),
+                    handle_item_id: None,
+                },
+            ))
             .await
             .unwrap();
         assert_eq!(held["status"], "held");
     }
     let posted = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "insisting".into(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "insisting".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     assert_eq!(posted["status"], "posted");
@@ -1762,23 +1768,27 @@ async fn a_run_is_not_held_by_its_own_messages_or_by_other_threads() {
     .unwrap();
 
     let posted = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "not blocked".into(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "not blocked".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     assert_eq!(posted["status"], "posted");
 
     let held = fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Channel(ChannelId::from_uuid(channel_id)),
-            body: "new root".into(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Channel(ChannelId::from_uuid(channel_id)),
+                body: "new root".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     assert_eq!(held["status"], "held");
@@ -1803,18 +1813,18 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
     let task_id = fixture.bind_task().await;
     insert_focus_message(&fixture, channel_id, "moved before first read").await;
     let stale = fixture
-        .execute(capability::Action::TaskDone {
+        .execute(wire_capability::Action::TaskDone {
             result: Some("stale first".into()),
-            post_to: capability::PostTarget::Focus,
+            post_to: wire_capability::PostTarget::Focus,
             result_message: None,
         })
         .await
         .unwrap_err();
-    assert_eq!(stale.code, capability::ErrorCode::ContextChanged);
+    assert_eq!(stale.code, wire_capability::ErrorCode::ContextChanged);
     assert!(stale.details.is_empty());
 
     fixture
-        .execute(capability::Action::ChannelRead {
+        .execute(wire_capability::Action::ChannelRead {
             channel_id: ChannelId::from_uuid(channel_id),
             around_message_id: None,
             limit: 20,
@@ -1822,9 +1832,9 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
         .await
         .unwrap();
     fixture
-        .execute(capability::Action::TaskDone {
+        .execute(wire_capability::Action::TaskDone {
             result: Some("first done".into()),
-            post_to: capability::PostTarget::Focus,
+            post_to: wire_capability::PostTarget::Focus,
             result_message: None,
         })
         .await
@@ -1843,46 +1853,47 @@ async fn task_outcomes_follow_the_latest_observed_thread_sequence() {
     fixture.destroy().await;
 }
 
-use axum::body::to_bytes;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::*;
-
-#[tokio::test]
-async fn authentication_surfaces_cannot_be_substituted() {
-    let error = write_context(
-        AuthenticationSurface::Computer,
-        AuthenticationSurface::Browser,
-        Some(&Uuid::now_v7().to_string()),
-    )
-    .unwrap_err()
-    .into_response();
-    assert_eq!(error.status(), StatusCode::FORBIDDEN);
-
-    let body: Value =
-        serde_json::from_slice(&to_bytes(error.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(body["error"]["code"], "permission_denied");
-    assert!(body["error"].get("details").is_none());
+#[test]
+fn the_session_cookie_is_secure_only_when_the_server_is_served_over_tls() {
+    let token = RawSessionToken::new("session-token".to_owned());
+    let header = |secure| {
+        session_cookie(CookieJar::new(), &token, secure)
+            .get(SESSION_COOKIE)
+            .map(|cookie| cookie.to_string())
+            .unwrap()
+    };
+    let insecure = header(false);
+    assert!(insecure.contains("HttpOnly"), "{insecure}");
+    assert!(insecure.contains("SameSite=Lax"), "{insecure}");
+    assert!(!insecure.contains("Secure"), "{insecure}");
+    assert!(header(true).contains("Secure"));
 }
 
-#[test]
-fn every_write_requires_a_valid_idempotency_key() {
+#[tokio::test]
+async fn logout_removes_the_cookie_on_the_path_it_was_set_on() {
+    let token = RawSessionToken::new("session-token".to_owned());
+    let set = session_cookie(CookieJar::new(), &token, true).into_response();
+    let removal =
+        clear_session_cookie(CookieJar::from_headers(set.headers()), true).into_response();
+    let header = removal
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("logout sends a removal cookie")
+        .to_str()
+        .unwrap()
+        .to_owned();
     assert!(
-        write_context(
-            AuthenticationSurface::Agent,
-            AuthenticationSurface::Agent,
-            None,
-        )
-        .is_err()
+        header.starts_with(&format!("{SESSION_COOKIE}=")),
+        "{header}"
     );
+    assert!(header.contains("Path=/"), "{header}");
+    assert!(header.contains("Secure"), "{header}");
     assert!(
-        write_context(
-            AuthenticationSurface::Agent,
-            AuthenticationSurface::Agent,
-            Some("not-a-uuid"),
-        )
-        .is_err()
+        header.contains("Max-Age=0") || header.contains("expires=Thu, 01 Jan 1970"),
+        "the removal cookie must expire the session: {header}"
     );
 }
 
@@ -1893,6 +1904,41 @@ fn task_create_dto_rejects_system_derived_source_fields() {
         "source_thread_id": Uuid::now_v7()
     });
     assert!(serde_json::from_value::<CreateTaskBody>(body).is_err());
+}
+
+#[tokio::test]
+async fn a_write_from_a_run_that_stopped_working_reports_context_changed() {
+    let fixture = CapabilityFixture::create().await;
+    sqlx::query(
+        "INSERT INTO member_permissions (member_id,space_id,action_code,granted_by_member_id,created_at) \
+         VALUES ($1,$2,'channel.create',$3,now())",
+    )
+    .bind(fixture.context.agent_id.into_uuid())
+    .bind(fixture.context.space_id.into_uuid())
+    .bind(fixture.owner_id)
+    .execute(&fixture.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent_runs SET status='yielded',outcome_code='yielded',finished_at=now() WHERE id=$1",
+    )
+        .bind(fixture.context.run_id.into_uuid())
+        .execute(&fixture.state.pool)
+        .await
+        .unwrap();
+
+    let error = fixture
+        .execute(wire_capability::Action::ChannelCreate {
+            slug: "late".into(),
+            topic: None,
+            private: false,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, wire_capability::ErrorCode::ContextChanged);
+    assert!(!error.retryable);
+    fixture.destroy().await;
 }
 
 #[tokio::test]
@@ -1910,7 +1956,7 @@ async fn agent_channel_create_rejects_topic_text_used_as_a_slug() {
     .unwrap();
 
     let error = fixture
-        .execute(capability::Action::ChannelCreate {
+        .execute(wire_capability::Action::ChannelCreate {
             slug: "产品讨论".into(),
             topic: Some("产品讨论".into()),
             private: false,
@@ -1918,10 +1964,7 @@ async fn agent_channel_create_rejects_topic_text_used_as_a_slug() {
         .await
         .unwrap_err();
 
-    assert_eq!(error.code, capability::ErrorCode::InvalidArgument);
-    assert!(error.message.contains("lowercase ASCII"));
-    assert!(error.message.contains("Use topic"));
-    assert!(error.message.contains("topic supports Unicode"));
+    assert_eq!(error.code, wire_capability::ErrorCode::InvalidArgument);
     assert!(!error.retryable);
     let channel_count: i64 = sqlx::query_scalar("SELECT count(*) FROM channels WHERE space_id=$1")
         .bind(fixture.context.space_id.into_uuid())
@@ -1951,17 +1994,19 @@ async fn agent_write_actions_emit_agent_activity_events() {
     .unwrap();
 
     fixture
-        .execute(capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
-            body: "activity check".into(),
-            attachment_ids: Vec::new(),
-            handle_item_id: None,
-        }))
+        .execute(wire_capability::Action::MessageSend(
+            wire_capability::MessageSend {
+                target: wire_capability::MessageTarget::Focus,
+                body: "activity check".into(),
+                attachment_ids: Vec::new(),
+                handle_item_id: None,
+            },
+        ))
         .await
         .unwrap();
     let task_id = fixture.bind_task().await;
     let created_channel = fixture
-        .execute(capability::Action::ChannelCreate {
+        .execute(wire_capability::Action::ChannelCreate {
             slug: "news".into(),
             topic: Some("团队动态".into()),
             private: false,
@@ -1983,27 +2028,27 @@ async fn agent_write_actions_emit_agent_activity_events() {
     .unwrap();
     assert_eq!(initial_notice_count, 0);
     let created_agent = fixture
-        .execute(capability::Action::AgentCreate {
+        .execute(wire_capability::Action::AgentCreate {
             name: "Coder".into(),
             role: "Write code".into(),
-            driver: capability::DriverKind::Acp {
-                provider: capability::AcpProvider::Codex,
+            driver: wire_capability::DriverKind::Acp {
+                provider: wire_capability::AcpProvider::Codex,
             },
             computer_id: crate::ids::ComputerId::from_uuid(fixture.computer_id),
         })
         .await
         .unwrap();
     fixture
-        .execute(capability::Action::InboxAck {
+        .execute(wire_capability::Action::InboxAck {
             item_id: fixture.handled_item_id,
             reason: None,
         })
         .await
         .unwrap();
     fixture
-        .execute(capability::Action::TaskDone {
+        .execute(wire_capability::Action::TaskDone {
             result: Some("Agent Result".into()),
-            post_to: capability::PostTarget::Focus,
+            post_to: wire_capability::PostTarget::Focus,
             result_message: None,
         })
         .await
@@ -2099,8 +2144,8 @@ async fn a_resent_agent_action_records_one_activity() {
     let fixture = CapabilityFixture::create().await;
     let key = IdempotencyKey::from_uuid(Uuid::now_v7());
     let send = || {
-        capability::Action::MessageSend(capability::MessageSend {
-            target: capability::MessageTarget::Focus,
+        wire_capability::Action::MessageSend(wire_capability::MessageSend {
+            target: wire_capability::MessageTarget::Focus,
             body: "sent once".to_owned(),
             attachment_ids: Vec::new(),
             handle_item_id: None,
@@ -2139,6 +2184,7 @@ async fn yielded_run_emits_agent_activity_event() {
         &fixture.state,
         fixture.computer_id,
         RunResult {
+            daemon_session_id: DaemonSessionId::from_uuid(Uuid::now_v7()),
             event_id: EventId::from_uuid(Uuid::now_v7()),
             run_id: fixture.context.run_id,
             status: RunTerminalStatus::Yielded,

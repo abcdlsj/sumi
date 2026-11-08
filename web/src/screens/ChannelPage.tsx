@@ -3,28 +3,18 @@ import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-route
 import { Hash, LoaderCircle, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  addChannelAgents,
-  createDirectMessage,
-  createMessage,
-  listAgents,
-  listChannelMembers,
-  listComputers,
-  listMembers,
-  type Channel,
-  type ChannelMembers,
-  type Member,
-  type Message,
-} from "../api/client";
+import {addChannelAgents, createDirectMessage, createMessage, listAgents, listChannelMembers, listComputers, listMembers} from "../api/client";
+import type {Channel, ChannelMembers, CreateMessageInput, Member, Message} from "../api/types";
 import { DialogFrame } from "../components/DialogFrame";
 import { GettingStarted } from "../components/onboarding/GettingStarted";
-import { MessageComposer, type ComposerInput } from "../components/channel/MessageComposer";
+import { MessageComposer } from "../components/channel/MessageComposer";
 import { MessageTimeline, type MessageTimelineScrollApi } from "../components/channel/MessageTimeline";
 import { SelfMemberContext } from "../components/channel/selfMember";
 import { ThreadPane } from "../components/channel/ThreadPane";
 import { useOutbox } from "../components/channel/outbox";
 import { messagesQueryOptions, timelinePage, upsertRootMessage, type MessagePages } from "../components/channel/messageCache";
-import { PixelIdentity, PresenceIdentity, SpacePage } from "../components/SpaceShell";
+import { PixelIdentity, PresenceIdentity } from "../components/PixelIdentity";
+import { SpacePage } from "../components/SpaceShell";
 import { agentPresence } from "../agentActivity";
 
 export function ChannelPage() {
@@ -236,7 +226,7 @@ export function MessageWorkspace({
   const workingLabelByMemberId = new Map(
     (agents.data ?? []).flatMap((agent) => agent.activity?.label ? [[agent.member_id, agent.activity.label] as const] : []),
   );
-  async function sendMessage(input: ComposerInput, idempotencyKey: string): Promise<Message> {
+  async function sendMessage(input: CreateMessageInput, idempotencyKey: string): Promise<Message> {
     return createMessage(channel.id, input, idempotencyKey);
   }
 
@@ -245,7 +235,7 @@ export function MessageWorkspace({
     queryClient.setQueryData<MessagePages>(messagesQueryOptions(channel.id).queryKey, (data) => upsertRootMessage(data, message));
   }
   const outbox = useOutbox(sendMessage, addMessage);
-  function queueMessage(input: ComposerInput) {
+  function queueMessage(input: CreateMessageInput) {
     outbox.queue(input);
     window.requestAnimationFrame(() => timelineScrollApi.current?.scrollToBottom());
   }

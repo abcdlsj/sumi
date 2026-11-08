@@ -2,15 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, Paperclip, Users, X } from "lucide-react";
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
-import { uploadAttachment, type Member, type Message } from "../../api/client";
-import { PixelIdentity } from "../SpaceShell";
-
-export interface ComposerInput {
-  body_markdown: string;
-  mentions: string[];
-  mention_all: boolean;
-  attachment_ids: string[];
-}
+import {uploadAttachment} from "../../api/client";
+import type {CreateMessageInput, Member, Message} from "../../api/types";
+import { PixelIdentity } from "../PixelIdentity";
 
 const DRAFT_STORAGE_PREFIX = "sumi:composer-draft:";
 
@@ -63,10 +57,10 @@ export function MessageComposer({
   sendButtonLabel: string;
   attachmentsAriaLabel: string;
   className?: string;
-  send?: (input: ComposerInput) => Promise<Message>;
+  send?: (input: CreateMessageInput) => Promise<Message>;
   onSent?: (message: Message) => void;
   /** Hands the message to an outbox that shows it at once; the composer clears immediately. */
-  queue?: (input: ComposerInput) => void;
+  queue?: (input: CreateMessageInput) => void;
   /** Text to put in the composer, e.g. a mention from the setup guide; nonce makes repeats apply. */
   insert?: { text: string; nonce: number };
 }) {
@@ -98,7 +92,7 @@ export function MessageComposer({
   const [attachments, setAttachments] = useState<Awaited<ReturnType<typeof uploadAttachment>>[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const submission = useMutation({
-    mutationFn: (input: ComposerInput) => send!(input),
+    mutationFn: (input: CreateMessageInput) => send!(input),
     onSuccess: (message) => {
       onSent?.(message);
       setBody("");

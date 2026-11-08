@@ -119,16 +119,14 @@ textarea:focus-visible {
 }
 
 .page-title,
-.members-title,
-.settings-header {
+.members-title {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
 .page-title h1,
-.members-title h1,
-.settings-header h1 {
+.members-title h1 {
   margin: 0;
   font-size: var(--text-page-title);
   font-weight: 600;
@@ -597,6 +595,11 @@ input[type="radio"] {
 .space-section {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
+}
+
+/* A page inside the section grid that has no list of its own. */
+.space-section--page {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .section-nav {
@@ -1396,8 +1399,10 @@ input[type="radio"] {
 .tasks-header .page-title h1,
 .members-title h1,
 .computer-onboarding-header .page-title h1,
-.office-header .page-title h1 {
+.office-header .page-title h1,
+.settings-header h1 {
   font-size: var(--text-page-title);
+  font-weight: 600;
 }
 
 /* Route states ---------------------------------------------------------- */
@@ -1871,6 +1876,14 @@ body > #root > .route-status {
 
 .agent-create-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Computer, Driver and Access, wherever a new Agent is configured. */
+.agent-setup-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  grid-column: 1 / -1;
 }
 
 .agent-field--wide,
@@ -2471,6 +2484,120 @@ a.task-source-link:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.task-actions-secondary {
+  margin-top: 12px;
+}
+
+.task-changes {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-width: var(--measure-text);
+}
+
+.task-changes h3 {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.task-changes textarea {
+  min-height: 78px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.task-changes-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.task-changes-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* The assignee's last word while review is pending, above the Request body. */
+.task-latest {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-sidebar);
+}
+
+.task-latest header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-latest h3 {
+  margin: 0;
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.task-latest time {
+  color: var(--muted);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.task-latest-body {
+  margin: 0;
+  max-width: var(--measure-text);
+  color: var(--ink);
+  font-size: var(--text-small);
+  white-space: pre-wrap;
+}
+
+.task-latest-body--clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.task-latest-toggle {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+
+.task-latest-toggle:hover {
+  text-decoration: underline;
+}
+
+.task-latest--empty {
+  margin: 2px 0 10px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+@media (max-width: 700px) {
+  .task-changes-actions {
+    flex-direction: column;
+  }
+
+  .task-changes-actions .command-button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .task-assignee {

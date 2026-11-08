@@ -56,9 +56,6 @@ function renderWorkspace({
 }: { withUsage?: boolean; usageFailure?: boolean; partialUsage?: boolean } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path.endsWith("/spaces/by-slug/sumi-lab")) {
-        return json({ id: spaceId, name: "Sumi Dev", slug: "sumi-lab" });
-      }
       if (path.endsWith(`/spaces/${spaceId}/agents`)) {
         return json([
           { member_id: irisId, name: "Iris", activity_status: "idle" },
@@ -88,7 +85,7 @@ function renderWorkspace({
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <AgentStatisticsWorkspace spaceSlug="sumi-lab" />
+      <AgentStatisticsWorkspace spaceId={spaceId} />
     </QueryClientProvider>,
   );
   return { view, fetchMock };

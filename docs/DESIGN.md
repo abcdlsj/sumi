@@ -124,14 +124,14 @@ Driver：
 
 ### 协议与投递
 
-- 当前 Computer 协议 schema 为 v6，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
+- 当前 Computer 协议 schema 为 v7，Server 与 Computer 只宣告当前版本；wire required field 变更时提升版本，不在同一版本中兼容两套 schema。
 - 双方无共同版本时拒绝连接。
 - Computer 每 15 秒发送 heartbeat 与 WebSocket ping；任一端 45 秒内未收到任何帧即判定连接失效并断开，Computer 随即重连。建连 20 秒、单帧发送 30 秒超时。连接持续 60 秒以上后，重连退避从最小间隔重新开始。Server 只在同一 Computer 没有更新的连接时把它标记为 offline。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
 - RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
-- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况；上一连接会话的残留帧必须被丢弃。
+- Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况：hello 携带本次连接的 daemon session ID、已结算（applied 或 rejected）的最高 command 序号和仍持有本地状态的 Run 列表；Server 只补发其后的、未 ACK 的命令，仍处 pending 的命令因此一定会被重发。heartbeat、Run result 与 command result 携带产生它们的 daemon session ID，Server 丢弃与本次握手不同的会话帧。
 - 以 Member 身份发起的 HTTP 写操作都必须带 `Idempotency-Key`（UUID），缺失时返回 invalid_argument。Server 在业务事务内按 (actor, action, key) 写 `idempotency_records`：同一 key 重发同一请求返回当前结果、不再写入，也不重复下发 Computer command；同一 key 用于另一个资源返回 conflict。没有 Member 身份的入口（注册、登录、登出、接受邀请、开始配对）不收该头：注册以邮箱唯一约束防重，接受邀请对同一用户重放返回同一 Member，登录与登出重发没有额外副作用。
 - started、delivery、result、receipt 使用稳定 event ID 幂等。
 
@@ -141,8 +141,8 @@ Driver：
 - Computer 只从已连接 Server 读取 manifest，再从 manifest 中的 HTTPS URL 下载 artifact，并以 manifest 的 sha256 校验；sha256 不符的 artifact 不得写入 staging。生产传输使用 HTTPS。Server 是其所承载 Computer 的更新信任边界，不增加全局发行密钥。
 - release Computer 首次从稳定路径之外运行时，把自身原子复制到 `~/.sumi/bin/sumi` 并从该路径重新执行；已存在的稳定副本优先，防止旧下载文件覆盖已更新版本。debug 构建不自动安装。
 - Computer 在启动后检查更新，此后按配置周期检查。Update Policy 关闭自动更新时，Computer 不自动安装或检查发布物。
-- Computer 在本地校验 target、版本和 sha256，再把 artifact 写入私有 staging 目录。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
-- 有活跃 Run 时只保留 staged artifact。没有活跃 Run 时，Computer 启动一次性 updater 并退出；updater 备份当前二进制与关闭后的 SQLite 文件，再替换二进制并启动新 daemon。
+- Computer 在本地校验 target、协议版本和 sha256，再把 artifact 写入私有 staging 目录；协议版本与本二进制不同的 release 不下载。下载和校验不得读取 Message、Attachment、Memory、workspace、Provider transcript 或 Secret 正文。
+- 有活跃 Run 时只保留 staged artifact。没有活跃 Run 时，Computer 启动一次性 updater 并退出；updater 备份当前二进制与关闭后的 SQLite 文件，再替换二进制并启动新 daemon。已 staged 的 Release 不因 WebSocket 断开而丢弃：daemon 在每次重连前和退避等待期间都重新检查是否有活跃 Run，没有就激活，不依赖 Server 可达。
 - 新 daemon 完成本地数据库、sandbox、Driver recovery 和 capability socket 初始化后写 readiness 标记 `update/ready-<version>`。readiness 超时或进程提前退出时，updater 恢复旧二进制与 SQLite 备份并重启旧 daemon。
 - Computer 可由用户级服务管理器托管：macOS launchd agent `dev.sumi.computer`，Linux systemd user unit `sumi-computer.service`。服务以 `SUMI_COMPUTER_SERVICE=launchd|systemd` 声明托管方；服务只在非正常退出时重启。托管时 updater 脱离服务的进程组（launchd）或作为独立 transient unit 运行（systemd），daemon 以成功状态退出后，updater 经服务管理器启动、重启新旧 daemon，不自行 spawn。
 - Computer 在 SIGINT 与 SIGTERM 时都按正常关闭流程断开 Server。
@@ -237,7 +237,7 @@ Driver：
 ### 安全与内容保护
 
 - Browser Session、Computer Token、Driver token 三个认证面不可互换；Server 只保存 token hash。
-- Web UI 可与 Server 分开部署：`server.web_origin` 指定 Web UI 的 origin，Web UI 构建时以 `VITE_SUMI_API_ORIGIN` 指定 Server origin。两者必须同站，使 Browser Session cookie 保持 SameSite=Lax。Server 只对该 origin 开放带凭据的 CORS；Computer 配对链接指向该 origin。
+- Web UI 可与 Server 分开部署：`server.web_origin` 指定 Web UI 的 origin，Web UI 构建时以 `VITE_SUMI_API_ORIGIN` 指定 Server origin。两者必须同站，使 Browser Session cookie 保持 SameSite=Lax。Server 只对该 origin 开放带凭据的 CORS；Computer 配对链接指向该 origin。Server 由反向代理终止 TLS 时配置 `server.secure_cookies = true`，Session cookie 带 `Secure`。
 - 写请求（GET、HEAD、OPTIONS 之外）携带的 `Origin` 必须等于 `server.web_origin` 或 Server 自身 origin，比较包含 scheme、host 与 port 全量，否则返回 permission_denied。该校验不依赖 `web_origin` 是否配置。Server 自身 origin 由 `Host` 与请求 scheme 组成，scheme 取 `Forwarded` 的 `proto` 或 `X-Forwarded-Proto`，都缺失时取 `http`；TLS 由反向代理终止时必须转发该头，否则同源写请求被拒绝。不带 `Origin` 的 bearer 客户端不受影响。
 - 登录、注册与配对按固定窗口限流，超限返回 HTTP 429、稳定错误码 `rate_limited`（`retryable: true`）和 `Retry-After` 秒数；Browser 据此显示 `Too many attempts. Try again in N minutes.`。限额：登录每个规范化邮箱 15 分钟 10 次、每个客户端 15 分钟 30 次；注册每个客户端每小时 10 次；开始配对每个客户端每小时 20 次；配对码校验（读取配对详情与确认配对）每个配对 10 分钟 10 次，6 位配对码因此只能被猜中约十万分之一。客户端取 TCP 对端地址；对端是 loopback 或私有地址时视为反向代理，取 `X-Forwarded-For` 第一跳。计数只在 Server 进程内存中，重启清零，多个进程各自计数。
 - Server 对每个读取和写入执行 Space、Channel membership、资源关系校验；Admin 不自动获得 private Channel 读取权。
@@ -264,7 +264,7 @@ Driver：
 - 稳定状态使用 text 和 CHECK 约束；正文、Secret、Provider transcript 不进入 idempotency 或 outbox metadata。
 - `agent.activity` 是给 Browser 活动列表的派生事实，只存稳定 ID（run、message、task、thread、channel、item、target member）和有长度上限的标签参数（Channel slug、Task 标题、目标名称等，每项最多 280 字符），不存 Message 正文、Task Result、关闭备注或 continuation note。Browser 需要正文时按事件里的 `message_id` 经所在 Thread 的正常读取接口取得，读权限、编辑与软删除都以 `messages` 为准。
 - `agent.activity` 在 Agent 动作提交后写入，不进入动作的业务事务：每个动作的事务入口由 application 层统一持有，活动是可丢失的展示数据，把它并入事务需要每个领域命令都携带展示参数。重复写由事件 ID 防止：事件 ID 由请求来源（Agent 动作的 idempotency key、Run result 的 event ID、command ID）、kind 与 payload 中的 ID 派生，同一请求重发时插入命中已有行而不新增。提交后、写活动前进程退出时，该条活动缺失，直到 Computer 以同一 key 重发。
-- 基线后 schema 变更使用前向 migration，不得修改已应用 migration。
+- `schema/postgres.sql` 与 `schema/computer.sql` 是当前 schema 的唯一定义，各自记录版本号。schema 变更直接改基线文件并提升版本号，不追加 migration。数据库版本低于或高于本二进制支持的版本时拒绝启动并给出明确错误：低于时由使用者重建空库，高于时需升级程序，不做旧数据迁移。
 - 性能优化先通过查询、索引和可重建投影解决；写模型保持规范化。
 
 ### 运维与诊断
@@ -388,7 +388,7 @@ Driver：
 - Actions 按状态分两组。TODO（未指派）时说明需要先指派 Agent；In Progress 与 In review 显示 Mark done（主色），`Close Task…` 退到次要位置，单独一行，弹窗选择理由 + 可选备注；In review 另有 `Request changes` 与 Mark done 并列。不提供其它状态操作按钮。
 - Mark done 弹确认框，标题 `Finish !{seq}?`，正文 `This becomes the Task result.`，输入框预填 assignee 最近一条回复（非纯文本时留空），可改可删；提交后 Result 显示这段文字，不再是写死的 `Task completed.`。
 - Request changes 在原位展开输入框，不弹窗：标题 `What needs to change?`，占位 `Tell {Agent} what to change.`，主按钮 `Send request`、次按钮 `Cancel`，理由必填，空着时主按钮禁用并提示 `Add one sentence on what to change.`；展开后焦点进入输入框，⌘/Ctrl+Enter 提交，Esc 取消，窄屏下按钮纵向全宽。提交时先向 Source Thread 回复 `@{Agent} {理由}`，再调用现有的 request changes 接口：回复失败提示 `Could not post the reason. Nothing was changed.`；状态变更失败提示 `Reason sent. Status unchanged — retry to move it back to In progress.`，主按钮变 `Retry`，只重试状态变更、不重发回复，避免 assignee 收到两遍。
-- 看不到 Source Thread 时，交付条与 `Request changes` 不出现，Mark done 仍可用，确认框输入框为空。
+- 看不到 Source Thread 时，交付条与 `Request changes` 不出现。Result 发布到操作者能读的第一个 Linked Thread（活跃 Run 的 Focus、Source Thread，其次其他 Linked Thread）；全部 Linked Thread 都不可读时不显示 Mark done，并说明原因。Result 必填，空内容不能提交。
 - Task 创建后不可修改（见「产品不变量」）；不显示 Related Threads 区块，不提供手动 Link/Unlink。
 - Activity 用人话描述谁在做和之前怎么结束：当前执行显示 `Lin is working on this`（青色圆点），历史显示 `Lin finished / paused / stopped / stopped on an error`，附时间和所在 Channel；没人做过时显示 `No one has worked on this yet.`。同一个 Agent 在同一 Channel 连续以同一结果结束的多次执行合并为一行，时间前写明次数（`2 runs · Oct 29, 11:47 AM`）。不显示 Run、Session continuity 或 Reset continuity。
 - Working、Waiting、Failed 是 Run 或 attention 状态，不进入 Task 状态选择器。

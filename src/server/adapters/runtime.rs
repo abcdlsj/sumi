@@ -45,6 +45,7 @@ pub(in crate::server) async fn run(config: ServerConfig) -> anyhow::Result<()> {
         ))),
         session_lifetime: SessionLifetime::from_hours(config.session_ttl_hours)
             .context("Server session TTL must be a positive number of hours")?,
+        secure_cookies: config.secure_cookies,
         attachment_max_bytes: config.attachment_max_bytes,
         queries: QueryRegistry::default(),
         agent_graph_cache: http::AgentGraphCache::default(),

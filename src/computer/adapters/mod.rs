@@ -1,6 +1,7 @@
 pub(super) mod filesystem;
 pub(super) mod local_ipc;
 pub(super) mod server_connection;
+pub(super) mod server_http;
 pub(super) mod sqlite;
 
 pub(super) use filesystem::AgentHomeAdapter;

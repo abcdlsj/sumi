@@ -26,6 +26,11 @@ pub(in crate::server) struct Member {
     pub(in crate::server) created_at: OffsetDateTime,
 }
 
+/// Longest Display Name; the Browser create form and both creation entries share it.
+pub(in crate::server) const DISPLAY_NAME_LIMIT: usize = 40;
+/// Longest Agent Role; a longer text is rejected instead of truncated.
+pub(in crate::server) const ROLE_TEXT_LIMIT: usize = 12_000;
+
 /// Display name is the only member address: Unicode letters and underscores,
 /// no spaces, no leading/trailing underscore, and never the reserved `all`.
 pub(in crate::server) fn valid_display_name(name: &str) -> bool {
@@ -63,6 +68,21 @@ impl Member {
 }
 
 impl AccessLevel {
+    pub(in crate::server) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+        }
+    }
+
+    /// Parses the stored form; `None` means no known Access Level.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [Self::Owner, Self::Admin, Self::Member]
+            .into_iter()
+            .find(|level| level.as_str() == value)
+    }
+
     pub(in crate::server) fn can_manage_space(self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
     }
@@ -85,6 +105,18 @@ pub(in crate::server) enum PermissionAction {
 }
 
 impl PermissionAction {
+    /// Parses the stored form; `None` means no known Action.
+    pub(in crate::server) fn parse(value: &str) -> Option<Self> {
+        [
+            Self::ChannelCreate,
+            Self::ChannelInvite,
+            Self::ChannelRemove,
+            Self::AgentCreate,
+        ]
+        .into_iter()
+        .find(|action| action.code() == value)
+    }
+
     pub(in crate::server) fn code(self) -> &'static str {
         match self {
             Self::ChannelCreate => "channel.create",
@@ -104,6 +136,12 @@ pub(in crate::server) enum AgentLifecycle {
     Error,
 }
 
+/// A validated new Agent together with its normalized Display Name, which the Member carries.
+pub(in crate::server) struct NewAgent {
+    pub(in crate::server) agent: Agent,
+    pub(in crate::server) display_name: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::server) struct Agent {
     pub(in crate::server) member_id: MemberId,
@@ -117,6 +155,39 @@ pub(in crate::server) struct Agent {
 }
 
 impl Agent {
+    /// Validates the Agent configuration and builds the Agent. The returned Display Name and Role
+    /// text are normalized, so the caller stores them instead of trimming a second time.
+    pub(in crate::server) fn create(
+        member_id: MemberId,
+        space_id: SpaceId,
+        computer_id: ComputerId,
+        display_name: &str,
+        role_text: &str,
+        driver_kind: DriverKind,
+    ) -> Result<NewAgent, DomainError> {
+        let display_name = display_name.trim();
+        if !valid_display_name(display_name) || display_name.chars().count() > DISPLAY_NAME_LIMIT {
+            return Err(DomainError::InvalidAgentName);
+        }
+        let role_text = role_text.trim();
+        if role_text.is_empty() || role_text.chars().count() > ROLE_TEXT_LIMIT {
+            return Err(DomainError::InvalidRole);
+        }
+        Ok(NewAgent {
+            display_name: display_name.to_owned(),
+            agent: Self {
+                member_id,
+                space_id,
+                computer_id: Some(computer_id),
+                role_text: role_text.to_owned(),
+                role_revision: 1,
+                lifecycle: AgentLifecycle::Provisioning,
+                driver_kind,
+                retired_at: None,
+            },
+        })
+    }
+
     pub(in crate::server) fn apply_provision_result(
         &mut self,
         computer_id: ComputerId,
@@ -268,6 +339,35 @@ mod tests {
             access_level,
             created_at: OffsetDateTime::UNIX_EPOCH,
         }
+    }
+
+    #[test]
+    fn creation_returns_the_normalized_display_name_and_role() {
+        let created = Agent::create(
+            MemberId::from_uuid(uuid::Uuid::from_u128(1)),
+            SpaceId::from_uuid(uuid::Uuid::from_u128(2)),
+            ComputerId::from_uuid(uuid::Uuid::from_u128(3)),
+            "  Lin  ",
+            "  review boundaries  ",
+            DriverKind::Acp(AcpProvider::Codex),
+        )
+        .expect("a valid Agent");
+
+        assert_eq!(created.display_name, "Lin");
+        assert_eq!(created.agent.role_text, "review boundaries");
+        assert_eq!(created.agent.lifecycle, AgentLifecycle::Provisioning);
+        assert_eq!(
+            Agent::create(
+                MemberId::from_uuid(uuid::Uuid::from_u128(1)),
+                SpaceId::from_uuid(uuid::Uuid::from_u128(2)),
+                ComputerId::from_uuid(uuid::Uuid::from_u128(3)),
+                "Lin Lin",
+                "review",
+                DriverKind::Acp(AcpProvider::Codex),
+            )
+            .err(),
+            Some(DomainError::InvalidAgentName)
+        );
     }
 
     #[test]

@@ -77,19 +77,6 @@ export function formatFullDateTime(value: string | null | undefined): string {
   return date ? fullDateFormat.format(date) : "";
 }
 
-/** Today and yesterday in words, this year as "Oct 29", older with the year. */
-export function formatDayLabel(value: string | null | undefined, now = new Date()): string {
-  const date = parse(value);
-  if (!date) return "";
-  if (sameDay(date, now)) return "Today";
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (sameDay(date, yesterday)) return "Yesterday";
-  return date.getFullYear() === now.getFullYear()
-    ? dateFormat.format(date)
-    : longDateFormat.format(date);
-}
-
 /** The clock when the moment is today, otherwise the day it happened on, then the clock. */
 export function formatRecent(value: string | null | undefined, now = new Date()): string {
   const date = parse(value);

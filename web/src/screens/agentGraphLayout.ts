@@ -1,4 +1,4 @@
-import type { AgentGraphEdge, AgentGraphNode } from "../api/client";
+import type {AgentGraphEdge, AgentGraphNode} from "../api/types";
 
 export interface GraphLayoutNode extends AgentGraphNode {
   x: number;

@@ -16,10 +16,8 @@ use serde_json::Value;
 use sqlx::{Connection, Executor, PgConnection, postgres::PgConnectOptions};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{TcpListener, TcpStream},
     process::{Child, Command},
-    sync::{mpsc, watch},
-    task::JoinHandle,
+    sync::mpsc,
 };
 use url::Url;
 use uuid::Uuid;
@@ -183,103 +181,11 @@ impl SumiProcess {
         Ok(())
     }
 
-    pub async fn wait_for_success(&mut self, duration: std::time::Duration) -> Result<()> {
-        let status = tokio::time::timeout(duration, self.child.wait())
-            .await
-            .with_context(|| {
-                format!(
-                    "sumi process did not exit within {duration:?}; logs: {}",
-                    self.log_text()
-                )
-            })??;
-        ensure!(
-            status.success(),
-            "sumi process exited unsuccessfully: {status}; logs: {}",
-            self.log_text()
-        );
-        Ok(())
-    }
-
     pub fn log_text(&self) -> String {
         self.logs
             .lock()
             .map(|logs| logs.join("\n"))
             .unwrap_or_else(|_| "<log lock poisoned>".to_owned())
-    }
-}
-
-pub struct TcpCutProxy {
-    address: SocketAddr,
-    enabled: watch::Sender<bool>,
-    task: JoinHandle<()>,
-}
-
-impl TcpCutProxy {
-    pub async fn start(upstream: SocketAddr) -> Result<Self> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
-        let address = listener.local_addr()?;
-        let (enabled, mut state) = watch::channel(true);
-        let task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    accepted = listener.accept() => {
-                        let Ok((inbound, _)) = accepted else { break };
-                        if !*state.borrow() {
-                            drop(inbound);
-                            continue;
-                        }
-                        let connection_state = state.clone();
-                        tokio::spawn(proxy_connection(inbound, upstream, connection_state));
-                    }
-                    changed = state.changed() => {
-                        if changed.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        Ok(Self {
-            address,
-            enabled,
-            task,
-        })
-    }
-
-    pub fn url(&self) -> Result<Url> {
-        Ok(Url::parse(&format!("http://{}", self.address))?)
-    }
-
-    pub fn set_enabled(&self, enabled: bool) {
-        self.enabled.send_replace(enabled);
-    }
-}
-
-impl Drop for TcpCutProxy {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-async fn proxy_connection(
-    mut inbound: TcpStream,
-    upstream: SocketAddr,
-    mut state: watch::Receiver<bool>,
-) {
-    let Ok(mut outbound) = TcpStream::connect(upstream).await else {
-        return;
-    };
-    let transfer = tokio::io::copy_bidirectional(&mut inbound, &mut outbound);
-    tokio::pin!(transfer);
-    loop {
-        tokio::select! {
-            _ = &mut transfer => return,
-            changed = state.changed() => {
-                if changed.is_err() || !*state.borrow() {
-                    return;
-                }
-            }
-        }
     }
 }
 
@@ -342,7 +248,7 @@ pub fn write_computer_config(path: &Path, server: &Url, state_dir: &Path) -> Res
     std::fs::write(
         path,
         format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nshutdown_grace_period_seconds = 1\n",
+            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\n",
             state_dir.display()
         ),
     )?;
@@ -433,20 +339,8 @@ pub fn write_default_codex_computer_config(
         toml::Value::String(state_dir.display().to_string()),
     );
     computer.insert(
-        "open_pairing_browser".to_owned(),
-        toml::Value::Boolean(false),
-    );
-    computer.insert(
         "max_concurrent_runs".to_owned(),
         toml::Value::Integer(i64::try_from(max_concurrent_runs)?),
-    );
-    computer.insert(
-        "per_agent_timeout_seconds".to_owned(),
-        toml::Value::Integer(600),
-    );
-    computer.insert(
-        "shutdown_grace_period_seconds".to_owned(),
-        toml::Value::Integer(1),
     );
     computer.insert(
         "codex_config_source".to_owned(),
@@ -464,25 +358,6 @@ pub fn write_default_codex_computer_config(
 
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
-    Ok(())
-}
-
-pub fn write_builtin_computer_config(
-    path: &Path,
-    server: &Url,
-    state_dir: &Path,
-    provider_base_url: &Url,
-) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::write(
-        path,
-        format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nmax_concurrent_runs = 1\nper_agent_timeout_seconds = 60\nshutdown_grace_period_seconds = 1\n\n[computer.builtin]\napi_base = '{provider_base_url}'\ntoken = 'test-only-provider-key'\nmodel = 'sumi-test-model'\n",
-            state_dir.display(),
-        ),
-    )?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
@@ -515,7 +390,7 @@ pub fn write_harness_computer_config(
     std::fs::write(
         path,
         format!(
-            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nopen_pairing_browser = false\nmax_concurrent_runs = {max_concurrent_runs}\nper_agent_timeout_seconds = 1200\nshutdown_grace_period_seconds = 1\n{codex_sources}\n[computer.builtin]\napi_base = '{}'\ntoken = '{}'\nmodel = '{}'\ncontext_window_tokens = {}\ncompaction_trigger_ratio = {}\ncompaction_keep_recent_tokens = {}\n",
+            "[computer]\nserver_url = '{server}'\nstate_dir = '{}'\nmax_concurrent_runs = {max_concurrent_runs}\n{codex_sources}\n[computer.builtin]\napi_base = '{}'\ntoken = '{}'\nmodel = '{}'\ncontext_window_tokens = {}\ncompaction_trigger_ratio = {}\ncompaction_keep_recent_tokens = {}\n",
             state_dir.display(),
             builtin.api_base,
             builtin.token,
@@ -708,24 +583,6 @@ pub async fn confirm_pairing(
     Ok(response.json().await?)
 }
 
-pub async fn wait_for_computer_status(
-    client: &Client,
-    server: &Url,
-    cookie: &str,
-    space_id: Uuid,
-    expected: &str,
-) -> Result<ComputerResponse> {
-    wait_for_computer_status_for(
-        client,
-        server,
-        cookie,
-        space_id,
-        expected,
-        std::time::Duration::from_secs(20),
-    )
-    .await
-}
-
 pub async fn wait_for_computer_status_for(
     client: &Client,
     server: &Url,
@@ -755,10 +612,4 @@ pub async fn wait_for_computer_status_for(
     })
     .await
     .with_context(|| format!("Computer did not become {expected}"))?
-}
-
-pub fn empty_path(root: &Path) -> Result<PathBuf> {
-    let path = root.join("empty-path");
-    std::fs::create_dir(&path)?;
-    Ok(path)
 }

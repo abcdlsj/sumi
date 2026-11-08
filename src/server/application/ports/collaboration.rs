@@ -127,19 +127,4 @@ pub(in crate::server) trait CollaborationTransaction {
         idempotency_key: IdempotencyKey,
         now: time::OffsetDateTime,
     ) -> Result<(), ApplicationError>;
-    async fn channel_member_visible(
-        &mut self,
-        channel_id: ChannelId,
-        member_id: MemberId,
-    ) -> Result<bool, ApplicationError>;
-    async fn message_sequence_in_channel(
-        &mut self,
-        message_id: MessageId,
-        channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError>;
-    async fn channel_snapshot(&mut self, channel_id: ChannelId) -> Result<u64, ApplicationError>;
-    async fn pending_item_for_agent(
-        &mut self,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError>;
 }

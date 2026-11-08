@@ -1,4 +1,4 @@
-import type { TaskStatus } from "../api/client";
+import type {TaskStatus} from "../api/types";
 
 /** One glyph per Task status, shared by the Tasks page and Message badges.
  * Shape carries the meaning (dashed, half, dot, check, slash); colour only

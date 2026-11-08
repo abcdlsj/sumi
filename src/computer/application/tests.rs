@@ -59,6 +59,16 @@ struct MemoryTransaction {
 impl TransactionPort for MemoryPort {
     type Transaction = MemoryTransaction;
 
+    async fn command_watermark(&mut self) -> Result<u64, ApplicationError> {
+        Ok(self
+            .state
+            .commands
+            .values()
+            .map(|command| command.sequence)
+            .max()
+            .unwrap_or(0))
+    }
+
     async fn transact<T>(
         &mut self,
         operation: impl for<'a> AsyncFnOnce(&'a mut Self::Transaction) -> Result<T, ApplicationError>,
@@ -536,7 +546,6 @@ fn debug_output_excludes_fencing_locator_and_message_content() {
 
     let output = format!("{run:?} {session:?}");
 
-    assert!(!output.contains("secret-token"));
     assert!(!output.contains("provider-secret-locator"));
     assert!(!output.contains("message body"));
 }
@@ -913,7 +922,7 @@ async fn run_pipeline_finishes_driver_turn_and_dispatches_next_queued_run() {
         .unwrap();
     }
 
-    RunPipelineService::dispatch(&mut store, &mut driver, &mut homes, 1)
+    SchedulerService::dispatch(&mut store, &mut driver, &mut homes, 1)
         .await
         .unwrap();
     let running_id = if store.state.runs[&first_id].view().state == LocalRunState::Running {

@@ -27,7 +27,7 @@ use crate::server::domain::{
     },
     invitation::{Invitation, InvitationStatus},
     pairing::{ComputerOs, Pairing, PairingStatus},
-    task::{CloseReason, Task, TaskSnapshot, TaskStatus},
+    task::{CloseReason, RelatedThreadSnapshot, Task, TaskSnapshot, TaskStatus},
 };
 
 use super::{
@@ -40,15 +40,13 @@ use super::{
         HardItemRoute, MarkAllInboxRead, MarkAllInboxReadInput, ReadMemberInbox, RequeueDeadItem,
         RequeueDeadItemInput, RouteHardItem, RouteHardItemInput,
     },
+    channel::{
+        CreateChannel, CreateChannelAction, CreateChannelActionInput, CreateChannelInput,
+        InviteChannelMember, RemoveChannelMember,
+    },
     computer::{
         AuthenticateComputer, BeginPairing, BeginPairingInput, ConfirmPairing, ConfirmPairingInput,
         ReadPairing, ReadPairingStatus,
-    },
-    conversation::{
-        AddChannelAgents, CreateAgent, CreateAgentAction, CreateAgentActionInput, CreateAgentInput,
-        CreateChannel, CreateChannelAction, CreateChannelActionInput, CreateChannelInput,
-        DeleteMessage, EditMessage, EditMessageInput, InviteChannelMember, LeaveChannel,
-        OpenDirectMessage, OpenDirectMessageInput, PublishMessage, RemoveChannelMember,
     },
     execution::{
         AcknowledgeDelivery, AcknowledgeDeliveryInput, ApplyCommandResult, CompleteRun,
@@ -58,11 +56,16 @@ use super::{
     },
     identity::{
         AuthenticateHuman, AuthenticateHumanInput, AuthenticateSession, AuthorizeAgentGovernance,
-        AuthorizeSpaceAccess, CloseSession, DeleteComputer, RegisterHuman, RegisterHumanInput,
-        RetireAgent, SetPermission,
+        AuthorizeSpaceAccess, CloseSession, CreateAgent, CreateAgentAction, CreateAgentActionInput,
+        CreateAgentInput, DeleteComputer, RegisterHuman, RegisterHumanInput, RetireAgent,
+        SetPermission,
     },
     invitation::{
         AcceptInvitation, AcceptInvitationInput, InviteHuman, InviteHumanInput, ReadInvitation,
+    },
+    message::{
+        DeleteMessage, EditMessage, EditMessageInput, OpenDirectMessage, OpenDirectMessageInput,
+        PublishMessage,
     },
     ports::{
         ApplicationError, AttachmentObjectPort, AttachmentTransaction, AuthenticatedHuman,
@@ -207,86 +210,6 @@ async fn dispatch_failure_is_recorded_idempotently_in_a_separate_transaction() {
             channel_id,
             "run_dispatch_conflict".to_owned()
         )
-    );
-}
-
-#[tokio::test]
-async fn adding_channel_agents_replays_the_recorded_membership_result() {
-    let mut port = MemoryPort::default();
-    let actor = member(930);
-    let channel_id = channel(931);
-    let first = member(932);
-    let second = member(933);
-    let key = idempotency(934);
-
-    let added = AddChannelAgents::execute(
-        &mut port,
-        actor,
-        channel_id,
-        vec![first, second],
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("members are added");
-    let replayed = AddChannelAgents::execute(
-        &mut port,
-        actor,
-        channel_id,
-        vec![second],
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("same key replays the first result");
-
-    assert_eq!(added, vec![first, second]);
-    assert_eq!(replayed, added);
-    assert_eq!(
-        port.state.agent_channel_members,
-        HashSet::from([(channel_id, first), (channel_id, second)])
-    );
-}
-
-#[tokio::test]
-async fn an_agent_can_leave_a_channel_and_replay_the_same_request() {
-    let mut port = MemoryPort::default();
-    let agent_id = member(935);
-    let channel_id = channel(936);
-    let key = idempotency(937);
-    port.state
-        .agent_channel_members
-        .insert((channel_id, agent_id));
-
-    LeaveChannel::execute(
-        &mut port,
-        agent_id,
-        channel_id,
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("agent leaves the channel");
-    LeaveChannel::execute(
-        &mut port,
-        agent_id,
-        channel_id,
-        key,
-        OffsetDateTime::UNIX_EPOCH,
-    )
-    .await
-    .expect("same request replays");
-
-    assert!(
-        !port
-            .state
-            .agent_channel_members
-            .contains(&(channel_id, agent_id))
-    );
-    assert!(
-        port.state
-            .channel_agent_leaves
-            .contains(&(agent_id, channel_id, key))
     );
 }
 
@@ -1607,39 +1530,6 @@ impl CollaborationTransaction for MemoryTransaction {
             Err(ApplicationError::NotFound)
         }
     }
-    async fn channel_member_visible(
-        &mut self,
-        channel_id: ChannelId,
-        member_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        Ok(self.state.channel_members.values().any(|m| {
-            *m == member_id
-                && self
-                    .state
-                    .channel_members
-                    .keys()
-                    .any(|(_, c)| *c == channel_id)
-        }))
-    }
-    async fn message_sequence_in_channel(
-        &mut self,
-        _message_id: MessageId,
-        _channel_id: ChannelId,
-    ) -> Result<Option<u64>, ApplicationError> {
-        Ok(None)
-    }
-    async fn channel_snapshot(&mut self, _channel_id: ChannelId) -> Result<u64, ApplicationError> {
-        Ok(0)
-    }
-    async fn pending_item_for_agent(
-        &mut self,
-        agent_id: MemberId,
-    ) -> Result<bool, ApplicationError> {
-        Ok(self.state.items.values().any(|i| {
-            let v = i.view();
-            v.member_id == agent_id && v.status == InboxItemStatus::Pending
-        }))
-    }
 }
 
 #[async_trait::async_trait]
@@ -1744,7 +1634,13 @@ impl ExecutionTransaction for MemoryTransaction {
             .state
             .runs
             .values()
-            .find(|run| run.view().agent_id == agent_id && run.view().status.is_active())
+            .find(|run| {
+                run.view().agent_id == agent_id
+                    && matches!(
+                        run.view().status,
+                        RunStatus::Dispatched | RunStatus::Working
+                    )
+            })
             .map(|run| run.view().id))
     }
     async fn completed_run_for_event(
@@ -1847,21 +1743,6 @@ impl ExecutionTransaction for MemoryTransaction {
                 .state
                 .computer_assignments
                 .contains(&(proof.computer_id, proof.agent_id)))
-    }
-    async fn active_run_for_visible_agent(
-        &mut self,
-        agent_id: MemberId,
-        _viewer_id: MemberId,
-    ) -> Result<Option<RunId>, ApplicationError> {
-        Ok(self
-            .state
-            .runs
-            .values()
-            .find(|r| {
-                let v = r.view();
-                v.agent_id == agent_id && v.status == RunStatus::Working
-            })
-            .map(|r| r.view().id))
     }
     async fn agent_provision_command_target(
         &mut self,
@@ -3657,6 +3538,112 @@ async fn result_message_failure_rolls_back_task_completion() {
 }
 
 #[tokio::test]
+async fn a_task_result_must_not_be_empty() {
+    let assignee = member(70);
+    let focus = thread(71);
+    let task_id = task(72);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, focus, &[assignee]);
+    port.state.tasks.insert(
+        task_id,
+        make_task(task_id, focus, assignee, TaskStatus::InProgress),
+    );
+
+    let error = RecordTaskOutcome::execute(
+        &mut port,
+        RecordTaskOutcomeInput {
+            scope: TaskOutcomeScope::Browser { task_id },
+            actor_member_id: assignee,
+            idempotency_key: idempotency(204),
+            outcome: TaskOutcome::Done {
+                result: TaskResult::Publish(OutcomeMessage {
+                    message_id: message(73),
+                    body_markdown: "   \n".into(),
+                    post_to: TaskPostTarget::Thread(focus),
+                }),
+            },
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        ApplicationError::Domain(DomainError::EmptyTaskResult)
+    );
+    assert_eq!(
+        port.state.tasks[&task_id].view().status,
+        TaskStatus::InProgress
+    );
+    assert!(port.state.messages.is_empty());
+}
+
+/// The actor may read only some of the Linked Threads. The Result still lands in one of them, so
+/// marking a Task done never fails only because the Source Thread is unreadable.
+#[tokio::test]
+async fn a_task_result_lands_in_a_readable_linked_thread() {
+    let actor = member(74);
+    let stranger = member(75);
+    let source = thread(76);
+    let related = thread(77);
+    let task_id = task(78);
+    let result_id = message(79);
+    let mut port = MemoryPort::default();
+    insert_thread(&mut port, source, &[stranger]);
+    insert_thread(&mut port, related, &[actor]);
+    // The actor left the Source Thread's Channel after the Task linked it, so only the other
+    // Linked Thread is still readable.
+    port.state.tasks.insert(
+        task_id,
+        Task::rehydrate(TaskSnapshot {
+            id: task_id,
+            seq: 1,
+            space_id: space(1),
+            title: "任务".into(),
+            status: TaskStatus::InProgress,
+            source_thread_id: source,
+            creator_member_id: actor,
+            assignee_agent_member_id: Some(actor),
+            result_message_id: None,
+            close_reason: None,
+            close_reason_note: None,
+            related_threads: vec![RelatedThreadSnapshot {
+                thread_id: related,
+                linked_by_member_id: actor,
+                linked_at: OffsetDateTime::UNIX_EPOCH,
+            }],
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            finished_at: None,
+        })
+        .unwrap(),
+    );
+
+    let completed = RecordTaskOutcome::execute(
+        &mut port,
+        RecordTaskOutcomeInput {
+            scope: TaskOutcomeScope::Browser { task_id },
+            actor_member_id: actor,
+            idempotency_key: idempotency(205),
+            outcome: TaskOutcome::Done {
+                result: TaskResult::Publish(OutcomeMessage {
+                    message_id: result_id,
+                    body_markdown: "完成".into(),
+                    post_to: TaskPostTarget::Thread(source),
+                }),
+            },
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(completed.view().status, TaskStatus::Done);
+    assert_eq!(port.state.messages[&result_id].thread_id, related);
+}
+
+#[tokio::test]
 async fn agent_task_done_atomically_finishes_run_items_and_replays() {
     let agent = member(160);
     let focus = thread(161);
@@ -4097,6 +4084,140 @@ async fn agent_creation_and_action_message_share_permission_and_transaction() {
         port.state.messages[&action_message_id].content,
         MessageContent::AgentCreated(id) if id == created_agent
     ));
+}
+
+#[tokio::test]
+async fn agent_creation_normalizes_the_display_name_and_rejects_it_first() {
+    let owner = member(1300);
+    let computer_id = computer(1301);
+    let mut port = MemoryPort::default();
+    port.state.members.insert(
+        owner,
+        Member {
+            id: owner,
+            space_id: space(1),
+            display_name: "Owner".into(),
+            access_level: AccessLevel::Owner,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+        },
+    );
+    port.state.computers.insert(
+        computer_id,
+        Computer {
+            id: computer_id,
+            space_id: space(1),
+            lifecycle: ComputerLifecycle::Online,
+            token_hash: Some("hash".into()),
+            deleted_at: None,
+        },
+    );
+    let create = |display_name: &str, key: u128| CreateAgentInput {
+        agent_member_id: member(1302 + key),
+        space_id: space(1),
+        display_name: display_name.to_owned(),
+        access_level: AccessLevel::Member,
+        role_text: "Write".into(),
+        computer_id,
+        driver_kind: DriverKind::Acp(AcpProvider::Codex),
+        actor_member_id: owner,
+        idempotency_key: idempotency(key),
+        now: OffsetDateTime::UNIX_EPOCH,
+    };
+
+    let agent = CreateAgent::execute(&mut port, create("  Lin  ", 1304))
+        .await
+        .unwrap();
+    assert_eq!(
+        port.state.members[&agent.member_id].display_name, "Lin",
+        "the stored Display Name is the one the domain validated"
+    );
+
+    // An invalid name is refused before the Computer is consulted, so an offline Computer cannot
+    // turn a client mistake into a conflict.
+    port.state.computers.clear();
+    let invalid = CreateAgent::execute(&mut port, create("Lin Lin", 1305))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        invalid,
+        ApplicationError::Domain(DomainError::InvalidAgentName)
+    );
+}
+
+#[tokio::test]
+async fn both_agent_creation_entries_apply_the_same_role_limit() {
+    let owner = member(1200);
+    let focus = thread(1201);
+    let run_id = run(1202);
+    let computer_id = computer(1203);
+    let mut port = MemoryPort::default();
+    port.state.members.insert(
+        owner,
+        Member {
+            id: owner,
+            space_id: space(1),
+            display_name: "Owner".into(),
+            access_level: AccessLevel::Owner,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+        },
+    );
+    port.state.computers.insert(
+        computer_id,
+        Computer {
+            id: computer_id,
+            space_id: space(1),
+            lifecycle: ComputerLifecycle::Online,
+            token_hash: Some("hash".into()),
+            deleted_at: None,
+        },
+    );
+    insert_thread(&mut port, focus, &[owner]);
+    port.state
+        .runs
+        .insert(run_id, running_run(run_id, owner, focus, None, Vec::new()));
+    port.state
+        .permissions
+        .insert((owner, PermissionAction::AgentCreate));
+    let over_long = "x".repeat(12_001);
+
+    let direct = CreateAgent::execute(
+        &mut port,
+        CreateAgentInput {
+            agent_member_id: member(1204),
+            space_id: space(1),
+            display_name: "LongRole".into(),
+            access_level: AccessLevel::Member,
+            role_text: over_long.clone(),
+            computer_id,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
+            actor_member_id: owner,
+            idempotency_key: idempotency(1205),
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(direct, ApplicationError::Domain(DomainError::InvalidRole));
+
+    let action = CreateAgentAction::execute(
+        &mut port,
+        CreateAgentActionInput {
+            agent_member_id: member(1206),
+            display_name: "LongRole".into(),
+            role_text: over_long,
+            computer_id,
+            driver_kind: DriverKind::Acp(AcpProvider::Codex),
+            action_message_id: message(1207),
+            actor_member_id: owner,
+            idempotency_key: idempotency(1208),
+            current_run_id: run_id,
+            now: OffsetDateTime::UNIX_EPOCH,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(action, ApplicationError::Domain(DomainError::InvalidRole));
+    assert_eq!(port.state.agents.len(), 0);
 }
 
 #[tokio::test]

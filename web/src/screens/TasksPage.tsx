@@ -3,20 +3,10 @@ import { Link, useParams } from "@tanstack/react-router";
 import { ArrowUpRight, Check, ListTodo, MessageSquare, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
-import {
-  closeTask,
-  completeTask,
-  getTask,
-  listAgents,
-  listTasks,
-  readThread,
-  type Member,
-  startTask,
-  type Run,
-  type Task,
-  type TaskStatus,
-  type ThreadReference,
-} from "../api/client";
+import { v7 as uuidv7 } from "uuid";
+
+import {closeTask, completeTask, createThreadReply, getTask, listAgents, listTasks, readThread, requestTaskChanges, startTask} from "../api/client";
+import type {Message, Member, Run, Task, TaskStatus, ThreadRead, ThreadReference} from "../api/types";
 import { DialogFrame } from "../components/DialogFrame";
 import { EmptyState } from "../components/EmptyState";
 import { SpacePage } from "../components/SpaceShell";
@@ -24,7 +14,7 @@ import { SumiSelect } from "../components/SumiSelect";
 import { TaskStatusIcon } from "../components/taskStatusIcon";
 import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
 import { plainText } from "../markdownText";
-import { formatDateTime } from "../time";
+import { formatDateTime, formatRecent } from "../time";
 import { CompactMessage } from "../components/channel/MessageTimeline";
 import { PixelIdentity } from "../components/PixelIdentity";
 
@@ -207,17 +197,32 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
   const [closeOpen, setCloseOpen] = useState(false);
   const [closeReason, setCloseReason] = useState("invalid");
   const [closeNote, setCloseNote] = useState("");
+  const [doneOpen, setDoneOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
+  // Request changes posts its reason into the Source Thread, so the action exists only once that
+  // Thread is readable. DESIGN: an unreadable Source Thread offers neither delivery strip nor action.
+  const sourceThreadId = task.data?.source_thread.id;
+  const sourceThread = useQuery({
+    queryKey: ["thread", sourceThreadId],
+    queryFn: () => readThread(sourceThreadId!),
+    enabled: Boolean(sourceThreadId),
+  });
 
   if (task.isPending) return <DetailSkeleton label="Loading Task" />;
   if (task.error || !task.data) return <div className="route-status route-status--error" role="alert">Task unavailable or outside your visible Threads.</div>;
   const value = task.data;
+  const canRequestChanges = value.status === "in_review" && Boolean(value.assignee_agent_member_id) && sourceThread.isSuccess;
 
-  function markDone() {
-    change.mutate(() =>
-      completeTask(value.id, {
-        result_thread_id: value.current_run?.focus.id ?? value.source_thread.id,
-        result_markdown: "Task completed.",
-      }),
+  function markDone(result: string) {
+    const thread = value.result_thread;
+    if (!thread) return;
+    change.mutate(
+      () =>
+        completeTask(value.id, {
+          result_thread_id: thread.id,
+          result_markdown: result,
+        }),
+      { onSuccess: () => setDoneOpen(false) },
     );
   }
   function confirmClose() {
@@ -243,17 +248,28 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
       {change.error ? <p className="inline-notice inline-notice--error" role="alert">Could not update this Task. Nothing was changed.</p> : null}
       <div className="task-detail-scroll">
         <div className="task-detail-primary">
-        <TaskConversation thread={value.source_thread} spaceSlug={spaceSlug} members={members} />
+        <TaskConversation task={value} spaceSlug={spaceSlug} members={members} />
         <section className="task-detail-section"><h2>Task facts</h2><dl className="detail-grid"><Field label="Created by" value={value.creator_name} /><Field label="Created" value={formatTaskTime(value.created_at)} /><Field label="Updated" value={formatTaskTime(value.updated_at)} /></dl>{value.status === "todo" && !value.assignee_agent_member_id ? (
           <div className="task-assignee"><span>Assignee</span><SumiSelect value="" onChange={(agentId) => change.mutate(() => startTask(value.id, agentId))} options={(agents.data ?? []).filter((agent) => agent.desired_lifecycle === "active").map((agent) => ({ value: agent.member_id, label: agent.name }))} ariaLabel="Assign Agent" disabled={change.isPending} /></div>
         ) : null}</section>
         {!value.finished_at ? (
           <section className="task-detail-section"><h2>Actions</h2>
             <div className="task-actions">
-              <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={markDone}><Check /> Mark done</button>
-              <button className="danger-button" type="button" disabled={change.isPending} onClick={() => setCloseOpen(true)}><XCircle /> Close Task</button>
+              {value.result_thread ? (
+                <button className="command-button command-button--accent" type="button" disabled={!["in_progress", "in_review"].includes(value.status) || change.isPending} onClick={() => setDoneOpen(true)}><Check /> Mark done</button>
+              ) : null}
+              {canRequestChanges ? (
+                <button className="command-button" type="button" aria-expanded={changesOpen} disabled={changesOpen} onClick={() => setChangesOpen(true)}><MessageSquare /> Request changes</button>
+              ) : null}
             </div>
+            {canRequestChanges && changesOpen ? <TaskRequestChanges task={value} close={() => setChangesOpen(false)} /> : null}
+            {!value.result_thread ? <p className="task-actions-hint">You cannot see any Conversation linked to this Task, so its Result cannot be written here.</p> : null}
             {value.status === "todo" ? <p className="task-actions-hint">Assign an Agent to start. A Task can be marked done once it is in progress or in review.</p> : null}
+            {!value.finished_at ? (
+              <div className="task-actions-secondary">
+                <button className="danger-button" type="button" disabled={change.isPending} onClick={() => setCloseOpen(true)}><XCircle /> Close Task…</button>
+              </div>
+            ) : null}
           </section>
         ) : null}
         {value.status === "done" ? <section className="task-detail-section"><h2>Result</h2>{value.result_message?.content.type === "text" ? <p className="task-result">{plainText(value.result_message.content.body_markdown)}</p> : <p>The result is not available.</p>}</section> : null}
@@ -263,6 +279,15 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
         <section className="task-detail-section"><h2>Activity</h2><TaskActivity task={value} spaceSlug={spaceSlug} /></section>
         </aside>
       </div>
+      {doneOpen ? (
+        <MarkDoneDialog
+          task={value}
+          threadId={value.result_thread?.id ?? value.source_thread.id}
+          pending={change.isPending}
+          onCancel={() => setDoneOpen(false)}
+          onConfirm={markDone}
+        />
+      ) : null}
       {closeOpen ? (
         <DialogFrame className="confirm-dialog" close={() => setCloseOpen(false)} labelId="close-task-title">
           <header>
@@ -284,10 +309,12 @@ function TaskDetail({ taskId, spaceId, spaceSlug, members }: { taskId: string; s
 }
 
 /** The conversation that asked for the work: the first message and its latest replies. */
-function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadReference; spaceSlug: string; members: Member[] }) {
+function TaskConversation({ task, spaceSlug, members }: { task: Task; spaceSlug: string; members: Member[] }) {
+  const thread = task.source_thread;
   const read = useQuery({ queryKey: ["thread", thread.id], queryFn: () => readThread(thread.id) });
   const replies = read.data?.replies ?? [];
   const latest = replies.slice(-3);
+  const latestFromAssignee = replies.filter((reply) => reply.author.id === task.assignee_agent_member_id).at(-1);
   return (
     <section className="task-detail-section task-conversation" aria-labelledby="task-conversation-heading">
       <header className="task-conversation-heading">
@@ -302,6 +329,13 @@ function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadRefere
       {read.error ? <p className="task-conversation-empty">You cannot see the conversation this Task came from.</p> : null}
       {read.data ? (
         <div className="task-conversation-body">
+          {task.status === "in_review" ? (
+            <LatestFromAssignee
+              task={task}
+              latest={latestFromAssignee}
+              alreadyShown={latest.some((reply) => reply.id === latestFromAssignee?.id)}
+            />
+          ) : null}
           <CompactMessage message={read.data.root} spaceSlug={spaceSlug} members={members} />
           {replies.length > latest.length ? <p className="task-conversation-more">{replies.length - latest.length} earlier {replies.length - latest.length === 1 ? "reply" : "replies"}</p> : null}
           {latest.map((reply) => <CompactMessage key={reply.id} message={reply} spaceSlug={spaceSlug} members={members} />)}
@@ -309,6 +343,164 @@ function TaskConversation({ thread, spaceSlug, members }: { thread: ThreadRefere
       ) : null}
     </section>
   );
+}
+
+/** While review is pending, the assignee's last word sits at the top of the Request card. */
+function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest: Message | undefined; alreadyShown: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const name = task.assignee_name ?? "the Agent";
+  // A reply the Request body already lists below needs no second copy.
+  if (alreadyShown) return null;
+  if (!latest) {
+    return <p className="task-latest task-latest--empty">No reply from {name} yet.</p>;
+  }
+  const body = latest.content.type === "text" ? plainText(latest.content.body_markdown) : "";
+  return (
+    <div className="task-latest">
+      <header>
+        <h3>Latest from {name}</h3>
+        <time dateTime={latest.created_at}>{formatRecent(latest.created_at)}</time>
+      </header>
+      <p className={expanded ? "task-latest-body" : "task-latest-body task-latest-body--clamped"}>{body || "The reply is not plain text."}</p>
+      {body ? (
+        <button className="task-latest-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Finish asks for the result instead of writing a placeholder. */
+function MarkDoneDialog({ task, threadId, pending, onCancel, onConfirm }: { task: Task; threadId: string; pending: boolean; onCancel: () => void; onConfirm: (result: string) => void }) {
+  // The Result lands in the Thread the Server resolved for this actor; its latest reply is the prefill.
+  const read = useQuery({ queryKey: ["thread", threadId], queryFn: () => readThread(threadId) });
+  const [result, setResult] = useState<string | undefined>(undefined);
+  const prefill = latestReplyText(read.data, task.assignee_agent_member_id);
+  const value = result ?? prefill;
+  return (
+    <DialogFrame className="confirm-dialog" close={onCancel} labelId="finish-task-title">
+      <header>
+        <h2 id="finish-task-title">Finish !{task.seq}?</h2>
+        <button className="icon-button" type="button" aria-label="Close Finish Task" onClick={onCancel}><X /></button>
+      </header>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onConfirm(value.trim());
+        }}
+      >
+        <p>This becomes the Task result.</p>
+        <label className="task-field">
+          Result
+          <textarea value={value} rows={4} onChange={(event) => setResult(event.target.value)} />
+        </label>
+        <footer>
+          <button className="command-button" type="button" onClick={onCancel}>Cancel</button>
+          <button className="command-button command-button--accent" type="submit" disabled={pending || !value.trim()}><Check /> Mark done</button>
+        </footer>
+      </form>
+    </DialogFrame>
+  );
+}
+
+/** Asks the assignee for another pass: a normal reply with a real mention, then the status change.
+ *
+ * The form sits below the action row, not inside it, so opening it does not reflow the buttons.
+ */
+function TaskRequestChanges({ task, close }: { task: Task; close: () => void }) {
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [reasonSent, setReasonSent] = useState(false);
+  const change = useMutation({
+    mutationFn: async ({ reason, resent }: { reason: string; resent: boolean }) => {
+      if (!resent) {
+        await createThreadReply(
+          task.source_thread.id,
+          {
+            body_markdown: `@${task.assignee_name} ${reason}`,
+            mentions: task.assignee_agent_member_id ? [task.assignee_agent_member_id] : [],
+            mention_all: false,
+            attachment_ids: [],
+          },
+          uuidv7(),
+        );
+        setReasonSent(true);
+      }
+      return requestTaskChanges(task.id);
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["task", updated.id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["tasks", updated.space_id] });
+      void queryClient.invalidateQueries({ queryKey: ["thread", updated.source_thread.id] });
+      close();
+      setReason("");
+      setReasonSent(false);
+    },
+  });
+
+  const submit = () => {
+    if (reason.trim()) change.mutate({ reason: reason.trim(), resent: reasonSent });
+  };
+
+  return (
+    <>
+      <form
+        className="task-changes"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <h3>What needs to change?</h3>
+        <textarea
+          autoFocus
+          value={reason}
+          rows={3}
+          placeholder={`Tell ${task.assignee_name} what to change.`}
+          onChange={(event) => {
+            setReason(event.target.value);
+            // A new sentence is a new request: the reply must be posted again.
+            setReasonSent(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") close();
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        {reason.trim() ? null : <p className="task-changes-hint" role="status">Add one sentence on what to change.</p>}
+        <div className="task-changes-actions">
+          <button className="command-button command-button--accent" type="submit" disabled={!reason.trim() || change.isPending}>{change.isError && reasonSent ? "Retry" : "Send request"}</button>
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => {
+              close();
+              setReason("");
+              setReasonSent(false);
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+      {change.isError ? (
+        <p className="inline-notice inline-notice--error" role="alert">{reasonSent ? "Reason sent. Status unchanged — retry to move it back to In progress." : "Could not post the reason. Nothing was changed."}</p>
+      ) : null}
+    </>
+  );
+}
+
+/** The assignee's last plain-text reply, used to prefill the result. */
+function latestReplyText(read: ThreadRead | undefined, assigneeId: string | null | undefined): string {
+  if (!read || !assigneeId) return "";
+  const reply = read.replies
+    .filter((candidate) => candidate.author.id === assigneeId)
+    .at(-1);
+  return reply?.content.type === "text" ? plainText(reply.content.body_markdown) : "";
 }
 
 function TaskStatusLabel({ status }: { status: TaskStatus }) {
