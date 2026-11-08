@@ -362,7 +362,7 @@ Driver：
 - Channel 时间线按页读取 Root Message：首屏是最新 50 条，滚到顶部时自动读取更早的一页（顶部同时有 `Load earlier messages` 按钮供键盘使用），插入后正在阅读的消息保持在原位置。
 - Thread pane 头部第二项是这条 Thread 关联的 Task：状态图形 + `!seq` + 标题，hover 显示 `Task !seq · Source/Linked Thread · 标题`，用图形表明它是 Task 而不是标题的一部分。
 - 打开 Channel 或 DM 时，自上次在本浏览器看过之后、别人发来的第一条消息前显示红色 `New` 分隔线；分隔线在本次浏览期间固定不动，已读位置按对话保存在浏览器本地。
-- Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。
+- Channel 与 Thread 收到新消息时，距底部不超过 3/4 可视屏高则自动定位到最新 Message；超过 3/4 屏时不自动定位，显示 `To bottom`，点击后回到最新 Message；发送成功后同样定位到新 Message。同在 3/4 屏内时，内容在同一个最新 Message 下变高（Thread 预览新增回复、消息编辑、工作状态出现）也保持贴底，读者不会因为回复变多而漂上去。Channel 在恢复的旧位置或离开期间产生的新消息，以数量展示在 `To bottom` 按钮上，点击回到最新 Message 后清除。
 - 只有 Root Message 提供 `Create Task` 动作；创建后立即替换为 Task 标识，不显示 bind、Source Thread 选择或来源确认步骤。
 - Thread reply 不显示创建动作；reply 上的 Task 动作保持禁用并说明只能从 Root Message 创建。
 - 每条 Message 在 hover 或键盘 focus 时才显示：右下角的时间、右上角的轻量动作面板（Reply in Thread、Create Task，分隔线后是 Copy text 与 Copy link；Thread pane 的消息只有两个复制动作）。同一时刻只有一条 Message 显示动作面板，鼠标点击过的按钮不会让面板保持显示。复制成功时图标换成对勾，按钮下方出现 `Copied` 小提示，动作条宽度不变。时间悬停显示完整日期时间。静止时消息行只有头像、名字和正文；Thread 预览占满消息宽度，不显示 reply 时间。

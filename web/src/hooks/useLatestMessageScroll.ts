@@ -137,5 +137,27 @@ export function useLatestMessageScroll(
     return () => element.removeEventListener("scroll", updateScrollState);
   }, [latestMessageId, memoryKey, messageIds, scrollRef, updateScrollState]);
 
+  // Content grows without a new latest Message: an inline Thread gains a reply, a message is edited,
+  // the working strip appears. A reader parked near the bottom stays at the bottom instead of
+  // drifting up by the height of what arrived.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof MutationObserver === "undefined") return;
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (!nearBottomRef.current || frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        // The reader may have scrolled up between the mutation and this frame.
+        if (nearBottomRef.current) scrollToBottom();
+      });
+    });
+    observer.observe(element, { childList: true, characterData: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [scrollRef, scrollToBottom]);
+
   return { showToBottom, newMessageCount, scrollToBottom, markLatestSeen };
 }

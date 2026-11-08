@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -382,6 +382,51 @@ describe("timeline position", () => {
     );
 
     expect(timeline.scrollTop).toBe(500);
+  });
+
+  it("stays at the bottom when an inline Thread reply grows the timeline", async () => {
+    const rootWithReplies = (replyCount: number, replies: string[]): Message => ({
+      ...humanMessage(1),
+      thread_id: "thread-1",
+      reply_count: replyCount,
+      latest_replies: replies.map((body, index) => ({
+        id: `reply-${index}`,
+        author: { id: "human-lin", kind: "human" as const, display_name: "Lin" },
+        content: { type: "text" as const, body_markdown: body },
+        deleted_at: null,
+      })),
+    });
+    const view = (replies: string[]) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <MessageTimeline
+          timelineRef={timelineRef}
+          page={pageWith([rootWithReplies(replies.length, replies)])}
+          pending={false}
+          error={null}
+          retry={vi.fn()}
+          emptyTitle="No messages"
+          channelId="channel-1"
+          spaceSlug="sumi-lab"
+          openThread={vi.fn()}
+          activityByMemberId={new Map()}
+          members={[]}
+        />
+      </QueryClientProvider>
+    );
+    const timelineRef = createRef<HTMLDivElement>();
+    const { rerender } = render(view(["One reply"]));
+
+    const timeline = timelineRef.current!;
+    Object.defineProperty(timeline, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(timeline, "scrollHeight", { configurable: true, value: 200 });
+    timeline.scrollTop = 100;
+    fireEvent.scroll(timeline);
+
+    // Same latest Message, taller content: the reader is parked at the bottom and stays there.
+    Object.defineProperty(timeline, "scrollHeight", { configurable: true, value: 260 });
+    rerender(view(["One reply", "A reply that arrived while reading"]));
+
+    await waitFor(() => expect(timeline.scrollTop).toBe(260));
   });
 
   it("keeps the scroll position and shows the jump button when a new message arrives far above the bottom", () => {
