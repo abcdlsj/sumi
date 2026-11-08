@@ -476,6 +476,7 @@ input[type="radio"] {
   flex: none;
   place-items: center;
   overflow: hidden;
+  border: 1px solid var(--identity-line);
   border-radius: 50%;
   font-size: 13px;
   font-weight: 600;

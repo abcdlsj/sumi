@@ -256,9 +256,10 @@
   white-space: nowrap;
 }
 
+/* The resting hairline stays; hover and the open menu add a heavier ring outside it. */
 .message-avatar-button[aria-expanded="true"] .pixel-identity,
 .message-avatar-button:hover .pixel-identity {
-  box-shadow: 0 0 0 2px var(--line-strong);
+  box-shadow: 0 0 0 2px var(--identity-line-hover);
 }
 
 /* Time sits in the bottom-right corner and appears only with the toolbar. */

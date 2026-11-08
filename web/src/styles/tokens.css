@@ -44,6 +44,10 @@
   --line-strong: #d3cfc8;
   --line-hover: #cfccc6;
   --focus: #1c1b19;
+  /* Identity marks: every avatar fill is a pale tint, so a hairline keeps its edge readable
+     on white and on the sidebar. Hover and the open menu use the heavier ring. */
+  --identity-line: rgb(28 27 25 / 18%);
+  --identity-line-hover: rgb(28 27 25 / 26%);
 
   /* Signals */
   --you: #d9902b;

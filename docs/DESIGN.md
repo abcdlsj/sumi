@@ -311,7 +311,7 @@ Driver：
 - 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
 - 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 accent（主要 CTA），圆角 7px；按下时只加深底色并加内阴影，不位移、不缩放。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
 - 选中态全站统一：白色抬起卡片（`--shadow-selected`），用于导航当前项、筛选 tab、分段控件。hover 只换极浅底色。
-- 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。
+- 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。两种头像都有 1px 中性描边（`--identity-line`）：浅色底在白底和侧栏底上都需要一条边界，描边是静止态的全部装饰，不表示状态；消息里可点击的 Agent 头像在 hover 或浮层展开时在外侧加 2px 更深的环（`--identity-line-hover`），与静止描边区分。
 - Task 状态由图形形状承载：TODO 虚线圆、In Progress 半满圆、In Review 圆点环、Done 对勾、Closed 斜线；同时带状态文字或 `aria-label`，颜色不是唯一线索。
 - 附件以浅底小条展示（subtle 底 + 圆角），不画边框。
 - 所有图形信号带 `aria-label` 和 `title`。
