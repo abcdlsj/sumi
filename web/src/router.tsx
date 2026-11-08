@@ -12,8 +12,8 @@ import { SpaceLayout } from "./SpaceLayout";
 import { loadLastConversationRoute } from "./conversationMemory";
 import { ChannelPage } from "./screens/ChannelPage";
 import { DirectMessagePage } from "./screens/DirectMessagePage";
+import { LandingPage } from "./screens/LandingPage";
 import { LoginPage } from "./screens/LoginPage";
-import { RegisterPage } from "./screens/RegisterPage";
 import { SpaceCreatePage } from "./screens/SpaceCreatePage";
 import { NotFoundPage, RouteErrorPage } from "./components/RoutePages";
 import { OnboardingSkeleton, PageSkeleton, PanelSkeleton } from "./components/Skeleton";
@@ -30,6 +30,7 @@ const InvitationPage = lazyRouteComponent(() => import("./screens/InvitationPage
 const InboxPage = lazyRouteComponent(() => import("./screens/InboxPage"), "InboxPage");
 const MembersPage = lazyRouteComponent(() => import("./screens/MembersPage"), "MembersPage");
 const PairComputerPage = lazyRouteComponent(() => import("./screens/PairComputerPage"), "PairComputerPage");
+const SpacePickerPage = lazyRouteComponent(() => import("./screens/SpacePickerPage"), "SpacePickerPage");
 const SettingsPage = lazyRouteComponent(() => import("./screens/SettingsPage"), "SettingsPage");
 const TaskDetailPage = lazyRouteComponent(() => import("./screens/TasksPage"), "TaskDetailPage");
 const TasksPage = lazyRouteComponent(() => import("./screens/TasksPage"), "TasksPage");
@@ -41,7 +42,14 @@ const registerRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
-  component: RegisterPage,
+  component: LandingPage,
+  pendingComponent: () => <OnboardingSkeleton label="Opening Sumi" />,
+});
+const spacePickerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/spaces",
+  component: SpacePickerPage,
+  pendingComponent: () => <OnboardingSkeleton label="Opening your Spaces" />,
 });
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -195,6 +203,7 @@ const directMessageRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   registerRoute,
   loginRoute,
+  spacePickerRoute,
   createSpaceRoute,
   spaceRoute.addChildren([
     spaceEntryRoute,

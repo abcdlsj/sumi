@@ -22,10 +22,11 @@ describe("RegisterPage", () => {
   });
 
   it("renders the Human registration fields", async () => {
+    vi.stubGlobal("fetch", signedOutFetch());
     const router = createAppRouter(createMemoryHistory({ initialEntries: ["/"] }));
     await router.load();
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
@@ -44,6 +45,9 @@ describe("RegisterPage", () => {
   it("reports a registration conflict without revealing that the email exists", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === "/api/v1/spaces" && !init?.method) {
+        return json({ error: { code: "unauthenticated", message: "Authentication is required" } }, 401);
+      }
       if (path === "/api/v1/auth/register" && init?.method === "POST") {
         return json(
           { error: { code: "conflict", message: "request conflicts with current state" } },
@@ -178,6 +182,17 @@ describe("RegisterPage", () => {
     });
   });
 });
+
+/** The visitor `/` answers while nobody is signed in. */
+function signedOutFetch() {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path === "/api/v1/spaces") {
+      return json({ error: { code: "unauthenticated", message: "Authentication is required" } }, 401);
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

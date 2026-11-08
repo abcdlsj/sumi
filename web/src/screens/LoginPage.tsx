@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 
 import { listSpaces, login } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
+import { isSafeRedirect, landing, landingPath } from "../landing";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -18,12 +19,8 @@ export function LoginPage() {
         return;
       }
       const spaces = await queryClient.fetchQuery({ queryKey: ["spaces"], queryFn: listSpaces });
-      const space = spaces[0];
-      if (space) {
-        void navigate({ to: "/s/$spaceSlug", params: { spaceSlug: space.slug } });
-      } else {
-        void navigate({ to: "/spaces/new" });
-      }
+      const path = landingPath(landing(spaces));
+      if (path) void navigate({ href: path });
     },
   });
 
@@ -90,8 +87,4 @@ export function LoginPage() {
       <footer className="onboarding-footer" />
     </main>
   );
-}
-
-function isSafeRedirect(value: string | undefined): value is string {
-  return Boolean(value?.startsWith("/") && !value.startsWith("//"));
 }

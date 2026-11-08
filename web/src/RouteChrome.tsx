@@ -6,6 +6,7 @@ import { Toaster } from "./components/Feedback";
 function routeTitle(pathname: string): string | undefined {
   if (pathname === "/login") return "Sign in";
   if (pathname === "/") return "Register";
+  if (pathname === "/spaces") return "Choose a Space";
   if (pathname === "/spaces/new") return "Create Space";
   if (pathname.startsWith("/invite/")) return "Invitation";
   if (pathname.startsWith("/pair-computer/")) return "Pair Computer";

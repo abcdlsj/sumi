@@ -343,7 +343,7 @@ Driver：
 - 有 Computer、有 Agent 且 #general 里已有 Agent 发言后引导自动消失；右上角可手动隐藏（按 Space 存在浏览器本地）。引导出现时不再显示空 Channel 的开场说明。
 - 配对确认页在只有一个 Space 时自动选中它，确认后回到该 Space 的 #general，引导接着进行。
 - 注册后直接进入建 Space；建好后进入 #general。注册页与建 Space 页的当前步骤只由顶栏进度表示，左侧标题区不再重复 `Step 1 · Identity` 之类的标签；这两页页脚留空，页脚只放真实事实（例如邀请 7 天后失效）。
-- 登录后沿用身份已有的 Space：`GET /api/v1/spaces` 返回至少一个 Space 时进入其中第一个，否则进入建 Space。
+- 登录后沿用身份已有的 Space：`GET /api/v1/spaces` 只返回一个时直接进入该 Space，返回多个时进入 Space 选择页（列出每个 Space 的名称与 `/s/<slug>`，可另建），没有 Space 时进入建 Space。打开 `/` 按同一规则处理，没有会话时 `/` 就是注册页。
 
 ### 连接与反馈
 

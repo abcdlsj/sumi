@@ -3984,6 +3984,96 @@ a.task-source-link:hover {
   font-weight: 550;
 }
 
+/* Space picker: the only screen where the caller has to choose between Spaces ---- */
+
+.space-picker {
+  display: grid;
+  width: min(520px, calc(100% - 32px));
+  align-self: center;
+  justify-self: center;
+  gap: 16px;
+  padding: 32px 0 56px;
+}
+
+.space-picker h1 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 32px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -.02em;
+}
+
+.space-picker-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.space-picker-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.space-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.space-picker-option:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.space-picker-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.space-picker-mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.space-picker-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.space-picker-copy strong {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-picker-copy small {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.space-picker-option > svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--muted);
+}
+
 .slug-input {
   display: flex;
   width: 100%;

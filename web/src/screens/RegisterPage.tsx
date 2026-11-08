@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 
 import { ApiRequestError, register } from "../api/client";
 import { SumiLogo } from "../components/SumiLogo";
+import { isSafeRedirect } from "../landing";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -126,8 +127,4 @@ function registrationErrorText(error: Error): string {
     return "Could not create the account. Check your details and try again.";
   }
   return error.message;
-}
-
-function isSafeRedirect(value: string | undefined): value is string {
-  return Boolean(value?.startsWith("/") && !value.startsWith("//"));
 }

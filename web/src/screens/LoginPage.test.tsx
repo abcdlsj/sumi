@@ -74,6 +74,24 @@ describe("LoginPage", () => {
     });
   });
 
+  it("asks which Space when the identity belongs to several", async () => {
+    const build = { ...space, id: "019c0000-0000-7000-8000-000000000030", name: "Sumi Build", slug: "build" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/login" && init?.method === "POST") return json({ user });
+      if (path === "/api/v1/spaces" && !init?.method) return json([space, build]);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    const router = await signIn(fetchMock);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/spaces");
+    });
+    expect(await screen.findByRole("heading", { name: "Choose a Space." })).toBeVisible();
+    expect(screen.getByRole("link", { name: /Sumi Build/ })).toHaveAttribute("href", "/s/build");
+  });
+
   it("offers Space creation when the identity belongs to no Space", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
