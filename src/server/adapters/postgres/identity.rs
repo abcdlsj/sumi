@@ -883,8 +883,8 @@ impl PostgresTransaction {
 
     pub(super) async fn save_agent(&mut self, agent: Agent) -> Result<(), ApplicationError> {
         let changed = sqlx::query(
-            "UPDATE agents SET computer_id=$2,role_text=$3,role_revision=$4,lifecycle=$5,retired_at=$6 \
-             WHERE member_id=$1",
+            "UPDATE agents SET computer_id=$2,role_text=$3,role_revision=$4,lifecycle=$5,retired_at=$6, \
+             driver_kind=$7,driver_config_json=$8 WHERE member_id=$1",
         )
         .bind(agent.member_id.into_uuid())
         .bind(agent.computer_id.map(ComputerId::into_uuid))
@@ -892,6 +892,8 @@ impl PostgresTransaction {
         .bind(i64::try_from(agent.role_revision).map_err(|_| ApplicationError::Conflict)?)
         .bind(agent_lifecycle_str(agent.lifecycle))
         .bind(agent.retired_at)
+        .bind(driver_kind_str(agent.driver_kind))
+        .bind(driver_config(agent.driver_kind))
         .execute(&mut *self.connection)
         .await
         .map_err(map_sqlx)?;

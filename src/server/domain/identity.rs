@@ -219,6 +219,32 @@ impl Agent {
         Ok(())
     }
 
+    /// Switches the Driver this Agent runs on and reports whether anything changed.
+    ///
+    /// The Computer closes the Agent's provider sessions when the Driver differs, so the next Run
+    /// starts on the new one. A Driver cannot change while the Agent is still being set up: the
+    /// provisioning command carries the Driver it was created with.
+    pub(in crate::server) fn change_driver(
+        &mut self,
+        driver_kind: DriverKind,
+    ) -> Result<bool, DomainError> {
+        if self.lifecycle == AgentLifecycle::Retired {
+            return Err(DomainError::AgentRetired);
+        }
+        if self.lifecycle == AgentLifecycle::Provisioning {
+            return Err(DomainError::InvalidTransition);
+        }
+        if self.driver_kind == driver_kind {
+            return Ok(false);
+        }
+        self.driver_kind = driver_kind;
+        // A Driver error is what parked an Agent in Error, so a new Driver is the way out.
+        if self.lifecycle == AgentLifecycle::Error {
+            self.lifecycle = AgentLifecycle::Active;
+        }
+        Ok(true)
+    }
+
     pub(in crate::server) fn revise_role(&mut self, role_text: &str) -> Result<(), DomainError> {
         if self.lifecycle == AgentLifecycle::Retired {
             return Err(DomainError::AgentRetired);
@@ -444,6 +470,38 @@ mod tests {
         assert_eq!(retired.resume(), Err(DomainError::AgentRetired));
         assert_eq!(retired.retry_provisioning(), Err(DomainError::AgentRetired));
         assert_eq!(retired.restart(), Err(DomainError::AgentRetired));
+        assert_eq!(
+            retired.change_driver(DriverKind::Builtin),
+            Err(DomainError::AgentRetired)
+        );
+    }
+
+    #[test]
+    fn changing_the_driver_reports_what_changed_and_revives_a_parked_agent() {
+        let mut active = agent(AgentLifecycle::Active);
+        assert_eq!(
+            active.change_driver(DriverKind::Acp(AcpProvider::Codex)),
+            Ok(false),
+            "the same Driver is not a change"
+        );
+        assert_eq!(active.change_driver(DriverKind::Builtin), Ok(true));
+        assert_eq!(active.driver_kind, DriverKind::Builtin);
+        assert_eq!(active.lifecycle, AgentLifecycle::Active);
+
+        // A Driver error is what parks an Agent in Error, so a new Driver is the way out.
+        let mut parked = agent(AgentLifecycle::Error);
+        assert_eq!(
+            parked.change_driver(DriverKind::Acp(AcpProvider::Claude)),
+            Ok(true)
+        );
+        assert_eq!(parked.lifecycle, AgentLifecycle::Active);
+
+        // Provisioning already carries a Driver; the Agent has to finish first.
+        let mut provisioning = agent(AgentLifecycle::Provisioning);
+        assert_eq!(
+            provisioning.change_driver(DriverKind::Builtin),
+            Err(DomainError::InvalidTransition)
+        );
     }
 
     #[test]

@@ -272,13 +272,8 @@ pub(super) async fn create_agent(
     // The domain owns what an Agent may be; the adapter only maps the wire form.
     let name = body.name.trim();
     let role = body.role_text.trim();
-    let driver_kind = match (body.driver_kind.as_str(), body.driver_provider.as_deref()) {
-        ("acp", Some("codex")) => DriverKind::Acp(AcpProvider::Codex),
-        ("acp", Some("claude")) => DriverKind::Acp(AcpProvider::Claude),
-        ("acp", Some("pi")) => DriverKind::Acp(AcpProvider::Pi),
-        ("builtin", None) => DriverKind::Builtin,
-        _ => return Err(ApiError::invalid("Agent configuration is invalid")),
-    };
+    let driver_kind = driver_from_body(body.driver_kind.as_str(), body.driver_provider.as_deref())
+        .ok_or_else(|| ApiError::invalid("Agent configuration is invalid"))?;
     let agent_id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     let mut storage = state.storage.clone();
@@ -696,6 +691,14 @@ pub(super) async fn update_agent(
 ) -> Result<Json<AgentResponse>, ApiError> {
     let actor_id = require_agent_governor(&state, &jar, agent_id).await?;
     let lifecycle = body.lifecycle.as_ref().map(lifecycle_action).transpose()?;
+    let driver_kind = match (body.driver_kind.as_deref(), body.driver_provider.as_deref()) {
+        (None, None) => None,
+        (Some(kind), provider) => Some(
+            driver_from_body(kind, provider)
+                .ok_or_else(|| ApiError::invalid("Agent configuration is invalid"))?,
+        ),
+        (None, Some(_)) => return Err(ApiError::invalid("Agent configuration is invalid")),
+    };
     let mut storage = state.storage.clone();
     UpdateAgent::execute(
         &mut storage,
@@ -703,6 +706,7 @@ pub(super) async fn update_agent(
             actor_id: MemberId::from_uuid(actor_id),
             agent_id: MemberId::from_uuid(agent_id),
             role_text: body.role_text.as_deref(),
+            driver_kind,
             lifecycle,
             idempotency_key: IdempotencyKey::from_uuid(idempotency_header(&headers)?),
         },
@@ -710,6 +714,18 @@ pub(super) async fn update_agent(
     .await
     .map_err(application_error)?;
     read_agent_projection(&state, agent_id).await
+}
+
+/// The wire form of a Driver: `acp` with a provider, or `builtin` alone. `None` means no Driver was
+/// named, which is only valid when updating.
+fn driver_from_body(kind: &str, provider: Option<&str>) -> Option<DriverKind> {
+    match (kind, provider) {
+        ("acp", Some("codex")) => Some(DriverKind::Acp(AcpProvider::Codex)),
+        ("acp", Some("claude")) => Some(DriverKind::Acp(AcpProvider::Claude)),
+        ("acp", Some("pi")) => Some(DriverKind::Acp(AcpProvider::Pi)),
+        ("builtin", None) => Some(DriverKind::Builtin),
+        _ => None,
+    }
 }
 
 pub(super) fn lifecycle_action(

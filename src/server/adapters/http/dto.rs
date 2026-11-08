@@ -132,6 +132,13 @@ pub(in crate::server::adapters) struct OpenDirectMessageBody {
 #[derive(Deserialize, ToSchema)]
 pub(in crate::server::adapters) struct UpdateAgentBody {
     pub(super) role_text: Option<String>,
+    #[serde(default)]
+    #[schema(value_type = Option<DriverKindCode>)]
+    pub(super) driver_kind: Option<String>,
+    /// Required with `driver_kind` `acp`; omitted for `builtin`.
+    #[serde(default)]
+    #[schema(value_type = Option<AcpProviderCode>)]
+    pub(super) driver_provider: Option<String>,
     pub(super) lifecycle: Option<LifecycleActionBody>,
 }
 

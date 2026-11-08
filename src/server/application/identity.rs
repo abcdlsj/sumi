@@ -475,6 +475,7 @@ pub(in crate::server) struct UpdateAgentInput<'a> {
     pub(in crate::server) actor_id: MemberId,
     pub(in crate::server) agent_id: MemberId,
     pub(in crate::server) role_text: Option<&'a str>,
+    pub(in crate::server) driver_kind: Option<DriverKind>,
     pub(in crate::server) lifecycle: Option<AgentLifecycleAction>,
     pub(in crate::server) idempotency_key: IdempotencyKey,
 }
@@ -508,6 +509,10 @@ impl UpdateAgent {
             if let Some(role_text) = input.role_text {
                 agent.revise_role(role_text)?;
             }
+            let driver_changed = match input.driver_kind {
+                Some(driver_kind) => agent.change_driver(driver_kind)?,
+                None => false,
+            };
             if let Some(action) = input.lifecycle {
                 match action {
                     AgentLifecycleAction::Suspend { cancel_current_run } => {
@@ -536,7 +541,7 @@ impl UpdateAgent {
                 }
             }
             transaction.save_agent(agent.clone()).await?;
-            if agent.role_revision != revision_before {
+            if agent.role_revision != revision_before || driver_changed {
                 transaction.queue_agent_configuration(&agent).await?;
             }
             transaction.emit(Effect::AgentUpdated(agent.member_id));

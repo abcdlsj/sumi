@@ -372,6 +372,7 @@ async fn a_resent_agent_restart_queues_one_command() {
         actor_id: owner_id,
         agent_id,
         role_text: None,
+        driver_kind: None,
         lifecycle: Some(AgentLifecycleAction::Restart),
         idempotency_key: key,
     };

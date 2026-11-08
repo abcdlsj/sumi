@@ -24,6 +24,43 @@ afterEach(() => {
 });
 
 describe("Agent detail", () => {
+  it("changes the Driver and says the next Run starts on it", async () => {
+    let current = agent("active", "ready");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes("/spaces/by-slug/")) return json(space);
+      if (path === "/api/v1/auth/me") return json({ id: "user", display_name: "Ada", email: "ada@example.test" });
+      if (path.endsWith("/channels") && !init?.method) return json({ can_create: true, channels: [] });
+      if (path.endsWith("/dms") && !init?.method) return json([]);
+      if (path.endsWith("/members") && !init?.method) return json([{ id: space.owner_member_id, kind: "human", display_name: "Ada", access_level: "owner", permissions: [] }, { id: agentId, kind: "agent", display_name: "Lin", access_level: "member", permissions: [] }]);
+      if (path.endsWith(`/agents/${agentId}/runs/current`) && !init?.method) return json({ another_item_waiting: false });
+      if (path.endsWith(`/agents/${agentId}`) && !init?.method) return json(current);
+      if (path.endsWith(`/agents/${agentId}`) && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        current = { ...current, driver_kind: body.driver_kind ?? current.driver_kind, driver_provider: body.driver_provider ?? current.driver_provider };
+        return json(current);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderRoute(`/s/sumi-lab/agents/${agentId}`);
+
+    await screen.findByRole("heading", { name: "Lin" });
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Driver" }));
+    fireEvent.click(screen.getByRole("option", { name: "Claude (ACP)" }));
+    fireEvent.click(screen.getByRole("button", { name: /save configuration/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`/agents/${agentId}`),
+      expect.objectContaining({
+        method: "PATCH",
+        body: expect.stringContaining('"driver_provider":"claude"'),
+      }),
+    ));
+  });
+
+
   it("edits Role and controls lifecycle while warning about local-only Memory", async () => {
     let current = agent("active", "ready");
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

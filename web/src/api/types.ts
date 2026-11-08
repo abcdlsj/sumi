@@ -737,6 +737,8 @@ export interface components {
             thread_id: string;
         };
         UpdateAgentBody: {
+            driver_kind?: null | components["schemas"]["DriverKind"];
+            driver_provider?: null | components["schemas"]["AcpProvider"];
             lifecycle?: null | components["schemas"]["LifecycleActionBody"];
             role_text?: string | null;
         };

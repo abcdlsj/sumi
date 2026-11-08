@@ -4,12 +4,13 @@ import { Activity, Brain, Eye, LayoutDashboard, Pause, Play, RotateCcw, Save, Se
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useRef, useState } from "react";
 
 import {getAgent, getAgentRuntime, grantMemberPermission, listComputers, listMemberDirectMessages, listMembers, readAgentMemory, readThread, retireAgent, revokeMemberPermission, updateAgent} from "../api/client";
-import type {Channel} from "../api/types";
-import { driverLabel } from "../driver";
+import type {Agent, Channel} from "../api/types";
+import { DRIVER_CHOICES, driverInput, driverLabel, type DriverChoice } from "../driver";
 import { EmptyState } from "../components/EmptyState";
 import { AGENT_ACTIVITY_LABELS, activityLabel, agentPresence, useAgentActivity, type AgentActivityItem } from "../agentActivity";
 import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
+import { SumiSelect } from "../components/SumiSelect";
 import { SpacePage } from "../components/SpaceShell";
 import { PresenceIdentity } from "../components/PixelIdentity";
 import { formatBytes } from "../format";
@@ -48,6 +49,8 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   const [tab, setTab] = useState<AgentTab>("activity");
   const [cancelNow, setCancelNow] = useState(false);
   const [retireConfirmOpen, setRetireConfirmOpen] = useState(false);
+  // Undefined until the Human picks a Driver, so the stored one stays selected while nothing is edited.
+  const [driverChoice, setDriverChoice] = useState<DriverChoice | undefined>(undefined);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => getAgent(agentId) });
   const runtime = useQuery({ queryKey: ["agent-runtime", agentId], queryFn: () => getAgentRuntime(agentId), retry: false });
@@ -66,7 +69,12 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   });
   const update = useMutation({
     mutationFn: (input: Parameters<typeof updateAgent>[1]) => updateAgent(agentId, input),
-    meta: { success: "Agent updated." },
+    meta: {
+      success: (_agent: unknown, input) =>
+        (input as { driver_kind?: unknown }).driver_kind === undefined
+          ? "Agent updated."
+          : "Driver updated. The Agent starts the new one on its next Run.",
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData(["agent", agentId], updated);
       void queryClient.invalidateQueries({ queryKey: ["agents", updated.space_id] });
@@ -93,7 +101,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     if (!agent.data) return;
-    update.mutate({ role_text: String(form.get("role_text") ?? "") });
+    update.mutate({ role_text: String(form.get("role_text") ?? ""), ...driverInput(driver) });
   }
 
   function moveTab(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
@@ -112,6 +120,7 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   if (agent.isPending) return <DetailSkeleton label="Loading Agent" />;
   if (agent.error || !agent.data) return <p className="route-status route-status--error">Agent unavailable. Check your permission and retry.</p>;
   const value = agent.data;
+  const driver = driverChoice ?? storedDriver(value);
   const agentMember = members.data?.find((member) => member.id === value.member_id);
 
   return (
@@ -237,6 +246,16 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
             {!canManage ? <p className="permission-notice" role="status">Only Owners and Admins can change these settings.</p> : null}
             <form className="agent-settings" onSubmit={save}>
               <label>Role<textarea name="role_text" defaultValue={value.role_text} maxLength={12000} required disabled={!canManage || value.desired_lifecycle === "retired"} /></label>
+              <label>Driver
+                <SumiSelect
+                  ariaLabel="Driver"
+                  value={driver}
+                  disabled={!canManage || value.desired_lifecycle === "retired" || value.provision_status === "provisioning"}
+                  onChange={(next) => setDriverChoice(next as DriverChoice)}
+                  options={DRIVER_CHOICES.map((choice) => ({ value: choice.value, label: choice.label }))}
+                />
+                <small className="form-hint">Changing the Driver closes this Agent's provider sessions; the next Run starts on the new one.</small>
+              </label>
               {canManage && value.desired_lifecycle !== "retired" ? <button className="command-button command-button--accent" type="submit" disabled={update.isPending}><Save /> Save configuration</button> : null}
             </form>
             {canManage && value.desired_lifecycle !== "retired" ? <section className="agent-lifecycle" aria-label="Agent lifecycle"><h2>Lifecycle</h2>{value.desired_lifecycle === "active" || value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "restart" } })}><RotateCcw aria-hidden="true" /> Restart Agent</button> : null}{value.desired_lifecycle === "active" ? <label className="agent-check"><input type="checkbox" checked={cancelNow} onChange={(event) => setCancelNow(event.target.checked)} /> Stop what it is doing right away</label> : null}{value.desired_lifecycle === "active" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "suspend", mode: cancelNow ? "cancel_now" : "stop_after_current" } })}><Pause /> Suspend</button> : null}{value.desired_lifecycle === "suspended" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "resume" } })}><Play /> Resume</button> : null}{value.provision_status === "error" ? <button className="command-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ lifecycle: { action: "retry" } })}><RotateCcw /> Retry setup</button> : null}<button className="danger-button" type="button" disabled={update.isPending || retirement.isPending} onClick={() => setRetireConfirmOpen(true)}><Trash2 /> Retire permanently</button></section> : null}
@@ -343,4 +362,10 @@ function activityLink(item: AgentActivityItem, spaceSlug: string, channelById: M
 
 function activityTime(occurredAt: string): string {
   return formatRecent(occurredAt);
+}
+
+/** The Driver an Agent already runs on, in the form the select uses. */
+function storedDriver(agent: Pick<Agent, "driver_kind"> & { driver_provider?: string | null }): DriverChoice {
+  if (agent.driver_kind === "builtin") return "builtin";
+  return agent.driver_provider === "claude" || agent.driver_provider === "pi" ? agent.driver_provider : "codex";
 }

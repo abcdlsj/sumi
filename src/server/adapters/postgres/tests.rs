@@ -2324,6 +2324,68 @@ async fn claim_run_inserts_the_run_before_leasing_its_inbox_item() {
         .unwrap();
 }
 
+/// A Driver change is the way out of a parked Agent: the stored Driver follows, the Agent becomes
+/// active again, and the Computer is told to reconfigure so the old provider sessions close.
+#[tokio::test]
+async fn changing_a_driver_persists_and_reconfigures_the_computer() {
+    let database = TestDatabase::create("sumi_agent_driver").await;
+    let pool = database.pool.clone();
+    let mut adapter = PostgresAdapter::new(pool.clone());
+    adapter.initialize_schema().await.unwrap();
+    let space_id = Uuid::now_v7();
+    let owner_id = Uuid::now_v7();
+    let agent_id = Uuid::now_v7();
+    let computer_id = Uuid::now_v7();
+    sqlx::raw_sql(&format!(
+        "BEGIN;
+         INSERT INTO spaces(id,slug,name,accent,owner_member_id,created_at) VALUES ('{space_id}','driver','Driver','#F0602F','{owner_id}',now());
+         INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES ('{owner_id}','{space_id}','human','Owner','owner',now());
+         INSERT INTO members(id,space_id,kind,display_name,access_level,created_at) VALUES ('{agent_id}','{space_id}','agent','Agent','member',now());
+         INSERT INTO computers(id,space_id,name,hostname,os,token_hash,connection_status,next_command_seq,created_at) VALUES ('{computer_id}','{space_id}','Computer','localhost','linux','driver-hash','offline',1,now());
+         INSERT INTO agents(member_id,space_id,computer_id,role_text,role_revision,lifecycle,driver_kind,created_at) VALUES ('{agent_id}','{space_id}','{computer_id}','Reply',1,'error','builtin',now());
+         COMMIT;"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    UpdateAgent::execute(
+        &mut adapter,
+        UpdateAgentInput {
+            actor_id: MemberId::from_uuid(owner_id),
+            agent_id: MemberId::from_uuid(agent_id),
+            role_text: None,
+            driver_kind: Some(DriverKind::Acp(AcpProvider::Claude)),
+            lifecycle: None,
+            idempotency_key: crate::ids::IdempotencyKey::from_uuid(Uuid::now_v7()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let (kind, config, lifecycle): (String, serde_json::Value, String) = sqlx::query_as(
+        "SELECT driver_kind,driver_config_json,lifecycle FROM agents WHERE member_id=$1",
+    )
+    .bind(agent_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kind, "acp");
+    assert_eq!(config["provider"], "claude");
+    assert_eq!(lifecycle, "active");
+    let configured: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM computer_commands WHERE computer_id=$1 AND kind='agent.configure')",
+    )
+    .bind(computer_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        configured,
+        "the Computer must reconfigure to close the old provider sessions"
+    );
+}
+
 #[tokio::test]
 async fn resuming_an_agent_queues_resume_before_a_later_run_start() {
     let admin_url = std::env::var("SUMI_TEST_DATABASE_URL")
@@ -2372,6 +2434,7 @@ async fn resuming_an_agent_queues_resume_before_a_later_run_start() {
             actor_id: MemberId::from_uuid(owner_id),
             agent_id: MemberId::from_uuid(agent_id),
             role_text: None,
+            driver_kind: None,
             lifecycle: Some(AgentLifecycleAction::Resume),
         },
     )
