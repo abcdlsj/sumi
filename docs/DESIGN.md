@@ -121,7 +121,7 @@ Driver：
 - ACP Driver 以全权限运行：session 建立后若 agent 提供全权限 mode（codex `full-access`、claude `bypassPermissions`）则切换到该 mode；`session/request_permission` 选择 allow 选项。Computer 不宣告 fs 与 terminal client capability。
 - ACP 恢复 Provider Session 时，agent 宣告 `sessionCapabilities.resume` 则用 `session/resume`，否则宣告 `loadSession` 则用 `session/load` 并丢弃重放的 `session/update`；两者都不支持或请求失败时 Session 丢失。关闭 Session 仅在宣告 `sessionCapabilities.close` 时发送 `session/close`。
 - ACP 回合以 `session/prompt` 响应结束：`end_turn` 为 Completed，`cancelled` 为 Interrupted，其余 stop reason 与错误为 Failed。interrupt 发送 `session/cancel`。
-- ACP 握手与 Provider 启动分开计时：`initialize` 45 秒（健康的 adapter 一声就到，沉默的进程视为起不来，及时把 Agent 的 Run 判失败），首次 `session/new` 180 秒（首次启动可能经 npx 下载 adapter 包）。
+- ACP 握手与 Provider 启动分开计时：`initialize` 45 秒（健康的 adapter 一声就到，沉默的进程视为起不来），首次 `session/new` 60 秒（此时 adapter 进程已经在应答，npx 下载已经结束，只剩 provider 自身启动；缺凭据或命令错误的 adapter 永远不回，不能一直算作在工作）。两者超时都把该 Run 判为 driver_error。
 
 ### 协议与投递
 

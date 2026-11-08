@@ -41,8 +41,8 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 // An adapter answers `initialize` as soon as it runs, so a silent one is not starting: a wrong or
 // broken command must fail an Agent quickly instead of looking busy for the whole startup budget.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
-// The first start may download the pinned adapter package through npx before the provider boots.
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
+// Booting the provider behind the first `session/new`; the adapter itself is already answering.
+const SESSION_START_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_TURN_ATTEMPTS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -407,9 +407,12 @@ impl AcpProcess {
     }
 
     fn session_request_timeout(&self) -> Duration {
-        // Adapters may start the provider runtime lazily on the first session request.
+        // The adapter process is already running: `initialize` was answered through it, so no
+        // package is downloading. Booting the provider behind the first session may still take a
+        // while, but an adapter that cannot (no credentials, wrong command) never answers, and
+        // waiting the whole startup budget for it is what made a broken Driver look busy.
         if self.sessions.is_empty() {
-            STARTUP_TIMEOUT
+            SESSION_START_TIMEOUT
         } else {
             RPC_TIMEOUT
         }
