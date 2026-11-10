@@ -145,6 +145,9 @@ textarea:focus-visible {
 
 /* Controls -------------------------------------------------------------- */
 
+/* Buttons are borderless fills: primary uses the accent, secondary a translucent
+   neutral fill, ghost (icon buttons) only paints on hover. A press scales the
+   control by --press-scale; reduced motion keeps only the darker fill. */
 .command-button,
 .danger-button,
 .compact-action,
@@ -155,69 +158,69 @@ textarea:focus-visible {
   flex: none;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 9px;
-  background: var(--bg-raised);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--fill-neutral);
   color: var(--ink);
   cursor: pointer;
-  font-size: var(--text-small);
-  font-weight: 550;
+  font-size: var(--text-body);
+  font-weight: 500;
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
-  transition: background-color .12s ease, box-shadow .12s ease, color .12s ease;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease;
 }
 
 .command-button:hover:not(:disabled),
 .compact-action:hover:not(:disabled),
-.secondary-action:hover {
-  background: var(--bg-hover);
-  box-shadow: inset 0 0 0 1px var(--line-hover);
+.secondary-action:hover:not(:disabled) {
+  background: var(--fill-neutral-hover);
+}
+
+.command-button:active:not(:disabled),
+.compact-action:active:not(:disabled),
+.secondary-action:active:not(:disabled) {
+  background: var(--fill-neutral-pressed);
 }
 
 .command-button--accent,
 .primary-action {
   background: var(--accent);
-  box-shadow: none;
   color: var(--on-accent);
 }
 
 .command-button--accent:hover:not(:disabled),
-.primary-action:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: none;
-}
-
-/* Pressed: a firmer surface, never a transform, so nothing moves on click. */
-.command-button:active:not(:disabled),
-.compact-action:active:not(:disabled),
-.secondary-action:active {
-  background: var(--bg-subtle);
-  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 2px rgb(28 27 25 / 8%);
-}
-
+.primary-action:hover:not(:disabled),
 .command-button--accent:active:not(:disabled),
 .primary-action:active:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-pressed);
+}
+
+.command-button:active:not(:disabled),
+.danger-button:active:not(:disabled),
+.compact-action:active:not(:disabled),
+.primary-action:active:not(:disabled),
+.secondary-action:active:not(:disabled),
+.icon-button:active:not(:disabled) {
+  transform: scale(var(--press-scale));
 }
 
 .danger-button {
-  box-shadow: inset 0 0 0 1px var(--danger-line);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
-.danger-button:hover:not(:disabled) {
-  background: var(--danger-soft);
+.danger-button:hover:not(:disabled),
+.danger-button:active:not(:disabled) {
+  background: var(--danger-soft-hover);
 }
 
 .compact-action {
   height: var(--control-height-compact);
   padding: 0 10px;
-  font-size: var(--text-meta);
+  font-size: var(--text-small);
 }
 
 .command-button svg,
@@ -225,43 +228,44 @@ textarea:focus-visible {
 .compact-action svg,
 .primary-action svg,
 .secondary-action svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .command-button:disabled,
 .danger-button:disabled,
 .compact-action:disabled,
-.primary-action:disabled {
+.primary-action:disabled,
+.secondary-action:disabled {
   cursor: not-allowed;
   opacity: .5;
 }
 
 .icon-button {
   display: inline-grid;
-  width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
   flex: none;
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   text-decoration: none;
-  transition: background-color .12s ease, color .12s ease;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease;
 }
 
 .icon-button:hover:not(:disabled) {
-  background: var(--bg-subtle);
+  background: var(--ink-wash);
   color: var(--ink);
 }
 
 .icon-button:active:not(:disabled),
 .message-action-button:active:not(:disabled, [aria-disabled="true"]),
 .member-message-button:active:not(:disabled) {
-  background: var(--line-strong);
+  background: var(--ink-wash-pressed);
   color: var(--ink);
 }
 
@@ -275,26 +279,39 @@ textarea:focus-visible {
   height: 17px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .command-button:active,
+  .danger-button:active,
+  .compact-action:active,
+  .primary-action:active,
+  .secondary-action:active,
+  .icon-button:active {
+    transform: none !important;
+  }
+}
+
 label {
   color: var(--ink-2);
   font-size: var(--text-small);
   font-weight: 500;
 }
 
+/* Fields: a 1px strong line; hover adds a faint 2px inner ring, focus turns the
+   line ink and keeps a 2px inner ring, so the field never changes size. */
 input:not([type="checkbox"], [type="radio"], [type="file"]),
 select,
 textarea {
   width: 100%;
   min-height: var(--control-height);
-  padding: 7px 11px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--ink);
   font-size: var(--text-body);
   font-weight: 400;
-  transition: box-shadow .12s ease;
+  transition: box-shadow var(--duration-fast) ease;
 }
 
 select {
@@ -311,10 +328,16 @@ textarea {
   resize: vertical;
 }
 
+input:not([type="checkbox"], [type="radio"], [type="file"]):where(:hover:not(:focus, :disabled)),
+select:where(:hover:not(:focus, :disabled)),
+textarea:where(:hover:not(:focus, :disabled)) {
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 0 0 3px var(--field-ring-hover);
+}
+
 input:not([type="checkbox"], [type="radio"], [type="file"]):focus,
 select:focus,
 textarea:focus {
-  box-shadow: inset 0 0 0 1px var(--ink), 0 0 0 3px rgb(28 27 25 / 6%);
+  box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 3px var(--line-strong);
 }
 
 input::placeholder,
@@ -387,13 +410,13 @@ input[type="radio"] {
 .agent-error-signal,
 .agent-label {
   display: inline-flex;
-  height: 22px;
+  height: 20px;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 0 8px;
-  border-radius: 6px;
-  background: var(--bg-subtle);
+  border-radius: var(--radius-full);
+  background: var(--fill-neutral);
   color: var(--ink-2);
   font-size: var(--text-meta);
   font-weight: 500;
@@ -706,18 +729,20 @@ input[type="radio"] {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--ink-2);
   font-size: var(--text-small);
+  font-weight: 500;
   text-decoration: none;
 }
 
 .page-tabs a:hover {
+  background: var(--ink-wash);
   color: var(--ink);
 }
 
 .page-tabs a[aria-current="page"] {
-  background: var(--bg-subtle);
+  background: var(--fill-neutral-hover);
   color: var(--ink);
 }
 
@@ -1020,7 +1045,7 @@ input[type="radio"] {
   align-items: center;
   gap: 10px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--ink-2);
   font-size: var(--text-body);
   text-decoration: none;
@@ -1672,7 +1697,7 @@ body > #root > .route-status {
   max-height: calc(100dvh - 40px);
   gap: 16px;
   overflow-y: auto;
-  padding: 20px 22px 22px;
+  padding: 20px 24px 24px;
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
   box-shadow: var(--shadow-dialog);
@@ -1693,13 +1718,13 @@ body > #root > .route-status {
 
 .dialog-surface > header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 24px;
 }
 
 .dialog-surface > header .icon-button {
-  margin: -4px -8px 0 0;
+  margin: -4px -10px 0 0;
 }
 
 .dialog-surface > p,
@@ -1731,7 +1756,7 @@ body > #root > .route-status {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 4px;
+  padding-top: 8px;
 }
 
 .dialog-surface ul {
@@ -1918,23 +1943,30 @@ body > #root > .route-status {
   display: flex;
   width: 100%;
   min-width: 120px;
-  height: var(--control-height-compact);
+  height: var(--control-height);
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 0 8px 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--ink);
   cursor: pointer;
-  font-size: var(--text-small);
-  font-weight: 500;
+  font-size: var(--text-body);
+  font-weight: 400;
+  transition: box-shadow var(--duration-fast) ease;
 }
 
 .sumi-select-trigger:hover:not(:disabled) {
-  box-shadow: inset 0 0 0 1px var(--line-hover);
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 0 0 3px var(--field-ring-hover);
+}
+
+.sumi-select-trigger[aria-expanded="true"],
+.sumi-select-trigger:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 3px var(--line-strong);
+  outline: none;
 }
 
 .sumi-select-trigger:disabled {
@@ -1966,11 +1998,12 @@ body > #root > .route-status {
 
 .sumi-select-option {
   display: flex;
+  min-height: var(--control-height);
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
   color: var(--ink);
   cursor: pointer;
   font-size: var(--text-small);
@@ -1978,7 +2011,7 @@ body > #root > .route-status {
 }
 
 .sumi-select-option--highlighted {
-  background: var(--bg-subtle);
+  background: var(--ink-wash);
 }
 
 .sumi-select-option svg {
@@ -2122,31 +2155,33 @@ body > #root > .route-status {
 .llm-usage-range button,
 .detail-tabs button {
   display: inline-flex;
-  height: 28px;
+  height: var(--control-height-compact);
   align-items: center;
   gap: 6px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--ink-2);
   cursor: pointer;
   font-size: var(--text-small);
-  font-weight: 450;
+  font-weight: 500;
   white-space: nowrap;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
 .task-filters button:hover,
 .member-filter button:hover,
 .llm-usage-range button:hover,
 .detail-tabs button:hover {
+  background: var(--ink-wash);
   color: var(--ink);
 }
 
 .task-filters button[aria-pressed="true"],
 .member-filter button[aria-pressed="true"],
 .detail-tabs button[aria-selected="true"] {
-  background: var(--bg-subtle);
+  background: var(--fill-neutral-hover);
   color: var(--ink);
 }
 
@@ -2154,7 +2189,7 @@ body > #root > .route-status {
   min-width: 16px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--ink-wash-strong);
+  background: var(--fill-neutral);
   color: var(--ink-2);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -2876,7 +2911,7 @@ a.task-source-link:hover {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -4078,7 +4113,7 @@ a.task-source-link:hover {
   display: flex;
   width: 100%;
   align-items: center;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
@@ -4308,7 +4343,7 @@ a.task-source-link:hover {
     align-items: center;
     gap: 6px;
     padding: 0 8px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     color: var(--ink-2);
     text-decoration: none;
   }

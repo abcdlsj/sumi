@@ -6,8 +6,8 @@
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 9px;
-  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  background: var(--fill-neutral);
 }
 
 .llm-usage-range button {
@@ -15,7 +15,7 @@
   height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: calc(var(--radius-md) - 2px);
   background: transparent;
   color: var(--ink-2);
   font-size: var(--text-meta);

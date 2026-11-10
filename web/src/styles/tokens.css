@@ -24,8 +24,14 @@
   /* Translucent white over content: drop targets and labels on the Office scene. */
   --veil: rgb(255 255 255 / 90%);
   --scrim: rgb(28 27 25 / 22%);
-  --ink-wash: rgb(28 27 25 / 4%);
-  --ink-wash-strong: rgb(28 27 25 / 6%);
+  /* Interaction overlays painted over any surface (Astryx overlay-hover / overlay-pressed). */
+  --ink-wash: rgb(28 27 25 / 5%);
+  --ink-wash-pressed: rgb(28 27 25 / 10%);
+  /* Translucent fill for secondary controls and neutral badges, so they read on
+     white, the sidebar and subtle surfaces alike. */
+  --fill-neutral: rgb(28 27 25 / 6%);
+  --fill-neutral-hover: rgb(28 27 25 / 10%);
+  --fill-neutral-pressed: rgb(28 27 25 / 14%);
   --ink-outline: rgb(28 27 25 / 10%);
 
   /* On an ink surface (toasts, the pairing command) */
@@ -44,6 +50,7 @@
   --line-strong: #d3cfc8;
   --line-hover: #cfccc6;
   --focus: #1c1b19;
+  --field-ring-hover: rgb(211 207 200 / 45%);
   /* Identity marks: every avatar fill is a pale tint, so a hairline keeps its edge readable
      on white and on the sidebar. Hover and the open menu use the heavier ring. */
   --identity-line: rgb(28 27 25 / 18%);
@@ -63,6 +70,7 @@
   --danger: #c2402a;
   --danger-soft: #fbece8;
   --danger-line: #ead1cb;
+  --danger-soft-hover: #f6dcd5;
   --warning: #c98512;
 
   /* Space accent: SpaceShell replaces these with the Space's own colour. */
@@ -89,16 +97,20 @@
   --series-3: #d9902b;
 
   /* Shape */
-  --radius-xs: 5px;
-  --radius-sm: 7px;
+  /* Radius: xs for marks, sm inside a control (menu option), md for a control,
+     lg for a container (card, dialog, composer). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
   --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
   --radius-agent: 8px;
   --shadow-selected: 0 1px 2px rgb(28 27 25 / 6%), 0 0 0 1px rgb(28 27 25 / 4%);
-  --shadow-raised: 0 0 0 1px rgb(28 27 25 / 7%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 6%);
-  --shadow-popover: 0 0 0 1px rgb(28 27 25 / 6%), 0 8px 24px rgb(28 27 25 / 10%);
-  --shadow-raised-focus: 0 0 0 1px rgb(28 27 25 / 16%), 0 2px 4px rgb(28 27 25 / 3%), 0 10px 28px rgb(28 27 25 / 7%);
-  --shadow-dialog: 0 0 0 1px rgb(28 27 25 / 6%), 0 24px 64px rgb(28 27 25 / 18%);
+  /* Elevation follows three levels: raised (low), popover (med), dialog (high). */
+  --shadow-raised: 0 0 0 1px rgb(28 27 25 / 8%), 0 2px 4px rgb(28 27 25 / 3%), 0 4px 8px rgb(28 27 25 / 5%);
+  --shadow-popover: 0 0 0 1px rgb(28 27 25 / 6%), 0 2px 4px rgb(28 27 25 / 5%), 0 4px 12px rgb(28 27 25 / 10%);
+  --shadow-raised-focus: 0 0 0 1px rgb(28 27 25 / 18%), 0 2px 4px rgb(28 27 25 / 3%), 0 4px 8px rgb(28 27 25 / 6%);
+  --shadow-dialog: 0 0 0 1px rgb(28 27 25 / 6%), 0 4px 6px rgb(28 27 25 / 10%), 0 12px 24px rgb(28 27 25 / 15%);
   --shadow-drawer: 0 0 0 1px rgb(28 27 25 / 6%), 12px 0 40px rgb(28 27 25 / 14%);
   --shadow-toast: 0 8px 28px rgb(28 27 25 / 22%);
   --shadow-chip: 0 0 0 1px rgb(28 27 25 / 8%), 0 1px 2px rgb(28 27 25 / 10%);
@@ -115,8 +127,10 @@
   /* Layout */
   --header-height: 56px;
   --sidebar-width: 256px;
-  --control-height: 34px;
-  --control-height-compact: 30px;
+  --control-height: 32px;
+  --control-height-compact: 28px;
+  --press-scale: .98;
+  --duration-fast: 125ms;
   --measure-text: 68ch;
   --page-gutter: 28px;
   --page-gutter-compact: 16px;

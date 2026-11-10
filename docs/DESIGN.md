@@ -311,8 +311,9 @@ Driver：
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
 - 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。Channel 名、Driver 名和时间是文字，使用 Geist。
 - 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 16px/600，Task 与 Agent 详情的大标题 22px/600、区域标题 13px/600（句首大写，不用全大写）、正文与 Message 14px、辅助信息 13px、元数据 12px。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
-- 控件高度：默认 34px、紧凑 30px；按钮 1px 线框或实心 accent（主要 CTA），圆角 7px；按下时只加深底色并加内阴影，不位移、不缩放。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
-- 选中态全站统一：白色抬起卡片（`--shadow-selected`），用于导航当前项、筛选 tab、分段控件。hover 只换极浅底色。
+- 组件尺度参照 Astryx Neutral 主题，样式由 Sumi 自写 CSS 实现，不引入组件库：控件高度默认 32px、紧凑 28px；圆角分四级（`--radius-xs` 4px 用于标记，`--radius-sm` 6px 用于控件内部的菜单项，`--radius-md` 10px 用于按钮、输入框与下拉，`--radius-lg` 12px 用于卡片、弹窗与 Composer），徽标与状态胶囊为全圆角；阴影分三级（`--shadow-raised` 抬起卡片、`--shadow-popover` 浮层、`--shadow-dialog` 弹窗）。
+- 按钮无边框：主要 CTA 为实心 accent，次要按钮为半透明中性填充（`--fill-neutral`），危险按钮为浅红底红字，icon button 只在 hover 时显示 `--ink-wash`；hover 与按下逐级加深填充，按下时缩放到 `--press-scale`（0.98），`prefers-reduced-motion` 下不缩放。输入框与 SumiSelect 触发器为 1px `--line-strong` 线框：hover 在内侧加 2px 浅环，聚焦时线变墨色并保留 2px 内环，尺寸不变。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
+- 选中态：Sidebar 导航当前项与分段控件的选中块是白色抬起卡片（`--shadow-selected`）；页内筛选与 tab 的当前项是中性填充（`--fill-neutral-hover`）。hover 只叠加 `--ink-wash`。
 - 身份：Human 是圆形头像（首字符 + 稳定浅色底）；Agent 是圆角方形印章（`#F1F0EC` 底 + 一种墨色的 8×8 左右对称像素图案，由 member ID 决定：左半 32 格约一半填充，去掉孤立像素，过稀、过密或中线断开的结果会重抽，保证每个印章读起来是一个完整的符号）。形状即可区分人与 Agent，消息里不显示 `AGENT` 标签；成员列表、详情等身份场景显示 `Agent` 小标签。两种头像都有 1px 中性描边（`--identity-line`）：浅色底在白底和侧栏底上都需要一条边界，描边是静止态的全部装饰，不表示状态；消息里可点击的 Agent 头像在 hover 或浮层展开时在外侧加 2px 更深的环（`--identity-line-hover`），与静止描边区分。
 - Task 状态由图形形状承载：TODO 虚线圆、In Progress 半满圆、In Review 圆点环、Done 对勾、Closed 斜线；同时带状态文字或 `aria-label`，颜色不是唯一线索。
 - 附件以浅底小条展示（subtle 底 + 圆角），不画边框。
@@ -325,12 +326,12 @@ Driver：
 - Sidebar 头部有搜索按钮，`⌘K` / `Ctrl+K` 在任何页面打开快速跳转：按名字筛选 Channels、DM、Agents 和 Space 工具页，方向键选择、Enter 打开、Esc 关闭。
 - `/s/$spaceSlug` 是布局路由：同一 Space 内只挂载一个 SpaceShell，切换页面不重建 Sidebar、实时连接与未读标记；该 Shell 持有 Space 唯一的 SSE 连接，需要实时 Message 事件的页面（如 Company Office）订阅 Shell，不另开连接。切换到另一个 Space 时重建 Shell。
 - Sidebar 结构固定：点击任何入口只改变选中项，不在 Sidebar 内插入或移除内容。页面自己的二级列表放在页面内：Computers 的已配对列表是页面左侧 232px 分栏（标题行与页面 header 同高、共用分隔线；低于 700px 变为顶部横向滚动条），Insights 用页内 tab，Settings 是单页。
-- 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用 subtle 底槽 + 白色抬起选中块。
+- 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用中性半透明底槽（`--fill-neutral`）+ 白色抬起选中块。
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。
 - DM 列表中 Agent 正在工作时显示青色 `Working`，否则显示 Role 摘要。
 - 1100px 及以上保持三栏；低于 1100px 出现顶栏（`Open navigation` 菜单按钮、Space 名称、Inbox 计数），Sidebar 变为抽屉，Thread 覆盖 Channel；低于 700px 使用单列，Thread 和 Task 详情为全屏路由。
 - Header 高 56px。Message 正文、Thread 回复预览、Task Result 与 Agent 活动预览的最大宽度是 `--measure-text`（68ch），窗口再宽也不拉长行；附件、Task 标识与 Composer 仍占满整列。消息较少时时间线贴近 Composer，像聊天一样从底部开始。
-- Composer 是抬起的白色卡片（`--shadow-raised`、圆角 14px），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
+- Composer 是抬起的白色卡片（`--shadow-raised`、圆角 `--radius-lg`），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
 - Composer 只包含 Markdown、Attachment、mention 和 Send；DM 的 Composer 不提供 mention。
 - 输入 `@` 弹出 mention 面板：首项 `Everyone`（`@all`，人群图标），其后最多 6 位成员，名字以输入开头者排前；每行左侧 22px 图标、名字、Agent 标签右对齐；↑↓ 选择，Enter/Tab 插入，Esc 关闭。
