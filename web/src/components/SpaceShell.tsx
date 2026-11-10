@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Hash,
-  Building2,
   Inbox,
   LockKeyhole,
   ListTodo,
@@ -25,7 +24,6 @@ import type {Channel, DirectMessage, Member} from "../api/types";
 import { activityLabel, agentPresence, type AgentPresence } from "../agentActivity";
 import {
   AGENT_INSIGHTS_FEATURE_ID,
-  COMPANY_OFFICE_FEATURE_ID,
   useFeatureEnabled,
 } from "../featureRegistry";
 import { useSpaceEvents } from "../hooks/useSpaceEvents";
@@ -48,7 +46,7 @@ export function SpacePage({ children }: { children: (context: SpaceShellContext)
   return <>{children(useSpaceShell())}</>;
 }
 
-type ShellSection = "channel" | "dm" | "company" | "members" | "inbox" | "tasks" | "computers" | "insights" | "settings";
+type ShellSection = "channel" | "dm" | "members" | "inbox" | "tasks" | "computers" | "insights" | "settings";
 
 /** The sidebar entry the path belongs to; Agent details live under Members. */
 function shellSection(pathname: string): ShellSection | undefined {
@@ -56,7 +54,7 @@ function shellSection(pathname: string): ShellSection | undefined {
   switch (segment) {
     case "channels": return "channel";
     case "agents": return "members";
-    case "dm": case "company": case "members": case "inbox": case "tasks": case "computers": case "insights": case "settings":
+    case "dm": case "members": case "inbox": case "tasks": case "computers": case "insights": case "settings":
       return segment;
     default: return undefined;
   }
@@ -100,7 +98,6 @@ export function SpaceShell({
     return () => document.removeEventListener("keydown", handleKey);
   }, []);
   const agentInsightsEnabled = useFeatureEnabled(AGENT_INSIGHTS_FEATURE_ID);
-  const companyOfficeEnabled = useFeatureEnabled(COMPANY_OFFICE_FEATURE_ID);
   const [unreadChannelIds, setUnreadChannelIds] = useState<ReadonlySet<string>>(() => new Set());
   const navigationPanel = useRef<HTMLElement>(null);
   const topbarNavigationTrigger = useRef<HTMLButtonElement>(null);
@@ -464,14 +461,6 @@ export function SpaceShell({
               active={active === "computers"}
               href={`/s/${spaceSlugValue}/computers`}
             />
-            {companyOfficeEnabled ? (
-              <NavigationItem
-                icon={Building2}
-                label="Company"
-                active={active === "company"}
-                href={`/s/${spaceSlugValue}/company`}
-              />
-            ) : null}
             {agentInsightsEnabled ? (
               <NavigationItem
                 icon={Network}

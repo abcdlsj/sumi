@@ -20,7 +20,6 @@ import { OnboardingSkeleton, PageSkeleton, PanelSkeleton } from "./components/Sk
 
 // Pages beyond the conversation load on first visit, so opening a Channel downloads only what it renders.
 // Each one shows its own skeleton inside the Space Shell while its code downloads.
-const CompanyOfficePage = lazyRouteComponent(() => import("./screens/CompanyPage"), "CompanyOfficePage");
 const AgentGraphRouteContent = lazyRouteComponent(() => import("./screens/InsightsPage"), "AgentGraphRouteContent");
 const InsightsPage = lazyRouteComponent(() => import("./screens/InsightsPage"), "InsightsPage");
 const AgentStatisticsPage = lazyRouteComponent(() => import("./screens/AgentStatisticsPage"), "AgentStatisticsPage");
@@ -92,22 +91,6 @@ const channelRoute = createRoute({
   getParentRoute: () => spaceRoute,
   path: "channels/$channelSlug",
   component: ChannelPage,
-});
-const companyRoute = createRoute({
-  getParentRoute: () => spaceRoute,
-  path: "company",
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: "/s/$spaceSlug/company/office",
-      params: { spaceSlug: params.spaceSlug },
-    });
-  },
-});
-const companyOfficeRoute = createRoute({
-  getParentRoute: () => spaceRoute,
-  path: "company/office",
-  component: CompanyOfficePage,
-  pendingComponent: () => <PageSkeleton label="Opening Company" body="panel" />,
 });
 const membersRoute = createRoute({
   getParentRoute: () => spaceRoute,
@@ -208,8 +191,6 @@ const routeTree = rootRoute.addChildren([
   spaceRoute.addChildren([
     spaceEntryRoute,
     channelRoute,
-    companyRoute,
-    companyOfficeRoute,
     membersRoute,
     insightsRoute.addChildren([insightsIndexRoute, insightsStatsRoute, insightsGraphRoute]),
     settingsRoute,

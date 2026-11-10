@@ -1407,16 +1407,14 @@ input[type="radio"] {
 .tasks-header > :first-child,
 .members-header > :first-child,
 .inbox-workspace > .channel-header > :first-child,
-.computer-onboarding-header > :first-child,
-.office-header > :first-child {
+.computer-onboarding-header > :first-child {
   flex: 1;
 }
 
 .tasks-header .page-title,
 .members-title,
 .inbox-workspace .channel-title,
-.computer-onboarding-header .page-title,
-.office-header .page-title {
+.computer-onboarding-header .page-title {
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -1425,7 +1423,6 @@ input[type="radio"] {
 .tasks-header .page-title h1,
 .members-title h1,
 .computer-onboarding-header .page-title h1,
-.office-header .page-title h1,
 .settings-header h1 {
   font-size: var(--text-page-title);
   font-weight: 600;

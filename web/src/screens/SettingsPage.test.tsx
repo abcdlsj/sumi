@@ -1,12 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { setFeatureEnabled } from "../featureRegistry";
 import { SettingsWorkspace } from "./SettingsPage";
 
 beforeEach(() => {
   window.localStorage.clear();
-  setFeatureEnabled("agent-insights", false);
 });
 
 afterEach(() => {
@@ -20,23 +18,22 @@ describe("SettingsWorkspace", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Experimental features" })).toBeVisible();
     expect(screen.getByRole("switch", { name: "Agent insights" })).toBeVisible();
-    expect(screen.getByRole("switch", { name: "Company office" })).toBeVisible();
   });
 
-  it("persists the enable switch per feature", () => {
+  it("starts with the experimental feature shown and persists a turn-off", () => {
     render(<SettingsWorkspace />);
 
     const toggle = screen.getByRole("switch", { name: "Agent insights" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
     fireEvent.click(toggle);
 
-    expect(screen.getByRole("switch", { name: "Agent insights" })).toHaveAttribute("aria-checked", "true");
-    expect(window.localStorage.getItem("sumi.feature.agent-insights")).toBe("1");
+    expect(screen.getByRole("switch", { name: "Agent insights" })).toHaveAttribute("aria-checked", "false");
+    expect(window.localStorage.getItem("sumi.feature.agent-insights")).toBe("0");
   });
 
   it("highlights the feature named in the link", () => {
-    render(<SettingsWorkspace selectedFeatureId="company-office" />);
+    render(<SettingsWorkspace selectedFeatureId="agent-insights" />);
 
-    expect(document.getElementById("feature-company-office")).toHaveClass("settings-row--highlighted");
+    expect(document.getElementById("feature-agent-insights")).toHaveClass("settings-row--highlighted");
   });
 });

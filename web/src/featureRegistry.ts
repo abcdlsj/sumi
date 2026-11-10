@@ -16,12 +16,13 @@ export interface RegisteredFeature {
   kind: FeatureKind;
   description: string;
   storageKey: string;
+  /** Shown until the reader turns it off; only an explicit "0" disables it. */
+  defaultEnabled: boolean;
   /** Feature-specific config fields; experimental features always get an enable toggle. */
   fields: FeatureConfigField[];
 }
 
 export const AGENT_INSIGHTS_FEATURE_ID = "agent-insights";
-export const COMPANY_OFFICE_FEATURE_ID = "company-office";
 
 export const REGISTERED_FEATURES: readonly RegisteredFeature[] = [
   {
@@ -31,14 +32,7 @@ export const REGISTERED_FEATURES: readonly RegisteredFeature[] = [
     description:
       "Agent-level usage statistics and the Agent-to-Agent coordination graph, shown in the sidebar.",
     storageKey: "sumi.feature.agent-insights",
-    fields: [],
-  },
-  {
-    id: COMPANY_OFFICE_FEATURE_ID,
-    name: "Company office",
-    kind: "experimental",
-    description: "Kairosoft-style company office shown in the sidebar.",
-    storageKey: "sumi.feature.company-office",
+    defaultEnabled: true,
     fields: [],
   },
 ];
@@ -51,7 +45,8 @@ export function featureEnabled(id: string): boolean {
   if (typeof window === "undefined") return false;
   const feature = registeredFeature(id);
   if (!feature) return false;
-  return window.localStorage?.getItem(feature.storageKey) === "1";
+  const stored = window.localStorage?.getItem(feature.storageKey);
+  return stored === undefined || stored === null ? feature.defaultEnabled : stored === "1";
 }
 
 export function setFeatureEnabled(id: string, enabled: boolean): void {

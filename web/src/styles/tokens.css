@@ -21,7 +21,7 @@
   --bg-raised: #ffffff;
   --code-bg: #f3f2ef;
   --bg-panel: #fbfaf9;
-  /* Translucent white over content: drop targets and labels on the Office scene. */
+  /* Translucent white over content: the Composer drop target. */
   --veil: rgb(255 255 255 / 90%);
   --scrim: rgb(28 27 25 / 22%);
   /* Interaction overlays painted over any surface (Astryx overlay-hover / overlay-pressed). */

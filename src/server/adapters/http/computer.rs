@@ -318,7 +318,7 @@ pub(super) fn attention_policy() -> AttentionConfig {
 
 /// What an Agent is doing, in two forms.
 ///
-/// `label` is a sentence for a surface that shows it alone (Members, the Office roster). `target`
+/// `label` is a sentence for a surface that shows it alone (Members, a roster row). `target`
 /// names the Task a Run works on, so the timeline can say `X is working on <target>` instead of
 /// stacking "is working" next to "Working on …". A Channel address is not a target: every surface
 /// already shows which conversation the reader is in.

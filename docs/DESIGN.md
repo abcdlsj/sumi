@@ -323,9 +323,9 @@ Driver：
 ### 布局
 
 - 桌面布局为 Sidebar、Channel、可选 Thread pane 三栏；不再有 Space rail。Thread pane 只在打开时存在，打开即占满可用最大宽度（480px，窄窗口时按剩余宽度收缩），可拖拽或键盘收窄到 360px；Channel 自适应收缩。
-- Sidebar 宽 256px，自上而下：Space 头（标识 + 名称）、Space tools（Inbox 带待读计数、Tasks、Members、Computers；开启实验功能后出现 Agent insights、Company）、Channels、Discover、Direct messages，底部固定为账户菜单（头像 + 名字，点开显示邮箱、Settings、Sign out）与 Settings 齿轮。
+- Sidebar 宽 256px，自上而下：Space 头（标识 + 名称）、Space tools（Inbox 带待读计数、Tasks、Members、Computers、Agent insights）、Channels、Discover、Direct messages，底部固定为账户菜单（头像 + 名字，点开显示邮箱、Settings、Sign out）与 Settings 齿轮。
 - Sidebar 头部有搜索按钮，`⌘K` / `Ctrl+K` 在任何页面打开快速跳转：按名字筛选 Channels、DM、Agents 和 Space 工具页，方向键选择、Enter 打开、Esc 关闭。
-- `/s/$spaceSlug` 是布局路由：同一 Space 内只挂载一个 SpaceShell，切换页面不重建 Sidebar、实时连接与未读标记；该 Shell 持有 Space 唯一的 SSE 连接，需要实时 Message 事件的页面（如 Company Office）订阅 Shell，不另开连接。切换到另一个 Space 时重建 Shell。
+- `/s/$spaceSlug` 是布局路由：同一 Space 内只挂载一个 SpaceShell，切换页面不重建 Sidebar、实时连接与未读标记；该 Shell 持有 Space 唯一的 SSE 连接，需要实时 Message 事件的页面（如 Inbox）订阅 Shell，不另开连接。切换到另一个 Space 时重建 Shell。
 - Sidebar 结构固定：点击任何入口只改变选中项，不在 Sidebar 内插入或移除内容。页面自己的二级列表放在页面内：Computers 的已配对列表是页面左侧 232px 分栏（标题行与页面 header 同高、共用分隔线；低于 700px 变为顶部横向滚动条），Insights 用页内 tab，Settings 是单页。
 - 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用中性半透明底槽（`--fill-neutral`）+ 白色抬起选中块。
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。
@@ -397,13 +397,6 @@ Driver：
 - Activity 用人话描述谁在做和之前怎么结束：当前执行显示 `Lin is working on this`（青色圆点），历史显示 `Lin finished / paused / stopped / stopped on an error`，附时间和所在 Channel；没人做过时显示 `No one has worked on this yet.`。同一个 Agent 在同一 Channel 连续以同一结果结束的多次执行合并为一行，时间前写明次数（`2 runs · Oct 29, 11:47 AM`）。不显示 Run、Session continuity 或 Reset continuity。
 - Working、Waiting、Failed 是 Run 或 attention 状态，不进入 Task 状态选择器。
 
-### Company 页面
-
-- Company 是 Space 的公司形态入口，默认进入 Company Office；Sidebar 的 Company 入口直接打开 Office。
-- Company Office 是像素化办公区：每个 Agent 一个工位，按 activity 状态显示坐姿、打字或空闲；不同 Agent 使用不同配色区分，名字以白色小胶囊固定在头顶（状态点：工作中为青色）。页面右侧是 Agent 名单（印章头像、名字、工作中显示当前步骤），名单行与场景中的小人悬停/聚焦时互相高亮，点击进入 Agent 详情；聚集中的频道以青色胶囊列在名单下方。窄屏时名单移到场景下方。移动走 8px 网格上的 A* 路径，绕开工位、桌子和其他家具，以恒定的慢速前进；朝向跟随行走方向，到达后转向交谈对象；小人按所在纵坐标排前后遮挡。行为按优先级决定：离线、工作中或被派发任务时回工位（不瞬移）；Agent 参与 DM 活跃时，发起方走到对方工位侧边讨论，双方显示交谈；群组频道在数分钟窗口内消息达到阈值时，频道内 Agent 围坐到会议区的不同座位；其余空闲 Agent 在工位坐一阵后外出闲逛、去茶水角或游戏桌，停留后回座或换个地方。同一目标位置只容一人，其他 Agent 会避开已被占用的位置。动画遵循 `prefers-reduced-motion`；静止模式下不跑动画循环，每个 Agent 直接出现在目标位置，空闲 Agent 留在工位。
-- Office 场景与小人使用 Arlan_TR 的 [Free office pixel art](https://arlantr.itch.io/free-office-pixel-art)（itch.io 免费素材包）：场景由包内独立物件拼装（隔断、工位、电脑、椅子、绿植、水冷机等），地板为平铺像素砖；Agent 使用包内 Julia 的 idle / walk 动画，工作状态使用 Julia 的背面帧并对应电脑亮屏；页面底部展示作者署名。
-- 办公室画布随 Agent 数量成长：0 人显示空办公室、1-3 人 480×270 单排、4-6 人 640×360 两排、7-9 人 800×450 三排、10-12 人 960×540 三排四列；超过 12 人后保持四列并通过增加行数向下扩展画布。只给实际 Agent 生成工位与电脑，每个 Agent 使用独立工位；人少时桌子挨在一起，画布也更小。
-
 ### Inbox、Members、Computers、Agent
 
 - Channel header 的 Member strip 使用与 Agent 头像相同尺寸的加号按钮，并在 Agent 选择浮层中显示 Display Name 与 Role。
@@ -432,8 +425,8 @@ Driver：
 
 - Sidebar 底部身份行右侧提供 Settings 入口（齿轮图标），路由为 `/s/$spaceSlug/settings`。
 - Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、Space 颜色（色块 + 四个预设名 Flame／Gold／Teal／Iris 之一，不显示十六进制原值）和你的访问级别；`Keyboard shortcuts` 分组列出快捷键；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
-- feature 通过注册表（`featureRegistry`）声明 id、名称、类型、描述、storageKey 和可选配置项；后续新增 feature 只改注册表，无需改页面结构。
-- 实验类型（experimental）的行即启用开关；所有状态只持久化在浏览器 localStorage（`sumi.feature.<id>`），不上传 Server。开启后 Sidebar 才显示对应实验入口（当前为 Agent insights 与 Company office；Company office 未开启时直达 `/company/office` 显示禁用说明）。
+- feature 通过注册表（`featureRegistry`）声明 id、名称、类型、描述、storageKey、`defaultEnabled` 和可选配置项；后续新增 feature 只改注册表，无需改页面结构。
+- 实验类型（experimental）的行即启用开关；所有状态只持久化在浏览器 localStorage（`sumi.feature.<id>`），不上传 Server。localStorage 无值时按 `defaultEnabled` 显示，写过的值（"0" / "1"）保持不变；当前唯一的实验为 Agent insights（默认开启），关闭后 Sidebar 隐藏对应入口。
 
 ### Computers 的 LLM usage 面板
 
