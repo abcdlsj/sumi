@@ -30,19 +30,19 @@ describe("System Notice timeline", () => {
   it("folds consecutive notices from the same day and exposes the expanded state", () => {
     renderSystemNotices([
       systemNotice(1, "Lin joined the channel", "2026-07-25T12:00:00Z"),
-      systemNotice(2, "Reviewer joined the channel", "2026-07-25T12:01:00Z"),
+      systemNotice(2, "Reviewer left the channel", "2026-07-25T12:01:00Z"),
     ]);
 
     const toggle = screen.getByRole("button", { name: "Show 2 system notices" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Lin joined the channel")).not.toBeVisible();
-    expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Reviewer joined the channel")).not.toBeVisible();
+    expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Reviewer left the channel")).not.toBeVisible();
 
     fireEvent.click(toggle);
 
     expect(screen.getByRole("button", { name: "Hide 2 system notices" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Lin joined the channel")).toBeVisible();
-    expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Reviewer joined the channel")).toBeVisible();
+    expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Reviewer left the channel")).toBeVisible();
   });
 
   it("keeps notices from different days in separate visible rows", () => {
@@ -54,6 +54,46 @@ describe("System Notice timeline", () => {
     expect(screen.queryByRole("button", { name: /system notices/i })).not.toBeInTheDocument();
     expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Lin joined the channel")).toBeVisible();
     expect(screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")) && element?.textContent === "Reviewer joined the channel")).toBeVisible();
+  });
+
+  it("merges adjacent notices with the same action into one line", () => {
+    renderSystemNotices([
+      systemNotice(1, "Leo joined the channel", "2026-07-25T12:00:00Z"),
+      systemNotice(2, "Nora joined the channel", "2026-07-25T12:01:00Z"),
+      systemNotice(3, "Mara joined the channel", "2026-07-25T12:02:00Z"),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 system notices" }));
+
+    const lines = screen.getAllByText((content, element) => Boolean(element?.classList.contains("system-event--message")));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].textContent).toBe("Leo, Nora and Mara joined the channel");
+    expect(document.getElementById("message-notice-2")).not.toBeNull();
+    expect(document.getElementById("message-notice-3")).not.toBeNull();
+  });
+
+  it("keeps notices with different actions on separate lines", () => {
+    renderSystemNotices([
+      systemNotice(1, "Leo joined the channel", "2026-07-25T12:00:00Z"),
+      systemNotice(2, "Nora left the channel", "2026-07-25T12:01:00Z"),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 system notices" }));
+
+    const lines = screen.getAllByText((content, element) => Boolean(element?.classList.contains("system-event--message")));
+    expect(lines.map((line) => line.textContent)).toEqual(["Leo joined the channel", "Nora left the channel"]);
+  });
+
+  it("uses the plural verb when several members were removed", () => {
+    renderSystemNotices([
+      systemNotice(1, "Leo was removed from the channel", "2026-07-25T12:00:00Z"),
+      systemNotice(2, "Nora was removed from the channel", "2026-07-25T12:01:00Z"),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 system notices" }));
+
+    const line = screen.getByText((content, element) => Boolean(element?.classList.contains("system-event--message")));
+    expect(line.textContent).toBe("Leo and Nora were removed from the channel");
   });
 
   it("resets Message identity grouping after a System Notice", () => {

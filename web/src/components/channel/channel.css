@@ -985,6 +985,12 @@ a.message-mention--agent:hover {
   font-weight: 500;
 }
 
+/* A merged notice keeps the anchor of every Message it absorbed. */
+.message-anchor {
+  display: block;
+  height: 0;
+}
+
 .action-message {
   display: flex;
   flex-wrap: wrap;

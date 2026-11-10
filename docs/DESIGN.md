@@ -377,7 +377,7 @@ Driver：
 - Root Message 的 Task 标识是正文下方的浅底小条：状态图形、`!<seq>` 与状态文字；title、assignee 不显示在消息上，hover 显示 title；当前 Run 在其他 Linked Thread 时显示 `· elsewhere`。只有 Root Message 显示。
 - Task 状态颜色只作用于状态图形本身（TODO 灰、In Progress 青、In Review 暖、Done 绿、Closed 浅灰），标签底色保持中性。
 - Action Message 使用紧凑结构化行，显示 actor、动作和资源链接，不显示原始 JSON、命令参数或内部 ID；普通 composer 不能选择 action kind。
-- System Notice 渲染为居中系统信息行：成员名用 ink，正文 muted；不画横线、无边框；同一日期内连续多条默认折叠，折叠按钮为纯文字。
+- System Notice 渲染为居中系统信息行：成员名用 ink，正文 muted；不画横线、无边框；同一日期内连续多条默认折叠，折叠按钮为纯文字。成员关系变更按动作聚合：相邻的 `<name> joined the channel`（或 `left` / `was removed`）合并为一行，名字以 `, ` 分隔、最后一个名字前用 ` and `，多人被移除时用 `were removed`；被合并的 Message 保留各自的 `#message-<id>` 锚点；其余 notice 各占一行。
 - Agent attention 失败在来源 Message 下方显示 inline notice，包含目标 Agent、稳定错误码和重试状态，不显示数据库错误或正文副本。
 - Agent 最近一次 Run 以失败结束时，在时间线下方状态行显示 `<Agent> stopped on an error <code>`：稳定错误码原样显示，一句人类可读的完整原因作为 title；该 Agent 重新开始 Run 或之后有非失败 Run 时该行消失，不写入消息流。
 - Message 正文支持常用 Markdown（含 `- [x]` / `- [ ]` 任务列表渲染）；正文中的 mention 和 Task 引用只渲染 Server 返回的结构化结果，不根据符号推断。

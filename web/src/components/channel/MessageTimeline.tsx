@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
-import { type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {apiUrl, createTaskFromRootMessage} from "../../api/client";
 import type {Attachment, Member, Message, MessagePage, MessageTaskRef, MessageTaskSummary} from "../../api/types";
@@ -275,17 +275,37 @@ function SystemNoticeGroup({
         </button>
       ) : null}
       <div id={listId} className="system-notice-list" hidden={grouped && !expanded}>
-        {messages.map((message) => (
-          <div className="message-block" id={`message-${message.id}`} data-message-id={message.id} tabIndex={-1} key={message.id}>
+        {mergeSystemNotices(messages).map((row) => (
+          <div className="message-block" id={`message-${row.ids[0]}`} data-message-id={row.ids[0]} tabIndex={-1} key={row.ids[0]}>
+            {row.ids.slice(1).map((id) => (
+              <span className="message-anchor" id={`message-${id}`} data-message-id={id} key={id} />
+            ))}
             <article className="message-row message-row--system">
               <div className="message-system-content">
-                <MessageBody message={message} spaceSlug={spaceSlug} members={members} />
+                {row.names && row.action ? (
+                  <SystemNoticeLine names={row.names} action={row.action} />
+                ) : (
+                  <MessageBody message={row.message} spaceSlug={spaceSlug} members={members} />
+                )}
               </div>
             </article>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+function SystemNoticeLine({ names, action }: { names: string[]; action: SystemNoticeAction }) {
+  return (
+    <p className="system-event system-event--message">
+      {names.map((name, index) => (
+        <Fragment key={name}>
+          {index > 0 ? (index === names.length - 1 ? " and " : ", ") : null}
+          <strong className="system-notice-name">{name}</strong>
+        </Fragment>
+      ))}{" "}{names.length > 1 ? action.plural : action.single}
+    </p>
   );
 }
 
@@ -1281,6 +1301,49 @@ function WorkingStrip({ workers, targets }: { workers: Member[]; targets?: Reado
 }
 
 const MESSAGE_GROUP_GAP_MS = 5 * 60 * 1000;
+
+type SystemNoticeAction = { single: string; plural: string };
+
+type SystemNoticeRow = {
+  ids: string[];
+  message: Message;
+  names: string[] | null;
+  action: SystemNoticeAction | null;
+};
+
+// Membership changes written by the Server. Anything else keeps its own line.
+const SYSTEM_NOTICE_ACTIONS: { pattern: RegExp; action: SystemNoticeAction }[] = [
+  { pattern: /^(.+) joined the channel$/, action: { single: "joined the channel", plural: "joined the channel" } },
+  { pattern: /^(.+) left the channel$/, action: { single: "left the channel", plural: "left the channel" } },
+  { pattern: /^(.+) was removed from the channel$/, action: { single: "was removed from the channel", plural: "were removed from the channel" } },
+];
+
+function parseSystemNotice(body: string): { name: string; action: SystemNoticeAction } | null {
+  for (const { pattern, action } of SYSTEM_NOTICE_ACTIONS) {
+    const match = body.match(pattern);
+    if (match) return { name: match[1], action };
+  }
+  return null;
+}
+
+// Adjacent notices with the same action read as one line: "Leo, Nora and Mara
+// joined the channel". Each merged Message keeps its anchor so a link to it
+// still lands on the line that now carries its name.
+function mergeSystemNotices(messages: Message[]): SystemNoticeRow[] {
+  const rows: SystemNoticeRow[] = [];
+  for (const message of messages) {
+    if (message.content.type !== "system_notice") continue;
+    const parsed = parseSystemNotice(message.content.body_markdown);
+    const last = rows[rows.length - 1];
+    if (parsed && last?.names && last.action === parsed.action && !last.names.includes(parsed.name)) {
+      last.ids.push(message.id);
+      last.names.push(parsed.name);
+      continue;
+    }
+    rows.push({ ids: [message.id], message, names: parsed ? [parsed.name] : null, action: parsed?.action ?? null });
+  }
+  return rows;
+}
 
 function groupTimelineMessages(messages: Message[]): Message[][] {
   const groups: Message[][] = [];
