@@ -191,7 +191,7 @@
   margin: 0 -14px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  transition: background-color .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .message-row:hover {
@@ -277,7 +277,7 @@
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .12s ease;
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .message-row:hover .message-hover-time,
@@ -391,8 +391,8 @@
 }
 
 .message-checkbox svg {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   stroke-width: 3;
 }
 
@@ -582,7 +582,7 @@ a.message-mention--agent:hover {
 .timeline-working .agent-working {
   max-width: 100%;
   min-width: 0;
-  animation: timeline-working-in .2s ease-out;
+  animation: timeline-working-in .2s var(--ease-standard);
 }
 
 .timeline-working-faces {
@@ -642,7 +642,7 @@ a.message-mention--agent:hover {
 
 /* Messages from others ease in; your own replace their outgoing copy in place. */
 .message-block--arrived {
-  animation: message-arrive .22s ease-out;
+  animation: message-arrive .22s var(--ease-standard);
 }
 
 @keyframes message-arrive {
@@ -661,7 +661,7 @@ a.message-mention--agent:hover {
   color: var(--muted);
   font-size: var(--text-meta);
   /* Only a slow send says so; a quick one never flashes the label. */
-  animation: outgoing-status-in .2s ease .8s both;
+  animation: outgoing-status-in .2s var(--ease-standard) .8s both;
 }
 
 .message-outgoing-status--failed {
@@ -762,7 +762,7 @@ a.message-mention--agent:hover {
   box-shadow: var(--shadow-popover);
   opacity: 0;
   pointer-events: none;
-  transition: opacity .12s ease;
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .message-row:hover .message-actions,
@@ -996,8 +996,8 @@ a.message-mention--agent:hover {
 }
 
 .action-message > svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 
@@ -1155,8 +1155,8 @@ details.system-event .system-event-heading {
 }
 
 .to-bottom-button svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .to-bottom-badge {
@@ -1262,8 +1262,8 @@ details.system-event .system-event-heading {
 }
 
 .getting-started-marker svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 .is-current > .getting-started-marker {
@@ -1405,7 +1405,7 @@ details.system-event .system-event-heading {
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
   box-shadow: var(--shadow-raised);
-  transition: box-shadow .15s ease;
+  transition: box-shadow .15s var(--ease-standard);
 }
 
 .composer--dragging {
@@ -1478,7 +1478,7 @@ details.system-event .system-event-heading {
   color: var(--muted);
   font-size: 11.5px;
   opacity: 0;
-  transition: opacity .15s ease;
+  transition: opacity .15s var(--ease-standard);
 }
 
 .composer:focus-within .composer-shortcut {
@@ -1497,7 +1497,7 @@ details.system-event .system-event-heading {
   background: var(--accent);
   color: var(--on-accent);
   cursor: pointer;
-  transition: background-color .12s ease, color .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
 .send-button:hover:not(:disabled) {
@@ -1543,8 +1543,8 @@ details.system-event .system-event-heading {
 }
 
 .composer-attachments > span svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   flex: none;
   color: var(--muted);
 }
@@ -1626,8 +1626,8 @@ details.system-event .system-event-heading {
 }
 
 .mention-suggestion-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .mention-suggestion-name {

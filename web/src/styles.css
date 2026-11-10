@@ -170,7 +170,7 @@ textarea:focus-visible {
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
-  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
 }
 
 .command-button:hover:not(:disabled),
@@ -254,7 +254,7 @@ textarea:focus-visible {
   color: var(--muted);
   cursor: pointer;
   text-decoration: none;
-  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
 }
 
 .icon-button:hover:not(:disabled) {
@@ -275,8 +275,8 @@ textarea:focus-visible {
 }
 
 .icon-button svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -311,7 +311,7 @@ textarea {
   color: var(--ink);
   font-size: var(--text-body);
   font-weight: 400;
-  transition: box-shadow var(--duration-fast) ease;
+  transition: box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 select {
@@ -689,8 +689,8 @@ input[type="radio"] {
 }
 
 .empty-state-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
 .empty-state h2 {
@@ -747,8 +747,8 @@ input[type="radio"] {
 }
 
 .page-tabs svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .space-topbar {
@@ -851,8 +851,8 @@ input[type="radio"] {
 }
 
 .quick-switcher-search > svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   flex: none;
   color: var(--muted);
 }
@@ -1032,8 +1032,8 @@ input[type="radio"] {
 }
 
 .nav-section-heading svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 
 .nav-item,
@@ -1049,7 +1049,7 @@ input[type="radio"] {
   color: var(--ink-2);
   font-size: var(--text-body);
   text-decoration: none;
-  transition: background-color .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .nav-item:hover,
@@ -1177,8 +1177,8 @@ input[type="radio"] {
 }
 
 .discover-channel svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .discover-channel span {
@@ -1312,8 +1312,8 @@ input[type="radio"] {
 }
 
 .account-menu-trigger > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex: none;
   color: var(--muted);
 }
@@ -1376,8 +1376,8 @@ input[type="radio"] {
 }
 
 .account-menu-item svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .space-settings-link--active {
@@ -1688,7 +1688,7 @@ body > #root > .route-status {
   padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
   overflow-y: auto;
   background: var(--scrim);
-  animation: fade-in .14s ease;
+  animation: fade-in .14s var(--ease-standard);
 }
 
 .dialog-surface {
@@ -1702,7 +1702,7 @@ body > #root > .route-status {
   background: var(--bg-raised);
   box-shadow: var(--shadow-dialog);
   outline: none;
-  animation: dialog-in .16s ease;
+  animation: dialog-in .16s var(--ease-standard);
 }
 
 .agent-dialog {
@@ -1956,7 +1956,7 @@ body > #root > .route-status {
   cursor: pointer;
   font-size: var(--text-body);
   font-weight: 400;
-  transition: box-shadow var(--duration-fast) ease;
+  transition: box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .sumi-select-trigger:hover:not(:disabled) {
@@ -1975,8 +1975,8 @@ body > #root > .route-status {
 }
 
 .sumi-select-trigger svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 
@@ -2015,8 +2015,8 @@ body > #root > .route-status {
 }
 
 .sumi-select-option svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 /* Inbox ----------------------------------------------------------------- */
@@ -2085,7 +2085,7 @@ body > #root > .route-status {
   color: var(--ink);
   cursor: pointer;
   text-align: start;
-  transition: background-color .12s ease, box-shadow .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .inbox-open:hover {
@@ -2167,7 +2167,7 @@ body > #root > .route-status {
   font-size: var(--text-small);
   font-weight: 500;
   white-space: nowrap;
-  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
 .task-filters button:hover,
@@ -2258,7 +2258,7 @@ body > #root > .route-status {
   gap: 12px;
   padding: 9px 10px;
   border-radius: var(--radius-md);
-  transition: background-color .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .task-row:hover {
@@ -2723,8 +2723,8 @@ a.task-source-link:hover {
 }
 
 .invite-band-title svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   margin-top: 2px;
   color: var(--muted);
 }
@@ -2815,7 +2815,7 @@ a.task-source-link:hover {
   gap: 12px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  transition: background-color .12s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .member-row:hover {
@@ -3100,8 +3100,8 @@ a.task-source-link:hover {
 }
 
 .detail-tabs svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .agent-detail-scroll {
@@ -3353,8 +3353,8 @@ a.task-source-link:hover {
 }
 
 .agent-memory-heading svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 
@@ -3394,8 +3394,8 @@ a.task-source-link:hover {
 }
 
 .memory-file-button svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 
@@ -3420,8 +3420,8 @@ a.task-source-link:hover {
 }
 
 .memory-empty svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   color: var(--muted);
 }
 
@@ -4280,8 +4280,8 @@ a.task-source-link:hover {
 }
 
 .pairing-machine dt svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 
 .pairing-machine dd {
@@ -4349,8 +4349,8 @@ a.task-source-link:hover {
   }
 
   .space-topbar-inbox svg {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
   }
 
   .space-topbar-inbox .nav-count {
@@ -4368,13 +4368,13 @@ a.task-source-link:hover {
     box-shadow: var(--shadow-drawer);
     visibility: hidden;
     transform: translateX(-104%);
-    transition: transform .2s ease, visibility 0s linear .2s;
+    transition: transform var(--duration-move) var(--ease-standard), visibility 0s linear var(--duration-move);
   }
 
   .space-navigation--open {
     visibility: visible;
     transform: none;
-    transition: transform .2s ease;
+    transition: transform var(--duration-move) var(--ease-standard);
   }
 
   .navigation-close {
@@ -4389,7 +4389,7 @@ a.task-source-link:hover {
     width: 100%;
     border: 0;
     background: var(--scrim);
-    animation: fade-in .14s ease;
+    animation: fade-in .14s var(--ease-standard);
   }
 
   .tasks-header,
@@ -4636,12 +4636,12 @@ a.task-source-link:hover {
   font-size: var(--text-small);
   line-height: 1.45;
   pointer-events: auto;
-  animation: toast-in .18s ease-out;
+  animation: toast-in .18s var(--ease-standard);
 }
 
 .toast > svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   margin-top: 1px;
   color: var(--on-ink-success);
 }
@@ -4669,8 +4669,8 @@ a.task-source-link:hover {
 }
 
 .toast button svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 @keyframes toast-in {
@@ -4693,7 +4693,7 @@ a.task-source-link:hover {
   color: var(--ink-2);
   font-size: var(--text-small);
   transform: translateX(-50%);
-  animation: fade-in .2s ease;
+  animation: fade-in .2s var(--ease-standard);
 }
 
 .connection-banner > svg {

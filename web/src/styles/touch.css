@@ -117,7 +117,7 @@
     max-height: calc(100dvh - 24px);
     padding-bottom: max(22px, env(safe-area-inset-bottom));
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    animation: sheet-in .2s ease-out;
+    animation: sheet-in .2s var(--ease-standard);
   }
 
   .dialog-surface footer {

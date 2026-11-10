@@ -242,7 +242,7 @@
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
-  transition: box-shadow .15s ease, transform .15s ease;
+  transition: box-shadow .15s var(--ease-standard), transform .15s var(--ease-standard);
 }
 .office-agent-label span {
   overflow: hidden;
