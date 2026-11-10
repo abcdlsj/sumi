@@ -719,7 +719,7 @@ function MessageBody({ message, spaceSlug, members }: { message: Message; spaceS
 
 export function ExpandableMessageText({ messageId, body, mentionedMembers, taskRefs, spaceSlug }: { messageId: string; body: string; mentionedMembers: ReadonlyMap<string, MentionTarget>; taskRefs: ReadonlyMap<number, MessageTaskRef>; spaceSlug: string }) {
   const paragraph = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [overflowing, setOverflowing] = useState(false);
   const bodyId = `message-body-${messageId}`;
 

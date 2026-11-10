@@ -162,6 +162,7 @@ export function MessageWorkspace({
     if (trigger) threadTrigger.current = trigger;
     channelScrollPosition.current = timeline.current?.scrollTop ?? 0;
     setThreadOpenedAtMainSeq(latestMainMessageSeq);
+    setThreadPaneWidth(threadPaneMaxWidth);
     setThreadId(nextThreadId);
   }
 

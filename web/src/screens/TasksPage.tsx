@@ -347,7 +347,7 @@ function TaskConversation({ task, spaceSlug, members }: { task: Task; spaceSlug:
 
 /** While review is pending, the assignee's last word sits at the top of the Request card. */
 function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest: Message | undefined; alreadyShown: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const name = task.assignee_name ?? "the Agent";
   // A reply the Request body already lists below needs no second copy.
   if (alreadyShown) return null;

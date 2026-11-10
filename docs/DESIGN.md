@@ -322,7 +322,7 @@ Driver：
 
 ### 布局
 
-- 桌面布局为 Sidebar、Channel、可选 Thread pane 三栏；不再有 Space rail。Thread pane 只在打开时存在（默认 360px），展开时 Channel 自适应收缩。
+- 桌面布局为 Sidebar、Channel、可选 Thread pane 三栏；不再有 Space rail。Thread pane 只在打开时存在，打开即占满可用最大宽度（480px，窄窗口时按剩余宽度收缩），可拖拽或键盘收窄到 360px；Channel 自适应收缩。
 - Sidebar 宽 256px，自上而下：Space 头（标识 + 名称）、Space tools（Inbox 带待读计数、Tasks、Members、Computers；开启实验功能后出现 Agent insights、Company）、Channels、Discover、Direct messages，底部固定为账户菜单（头像 + 名字，点开显示邮箱、Settings、Sign out）与 Settings 齿轮。
 - Sidebar 头部有搜索按钮，`⌘K` / `Ctrl+K` 在任何页面打开快速跳转：按名字筛选 Channels、DM、Agents 和 Space 工具页，方向键选择、Enter 打开、Esc 关闭。
 - `/s/$spaceSlug` 是布局路由：同一 Space 内只挂载一个 SpaceShell，切换页面不重建 Sidebar、实时连接与未读标记；该 Shell 持有 Space 唯一的 SSE 连接，需要实时 Message 事件的页面（如 Company Office）订阅 Shell，不另开连接。切换到另一个 Space 时重建 Shell。
@@ -381,14 +381,14 @@ Driver：
 - Agent attention 失败在来源 Message 下方显示 inline notice，包含目标 Agent、稳定错误码和重试状态，不显示数据库错误或正文副本。
 - Agent 最近一次 Run 以失败结束时，在时间线下方状态行显示 `<Agent> stopped on an error <code>`：稳定错误码原样显示，一句人类可读的完整原因作为 title；该 Agent 重新开始 Run 或之后有非失败 Run 时该行消失，不写入消息流。
 - Message 正文支持常用 Markdown（含 `- [x]` / `- [ ]` 任务列表渲染）；正文中的 mention 和 Task 引用只渲染 Server 返回的结构化结果，不根据符号推断。
-- 普通 Message 正文超过 8 个视觉行时默认折叠，按实际排版高度判断，不按字符数推断。
+- 普通 Message 正文默认完整展开，第一次看到就能读到全部；超过 8 个视觉行的长正文提供纯文字的 `Show less` 收起，收起后显示 `Show more`，按实际排版高度判断，不按字符数推断。
 
 ### Task 页面
 
 - Tasks 页面使用 list/detail 布局，是对话的辅助入口，不是项目管理页面；入口保留在侧边栏。列表内容最宽 960px，标题列吸收多余宽度，Assignee、Source Thread 与更新时间保持右对齐。
 - 筛选固定为 All open、To do、In progress、In review、Done、Closed、Created by me，每个筛选带数量；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee（Agent 小印章 + 名字）、Source Thread、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
 - Task 详情 header 副标题为 `!seq · #channel`（DM 为 `Direct message`）。正文依次显示：Request（白底卡片，来源对话的第一条消息与最新 3 条 reply，右上角 Open Thread）、Task facts（Created by、Created、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Result（仅 Done）、Close reason（仅 Closed）；侧栏只有 Activity。
-- In review 时 Request 卡片顶部固定一条 assignee 最近回复：标题 `Latest from {Agent}` 与相对时间，正文最多 6 行、超出显示 Show more；该消息若已在下方 3 条 reply 中则不重复出现；assignee 没有回复时显示 `No reply from {Agent} yet.`
+- In review 时 Request 卡片顶部固定一条 assignee 最近回复：标题 `Latest from {Agent}` 与相对时间，正文默认完整展开（长正文可 `Show less` 收起）；该消息若已在下方 3 条 reply 中则不重复出现；assignee 没有回复时显示 `No reply from {Agent} yet.`
 - Actions 按状态分两组。TODO（未指派）时说明需要先指派 Agent；In Progress 与 In review 显示 Mark done（主色），`Close Task…` 退到次要位置，单独一行，弹窗选择理由 + 可选备注；In review 另有 `Request changes` 与 Mark done 并列。不提供其它状态操作按钮。
 - Mark done 弹确认框，标题 `Finish !{seq}?`，正文 `This becomes the Task result.`，输入框预填 assignee 最近一条回复（非纯文本时留空），可改可删；提交后 Result 显示这段文字，不再是写死的 `Task completed.`。
 - Request changes 在原位展开输入框，不弹窗：标题 `What needs to change?`，占位 `Tell {Agent} what to change.`，主按钮 `Send request`、次按钮 `Cancel`，理由必填，空着时主按钮禁用并提示 `Add one sentence on what to change.`；展开后焦点进入输入框，⌘/Ctrl+Enter 提交，Esc 取消，窄屏下按钮纵向全宽。提交时先向 Source Thread 回复 `@{Agent} {理由}`，再调用现有的 request changes 接口：回复失败提示 `Could not post the reason. Nothing was changed.`；状态变更失败提示 `Reason sent. Status unchanged — retry to move it back to In progress.`，主按钮变 `Retry`，只重试状态变更、不重发回复，避免 assignee 收到两遍。

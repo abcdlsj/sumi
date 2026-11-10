@@ -191,7 +191,7 @@ describe("Earlier messages", () => {
 });
 
 describe("ExpandableMessageText", () => {
-  it("expands and collapses text that exceeds eight rendered lines", () => {
+  it("shows long text in full first and lets the reader collapse it", () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(240);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(120);
 
@@ -204,11 +204,13 @@ describe("ExpandableMessageText", () => {
     );
 
     const body = container.querySelector(".message-body") as HTMLElement;
-    const toggle = screen.getByRole("button", { name: "Show more" });
-    expect(body).toHaveClass("message-body--collapsed");
-    fireEvent.click(toggle);
     expect(body).toHaveClass("message-body--expanded");
-    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+    expect(body).not.toHaveClass("message-body--collapsed");
+    const toggle = screen.getByRole("button", { name: "Show less" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(body).toHaveClass("message-body--collapsed");
+    expect(screen.getByRole("button", { name: "Show more" })).toHaveAttribute("aria-expanded", "false");
   });
 });
 
