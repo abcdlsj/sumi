@@ -6,7 +6,7 @@
   input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]),
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: 17px !important;
   }
 
   /* Comfortable targets for fingers. */

@@ -119,11 +119,11 @@
   --shadow-pressed: inset 0 1px 3px rgb(0 0 0 / 22%);
 
   /* Type */
-  --text-page-title: 16px;
-  --text-section: 13px;
-  --text-body: 14px;
-  --text-small: 13px;
-  --text-meta: 12px;
+  --text-page-title: 17px;
+  --text-section: 13.5px;
+  --text-body: 14.5px;
+  --text-small: 13.5px;
+  --text-meta: 12.5px;
 
   /* Layout */
   --header-height: 56px;

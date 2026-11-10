@@ -194,7 +194,7 @@
 
 .settings-mono {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .settings-accent {
@@ -212,7 +212,7 @@
   box-shadow: inset 0 -1px 0 var(--line-strong);
   color: var(--ink-2);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 12px;
   text-align: center;
 }
 
