@@ -305,7 +305,7 @@ Driver：
 - 视觉语言是“清晰”：中性底色、发丝线分隔、单一的选中态。界面不靠颜色营造层次；颜色只保留给两个注意力信号和 Task 状态。不使用渐变、玻璃、模糊、硬偏移阴影或大写标题。
 - 注意力只有两种信号，任何页面都不新增第三种：
   - **For you**（暖色）：有人在等你。时间线不高亮整条 Message；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
-  - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working · 当前步骤`，多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
+  - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working`；只有该 Run 属于 Task 时才补上目标，写成 `X is working on <Task>`，Channel 地址不写，因为读者就在那段对话里；多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
 - Agent 所在 Computer 不可达时，Agent 显示为 Offline：头像不显示呼吸环，角标为中性灰点，不出现在工作状态条中；工作状态条的位置改为一行中性文字 `X is offline · continues when its Computer reconnects`，列入规则与工作状态相同。Computer 重新连接后恢复原状态，界面不提供重试或检测操作。
 - 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色；阴影、遮罩、墨底上的文字等组合值同样定义为 token。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。

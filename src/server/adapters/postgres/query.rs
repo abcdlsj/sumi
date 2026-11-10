@@ -718,8 +718,6 @@ impl PostgresQueries {
                     c.deleted_at AS computer_deleted_at,
                     active_run.status AS run_status,active_run.task_id AS run_task_id,
                     active_task.title AS run_task_title,
-                    focus_channel.slug AS run_focus_slug,
-                    focus_thread.channel_seq AS run_focus_seq,
                     COALESCE(
                         (SELECT r.error_code FROM agent_runs r
                          WHERE r.agent_id=a.member_id AND r.outcome_code='failed'
@@ -744,9 +742,6 @@ impl PostgresQueries {
                  ORDER BY r.created_at DESC LIMIT 1
              ) active_run ON true
              LEFT JOIN tasks active_task ON active_task.id=active_run.task_id
-             LEFT JOIN messages focus_thread ON focus_thread.id=active_run.focus_thread_id
-                 AND focus_thread.placement='root'
-             LEFT JOIN channels focus_channel ON focus_channel.id=focus_thread.channel_id
              {predicate}"
         );
         let mut query = sqlx::query_as::<_, AgentRow>(&query);
@@ -1311,8 +1306,6 @@ pub(in crate::server::adapters) struct AgentRow {
     pub(in crate::server::adapters) connection_status: Option<String>,
     pub(in crate::server::adapters) run_status: Option<String>,
     pub(in crate::server::adapters) run_task_title: Option<String>,
-    pub(in crate::server::adapters) run_focus_slug: Option<String>,
-    pub(in crate::server::adapters) run_focus_seq: Option<i64>,
     pub(in crate::server::adapters) last_error_code: Option<String>,
 }
 

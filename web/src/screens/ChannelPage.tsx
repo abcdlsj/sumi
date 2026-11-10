@@ -223,8 +223,8 @@ export function MessageWorkspace({
   const errorByMemberId = new Map(
     (agents.data ?? []).flatMap((agent) => agent.last_error_code ? [[agent.member_id, agent.last_error_code] as const] : []),
   );
-  const workingLabelByMemberId = new Map(
-    (agents.data ?? []).flatMap((agent) => agent.activity?.label ? [[agent.member_id, agent.activity.label] as const] : []),
+  const workingTargetByMemberId = new Map(
+    (agents.data ?? []).flatMap((agent) => agent.activity?.target ? [[agent.member_id, agent.activity.target] as const] : []),
   );
   async function sendMessage(input: CreateMessageInput, idempotencyKey: string): Promise<Message> {
     return createMessage(channel.id, input, idempotencyKey);
@@ -329,7 +329,7 @@ export function MessageWorkspace({
         spaceSlug={spaceSlug}
         openThread={openThread}
         activityByMemberId={activityByMemberId}
-        workingLabelByMemberId={workingLabelByMemberId}
+        workingTargetByMemberId={workingTargetByMemberId}
         errorByMemberId={errorByMemberId}
         members={channelMembers.data?.members ?? []}
         direct={direct}

@@ -619,6 +619,44 @@ describe("timeline position", () => {
   });
 });
 
+describe("Working line", () => {
+  const lin = { id: "agent-lin", kind: "agent" as const, display_name: "Lin", access_level: "member" as const, permissions: [] };
+
+  function renderWorking(target?: string) {
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MessageTimeline
+          timelineRef={createRef<HTMLDivElement>()}
+          page={pageWith([agentMessage(1, "Lin")])}
+          pending={false}
+          error={null}
+          retry={vi.fn()}
+          emptyTitle="No messages"
+          channelId="channel-1"
+          spaceSlug="sumi-lab"
+          openThread={vi.fn()}
+          activityByMemberId={new Map([[lin.id, "working"]])}
+          workingTargetByMemberId={target ? new Map([[lin.id, target]]) : new Map()}
+          members={[lin]}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("names the Task a Run works on without saying it twice", () => {
+    renderWorking("Rebuild WebUI");
+
+    // One phrase, not "is working" glued to a second "Working on …".
+    expect(screen.getByText("Lin is working on Rebuild WebUI")).toBeVisible();
+  });
+
+  it("stops at the phrase when the Run has no Task to name", () => {
+    renderWorking();
+
+    expect(screen.getByText("Lin is working")).toBeVisible();
+  });
+});
+
 describe("Agent failure line", () => {
   const lin = { id: "agent-lin", kind: "agent" as const, display_name: "Lin", access_level: "member" as const, permissions: [] };
 

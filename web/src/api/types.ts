@@ -29,6 +29,11 @@ export interface components {
             kind: string;
             label: string;
             status: components["schemas"]["AgentActivityStatus"];
+            /**
+             * @description What the Run works on when it is worth naming: a Task. A Channel address is not, because
+             *     naming it in every surface repeats where the reader already is.
+             */
+            target?: string | null;
         };
         /**
          * @description What the Agent is doing. Independent of whether its Computer is reachable: an Agent can be

@@ -316,37 +316,32 @@ pub(super) fn attention_policy() -> AttentionConfig {
     }
 }
 
-pub(super) fn focus_address(row: &AgentRow) -> Option<String> {
-    Some(format!(
-        "#{}:{}",
-        row.run_focus_slug.as_ref()?,
-        row.run_focus_seq?
-    ))
-}
-
+/// What an Agent is doing, in two forms.
+///
+/// `label` is a sentence for a surface that shows it alone (Members, the Office roster). `target`
+/// names the Task a Run works on, so the timeline can say `X is working on <target>` instead of
+/// stacking "is working" next to "Working on …". A Channel address is not a target: every surface
+/// already shows which conversation the reader is in.
 pub(super) fn agent_activity(
     row: &AgentRow,
     activity_status: AgentActivityStatus,
 ) -> Option<AgentActivityResponse> {
     let run_status = row.run_status.clone()?;
-    let address = focus_address(row);
-    let task_title = row.run_task_title.clone();
-    let label = match (run_status.as_str(), address.as_deref()) {
-        ("stopping", Some(address)) => format!("Stopping work on {address}"),
+    let target = row.run_task_title.clone();
+    let label = match (run_status.as_str(), target.as_deref()) {
+        ("stopping", Some(target)) => format!("Stopping work on {target}"),
         ("stopping", None) => "Stopping the current Run".to_owned(),
-        ("finalizing", Some(address)) => format!("Finishing work on {address}"),
+        ("finalizing", Some(target)) => format!("Finishing work on {target}"),
         ("finalizing", None) => "Finishing the current Run".to_owned(),
-        ("queued", Some(address)) => format!("Queued for {address}"),
-        ("queued", None) => "Queued for a Run".to_owned(),
-        (_, Some(address)) => match task_title.as_deref() {
-            Some(title) => format!("Working on {address} for {title}"),
-            None => format!("Working on {address}"),
-        },
-        (_, None) => "Working on a Run".to_owned(),
+        ("queued", Some(target)) => format!("Queued for {target}"),
+        ("queued", None) => "Queued".to_owned(),
+        (_, Some(target)) => format!("Working on {target}"),
+        (_, None) => "Working".to_owned(),
     };
     Some(AgentActivityResponse {
         kind: run_status,
         label,
+        target,
         status: activity_status,
     })
 }

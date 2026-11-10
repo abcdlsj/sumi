@@ -201,6 +201,9 @@ pub(super) enum AgentAccessLevel {
 pub(super) struct AgentActivityResponse {
     pub(super) kind: String,
     pub(super) label: String,
+    /// What the Run works on when it is worth naming: a Task. A Channel address is not, because
+    /// naming it in every surface repeats where the reader already is.
+    pub(super) target: Option<String>,
     pub(super) status: AgentActivityStatus,
 }
 #[derive(Serialize, Deserialize, ToSchema)]

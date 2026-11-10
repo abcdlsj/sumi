@@ -36,7 +36,7 @@ export function MessageTimeline({
   spaceSlug,
   openThread,
   activityByMemberId,
-  workingLabelByMemberId,
+  workingTargetByMemberId,
   errorByMemberId,
   members,
   direct = false,
@@ -60,7 +60,8 @@ export function MessageTimeline({
   spaceSlug: string;
   openThread: (threadId: string, trigger?: HTMLButtonElement) => void;
   activityByMemberId: ReadonlyMap<string, AgentPresence>;
-  workingLabelByMemberId?: ReadonlyMap<string, string>;
+  /** What each working Agent's Run is for, named only when it is a Task. */
+  workingTargetByMemberId?: ReadonlyMap<string, string>;
   /** The failed Run's stable error code per Agent, reported while that Run is the Agent's latest. */
   errorByMemberId?: ReadonlyMap<string, string>;
   members: Member[];
@@ -226,7 +227,7 @@ export function MessageTimeline({
           );
         })}
       </div>
-      {offline.length && !workers.length ? <OfflineStrip offline={offline} /> : <WorkingStrip workers={workers} steps={workingLabelByMemberId} />}
+      {offline.length && !workers.length ? <OfflineStrip offline={offline} /> : <WorkingStrip workers={workers} targets={workingTargetByMemberId} />}
       <StoppedStrip stopped={stopped} errors={errorByMemberId} />
       {showToBottom || newMessageCount > 0 ? (
         <ToBottomButton onClick={scrollToBottom} newMessageCount={newMessageCount} />
@@ -1249,13 +1250,15 @@ function StoppedStrip({ stopped, errors }: { stopped: Member[]; errors?: Readonl
 }
 
 /** One quiet line under the timeline while Agents work; its space is always reserved. */
-function WorkingStrip({ workers, steps }: { workers: Member[]; steps?: ReadonlyMap<string, string> }) {
+function WorkingStrip({ workers, targets }: { workers: Member[]; targets?: ReadonlyMap<string, string> }) {
   const first = workers[0];
   const latest = useAgentActivity(first?.id ?? "")[0];
   let text = "";
   if (workers.length === 1) {
-    const step = steps?.get(first.id);
-    text = `${first.display_name} is working${step ? ` · ${step}` : ""}`;
+    // The Run says what it works on only when that is a Task; a Channel would repeat where the
+    // reader already is, and "is working · Working on …" says it twice.
+    const target = targets?.get(first.id);
+    text = `${first.display_name} is working${target ? ` on ${target}` : ""}`;
   } else if (workers.length === 2) {
     text = `${workers[0].display_name} and ${workers[1].display_name} are working`;
   } else if (workers.length > 2) {
