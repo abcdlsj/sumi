@@ -129,7 +129,11 @@ func waitUntil(t *testing.T, timeout time.Duration, desc string, cond func() boo
 type cliResponse struct {
 	OK    bool            `json:"ok"`
 	Data  json.RawMessage `json:"data"`
-	Error string          `json:"error"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Hint    string `json:"hint"`
+	} `json:"error"`
 }
 
 func runSumiCLI(ctx context.Context, binPath string, in driver.TurnInput, args ...string) (cliResponse, int, error) {

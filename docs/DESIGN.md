@@ -179,7 +179,10 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 ### Agent CLI
 
-- 命令极简、面向 `Conversation` 与 `Task`，所有命令支持 `--json` 输出统一信封：
+- 命令极简、面向 `Conversation` 与 `Task`，所有命令向 stdout 输出单个 JSON 信封 `{ok, data?, error?}`：
+  - `error` 为对象 `{code, message, retryable?, details?, hint?}`；`code` 透传服务端 `domain.Error` 码（`invalid_argument`、`not_found`、`permission_denied`、`conflict`、`rate_limited`…），本地故障用 `unauthenticated`（缺 socket/token）、`unavailable`（Server 或 socket 不可达，`retryable: true`）、`invalid_argument`（用法错误，退出码 2）。
+  - 被 Freshness Guard 拦下时 `error.code = "held"`，`data` 保留服务端返回的 `unread_messages` / `omitted_unread_count`。
+  - `hint` 是 CLI 按 `code` 给出的一句下一步指引（应执行的命令或应停止重试），供 Agent 自我纠错；不含消息正文。
   - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带未读数与是否提及）。
   - `sumi read <target> [--unread]`：读取目标对话（`#channel`、`dm:@name`、`thread:<id>`、`task:#N`）并推进 `read_seq`。
   - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。

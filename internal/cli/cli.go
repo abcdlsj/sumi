@@ -108,8 +108,8 @@ func (c *Client) Download(attachmentID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if status >= 400 {
-		return "", fmt.Errorf("download failed with http %d", status)
+	if e, _ := responseError(status, raw); e != nil {
+		return "", e
 	}
 	workDir := os.Getenv("SUMI_ATTACHMENT_DIR")
 	if workDir == "" {
@@ -136,8 +136,9 @@ func (c *Client) uploadAll(paths []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if status >= 400 {
-			return nil, fmt.Errorf("upload %s failed with http %d", filepath.Base(p), status)
+		if e, _ := responseError(status, raw); e != nil {
+			e.Message = "upload " + filepath.Base(p) + ": " + e.Message
+			return nil, e
 		}
 		var parsed struct {
 			Attachment struct {
@@ -163,27 +164,26 @@ func Run(args []string, stdout io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(io.Discard)
 
+	fail := func(e *EnvelopeError, data any) error {
+		exitCode = 1
+		writeEnvelope(stdout, false, data, e)
+		return e
+	}
 	call := func(method, path string, body any) error {
 		c, err := NewFromEnv()
 		if err != nil {
-			exitCode = 1
-			writeEnvelope(stdout, false, nil, err.Error())
-			return err
+			return fail(localError(codeUnauthenticated, err), nil)
 		}
 		status, raw, err := c.Do(method, path, body)
 		if err != nil {
-			exitCode = 1
-			writeEnvelope(stdout, false, nil, err.Error())
-			return err
+			return fail(localError(codeUnavailable, err), nil)
+		}
+		if e, data := responseError(status, raw); e != nil {
+			return fail(e, data)
 		}
 		var parsed any
 		_ = json.Unmarshal(raw, &parsed)
-		if status >= 400 {
-			exitCode = 1
-			writeEnvelope(stdout, false, parsed, fmt.Sprintf("http %d", status))
-			return fmt.Errorf("http %d", status)
-		}
-		writeEnvelope(stdout, true, parsed, "")
+		writeEnvelope(stdout, true, parsed, nil)
 		return nil
 	}
 
@@ -237,15 +237,11 @@ func Run(args []string, stdout io.Writer) int {
 		RunE: func(_ *cobra.Command, a []string) error {
 			c, err := NewFromEnv()
 			if err != nil {
-				exitCode = 1
-				writeEnvelope(stdout, false, nil, err.Error())
-				return err
+				return fail(localError(codeUnauthenticated, err), nil)
 			}
 			ids, err := c.uploadAll(sendAttach)
 			if err != nil {
-				exitCode = 1
-				writeEnvelope(stdout, false, nil, err.Error())
-				return err
+				return fail(asEnvelopeError(err), nil)
 			}
 			return call(http.MethodPost, "/conversations/"+a[0]+"/messages", map[string]any{
 				"body_markdown":       sendBody,
@@ -296,17 +292,13 @@ func Run(args []string, stdout io.Writer) int {
 		RunE: func(_ *cobra.Command, a []string) error {
 			c, err := NewFromEnv()
 			if err != nil {
-				exitCode = 1
-				writeEnvelope(stdout, false, nil, err.Error())
-				return err
+				return fail(localError(codeUnauthenticated, err), nil)
 			}
 			path, err := c.Download(a[0])
 			if err != nil {
-				exitCode = 1
-				writeEnvelope(stdout, false, nil, err.Error())
-				return err
+				return fail(asEnvelopeError(err), nil)
 			}
-			writeEnvelope(stdout, true, map[string]string{"path": path}, "")
+			writeEnvelope(stdout, true, map[string]string{"path": path}, nil)
 			return nil
 		},
 	})
@@ -467,9 +459,7 @@ func Run(args []string, stdout io.Writer) int {
 			if pairOpts.ConfigPath == "" {
 				home, err := os.UserHomeDir()
 				if err != nil {
-					exitCode = 1
-					writeEnvelope(stdout, false, nil, err.Error())
-					return err
+					return fail(localError(codeInternal, err), nil)
 				}
 				pairOpts.ConfigPath = filepath.Join(home, ".sumi", "desktop.json")
 				pairOpts.DataDir = filepath.Join(home, ".sumi", "v2")
@@ -481,11 +471,9 @@ func Run(args []string, stdout io.Writer) int {
 			pairOpts.ServerURL = norm
 			res, err := pair.Run(pairOpts)
 			if err != nil {
-				exitCode = 1
-				writeEnvelope(stdout, false, nil, err.Error())
-				return err
+				return fail(localError(codeUnavailable, err), nil)
 			}
-			writeEnvelope(stdout, true, res, "")
+			writeEnvelope(stdout, true, res, nil)
 			fmt.Fprintln(cmd.ErrOrStderr(), "computer paired; start the desktop app with `make app`")
 			return nil
 		},
@@ -505,18 +493,18 @@ func Run(args []string, stdout io.Writer) int {
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil && exitCode == 0 {
 		exitCode = 2
-		writeEnvelope(stdout, false, nil, err.Error())
+		writeEnvelope(stdout, false, nil, localError(codeInvalidArgument, err))
 	}
 	return exitCode
 }
 
-func writeEnvelope(w io.Writer, ok bool, data any, errMsg string) {
+func writeEnvelope(w io.Writer, ok bool, data any, e *EnvelopeError) {
 	env := map[string]any{"ok": ok}
 	if data != nil {
 		env["data"] = data
 	}
-	if errMsg != "" {
-		env["error"] = errMsg
+	if e != nil {
+		env["error"] = e
 	}
 	_ = json.NewEncoder(w).Encode(env)
 }

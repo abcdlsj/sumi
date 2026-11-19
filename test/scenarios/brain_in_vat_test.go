@@ -37,8 +37,8 @@ func TestBrainInVat(t *testing.T) {
 					if err != nil {
 						return driver.TurnResult{}, err
 					}
-					if res.OK || code == 0 {
-						return driver.TurnResult{}, fmt.Errorf("expected unprivileged child agent.create to fail")
+					if res.OK || code == 0 || res.Error == nil || res.Error.Code != "permission_denied" {
+						return driver.TurnResult{}, fmt.Errorf("expected unprivileged child agent.create to fail with permission_denied")
 					}
 					childDeniedChecked.Store(true)
 					return driver.TurnResult{FinalText: "permission check verified"}, nil
@@ -62,7 +62,7 @@ func TestBrainInVat(t *testing.T) {
 				if err != nil {
 					return driver.TurnResult{}, err
 				}
-				if heldRes.OK || code == 0 {
+				if heldRes.OK || code == 0 || heldRes.Error == nil || heldRes.Error.Code != "held" {
 					return driver.TurnResult{}, fmt.Errorf("expected Freshness Guard to hold unread send")
 				}
 
