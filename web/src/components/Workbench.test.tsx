@@ -5,7 +5,7 @@ import { api, type BootstrapData } from "../api";
 import { Workbench } from "./Workbench";
 
 const sampleBoot: BootstrapData = {
-  space: { id: "sp-1", slug: "studio", name: "Sumi Studio", owner_member_id: "m-owner", event_seq: 1, created_at: "2026-11-19T10:00:00Z" },
+  space: { id: "sp-1", slug: "studio", name: "Sumi Studio", accent: "flame", owner_member_id: "m-owner", event_seq: 1, created_at: "2026-11-19T10:00:00Z" },
   current_member: { id: "m-owner", space_id: "sp-1", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" },
   members: [
     { id: "m-owner", space_id: "sp-1", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" },

@@ -4,6 +4,7 @@ import {
   AtSign,
   Bot,
   CheckCircle2,
+  ChevronRight,
   CircleDot,
   Hash,
   Inbox,
@@ -12,11 +13,13 @@ import {
   Monitor,
   Moon,
   Plus,
+  Search,
   Sun,
   SunMoon,
   Users,
 } from "lucide-react";
-import { api, formatClock, formatDay, type BootstrapData, type InboxItem, type Task, type TaskStatus } from "../api";
+import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
+import { api, formatClock, formatDay, type BootstrapData, type InboxItem, type RuntimeState, type Task, type TaskStatus } from "../api";
 import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar } from "./Avatar";
@@ -143,7 +146,7 @@ export function InboxView({
                     </div>
                     <p className="mt-0.5 text-[14px] text-fg truncate">
                       {it.latest_author_name && <span className="font-medium">{it.latest_author_name}: </span>}
-                      <span className="text-fg-2">{it.latest_preview}</span>
+                      <span className="text-fg-2 font-body">{it.latest_preview}</span>
                     </p>
                   </button>
                   <span className="tabular text-[12.5px] text-fg-3 shrink-0 w-12 text-right">{formatClock(it.latest_at)}</span>
@@ -264,11 +267,147 @@ export function TasksView({
   );
 }
 
+const STATE_WORD: Record<RuntimeState, string> = { idle: "Idle", working: "Working", error: "Error", offline: "Offline" };
+const STATE_DOT: Record<RuntimeState, string> = { idle: "bg-fg-4", working: "bg-work animate-breathe", error: "bg-danger", offline: "border border-fg-4" };
+
+/** Raft-style agent table: identity on the left, aligned status / runtime / computer columns on the right. */
+function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selectedID?: string; onInspect: (id: string) => void }) {
+  const [q, setQ] = useState("");
+  const [group, setGroup] = useState<"none" | "computer">("none");
+  const query = q.trim().toLowerCase();
+  const agents = boot.members
+    .filter((m) => m.kind === "agent")
+    .filter((m) => !query || m.display_name.toLowerCase().includes(query) || (m.agent?.role_text ?? "").toLowerCase().includes(query));
+  const groups =
+    group === "none"
+      ? [{ key: "all", label: "", items: agents }]
+      : boot.computers
+          .map((c) => ({ key: c.id, label: c.name, items: agents.filter((a) => a.agent?.computer_id === c.id) }))
+          .filter((g) => g.items.length > 0);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-[320px]">
+          <Search className="size-4 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search agents"
+            aria-label="Search agents"
+            className="w-full h-8 pl-8 pr-3 rounded-[8px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+          />
+        </div>
+        <Segmented
+          value={group}
+          onChange={setGroup}
+          options={[
+            { value: "none", label: "All" },
+            { value: "computer", label: <><Monitor />By computer</> },
+          ]}
+        />
+      </div>
+      {agents.length === 0 ? (
+        <p className="py-8 text-center text-[13.5px] text-fg-3">No agents match “{q}”.</p>
+      ) : (
+        groups.map((g) => (
+          <div key={g.key}>
+            {g.label && (
+              <div className="px-1 pb-1.5 pt-1 flex items-center gap-2 text-[12px] font-semibold text-fg-3 ui-font">
+                {g.label} <span className="font-mono text-fg-4">{g.items.length}</span>
+              </div>
+            )}
+            <div className="@container rounded-[12px] border border-line bg-card divide-y divide-line overflow-hidden">
+              {g.items.map((m) => {
+                const ag = m.agent;
+                const st = ag?.runtime_state ?? "offline";
+                const comp = boot.computers.find((c) => c.id === ag?.computer_id);
+                const runtime = ag?.driver_kind === "acp" ? `ACP · ${ag.driver_config?.provider ?? "?"}` : "Model API";
+                const model = ag?.driver_kind === "builtin" ? ag.driver_config?.model ?? "" : "";
+                const selected = m.id === selectedID;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => onInspect(m.id)}
+                    aria-current={selected || undefined}
+                    className={`group w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
+                  >
+                    <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="md" state={st} ring={selected ? "var(--accent-soft)" : "var(--card)"} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline gap-2 min-w-0">
+                        <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
+                        {st === "working" || st === "error" ? (
+                          <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-work"}`} title={agentStatusText(boot, m)}>
+                            {agentStatusText(boot, m)}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-[13px] text-fg-3 truncate font-body" title={ag?.role_text}>
+                        {ag?.role_text || "No role defined."}
+                      </span>
+                      <span className="@[640px]:hidden block font-mono text-[12px] text-fg-4 truncate">
+                        {[STATE_WORD[st], runtime, model, comp?.name].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                    <span className="hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] text-fg-2 shrink-0">
+                      <span className={`size-2 rounded-full shrink-0 ${STATE_DOT[st]}`} />
+                      {STATE_WORD[st]}
+                    </span>
+                    <span className="hidden @[640px]:block w-[104px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={model || runtime}>
+                      {model || runtime}
+                    </span>
+                    <span className="hidden @[640px]:flex items-center gap-1.5 w-[136px] text-[13px] text-fg-3 shrink-0 min-w-0" title={comp?.hostname}>
+                      <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-work" : "bg-fg-4"}`} />
+                      <span className="truncate">{comp?.name ?? "No computer"}</span>
+                    </span>
+                    <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function AccentPicker({ spaceSlug, value, disabled }: { spaceSlug: string; value: SpaceAccent; disabled: boolean }) {
+  const qc = useQueryClient();
+  const { busy, run } = useAction();
+  return (
+    <div className="mb-3 px-4 h-12 rounded-[14px] border border-line bg-card flex items-center text-[14px]">
+      <span className="w-40 text-fg-3">Accent</span>
+      <div role="radiogroup" aria-label="Space accent" className="flex items-center gap-2">
+        {SPACE_ACCENTS.map((a) => (
+          <button
+            key={a.value}
+            role="radio"
+            aria-checked={a.value === value}
+            aria-label={a.label}
+            title={disabled ? "Only owners and admins can change the accent" : a.label}
+            disabled={disabled || busy}
+            onClick={() =>
+              void run(async () => {
+                await api.updateSpace(spaceSlug, { accent: a.value });
+                await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                await qc.invalidateQueries({ queryKey: ["me"] });
+              })
+            }
+            className={`size-6 rounded-full transition-transform disabled:cursor-not-allowed ${a.value === value ? "ring-2 ring-offset-2 ring-offset-[var(--card)] scale-105" : "hover:scale-110"}`}
+            style={{ background: a.swatch, ["--tw-ring-color" as string]: a.swatch }}
+          />
+        ))}
+      </div>
+      <span className="ml-3 text-[13px] text-fg-3">{SPACE_ACCENTS.find((a) => a.value === value)?.label}</span>
+    </div>
+  );
+}
+
 function SectionTitle({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
   return (
     <div className="flex items-end justify-between gap-4 mb-3">
       <div>
-        <h2 className="text-[16px] font-semibold text-fg">{title}</h2>
+        <h2 className="font-display text-[19px] font-semibold text-fg">{title}</h2>
         {body && <p className="text-[13.5px] text-fg-3 mt-0.5">{body}</p>}
       </div>
       {action}
@@ -281,6 +420,7 @@ export function AdminPanel({
   tab,
   onTab,
   onInspectAgent,
+  selectedAgentID,
   onNewAgent,
   onConnectComputer,
   theme,
@@ -291,6 +431,7 @@ export function AdminPanel({
   tab: AdminTab;
   onTab: (t: AdminTab) => void;
   onInspectAgent: (memberID: string) => void;
+  selectedAgentID?: string;
   onNewAgent: () => void;
   onConnectComputer: () => void;
   theme: ThemePref;
@@ -332,39 +473,7 @@ export function AdminPanel({
                   <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
                 </div>
               ) : (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-                  {agents.map((m) => {
-                    const comp = boot.computers.find((c) => c.id === m.agent?.computer_id);
-                    const st = m.agent?.runtime_state;
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => onInspectAgent(m.id)}
-                        className="text-left rounded-[14px] border border-line bg-card p-4 hover:shadow-md hover:border-line-strong transition-[box-shadow,border-color]"
-                      >
-                        <div className="flex items-center gap-3">
-                          <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="lg" state={st} ring="var(--card)" />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[15px] font-semibold text-fg truncate">{m.display_name}</div>
-                            <div className={`text-[13px] truncate ${st === "working" ? "text-work" : st === "error" ? "text-danger" : "text-fg-3"}`}>
-                              {agentStatusText(boot, m)}
-                            </div>
-                          </div>
-                        </div>
-                        <p className="mt-3 text-[13.5px] text-fg-2 line-clamp-2 min-h-[42px] leading-relaxed">{m.agent?.role_text || "No role defined."}</p>
-                        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                          <Badge>{m.agent?.driver_kind === "acp" ? `ACP · ${m.agent.driver_config?.provider ?? "?"}` : `API · ${m.agent?.driver_config?.model ?? "?"}`}</Badge>
-                          {comp && (
-                            <Badge>
-                              <Monitor />
-                              {comp.name}
-                            </Badge>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                <AgentList boot={boot} selectedID={selectedAgentID} onInspect={onInspectAgent} />
               )}
             </>
           )}
@@ -458,6 +567,7 @@ export function AdminPanel({
               </div>
               <div>
                 <SectionTitle title="Space" />
+                <AccentPicker spaceSlug={boot.space.slug} value={boot.space.accent} disabled={boot.current_member.access_level === "member"} />
                 <div className="rounded-[14px] border border-line bg-card divide-y divide-line text-[14px]">
                   {[
                     ["Name", boot.space.name],

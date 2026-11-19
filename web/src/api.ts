@@ -1,3 +1,5 @@
+import type { SpaceAccent } from "./accent";
+
 export type MemberKind = "human" | "agent";
 export type AccessLevel = "owner" | "admin" | "member";
 export type Permission = "agent.create" | "channel.create" | "channel.manage_members";
@@ -18,6 +20,7 @@ export interface Space {
   id: string;
   slug: string;
   name: string;
+  accent: SpaceAccent;
   owner_member_id: string;
   event_seq: number;
   created_at: string;
@@ -245,6 +248,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ slug, name }),
     }),
+  updateSpace: (spaceSlug: string, patch: { name?: string; accent?: SpaceAccent }) =>
+    request<{ space: Space }>(`/api/v1/spaces/${spaceSlug}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  listConversationMembers: (spaceSlug: string, convID: string) =>
+    request<{ members: Member[] }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/members`),
+  inviteToChannel: (spaceSlug: string, convID: string, member_id: string) =>
+    request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/members`, {
+      method: "POST",
+      body: JSON.stringify({ member_id }),
+    }),
+  removeFromChannel: (spaceSlug: string, convID: string, memberID: string) =>
+    request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/members/${memberID}`, { method: "DELETE" }),
   bootstrap: (spaceSlug: string) => request<BootstrapData>(`/api/v1/spaces/${spaceSlug}/bootstrap`),
   listMessages: (spaceSlug: string, convID: string, markRead = true) =>
     request<{ messages: Message[]; read_seq: number; following: boolean }>(

@@ -161,6 +161,7 @@ func (s *Service) CreateSpace(ctx context.Context, user domain.User, slug, name 
 		ID:            spaceID,
 		Slug:          slug,
 		Name:          name,
+		Accent:        domain.DefaultSpaceAccent,
 		OwnerMemberID: ownerMemberID,
 		CreatedAt:     now,
 	}
@@ -175,8 +176,8 @@ func (s *Service) CreateSpace(ctx context.Context, user domain.User, slug, name 
 
 	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO spaces (id, slug, name, owner_member_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-			space.ID, space.Slug, space.Name, space.OwnerMemberID, store.FormatTime(now),
+			`INSERT INTO spaces (id, slug, name, accent, owner_member_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			space.ID, space.Slug, space.Name, space.Accent, space.OwnerMemberID, store.FormatTime(now),
 		); err != nil {
 			if store.IsUniqueViolation(err) {
 				return domain.NewError(domain.CodeConflict, "space slug already exists")
@@ -211,7 +212,7 @@ func (s *Service) CreateSpace(ctx context.Context, user domain.User, slug, name 
 
 func (s *Service) ListUserSpaces(ctx context.Context, userID string) ([]domain.Space, error) {
 	rows, err := s.store.ReadDB().QueryContext(ctx,
-		`SELECT s.id, s.slug, s.name, s.owner_member_id, s.event_seq, s.created_at
+		`SELECT s.id, s.slug, s.name, s.accent, s.owner_member_id, s.event_seq, s.created_at
 		 FROM spaces s JOIN members m ON m.space_id = s.id
 		 WHERE m.user_id = ? AND m.retired_at IS NULL
 		 ORDER BY s.created_at ASC`,
@@ -225,7 +226,7 @@ func (s *Service) ListUserSpaces(ctx context.Context, userID string) ([]domain.S
 	for rows.Next() {
 		var sp domain.Space
 		var createdAt string
-		if err := rows.Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.OwnerMemberID, &sp.EventSeq, &createdAt); err != nil {
+		if err := rows.Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &createdAt); err != nil {
 			return nil, domain.WrapError(domain.CodeInternal, "scan space", err)
 		}
 		sp.CreatedAt = store.ParseTime(createdAt)
@@ -238,9 +239,9 @@ func (s *Service) ResolveHumanMemberInSpace(ctx context.Context, userID, spaceSl
 	var sp domain.Space
 	var spCreated string
 	err := s.store.ReadDB().QueryRowContext(ctx,
-		`SELECT id, slug, name, owner_member_id, event_seq, created_at FROM spaces WHERE slug = ?`,
+		`SELECT id, slug, name, accent, owner_member_id, event_seq, created_at FROM spaces WHERE slug = ?`,
 		spaceSlug,
-	).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.OwnerMemberID, &sp.EventSeq, &spCreated)
+	).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &spCreated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Space{}, domain.Member{}, domain.NewError(domain.CodeNotFound, "space not found")
 	}
@@ -941,4 +942,41 @@ func (s *Service) ControlAgent(ctx context.Context, actor domain.Member, agentMe
 		Action:        action,
 	})
 	return nil
+}
+
+// UpdateSpace renames a Space and/or changes its accent; empty fields keep their value.
+func (s *Service) UpdateSpace(ctx context.Context, actor domain.Member, name, accent string) (domain.Space, error) {
+	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
+		return domain.Space{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can change space settings")
+	}
+	name = strings.TrimSpace(name)
+	if accent != "" {
+		if err := domain.ValidateSpaceAccent(accent); err != nil {
+			return domain.Space{}, err
+		}
+	}
+	var sp domain.Space
+	var events []domain.SpaceEvent
+	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var created string
+		if err := tx.QueryRowContext(ctx,
+			`UPDATE spaces SET name = COALESCE(NULLIF(?, ''), name), accent = COALESCE(NULLIF(?, ''), accent)
+			 WHERE id = ? RETURNING id, slug, name, accent, owner_member_id, event_seq, created_at`,
+			name, accent, actor.SpaceID,
+		).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &created); err != nil {
+			return domain.WrapError(domain.CodeInternal, "update space", err)
+		}
+		sp.CreatedAt = store.ParseTime(created)
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "space.updated", map[string]any{"space_id": sp.ID})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+		return nil
+	})
+	if err != nil {
+		return domain.Space{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	return sp, nil
 }

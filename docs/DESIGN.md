@@ -94,7 +94,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 
 核心表仅 13 张：
 1. `users` / `browser_sessions`：Human 账号与 Cookie Session（只存 token hash）。
-2. `spaces`：Space 元信息（含 `event_seq` 单调递增提交序）。
+2. `spaces`：Space 元信息（含 `accent` 强调色与 `event_seq` 单调递增提交序）。
 3. `members`：Human 与 Agent 统一成员表（`kind`、`display_name`、`access_level`、`retired_at`）。
 4. `member_permissions`：`(member_id, action_code)`，原子权限授权。
 5. `computers` / `computer_pairings`：已配对机器与配对流程（只存 token hash）。
@@ -218,14 +218,19 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 ### 视觉原则
 
-- **主题**：浅色工作区 + 深色导航栏为默认；支持暗色模式（跟随系统，设置里可切换 `System / Light / Dark`，存 `localStorage`）。全部颜色走 CSS 变量，组件不写死色值。
+- **主题**：默认浅色（工作区与导航栏同为浅色），暗色模式下导航栏随之变暗；支持暗色模式（跟随系统，设置里可切换 `System / Light / Dark`，存 `localStorage`）。全部颜色走 CSS 变量，组件不写死色值。
+- **字体**：界面层（导航、按钮、标签、表头）用 Avenir Next；正文信息（消息、描述、预览、输入框）保持 Inter；视图标题、空态标题与引导页大标题用衬线展示字体（Iowan Old Style / Charter）。
 - **层级**：正文 14px / 行高 1.55；次要信息 13px；辅助标签不小于 12px。标题 15–18px semibold。图标 16px（行内 14px），与相邻文字基线居中对齐，统一 `gap-2`。
-- **表面**：工作区用三层底色（背景 / 面板 / 卡片）+ 1px 分隔线；卡片与弹层可用柔和阴影，圆角 8–12px。一个品牌强调色（靛蓝），语义色只用于：**Need me（暖橙）**、**Agent working（青绿）**、**Error（红）**、**Task status**。
+- **表面**：工作区用三层底色（背景 / 面板 / 卡片）+ 1px 分隔线；卡片与弹层可用柔和阴影，圆角 8–12px。强调色由 Space 决定（`spaces.accent` 取 `flame`（默认橙）/ `gold` / `rose` / `iris` / `sky`，owner/admin 在 Space Settings 切换，`PATCH /api/v1/spaces/{slug}` 请求 `{name?, accent?}`，提交后发出 `space.updated`），Web 把它写到 `<html data-accent>`，亮暗各有一套色值；语义色只用于：**Need me（跟随强调色）**、**Agent working（青绿）**、**Error（红）**、**Task status**。
 - **身份**：Human 圆形字母头像；Agent 为 8×8 左右对称的像素小生物头像（由 member id 播种：连续身体轮廓 + 眼睛，可选天线、高光带、手臂与腿；色相取自固定的协调色表，浅色底 + 同色相深浅两档身体），圆角方形，右下角叠加运行态徽标（idle 灰 / working 青绿呼吸 / error 红 / offline 空心）。
 - **Agent 状态可见**：凡出现 Agent 的地方（侧栏、消息作者、DM 顶栏、详情）都能看到运行态；`working` 时显示正在处理的对话名称（`Working in #general`、`Working on #14`、`Working in a private conversation`），可点击跳转。
 - **加载**：首屏、侧栏、消息流、Inbox、Tasks 与右栏在数据到达前显示与真实内容同几何的骨架（纯色块 + 透明度呼吸），数据到达后原位淡入替换，不出现布局跳动。
 - **动效**：只动 `opacity` 与 `transform`，时长 120–240ms、`ease-out`；用于视图切换、右栏滑入、新消息出现、弹层与 Toast。遵守 `prefers-reduced-motion: reduce`。
 - **反馈**：写操作有按钮内 loading 态，失败以 Toast 呈现服务端错误文案；表单错误就地显示在字段下；不使用 `window.prompt` / `alert`。
+
+### 桌面窗口
+
+- 桌面薄壳使用隐藏标题栏（内容延伸到窗口顶部），顶部 28px 为原生拖拽条并保留交通灯位置；窗口以 `?shell=desktop` 打开，Web 据此给各列加 28px 顶部留白。
 
 ### Onboarding（首次使用）
 
@@ -242,11 +247,11 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 桌面采用紧凑的 4 列工作台结构，所有列共用 `52px` 顶栏高度与 1px 贯通分隔线；不使用漂浮阴影卡片，以平实底色层级和 1px 结构线确立稳定边界：
 
-1. **Left Anchor Rail（56px，深色）**
-   - 顶部：Space 切换标识与新建 Space 入口。
+1. **Left Anchor Rail（56px）**
+   - 顶部：Space 切换标识（以各自强调色填充）与新建 Space 入口。
    - 底部：Space 管理入口（Computers 带在线状态点、Members & Permissions、Space Settings），不占主侧栏一级导航。
 
-2. **Sidebar（260px，深色，32px 行高，只留高频沟通与工作）**
+2. **Sidebar（默认 260px，可拖拽右缘在 200–420px 间调整，双击复位，宽度存 `localStorage`；32px 行高，只留高频沟通与工作）**
    - 顶部（44px）：Space 名称 + `⌘K` 快速跳转。
    - **Inbox**：唯一注意力中心，暖色数字仅统计真正需要我处理的对话数。
    - **Tasks**：轻量工作视图（默认过滤“Active / Mine”）。
@@ -257,7 +262,8 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 3. **Main Pane（主工作区）**
    - **Channel / DM 视图**：
-     - 52px 顶栏：频道名、主题、通知级别切换器（`Mentions only` / `All messages` / `Muted`）与成员入口。
+     - 52px 顶栏：频道名、主题、通知级别切换器（按钮只显示短标签 `Mentions` / `All` / `Muted`，展开菜单显示完整选项与说明）与成员入口（前 3 个头像 + 人数）。
+     - 成员面板（右栏）：列出能读该频道的成员；Private 频道里有 `channel.manage_members`（owner/admin 默认具备）的成员可 `Add` 拉人、`Remove` 移出，任何成员可 `Leave`；Public 频道全员可见，仅展示。HTTP：`GET|POST /conversations/{id}/members`、`DELETE /conversations/{id}/members/{memberID}`，变更发出 `conversation.members_changed`。
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
      - Composer 支持选择文件上传（`Attach`），上传成功后以紧凑 chip 展示，图片附件在消息内联渲染，其他附件显示为下载链接。
@@ -267,9 +273,10 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
    - **Tasks 视图**：
      - 按状态分组的紧凑表格行（`36px` 行高，等宽 `#N`、标题、负责人、来源频道对齐成列），点击在右栏原地打开 Task 详情与独立讨论流。
 
-4. **Right Detail Pane（400px，按需展开的结构化聚焦面板）**
+4. **Right Detail Pane（按需展开的结构化聚焦面板；默认以最大宽度展开，即主区保留 440px、上限 880px；可拖拽左缘调整，最小 340px，拖拽后记住宽度，双击复位）**
    - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关；开关初值取服务端 `conversation_states.following`（消息列表响应附带 `following` 字段），不在前端假设。
    - 点 Task → 上半部为固定列宽的 2 列 Key-Value 属性表（Status / Assignee / Source / Revision，原地 Claim / Assign / 改状态 / 编辑），下半部为 `Discussion` 分区头 + 该 Task 自己的独立讨论流与贴底回复框。
+   - Agents 管理页：可搜索、可按 Computer 分组的紧凑表格行（头像 + 名称 + Role 一行；右侧对齐 Status / Runtime / Computer 三列，窄宽度时折叠为一行 mono 元信息），选中行高亮并在右栏打开详情。
    - 点 Agent → 头部大头像 + 运行态；Key-Value 运行态表（State / Focus / Computer / Driver / Model）；最近错误（code + detail）；`Restart` / `Reset session`；Driver 配置可原地编辑；Role；原子 Permission 开关。
 
 ---

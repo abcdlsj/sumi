@@ -100,6 +100,7 @@ type Space struct {
 	ID            string    `json:"id"`
 	Slug          string    `json:"slug"`
 	Name          string    `json:"name"`
+	Accent        string    `json:"accent"`
 	OwnerMemberID string    `json:"owner_member_id"`
 	EventSeq      int64     `json:"event_seq"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -299,6 +300,21 @@ func ValidateDisplayName(name string) error {
 		return NewError(CodeInvalidArgument, "display_name must be 1-32 alphanumeric/underscore characters and not 'all'")
 	}
 	return nil
+}
+
+// SpaceAccents is the allowlist of Space accent names; the Web UI maps each to its palette.
+var SpaceAccents = []string{"flame", "gold", "rose", "iris", "sky"}
+
+// DefaultSpaceAccent is the accent a new Space starts with.
+const DefaultSpaceAccent = "flame"
+
+func ValidateSpaceAccent(accent string) error {
+	for _, a := range SpaceAccents {
+		if a == accent {
+			return nil
+		}
+	}
+	return NewError(CodeInvalidArgument, "accent must be one of flame, gold, rose, iris, sky")
 }
 
 func ValidateSlug(slug string) error {

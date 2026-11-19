@@ -97,6 +97,7 @@ func (s *Server) registerRoutes() {
 	// Space-scoped Human APIs
 	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
 		r.Get("/bootstrap", s.handleBootstrap)
+		r.Patch("/", s.handleUpdateSpace)
 		r.Get("/events", s.handleSSE)
 
 		r.Get("/members", s.handleListMembers)
@@ -121,6 +122,9 @@ func (s *Server) registerRoutes() {
 		r.Post("/conversations/{convID}/done", s.handleMarkDone)
 		r.Put("/conversations/{convID}/notify", s.handleSetNotifyLevel)
 		r.Put("/conversations/{convID}/follow", s.handleSetFollowing)
+		r.Get("/conversations/{convID}/members", s.handleListConversationMembers)
+		r.Post("/conversations/{convID}/members", s.handleInviteToChannel)
+		r.Delete("/conversations/{convID}/members/{memberID}", s.handleRemoveFromChannel)
 
 		r.Get("/inbox", s.handleListInbox)
 
@@ -358,6 +362,75 @@ func (s *Server) handleCreateSpace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"space": sp, "member": member})
+}
+
+func (s *Server) handleUpdateSpace(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		Name   string `json:"name"`
+		Accent string `json:"accent"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	sp, err := s.svc.UpdateSpace(r.Context(), actor, body.Name, body.Accent)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"space": sp})
+}
+
+func (s *Server) handleListConversationMembers(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	members, err := s.svc.ListConversationMembers(r.Context(), actor, chi.URLParam(r, "convID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+}
+
+func (s *Server) handleInviteToChannel(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		MemberID string `json:"member_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.InviteToChannel(r.Context(), actor, chi.URLParam(r, "convID"), body.MemberID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleRemoveFromChannel(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.RemoveFromChannel(r.Context(), actor, chi.URLParam(r, "convID"), chi.URLParam(r, "memberID")); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {

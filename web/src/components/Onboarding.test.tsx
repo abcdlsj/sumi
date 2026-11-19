@@ -14,7 +14,7 @@ function wrap(ui: ReactNode) {
 const noop = () => {};
 const user = { id: "u1", email: "li.si@example.com", display_name: "li_si", created_at: "" };
 const emptyBoot = {
-  space: { id: "sp", slug: "li-si-studio", name: "S", owner_member_id: "m", event_seq: 1, created_at: "" },
+  space: { id: "sp", slug: "li-si-studio", name: "S", accent: "flame", owner_member_id: "m", event_seq: 1, created_at: "" },
   current_member: { id: "m", space_id: "sp", kind: "human", display_name: "li_si", access_level: "owner", created_at: "" },
   members: [],
   conversations: [],

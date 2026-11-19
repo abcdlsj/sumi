@@ -1,11 +1,11 @@
--- Sumi v2 SQLite baseline schema (version 2).
+-- Sumi v2 SQLite baseline schema (version 3).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TEXT NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO schema_meta (version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -29,6 +29,7 @@ CREATE TABLE spaces (
     id TEXT PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    accent TEXT NOT NULL DEFAULT 'flame' CHECK (accent IN ('flame', 'gold', 'rose', 'iris', 'sky')),
     owner_member_id TEXT NOT NULL,
     event_seq INTEGER NOT NULL DEFAULT 0 CHECK (event_seq >= 0),
     next_task_number INTEGER NOT NULL DEFAULT 1 CHECK (next_task_number >= 1),
