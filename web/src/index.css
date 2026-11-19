@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    color: #161614;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    font-size: 13.5px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+.font-mono-num {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: #d7d3c9;
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
