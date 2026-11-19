@@ -118,10 +118,21 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 ### 桌面薄壳（Wails v3）
 
 - `desktop/` 是独立 main 包：托盘 + 单个窗口 + 进程内托管本机 Computer Daemon（必要时兼起本机 Server）；窗口直接打开 Server 源（`http://127.0.0.1:<port>`），由 Server 的 `-web-dir` 提供内嵌的 `web/dist`，因此 Browser Session Cookie、SSE 与上传都在真实 HTTP 源上工作，不引入反向代理。
-- 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`），字段 `server_url`、`computer_token`、`data_dir`；由 `sumi pair` 生成。
-- 启动顺序：探活 `server_url` → 若不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 启动 Computer Daemon → 开窗。缺 computer token 时窗口照常打开，托盘菜单显示 `Computer: not paired`，不静默失败。
+- 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`，0600），字段 `server_url`、`computer_token`、`data_dir`；由桌面确认式配对或 `sumi pair` 写出。
+- 启动顺序：探活 `server_url` → 若不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 有 token 则启动 Computer Daemon → 开窗。缺 token 时走「确认式配对」：开窗地址附带 `?pair=<id>&code=<code>`，托盘显示 `Computer: waiting for confirmation`；确认后写入配置并启动 Daemon，托盘变为 `Computer: online`，无需重启 App。
 - 托盘菜单固定四项：`Open Sumi`、`Computer` 状态（只读）、`Restart Computer Daemon`、`Quit`。关闭窗口只隐藏，Server/Daemon/托盘继续运行；Quit 才停止它们并退出。
 - 薄壳不含业务逻辑：鉴权、Space、Agent、附件全部由 Server 与 Daemon 承担。
+
+### 确认式配对（Computer Pairing）
+
+Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时持有的 secret；服务端只存 hash，不保存任何明文。
+
+1. **申请**（无鉴权）：`POST /api/v1/computer/pairings`，请求 `{hostname, os, daemon_version}`，返回 `{pairing: {id, code, expires_at}, secret}`。`code` 为 6 位易读字符（不含 `0/O/1/I`），`secret` 为 32 字节随机 token；`computer_pairings` 只存 `code_hash` 与 `token_hash`，状态 `pending`，10 分钟后过期。
+2. **查看**（Browser Session）：`GET /api/v1/pairings/{id}?code=...` 返回 `{pairing: {id, hostname, os, status, expires_at}}`；code 不符与不存在一律返回 `not_found`。
+3. **确认**（owner / admin）：`POST /api/v1/spaces/{slug}/computers/pairings/{id}/confirm`，请求 `{code, name}`。同一写事务内创建 `computers` 行（`token_hash` 直接取自 pairing）并把 pairing 置为 `confirmed`、写入 `computer_id` 与 `space_id`，发出 `computer.changed`。pairing 只能确认一次；已过期返回 `expired`。
+4. **轮询**（Bearer secret）：`GET /api/v1/computer/pairings/{id}`，返回 `{status, space_slug?, computer_id?}`；secret 不符返回 `not_found`。确认后 Computer 以该 secret 作为 computer token 连接 `/ws/computer`。
+
+桌面薄壳每 2 秒轮询一次；pairing 过期时重新申请并刷新窗口地址。Web 读到 `?pair=&code=` 后存入 `sessionStorage` 并从地址栏移除，登录、建 Space 后弹出确认卡片，卡片显示 hostname 与 code，必须由用户点击确认，不自动确认。
 
 ### 配对与本地引导（`sumi pair`）
 
@@ -176,6 +187,20 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 - 中性纸感底色、1px 发丝线分隔、单一选中态，无渐变/模糊/多余装饰。
 - 颜色只留给三个明确语义：**Need me（暖色）**、**Agent working（青色）**、**Task status（图形 + 克制语义色）**。
 - 身份由形状区分：Human 圆形头像，Agent 圆角方形像素印章。
+- **加载**：首屏、侧栏、消息流、Inbox、Tasks 与右栏在数据到达前显示与真实内容同几何的骨架（纯色块 + 透明度呼吸，不用渐变扫光），数据到达后原位淡入替换，不出现布局跳动。
+- **动效**：只动 `opacity` 与 `transform`，时长 120–220ms、`ease-out`；用于视图切换淡入、右栏滑入、新消息出现、弹层与 Toast。遵守 `prefers-reduced-motion: reduce`，此时关闭全部动效。
+- **反馈**：写操作有按钮内 loading 态，失败以底部 Toast 呈现错误码文案；不使用 `window.prompt` / `alert`。
+
+### Onboarding（首次使用）
+
+全屏单栏引导，顶部 4 步进度条，后两步可跳过：
+
+1. **Account**：`Sign in` / `Create account` 分段切换；邮箱、密码（可显隐）、注册时的 Display Name（按邮箱前缀预填并按规则清洗）。字段级错误就地显示。
+2. **Space**：输入名称，slug 按名称自动生成（可手动改）；已有 Space 的账号跳过此步。
+3. **Computer**：桌面 App 带来的 pending pairing 显示为确认卡片（hostname + code + `Connect this computer`）；浏览器中则调用 `computers/pair` 生成命令，一键复制，并实时显示该 Computer 是否上线。
+4. **First Agent**：在已上线的 Computer 上创建第一个 Agent（名称、Driver、Role），完成后直接进入与其的 DM。
+
+进入工作台后，若 Space 内没有 Computer 或没有 Agent，侧栏底部显示 `Finish setup` 入口，重新打开第 3、4 步。已登录用户在工作台中遇到 pending pairing 时，同样弹出确认卡片。
 
 ### 布局与信息架构
 
