@@ -174,7 +174,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 - **凭据处理**：`api_key` 只在服务端存储，并只随 provision spec 下发给承载该 Agent 的 Computer。任何面向 Browser 的响应都把它替换为 `api_key_set: true/false`，日志与错误中不出现。
 - **修改**：`PUT /api/v1/spaces/{slug}/agents/{agentID}/driver`，请求 `{driver_kind, driver_config}`；`api_key` 省略或为空字符串表示保留原值。修改后 Server 向 Computer 重新下发 `provision`，Computer 关闭旧 Driver 并按新 spec 重建（保留 workspace 与 `MEMORY.md`，Runtime Session 清空）。
 - **Computer 能力**：Computer 在 `hello` 中上报 `acp_providers`（本机 PATH 上能找到的 `pi` / `codex` / `claude`），Server 存在 `computers.capabilities_json`，Web 据此只列出可用的 ACP provider。
-- **运行环境**：Daemon 在 Agent 环境里把 `sumi` CLI 放到 `PATH` 最前（`<data_dir>/bin/sumi` 指向当前可执行文件，桌面薄壳也能以 `sumi` 名义执行 CLI）。Builtin 的 `HOME` 设为 Agent Home；ACP 子进程保留用户 `HOME`，以便读取 `pi` / `codex` / `claude` 自己的登录凭据，工作目录为 Agent 的 `workspace/`。
+- **运行环境**：Agent 子进程环境继承 Daemon 环境，但剔除全部 `SUMI_*` 变量与任何含 Computer token 的变量，再注入 `SUMI_SOCKET` / `SUMI_DRIVER_TOKEN` / `SUMI_ATTACHMENT_DIR`；Agent 只能凭 driver token 经 capability socket 访问 Server。Daemon 在 Agent 环境里把 `sumi` CLI 放到 `PATH` 最前（`<data_dir>/bin/sumi` 指向当前可执行文件，桌面薄壳也能以 `sumi` 名义执行 CLI）。Builtin 的 `HOME` 设为 Agent Home；ACP 子进程保留用户 `HOME`，以便读取 `pi` / `codex` / `claude` 自己的登录凭据，工作目录为 Agent 的 `workspace/`。
 - **错误呈现**：Turn 或 Driver 失败时 Computer 上报 `error_code` 与有界的 `error_detail`（≤ 240 字符，只含 Driver/HTTP 错误描述，不含 prompt 或消息正文）；Server 存入 `agents.last_error_code` / `last_error_detail`。错误码：`driver_config_invalid`、`driver_start_failed`、`model_auth_failed`、`model_unreachable`、`turn_failed`、`inbox_unreachable`。下一次 Turn 成功后清空。
 
 ### Agent CLI

@@ -583,11 +583,22 @@ func failureOf(err error, spec protocol.AssignedAgentSpec) (string, string) {
 
 // agentEnv builds the child environment: `sumi` first on PATH, capability socket credentials,
 // and HOME pointed at the Agent Home for builtin only (ACP CLIs need the user's own HOME).
+// Inherited SUMI_* variables and anything carrying the Computer token are dropped so an
+// Agent can only reach the Server through its own driver token.
 func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind) []string {
 	d.mu.RLock()
 	binDir := d.binDir
 	d.mu.RUnlock()
-	env := os.Environ()
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "SUMI_") {
+			continue
+		}
+		if tok := d.cfg.ComputerToken; tok != "" && strings.Contains(kv, tok) {
+			continue
+		}
+		env = append(env, kv)
+	}
 	path := os.Getenv("PATH")
 	if binDir != "" {
 		path = binDir + string(os.PathListSeparator) + path

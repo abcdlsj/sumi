@@ -177,3 +177,25 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatalf("condition not met")
 }
+
+func TestAgentEnvDropsComputerCredentials(t *testing.T) {
+	t.Setenv("SUMI_COMPUTER_TOKEN", "computer-secret")
+	t.Setenv("SUMI_DESKTOP_CONFIG", "/tmp/desktop.json")
+	t.Setenv("OTHER_TOKEN_COPY", "prefix-computer-secret")
+	t.Setenv("KEEP_ME", "1")
+	d := NewDaemon(Config{DataDir: t.TempDir(), ComputerToken: "computer-secret"}, nil)
+	ag := &hostedAgent{homeDir: "/agents/a", workDir: "/agents/a/workspace", driverToken: "tok"}
+	for _, kind := range []domain.DriverKind{domain.DriverBuiltin, domain.DriverACP} {
+		env := d.agentEnv(ag, kind)
+		keep := false
+		for _, kv := range env {
+			if strings.Contains(kv, "computer-secret") || strings.HasPrefix(kv, "SUMI_DESKTOP_CONFIG=") {
+				t.Fatalf("%s env leaks %q", kind, strings.SplitN(kv, "=", 2)[0])
+			}
+			keep = keep || kv == "KEEP_ME=1"
+		}
+		if !keep {
+			t.Fatalf("%s env dropped unrelated variables", kind)
+		}
+	}
+}
