@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, MessageSquare, Monitor, Pencil, RefreshCw, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { activityLabel, api, formatClock, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
@@ -14,7 +14,8 @@ import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
-  | { kind: "agent"; memberID: string };
+  | { kind: "agent"; memberID: string }
+  | { kind: "members"; convID: string };
 
 const PERMISSIONS: { code: Permission; label: string; hint: string }[] = [
   { code: "agent.create", label: "Create agents", hint: "Spin up new agents on its computer" },
@@ -150,6 +151,7 @@ export function DetailPane({
     <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
       {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} />}
       {target.kind === "thread" && <ThreadDetail spaceSlug={spaceSlug} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} />}
+      {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "agent" && (
         <AgentDetail
           spaceSlug={spaceSlug}
@@ -161,6 +163,149 @@ export function DetailPane({
         />
       )}
     </aside>
+  );
+}
+
+function MembersDetail({
+  spaceSlug,
+  boot,
+  convID,
+  onClose,
+  onSelectTarget,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  convID: string;
+  onClose: () => void;
+  onSelectTarget: (t: DetailTarget) => void;
+}) {
+  const qc = useQueryClient();
+  const act = useAction();
+  const toast = useToast();
+  const [adding, setAdding] = useState(false);
+  const [q, setQ] = useState("");
+  const conv = boot.conversations.find((c) => c.id === convID);
+  const membersQ = useQuery({
+    queryKey: ["conv-members", spaceSlug, convID],
+    queryFn: () => api.listConversationMembers(spaceSlug, convID),
+  });
+  const me = boot.current_member;
+  const canManage = me.access_level !== "member" || (me.permissions ?? []).includes("channel.manage_members");
+  const isPrivate = conv?.kind === "private";
+  const members = membersQ.data?.members ?? [];
+  const memberIDs = new Set(members.map((m) => m.id));
+  const candidates = boot.members.filter((m) => !memberIDs.has(m.id) && m.display_name.toLowerCase().includes(q.trim().toLowerCase()));
+  const byID = new Map(boot.members.map((m) => [m.id, m]));
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["conv-members", spaceSlug, convID] });
+    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+  };
+
+  return (
+    <>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          isPrivate && canManage ? (
+            <Button size="sm" variant={adding ? "secondary" : "soft"} icon={<UserPlus />} onClick={() => setAdding((v) => !v)}>
+              Add
+            </Button>
+          ) : undefined
+        }
+      >
+        {isPrivate ? <Lock className="size-4 text-fg-3" /> : <Hash className="size-4 text-fg-3" />}
+        <span className="font-semibold text-fg truncate">{conv?.slug}</span>
+        <span className="text-fg-3">· Members</span>
+        {membersQ.data && <span className="font-mono text-[12px] text-fg-4">{members.length}</span>}
+      </PaneHeader>
+      {adding && (
+        <div className="p-3 border-b border-line animate-fade-in">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Find people and agents"
+            aria-label="Find members to add"
+            className="w-full h-9 px-3 rounded-[9px] border border-line-strong bg-card text-[14px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+          />
+          <div className="mt-2 max-h-[240px] overflow-y-auto scroll-thin space-y-0.5">
+            {candidates.length === 0 ? (
+              <p className="px-2 py-3 text-[13px] text-fg-3">{q ? "No one matches." : "Everyone in the space is already here."}</p>
+            ) : (
+              candidates.map((m) => (
+                <button
+                  key={m.id}
+                  disabled={act.busy}
+                  onClick={() =>
+                    void act.run(async () => {
+                      await api.inviteToChannel(spaceSlug, convID, m.id);
+                      toast(`Added ${m.display_name} to #${conv?.slug}`, "success");
+                      refresh();
+                    })
+                  }
+                  className="w-full h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-hover text-left disabled:opacity-60"
+                >
+                  <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" state={m.agent?.runtime_state} />
+                  <span className="flex-1 truncate text-[14px] text-fg">{m.display_name}</span>
+                  <span className="text-[12px] text-fg-4">{m.kind === "agent" ? "Agent" : m.access_level}</span>
+                  <Plus className="size-4 text-fg-3" />
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-3">
+        {!isPrivate && (
+          <p className="px-2 pb-3 text-[13px] text-fg-3 leading-snug">Public channel: everyone in the space can read and join. Make a private channel to choose who is in it.</p>
+        )}
+        {membersQ.isLoading ? (
+          <div className="space-y-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-10 px-2 flex items-center gap-2.5">
+                <span className="skeleton size-6 rounded-full" />
+                <span className="skeleton h-3.5 w-28" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-0.5 animate-fade-in">
+            {members.map((m) => {
+              const full = byID.get(m.id) ?? m;
+              const self = m.id === me.id;
+              return (
+                <div key={m.id} className="group h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-subtle">
+                  <button
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+                    onClick={() => (full.kind === "agent" ? onSelectTarget({ kind: "agent", memberID: full.id }) : undefined)}
+                  >
+                    <MemberAvatar id={full.id} name={full.display_name} kind={full.kind} size="sm" state={full.agent?.runtime_state} />
+                    <span className="truncate text-[14px] text-fg">{full.display_name}</span>
+                    {self && <Badge>You</Badge>}
+                  </button>
+                  <span className="text-[12px] text-fg-4 group-hover:hidden">{full.kind === "agent" ? "Agent" : full.access_level}</span>
+                  {isPrivate && (canManage || self) && (
+                    <button
+                      onClick={() =>
+                        void act.run(async () => {
+                          await api.removeFromChannel(spaceSlug, convID, m.id);
+                          toast(self ? `You left #${conv?.slug}` : `Removed ${full.display_name}`, "success");
+                          refresh();
+                          if (self) onClose();
+                        })
+                      }
+                      className="hidden group-hover:inline-flex h-7 px-2 rounded-[7px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft items-center"
+                    >
+                      {self ? "Leave" : "Remove"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -196,7 +341,7 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
       </PaneHeader>
 
       <div className="px-5 pt-4 pb-4 border-b border-line space-y-3 shrink-0">
-        <h2 className="text-[17px] font-semibold text-fg leading-snug">{task.title}</h2>
+        <h2 className="font-display text-[20px] font-semibold text-fg leading-snug">{task.title}</h2>
         {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
         <div className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-1 pt-1">
           <KV label="Status">
@@ -444,7 +589,7 @@ function AgentDetail({
         <div className="px-5 py-5 flex items-center gap-4">
           <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} />
           <div className="min-w-0 flex-1">
-            <div className="text-[18px] font-semibold text-fg truncate">{member.display_name}</div>
+            <div className="font-display text-[22px] font-semibold text-fg truncate">{member.display_name}</div>
             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
               <Badge tone={stateTone}>
                 <StatusDot state={st} size={7} ring="transparent" />

@@ -182,7 +182,7 @@ func TestWriteConfigAtomic(t *testing.T) {
 
 func TestPairURLEscapesParams(t *testing.T) {
 	got := pairURL("http://127.0.0.1:8087", pairingTicket{ID: "a b", Code: "ABC234"})
-	if got != "http://127.0.0.1:8087/?code=ABC234&pair=a+b" {
+	if got != "http://127.0.0.1:8087/?code=ABC234&pair=a+b&shell=desktop" {
 		t.Fatalf("pair url = %s", got)
 	}
 }

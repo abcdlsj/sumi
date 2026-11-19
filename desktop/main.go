@@ -36,7 +36,8 @@ func main() {
 	}
 	rt.startDaemon(bootCtx)
 
-	startURL := cfg.ServerURL + "/"
+	// shell=desktop tells the Web UI to reserve the hidden title bar strip.
+	startURL := cfg.ServerURL + "/?shell=desktop"
 	var pr *pairer
 	var firstTicket *pairingTicket
 	if !rt.hasComputerToken() {
@@ -69,8 +70,14 @@ func main() {
 		Height:           900,
 		MinWidth:         900,
 		MinHeight:        600,
-		BackgroundColour: application.NewRGBA(244, 242, 236, 255),
+		BackgroundColour: application.NewRGBA(244, 244, 247, 255),
 		URL:              startURL,
+		// Content runs under a transparent title bar; the Web UI keeps the top
+		// 28px clear for the traffic lights and the native drag strip.
+		Mac: application.MacWindow{
+			TitleBar:                application.MacTitleBarHidden,
+			InvisibleTitleBarHeight: 28,
+		},
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		window.Hide()

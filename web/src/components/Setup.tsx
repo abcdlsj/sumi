@@ -19,7 +19,7 @@ export function StepHeading({ icon, title, body }: { icon: ReactNode; title: str
     <div className="flex items-start gap-3.5">
       <div className="size-10 rounded-[12px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0 [&>svg]:size-5">{icon}</div>
       <div className="pt-0.5">
-        <h1 className="text-[18px] font-semibold text-fg leading-tight">{title}</h1>
+        <h1 className="font-display text-[21px] font-semibold text-fg leading-tight">{title}</h1>
         <p className="mt-1 text-[14px] text-fg-3 leading-relaxed">{body}</p>
       </div>
     </div>

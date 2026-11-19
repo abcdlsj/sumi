@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, Hash, Inbox, Lock, Monitor, Moon, Plus, Search, Settings, Sparkles, Sun, Users } from "lucide-react";
 import { api, slugInput, slugify, type Member, type Space } from "../api";
+import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
@@ -9,6 +10,7 @@ import { agentStatusText, MemberAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
 import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
+import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
 import { Button, Field, Modal, Segmented, useAction } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
@@ -26,7 +28,14 @@ const SSE_EVENTS = [
   "computer.changed",
   "conversation.created",
   "member.permissions_changed",
+  "conversation.members_changed",
+  "space.updated",
 ];
+
+/** Remount (and replay the slide-in) only when the panel shows a different object. */
+function detailKey(d: DetailTarget) {
+  return d.kind === "task" ? `t:${d.taskID}` : d.kind === "thread" ? `th:${d.threadConvID}` : d.kind === "agent" ? `a:${d.memberID}` : `m:${d.convID}`;
+}
 
 function viewKey(v: MainView) {
   return v.kind === "conversation" ? `c:${v.convID}` : v.kind === "admin" ? "admin" : v.kind;
@@ -68,7 +77,7 @@ function Count({ n, tone = "warm" }: { n: number; tone?: "warm" | "muted" }) {
   return (
     <span
       className={`min-w-5 h-5 px-1.5 rounded-full text-[11.5px] font-semibold tabular inline-flex items-center justify-center animate-pop-in ${
-        tone === "warm" ? "bg-warm text-accent-fg" : "bg-nav-fill-2 text-nav-fg-2"
+        tone === "warm" ? "bg-accent text-accent-fg" : "bg-nav-fill-2 text-nav-fg-2"
       }`}
     >
       {n > 99 ? "99+" : n}
@@ -119,6 +128,9 @@ export function Workbench({
   const dm = useAction();
   const landed = useRef(false);
   const boot = bootQ.data;
+  const panes = usePaneWidths();
+  const accent = boot?.space.accent;
+  useEffect(() => applyAccent(accent), [accent]);
 
   // First landing: open the agent created during onboarding, else #general when Inbox is empty.
   useEffect(() => {
@@ -135,9 +147,10 @@ export function Workbench({
   useEffect(() => {
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });
     const invalidate = () => {
-      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
+      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
     };
     for (const ev of SSE_EVENTS) es.addEventListener(ev, invalidate);
+    es.addEventListener("space.updated", () => void qc.invalidateQueries({ queryKey: ["me"] }));
     return () => es.close();
   }, [spaceSlug, qc]);
 
@@ -229,12 +242,12 @@ export function Workbench({
 
   return (
     <div
-      className="h-full grid bg-bg transition-[grid-template-columns] duration-200 ease-out"
-      style={{ gridTemplateColumns: detail ? "56px 260px minmax(0, 1fr) 400px" : "56px 260px minmax(0, 1fr) 0px" }}
+      className="h-full grid bg-bg"
+      style={{ gridTemplateColumns: `56px ${panes.sidebar}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
     >
       {/* Rail */}
-      <nav aria-label="Spaces" className="bg-nav-rail flex flex-col items-center justify-between py-3 select-none">
-        <div className="flex flex-col items-center gap-2">
+      <nav aria-label="Spaces" className="bg-nav-rail titlebar-pad flex flex-col items-center justify-between pb-3 select-none">
+        <div className="flex flex-col items-center gap-2 pt-3">
           {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
             const active = sp.slug === spaceSlug;
             return (
@@ -249,9 +262,10 @@ export function Workbench({
                   className={`absolute -left-3 w-1 rounded-r-full bg-nav-fg-strong transition-all duration-200 ${active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
                 />
                 <span
-                  className={`size-9 rounded-[11px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius] ${
-                    active ? "bg-accent text-accent-fg" : "bg-nav-fill text-nav-fg-2 hover:bg-nav-fill-2 hover:rounded-[9px]"
+                  className={`size-9 rounded-[11px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
+                    active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[9px] text-white"
                   }`}
+                  style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
                 >
                   {(sp.name[0] ?? "S").toUpperCase()}
                 </span>
@@ -276,7 +290,16 @@ export function Workbench({
       </nav>
 
       {/* Sidebar */}
-      <aside aria-label="Sidebar" className="bg-nav border-r border-nav-line flex flex-col min-h-0 select-none">
+      <aside aria-label="Sidebar" className="relative bg-nav titlebar-pad border-r border-nav-line flex flex-col min-h-0 select-none">
+        <ResizeHandle
+          label="Resize sidebar"
+          edge="right"
+          value={panes.sidebar}
+          min={SIDEBAR_MIN}
+          max={SIDEBAR_MAX}
+          onResize={panes.setSidebar}
+          onReset={panes.resetSidebar}
+        />
         <div className="h-[52px] px-4 flex items-center shrink-0">
           <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
         </div>
@@ -400,7 +423,7 @@ export function Workbench({
       </aside>
 
       {/* Main */}
-      <main className="bg-panel flex flex-col min-w-0 min-h-0">
+      <main className="bg-panel titlebar-pad flex flex-col min-w-0 min-h-0">
         <div key={viewKey(mainView)} className="h-full min-h-0 animate-fade-in">
           {mainView.kind === "conversation" && activeConv && <ConversationView spaceSlug={spaceSlug} boot={boot} conv={activeConv} onOpenDetail={setDetail} />}
           {mainView.kind === "inbox" && (
@@ -419,6 +442,7 @@ export function Workbench({
               tab={mainView.tab}
               onTab={(tab) => setMainView({ kind: "admin", tab })}
               onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
+              selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
               onNewAgent={() => setDialog(boot.computers.length ? "agent" : "computer")}
               onConnectComputer={() => setDialog("computer")}
               theme={theme}
@@ -430,9 +454,20 @@ export function Workbench({
       </main>
 
       {/* Detail */}
-      <div className="min-w-0 min-h-0 overflow-hidden">
+      <div className="relative min-w-0 min-h-0 bg-panel titlebar-pad">
         {detail && (
-          <div key={JSON.stringify(detail)} className="h-full w-[400px] animate-slide-in">
+          <ResizeHandle
+            label="Resize panel"
+            edge="left"
+            value={panes.detail}
+            min={DETAIL_MIN}
+            max={panes.detailMax}
+            onResize={panes.setDetail}
+            onReset={panes.resetDetail}
+          />
+        )}
+        {detail && (
+          <div key={detailKey(detail)} className="h-full overflow-hidden animate-slide-in" style={{ width: panes.detail }}>
             <DetailPane
               spaceSlug={spaceSlug}
               boot={boot}

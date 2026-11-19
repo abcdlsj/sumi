@@ -101,6 +101,7 @@ func pairURL(baseURL string, t pairingTicket) string {
 	q := url.Values{}
 	q.Set("pair", t.ID)
 	q.Set("code", t.Code)
+	q.Set("shell", "desktop")
 	return baseURL + "/?" + q.Encode()
 }
 

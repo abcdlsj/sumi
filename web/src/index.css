@@ -16,13 +16,16 @@
   --text-2: #3d3d48;
   --text-3: #6c6c78;
   --text-4: #9d9daa;
-  --accent: #5a5bd8;
-  --accent-hover: #4b4cc8;
+  --accent: #f0602f;
+  --accent-hover: #dc5323;
   --accent-fg: #ffffff;
-  --accent-soft: #eeeefe;
-  --accent-text: #4a4bc4;
-  --warm: #d4510f;
-  --warm-soft: #fff0e6;
+  --accent-soft: #fdeee7;
+  --accent-text: #c2410c;
+  --accent-ring: rgba(240, 96, 47, 0.2);
+  /* "Needs me" follows the Space accent. */
+  --warm: var(--accent-text);
+  --warm-soft: var(--accent-soft);
+  --review: #b7791f;
   --work: #0c9a82;
   --work-soft: #e3f6f1;
   --danger: #d92d2d;
@@ -46,7 +49,7 @@
   --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.05);
   --shadow-md: 0 2px 8px rgba(20, 20, 30, 0.06), 0 1px 2px rgba(20, 20, 30, 0.04);
   --shadow-lg: 0 16px 48px rgba(20, 20, 30, 0.16), 0 2px 8px rgba(20, 20, 30, 0.06);
-  --ring: 0 0 0 3px rgba(90, 91, 216, 0.18);
+  --ring: 0 0 0 3px var(--accent-ring);
   color-scheme: light;
 }
 
@@ -63,13 +66,13 @@
   --text-2: #c6c6d0;
   --text-3: #8d8d9a;
   --text-4: #62626e;
-  --accent: #7475f0;
-  --accent-hover: #8586f5;
+  --accent: #ff7a45;
+  --accent-hover: #ff8d5e;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(116, 117, 240, 0.15);
-  --accent-text: #a5a6ff;
-  --warm: #ff8f52;
-  --warm-soft: rgba(255, 143, 82, 0.13);
+  --accent-soft: rgba(255, 122, 69, 0.15);
+  --accent-text: #ffa27a;
+  --accent-ring: rgba(255, 122, 69, 0.3);
+  --review: #f2c14e;
   --work: #2fd3b0;
   --work-soft: rgba(47, 211, 176, 0.12);
   --danger: #f87171;
@@ -93,8 +96,69 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 18px 56px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --ring: 0 0 0 3px rgba(116, 117, 240, 0.28);
   color-scheme: dark;
+}
+
+/* Space accents; html[data-accent] is set from the active Space. Flame is the :root default. */
+[data-accent="gold"] {
+  --accent: #e8b42d;
+  --accent-hover: #d9a520;
+  --accent-fg: #1c1b19;
+  --accent-soft: #fcf4dc;
+  --accent-text: #8a6500;
+  --accent-ring: rgba(232, 180, 45, 0.25);
+}
+[data-accent="rose"] {
+  --accent: #e0457b;
+  --accent-hover: #cd3a6e;
+  --accent-fg: #ffffff;
+  --accent-soft: #fce9f0;
+  --accent-text: #b42a5c;
+  --accent-ring: rgba(224, 69, 123, 0.2);
+}
+[data-accent="iris"] {
+  --accent: #6c5ce7;
+  --accent-hover: #5b4bd6;
+  --accent-fg: #ffffff;
+  --accent-soft: #efedfd;
+  --accent-text: #5546c9;
+  --accent-ring: rgba(108, 92, 231, 0.2);
+}
+[data-accent="sky"] {
+  --accent: #2f80ed;
+  --accent-hover: #2471d8;
+  --accent-fg: #ffffff;
+  --accent-soft: #e8f1fd;
+  --accent-text: #1f63c2;
+  --accent-ring: rgba(47, 128, 237, 0.2);
+}
+.dark[data-accent="gold"] {
+  --accent: #f2c14e;
+  --accent-hover: #f5cb66;
+  --accent-soft: rgba(242, 193, 78, 0.14);
+  --accent-text: #f5cf72;
+  --accent-ring: rgba(242, 193, 78, 0.3);
+}
+.dark[data-accent="rose"] {
+  --accent: #f06292;
+  --accent-hover: #f47aa3;
+  --accent-soft: rgba(240, 98, 146, 0.15);
+  --accent-text: #f7a1bf;
+  --accent-ring: rgba(240, 98, 146, 0.3);
+}
+.dark[data-accent="iris"] {
+  --accent: #8b7df2;
+  --accent-hover: #9b8ff5;
+  --accent-soft: rgba(139, 125, 242, 0.16);
+  --accent-text: #b3a9ff;
+  --accent-ring: rgba(139, 125, 242, 0.3);
+}
+.dark[data-accent="sky"] {
+  --accent: #5a9cf5;
+  --accent-hover: #70aaf7;
+  --accent-soft: rgba(90, 156, 245, 0.15);
+  --accent-text: #93bffa;
+  --accent-ring: rgba(90, 156, 245, 0.3);
 }
 
 @theme inline {
@@ -169,6 +233,17 @@
   }
 }
 
+/* Interface chrome uses Avenir Next; reading text (messages, descriptions, inputs) keeps the body face. */
+:root {
+  --font-ui: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-body: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-display: "Iowan Old Style", "Charter", "Source Serif Pro", Georgia, "Songti SC", serif;
+  --titlebar: 0px;
+}
+html.desktop {
+  --titlebar: 28px;
+}
+
 @layer base {
   html,
   body,
@@ -178,11 +253,16 @@
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    font-family: var(--font-ui);
     font-size: 14px;
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "cv11", "ss01";
+  }
+  input,
+  textarea,
+  select {
+    font-family: var(--font-body);
   }
   button:not(:disabled),
   [role="button"],
@@ -198,6 +278,51 @@
   ::selection {
     background: var(--accent-soft);
   }
+}
+
+.font-body,
+.md {
+  font-family: var(--font-body);
+}
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+/* Avenir Next sets small; give interface weights a touch more presence. */
+.ui-font {
+  font-family: var(--font-ui);
+}
+
+/* Desktop shell: native drag strip and traffic lights live in the top --titlebar px. */
+.titlebar-pad {
+  padding-top: var(--titlebar);
+}
+
+/* Resize handles for the sidebar and the detail pane. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  z-index: 20;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 150ms ease-out;
+}
+.resize-handle:hover::after,
+.resize-handle[data-dragging="true"]::after {
+  background: var(--accent);
+  width: 2px;
+  left: 3.5px;
 }
 
 .font-mono {

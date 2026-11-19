@@ -69,7 +69,7 @@ function BrandPanel({ step }: { step: OnboardingStep }) {
           <SumiMark size={36} />
           <span className="text-[19px] font-semibold tracking-tight text-nav-fg-strong">Sumi</span>
         </div>
-        <p className="mt-6 text-[22px] leading-snug font-semibold text-nav-fg-strong">
+        <p className="mt-6 font-display text-[27px] leading-[1.2] font-semibold text-nav-fg-strong">
           One workspace for people
           <br />
           and persistent agents.

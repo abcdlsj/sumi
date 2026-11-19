@@ -213,7 +213,7 @@ export function EmptyState({
           {icon}
         </div>
       )}
-      <div className="text-[16px] font-semibold text-fg">{title}</div>
+      <div className="font-display text-[19px] font-semibold text-fg">{title}</div>
       {body && <div className="mt-1.5 text-[14px] text-fg-3 max-w-[380px] leading-relaxed">{body}</div>}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -335,7 +335,7 @@ export function Modal({
         {title ? (
           <div className="px-6 pt-5 pb-1 flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-[17px] font-semibold text-fg leading-tight">{title}</h2>
+              <h2 className="font-display text-[20px] font-semibold text-fg leading-tight">{title}</h2>
               {description && <p className="mt-1 text-[13.5px] text-fg-3 leading-relaxed">{description}</p>}
             </div>
             <IconButton label="Close dialog" onClick={onClose} className="-mr-2 -mt-1">
@@ -490,8 +490,8 @@ export function MenuItem({
 export function SumiMark({ size = 32 }: { size?: number }) {
   return (
     <span
-      style={{ width: size, height: size, borderRadius: size * 0.3 }}
-      className="bg-gradient-to-br from-[#6d6ef0] to-[#4a4bc4] text-white inline-flex items-center justify-center shrink-0 select-none shadow-sm"
+      style={{ width: size, height: size, borderRadius: size * 0.3, background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
+      className="text-accent-fg inline-flex items-center justify-center shrink-0 select-none shadow-sm"
     >
       <svg viewBox="0 0 24 24" width={size * 0.56} height={size * 0.56} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
         <path d="M16.5 7.5c-1-1.3-2.6-2-4.5-2-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9 2.6 9 7.2 0 2-2 3.4-4.6 3.4-2 0-3.7-.8-4.7-2.2" />
@@ -503,7 +503,7 @@ export function SumiMark({ size = 32 }: { size?: number }) {
 const STATUS_META: Record<TaskStatus, { label: string; color: string }> = {
   todo: { label: "To do", color: "var(--text-3)" },
   in_progress: { label: "In progress", color: "var(--work)" },
-  in_review: { label: "In review", color: "var(--warm)" },
+  in_review: { label: "In review", color: "var(--review)" },
   done: { label: "Done", color: "var(--accent)" },
   closed: { label: "Closed", color: "var(--text-4)" },
 };
