@@ -59,10 +59,28 @@ type hostedAgent struct {
 	dirty      bool
 	lastReason string
 	lastConvID string
+
+	// Failure breaker: after failurePauseThreshold consecutive failed turns the Agent stops
+	// taking wakes until a probe timer, Restart, Reset session or a new spec. Unread triggers stay
+	// on the Server, so nothing is lost while paused.
+	failStreak int
+	paused     bool
+	probeDelay time.Duration
+	probeTimer *time.Timer
+}
+
+// resetBreakerLocked clears the failure breaker; caller holds ag.mu.
+func (ag *hostedAgent) resetBreakerLocked() {
+	ag.failStreak, ag.paused, ag.probeDelay = 0, false, 0
+	if ag.probeTimer != nil {
+		ag.probeTimer.Stop()
+		ag.probeTimer = nil
+	}
 }
 
 type Daemon struct {
 	cfg             Config
+	breaker         breakerPolicy
 	logger          *slog.Logger
 	daemonSessionID string
 	httpClient      *http.Client
@@ -79,6 +97,14 @@ type Daemon struct {
 	stopOnce     sync.Once
 }
 
+type breakerPolicy struct {
+	threshold  int
+	firstProbe time.Duration
+	maxProbe   time.Duration
+}
+
+var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Minute, maxProbe: 2 * time.Hour}
+
 func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 	if logger == nil {
 		logger = slog.Default()
@@ -92,6 +118,7 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 	}
 	return &Daemon{
 		cfg:             cfg,
+		breaker:         defaultBreakerPolicy,
 		logger:          logger,
 		daemonSessionID: uuid.NewString(),
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
@@ -191,6 +218,7 @@ func (d *Daemon) Stop() {
 		d.mu.Lock()
 		for _, ag := range d.agents {
 			ag.mu.Lock()
+			ag.resetBreakerLocked()
 			if ag.drv != nil {
 				_ = ag.drv.Close()
 			}
@@ -495,6 +523,7 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 		}
 	}
 	ag.spec, ag.drv, ag.failCode, ag.failDetail = spec, drv, code, detail
+	ag.resetBreakerLocked()
 	if old != nil {
 		// Closing may wait for an in-flight turn; never block provisioning on it.
 		go func() { _ = old.Close() }()
@@ -639,16 +668,21 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		}
 		ag.mu.Lock()
 		drv := ag.drv
+		ag.resetBreakerLocked()
 		ag.mu.Unlock()
 		if drv != nil {
 			_ = drv.ResetSession()
 			d.reportAgentState(ctrl.AgentMemberID, domain.RuntimeIdle, "", "", "")
+			d.scheduleWake(ctx, ctrl.AgentMemberID, "", "reset_session")
 		}
 	case "restart":
 		d.mu.RLock()
 		ag := d.agents[ctrl.AgentMemberID]
 		d.mu.RUnlock()
 		if ag != nil {
+			ag.mu.Lock()
+			ag.resetBreakerLocked()
+			ag.mu.Unlock()
 			d.reportAgentState(ctrl.AgentMemberID, domain.RuntimeIdle, "", "", "")
 			d.scheduleWake(ctx, ctrl.AgentMemberID, "", "restarted")
 		}
@@ -668,6 +702,10 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 		code, detail := ag.failCode, ag.failDetail
 		ag.mu.Unlock()
 		d.reportAgentState(agentID, domain.RuntimeError, "", code, detail)
+		return
+	}
+	if ag.paused {
+		ag.mu.Unlock()
 		return
 	}
 	ag.lastReason = reason
@@ -736,9 +774,16 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		if runErr != nil {
 			code, detail := failureOf(runErr, spec)
 			d.logger.Warn("Agent turn failed", "agent_id", spec.MemberID, "error_code", code, "error", detail)
+			if delay, paused := d.recordFailure(ctx, ag); paused {
+				d.logger.Warn("Agent paused after consecutive failures", "agent_id", spec.MemberID, "error_code", code, "probe_in", delay.String())
+				detail = domain.BoundErrorDetail(fmt.Sprintf("paused after %d failed turns, retry in %s: %s", d.breaker.threshold, delay.Round(time.Second), detail))
+			}
 			d.reportAgentState(spec.MemberID, domain.RuntimeError, focus.ConversationID, code, detail)
 			return
 		}
+		ag.mu.Lock()
+		ag.resetBreakerLocked()
+		ag.mu.Unlock()
 		d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 
 		// Check if new wakes arrived while busy.
@@ -750,6 +795,41 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		ag.dirty = false
 		ag.mu.Unlock()
 	}
+}
+
+// recordFailure counts a failed turn and, at the threshold, pauses the Agent and arms one probe
+// wake. Each failure while at the threshold doubles the probe delay up to maxProbe.
+func (d *Daemon) recordFailure(ctx context.Context, ag *hostedAgent) (time.Duration, bool) {
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	ag.failStreak++
+	if ag.failStreak < d.breaker.threshold {
+		return 0, false
+	}
+	switch {
+	case ag.probeDelay == 0:
+		ag.probeDelay = d.breaker.firstProbe
+	case ag.probeDelay < d.breaker.maxProbe:
+		ag.probeDelay = min(ag.probeDelay*2, d.breaker.maxProbe)
+	}
+	ag.paused = true
+	if ag.probeTimer != nil {
+		ag.probeTimer.Stop()
+	}
+	agentID, delay := ag.spec.MemberID, ag.probeDelay
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		ag.mu.Lock()
+		if ag.probeTimer != timer {
+			ag.mu.Unlock()
+			return
+		}
+		ag.paused, ag.probeTimer = false, nil
+		ag.mu.Unlock()
+		d.scheduleWake(ctx, agentID, "", "probe")
+	})
+	ag.probeTimer = timer
+	return delay, true
 }
 
 func (d *Daemon) fetchAgentInbox(ctx context.Context, agentID string) ([]domain.InboxItem, error) {

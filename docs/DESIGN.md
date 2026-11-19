@@ -156,6 +156,7 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - 当任意写事务为某个 Agent 产生高优先触发（DM / `@mention` / `following` 新消息 / Task `assign`）时，事务提交后 Server 通过 WebSocket 向其所在 Computer 发送轻量 `wake(agent_id, conversation_id, reason)` 通知。
   - Computer 若该 Agent 当前空闲，立即启动一轮 Turn；若正忙，仅置本地 `dirty = true`，当前 Turn 结束后自动查询 `inbox` 继续处理剩余未读触发。
   - Computer 重连上线时，主动拉取名下所有在线 Agent 的未读触发摘要，绝不漏消息。
+  - **失败熔断**：同一 Agent 连续 3 个 Turn 失败后暂停，忽略后续唤醒，并上报 `error`（`error_code` 为最后一次失败原因，`error_detail` 注明已暂停与下次重试时间）。暂停 10 分钟后放行一次探测唤醒；探测失败则再次暂停，间隔翻倍，上限 2 小时。任一 Turn 成功、`Restart`、`Reset session` 或重新下发不同的 spec 都会清零熔断。`Restart` 与 `Reset session` 之后立即唤醒一次。未读触发始终在服务端，暂停期间不丢消息；熔断状态只在 Daemon 内存中，Daemon 重启后重新计数。
 - **Runtime Session**：
   - 每个 Agent 仅维护 1 个活跃 Runtime Session（ACP `sessionId` 或 Builtin 本地 JSONL 会话文件）。
   - ACP `sessionId` 持久化在 Agent Home 的 `acp-session.json`（0600，连同启动命令 argv 作为指纹）。Daemon 或子进程重启后，若 Agent 在 `initialize` 中声明 `loadSession` 且命令一致，则以 `session/load` 恢复；否则或恢复失败时新建并覆盖记录。恢复出的 session 导致子进程在 prompt 中退出时删除记录，下次新建。
