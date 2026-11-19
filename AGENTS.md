@@ -22,7 +22,7 @@
 ## 实现
 
 - 按“检查现状、实现、定向测试、修复”推进；可验证的不确定性继续处理，缺少权限或需要用户决定时暂停说明。
-- 领域规则、流程编排和外部适配各归一个模块；依赖从外部适配器单向指向 application，再指向 domain 或 core。
+- 领域规则、流程编排和外部适配各归一个模块；依赖从外部适配器单向指向 application，再指向 domain。
 - 不允许创建低质量单测（纯字符串检测、无意义一次性单测等）。
 - 代码默认私有；只维护当前产品模型和当前 schema。
 - 旧实现、旧入口、旧 schema 和无业务边界价值的抽象必须删除。
@@ -30,7 +30,8 @@
 ## 验证
 
 - 核心流程、并发和安全边界必须有测试；日常改动运行最小相关测试。
-- Rust 提交前运行 `cargo fmt --all -- --check` 和 `cargo clippy --all-targets --all-features -- -D warnings`。
+- Go 提交前运行 `gofmt -l .`（输出为空）、`go vet ./...` 和 `go test ./...`。
+- Web 提交前运行 `pnpm --dir web typecheck` 与 `pnpm --dir web test`。
 
 ## Handoff
 

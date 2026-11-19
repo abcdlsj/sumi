@@ -1,5 +1,0 @@
-{
-  "setup": ["./.superset/setup.sh"],
-  "run": ["mise run dev"],
-  "cwd": "."
-}
