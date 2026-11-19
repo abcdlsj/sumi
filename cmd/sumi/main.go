@@ -20,7 +20,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sumi <server|computer|inbox|read|send|dm|members|follow|unfollow|mute|task|agent|channel>")
+		fmt.Fprintln(os.Stderr, "usage: sumi <server|computer|pair|inbox|read|send|dm|members|follow|unfollow|mute|task|agent|channel>")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -35,7 +35,7 @@ func main() {
 
 func runServer(args []string) {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "HTTP listen address")
+	addr := fs.String("addr", "127.0.0.1:8087", "HTTP listen address")
 	dbPath := fs.String("db", "sumi.db", "SQLite database file path")
 	webOrigin := fs.String("web-origin", "http://localhost:5173", "Allowed Web UI origin for CORS")
 	webDir := fs.String("web-dir", "", "Optional static Web UI dist directory")
@@ -83,7 +83,7 @@ func runServer(args []string) {
 
 func runComputer(args []string) {
 	fs := flag.NewFlagSet("computer", flag.ExitOnError)
-	serverURL := fs.String("server", "http://127.0.0.1:8080", "Sumi server URL")
+	serverURL := fs.String("server", "http://127.0.0.1:8087", "Sumi server URL")
 	token := fs.String("token", os.Getenv("SUMI_COMPUTER_TOKEN"), "Computer bearer token")
 	dataDir := fs.String("data-dir", "", "Daemon local state directory")
 	_ = fs.Parse(args)

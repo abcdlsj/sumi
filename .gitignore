@@ -16,3 +16,4 @@
 .env.*
 !.env.example
 .DS_Store
+/desktop/assets/dist/

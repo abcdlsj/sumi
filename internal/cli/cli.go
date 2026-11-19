@@ -7,12 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/abcdlsj/sumi/internal/pair"
 )
 
 type Client struct {
@@ -42,20 +46,26 @@ func NewFromEnv() (*Client, error) {
 
 func (c *Client) Do(method, path string, body any) (int, []byte, error) {
 	var r io.Reader
+	contentType := ""
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}
 		r = bytes.NewReader(raw)
+		contentType = "application/json"
 	}
+	return c.do(method, path, r, contentType)
+}
+
+func (c *Client) do(method, path string, r io.Reader, contentType string) (int, []byte, error) {
 	req, err := http.NewRequest(method, "http://unix"+path, r)
 	if err != nil {
 		return 0, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.driverToken)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -64,6 +74,82 @@ func (c *Client) Do(method, path string, body any) (int, []byte, error) {
 	defer resp.Body.Close()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	return resp.StatusCode, out, err
+}
+
+// Upload streams a local file as a multipart attachment.
+func (c *Client) Upload(filePath string) (int, []byte, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer f.Close()
+
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		defer pw.Close()
+		part, err := mw.CreateFormFile("file", filepath.Base(filePath))
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, f); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = mw.Close()
+	}()
+	return c.do(http.MethodPost, "/attachments", pr, mw.FormDataContentType())
+}
+
+// Download saves an attachment into the agent workspace and returns its path.
+func (c *Client) Download(attachmentID string) (string, error) {
+	status, raw, err := c.do(http.MethodGet, "/attachments/"+attachmentID, nil, "")
+	if err != nil {
+		return "", err
+	}
+	if status >= 400 {
+		return "", fmt.Errorf("download failed with http %d", status)
+	}
+	workDir := os.Getenv("SUMI_ATTACHMENT_DIR")
+	if workDir == "" {
+		workDir = "attachments"
+	}
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(workDir, attachmentID)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// uploadAll uploads each path and returns attachment IDs in order.
+func (c *Client) uploadAll(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(paths))
+	for _, p := range paths {
+		status, raw, err := c.Upload(p)
+		if err != nil {
+			return nil, err
+		}
+		if status >= 400 {
+			return nil, fmt.Errorf("upload %s failed with http %d", filepath.Base(p), status)
+		}
+		var parsed struct {
+			Attachment struct {
+				ID string `json:"id"`
+			} `json:"attachment"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Attachment.ID == "" {
+			return nil, fmt.Errorf("upload %s returned no attachment id", filepath.Base(p))
+		}
+		ids = append(ids, parsed.Attachment.ID)
+	}
+	return ids, nil
 }
 
 // Run executes an Agent CLI command via cobra and writes a single JSON envelope to stdout.
@@ -141,20 +227,36 @@ func Run(args []string, stdout io.Writer) int {
 	readCmd.Flags().IntVar(&readLimit, "limit", 50, "max messages")
 	root.AddCommand(readCmd)
 
-	var sendBody, sendReplyTo string
+	var sendBody string
+	var sendReplyTo string
+	var sendAttach []string
 	sendCmd := &cobra.Command{
 		Use:   "send <conversation_id>",
 		Args:  cobra.ExactArgs(1),
 		Short: "Send a message (protected by Freshness Guard)",
 		RunE: func(_ *cobra.Command, a []string) error {
+			c, err := NewFromEnv()
+			if err != nil {
+				exitCode = 1
+				writeEnvelope(stdout, false, nil, err.Error())
+				return err
+			}
+			ids, err := c.uploadAll(sendAttach)
+			if err != nil {
+				exitCode = 1
+				writeEnvelope(stdout, false, nil, err.Error())
+				return err
+			}
 			return call(http.MethodPost, "/conversations/"+a[0]+"/messages", map[string]any{
 				"body_markdown":       sendBody,
 				"reply_to_message_id": sendReplyTo,
+				"attachment_ids":      ids,
 			})
 		},
 	}
 	sendCmd.Flags().StringVar(&sendBody, "body", "", "message markdown")
 	sendCmd.Flags().StringVar(&sendReplyTo, "reply-to", "", "root message id for thread reply")
+	sendCmd.Flags().StringArrayVar(&sendAttach, "attach", nil, "local file to upload and attach (repeatable)")
 	_ = sendCmd.MarkFlagRequired("body")
 	root.AddCommand(sendCmd)
 
@@ -184,6 +286,28 @@ func Run(args []string, stdout io.Writer) int {
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
 			return call(http.MethodPut, "/conversations/"+a[0]+"/notify", map[string]any{"level": "mute"})
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "attachment <attachment_id>",
+		Args:  cobra.ExactArgs(1),
+		Short: "Download an attachment to the current workspace",
+		RunE: func(_ *cobra.Command, a []string) error {
+			c, err := NewFromEnv()
+			if err != nil {
+				exitCode = 1
+				writeEnvelope(stdout, false, nil, err.Error())
+				return err
+			}
+			path, err := c.Download(a[0])
+			if err != nil {
+				exitCode = 1
+				writeEnvelope(stdout, false, nil, err.Error())
+				return err
+			}
+			writeEnvelope(stdout, true, map[string]string{"path": path}, "")
+			return nil
 		},
 	})
 
@@ -320,6 +444,50 @@ func Run(args []string, stdout io.Writer) int {
 	chCreateCmd.Flags().StringVar(&chSrcConv, "source-conversation", "", "optional conversation id")
 	chCmd.AddCommand(chCreateCmd)
 	root.AddCommand(chCmd)
+
+	// Local bootstrap: sign in, ensure Space, pair this machine, write desktop config.
+	var pairOpts pair.Options
+	pairCmd := &cobra.Command{
+		Use:   "pair",
+		Short: "Pair this computer and write the desktop config",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if pairOpts.ConfigPath == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					exitCode = 1
+					writeEnvelope(stdout, false, nil, err.Error())
+					return err
+				}
+				pairOpts.ConfigPath = filepath.Join(home, ".sumi", "desktop.json")
+				pairOpts.DataDir = filepath.Join(home, ".sumi", "v2")
+			}
+			norm := pairOpts.ServerURL
+			if norm == "" {
+				norm = "http://127.0.0.1:8087"
+			}
+			pairOpts.ServerURL = norm
+			res, err := pair.Run(pairOpts)
+			if err != nil {
+				exitCode = 1
+				writeEnvelope(stdout, false, nil, err.Error())
+				return err
+			}
+			writeEnvelope(stdout, true, res, "")
+			fmt.Fprintln(cmd.ErrOrStderr(), "computer paired; start the desktop app with `make app`")
+			return nil
+		},
+	}
+	pairCmd.Flags().StringVar(&pairOpts.ServerURL, "server", "http://127.0.0.1:8087", "Sumi server URL")
+	pairCmd.Flags().StringVar(&pairOpts.Email, "email", "", "account email")
+	pairCmd.Flags().StringVar(&pairOpts.Password, "password", "", "account password")
+	pairCmd.Flags().StringVar(&pairOpts.DisplayName, "display-name", "", "display name for a new account")
+	pairCmd.Flags().StringVar(&pairOpts.SpaceSlug, "space", "studio", "space slug")
+	pairCmd.Flags().StringVar(&pairOpts.SpaceName, "space-name", "", "space name when creating it")
+	pairCmd.Flags().StringVar(&pairOpts.ConfigPath, "config", "", "desktop config path (default ~/.sumi/desktop.json)")
+	pairCmd.Flags().StringVar(&pairOpts.DataDir, "data-dir", "", "desktop data directory (default ~/.sumi)")
+	_ = pairCmd.MarkFlagRequired("email")
+	_ = pairCmd.MarkFlagRequired("password")
+	root.AddCommand(pairCmd)
 
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil && exitCode == 0 {
