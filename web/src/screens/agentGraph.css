@@ -33,18 +33,23 @@
 
 .agent-graph-zoom button {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
   place-items: center;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: var(--fill-neutral);
   color: var(--ink);
   cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
 }
 
 .agent-graph-zoom button:hover {
-  background: var(--bg-subtle);
+  background: var(--fill-neutral-hover);
+}
+
+.agent-graph-zoom button:active {
+  transform: scale(var(--press-scale));
 }
 
 .agent-graph-zoom svg {
@@ -64,6 +69,7 @@
   min-height: 420px;
   overflow: hidden;
   border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--bg-sidebar);
   touch-action: none;
 }
@@ -96,7 +102,7 @@
 }
 
 .graph-edge:focus-visible {
-  outline: 2px solid var(--series-1);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -316,7 +322,7 @@
   white-space: pre-wrap;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 1099px) {
   .agent-graph-layout {
     grid-template-columns: 1fr;
   }

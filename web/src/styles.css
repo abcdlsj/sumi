@@ -1,6 +1,6 @@
 @import "./styles/tokens.css";
 
-/* Sumi "Clarity". Layout and rules live in docs/UI_DESIGN.md.
+/* Sumi "Clarity". Layout and rules live in docs/DESIGN.md.
    Neutral surfaces, hairline separators, a raised white card for selection,
    and colour reserved for two signals: waiting for you, Agent working. */
 
@@ -2622,7 +2622,7 @@ a.task-source-link:hover {
   font-size: var(--text-meta);
 }
 
-@media (max-width: 700px) {
+@media (max-width: 699px) {
   .task-changes-actions {
     flex-direction: column;
   }

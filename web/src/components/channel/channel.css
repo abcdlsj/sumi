@@ -1411,11 +1411,11 @@ details.system-event .system-event-heading {
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
   box-shadow: var(--shadow-raised);
-  transition: box-shadow .15s var(--ease-standard);
+  transition: box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .composer--dragging {
-  box-shadow: 0 0 0 1.5px var(--live), 0 10px 28px rgb(28 27 25 / 7%);
+  box-shadow: 0 0 0 1.5px var(--live), var(--shadow-raised);
 }
 
 .composer--dragging::after {
@@ -1484,7 +1484,7 @@ details.system-event .system-event-heading {
   color: var(--muted);
   font-size: 12px;
   opacity: 0;
-  transition: opacity .15s var(--ease-standard);
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .composer:focus-within .composer-shortcut {
@@ -1872,7 +1872,7 @@ details.system-event .system-event-heading {
   }
 }
 
-@media (max-width: 899px) {
+@media (max-width: 1099px) {
   .channel-workspace--thread-open {
     grid-template-columns: minmax(0, 1fr);
   }

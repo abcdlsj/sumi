@@ -44,6 +44,13 @@ export function AgentDetailPage() {
   );
 }
 
+const PERMISSION_LABELS: Record<string, string> = {
+  "channel.create": "Create Channels",
+  "channel.invite": "Invite to Channels",
+  "channel.remove": "Remove from Channels",
+  "agent.create": "Create Agents",
+};
+
 function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { agentId: string; spaceId: string; spaceSlug: string; channels: Channel[]; canManage: boolean }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<AgentTab>("activity");
@@ -94,7 +101,13 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
   const memory = useMutation({ mutationFn: (path: string) => readAgentMemory(agentId, path) });
   const permission = useMutation({
     mutationFn: ({ action, enabled }: { action: string; enabled: boolean }) => enabled ? grantMemberPermission(agentId, action) : revokeMemberPermission(agentId, action),
-    meta: { success: (_data, input) => `${(input as { action: string }).action} ${(input as { enabled: boolean }).enabled ? "allowed" : "removed"}.` },
+    meta: {
+      success: (_data, input) => {
+        const { action, enabled } = input as { action: string; enabled: boolean };
+        const label = PERMISSION_LABELS[action] ?? action;
+        return `${label} ${enabled ? "allowed" : "removed"}.`;
+      },
+    },
     onSuccess: (member) => queryClient.setQueryData(["members", spaceId], (current: Awaited<ReturnType<typeof listMembers>> | undefined) => current?.map((item) => item.id === member.id ? member : item)),
   });
   function save(event: FormEvent<HTMLFormElement>) {
@@ -184,13 +197,12 @@ function AgentWorkspace({ agentId, spaceId, spaceSlug, channels, canManage }: { 
                   <div><span>Task</span><p>{runtime.data.current_task ? <Link to="/s/$spaceSlug/tasks/$taskId" params={{ spaceSlug, taskId: runtime.data.current_task.id }}>{runtime.data.current_task.title}</Link> : "None"}</p></div>
                   <div><span>Conversation</span><p>{runtime.data.focus ? runtime.data.focus.channel_slug ? <Link to="/s/$spaceSlug/channels/$channelSlug" params={{ spaceSlug, channelSlug: runtime.data.focus.channel_slug }} hash={`message-${runtime.data.focus.root_message_id}`}>#{runtime.data.focus.channel_slug}</Link> : <span>Direct message</span> : "None"}</p></div>
                   <div><span>Doing</span><p>{runtime.data.current_run ? runtime.data.current_run.status === "dispatched" ? "Starting" : "Working" : "Nothing right now"}</p></div>
-                  <div><span>Computer</span><p><StateSignal tone={value.computer_reachable ? "warm" : "unavailable"} label={value.computer_id ? value.computer_reachable ? "Online" : "Offline" : "Unassigned"} /></p></div>
                 </div>
               ) : null}
               {runtime.data?.another_item_waiting ? <p className="inline-notice" role="status">More work is waiting after this.</p> : null}
             </DetailSection>
             <DetailSection className="agent-identity" title="Identity"><dl className="detail-grid"><Field label="Access Level">{capitalize(value.access_level)}</Field><Field label="Created" tabular>{formatLongDate(value.created_at)}</Field></dl></DetailSection>
-            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Computer">{value.computer_id ? <Link to="/s/$spaceSlug/computers" params={{ spaceSlug }} hash={`computer-${value.computer_id}`}>{computers.data?.find((computer) => computer.id === value.computer_id)?.name ?? "Assigned Computer"}</Link> : undefined}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
+            <DetailSection className="agent-runtime" title="Setup"><dl className="detail-grid"><Field label="Setup">{setupLabel(value.provision_status)}</Field><Field label="Last problem">{value.last_error_code ? runErrorLabel(value.last_error_code) : "None"}</Field></dl></DetailSection>
             {canManage ? <DetailSection className="agent-direct-messages" title="Conversations with other Agents">
               {agentDirectMessages.isPending ? <ListSkeleton label="Loading Agent DMs" rows={2} /> : null}
               {agentDirectMessages.error ? <p className="inline-notice" role="alert">These conversations are unavailable right now.</p> : null}

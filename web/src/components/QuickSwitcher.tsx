@@ -25,7 +25,11 @@ export function QuickSwitcher({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const normalized = query.trim().toLocaleLowerCase();
-  const matches = items.filter((item) => !normalized || item.label.toLocaleLowerCase().includes(normalized));
+  const matches = items.filter((item) =>
+    !normalized ||
+    item.label.toLocaleLowerCase().includes(normalized) ||
+    Boolean(item.hint?.toLocaleLowerCase().includes(normalized)),
+  );
   const active = Math.min(activeIndex, Math.max(matches.length - 1, 0));
 
   function handleKey(event: KeyboardEvent<HTMLInputElement>) {

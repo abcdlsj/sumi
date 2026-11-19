@@ -6,7 +6,9 @@ import { useState } from "react";
 import { v7 as uuidv7 } from "uuid";
 
 import {closeTask, completeTask, createThreadReply, getTask, listAgents, listTasks, readThread, requestTaskChanges, startTask} from "../api/client";
-import type {Message, Member, Run, Task, TaskStatus, ThreadRead, ThreadReference} from "../api/types";
+import type {Agent, Message, Member, Run, Task, TaskStatus, ThreadRead, ThreadReference} from "../api/types";
+import { agentPresence } from "../agentActivity";
+import { runErrorLabel } from "../agentErrors";
 import { DialogFrame } from "../components/DialogFrame";
 import { EmptyState } from "../components/EmptyState";
 import { SpacePage } from "../components/SpaceShell";
@@ -73,6 +75,8 @@ export function TasksPage() {
 function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; spaceSlug: string; currentMemberId: string }) {
   const [filter, setFilter] = useState<TaskFilter>("all_open");
   const tasks = useQuery({ queryKey: ["tasks", spaceId], queryFn: () => listTasks(spaceId) });
+  const agents = useQuery({ queryKey: ["agents", spaceId], queryFn: () => listAgents(spaceId), retry: false });
+  const agentById = new Map((agents.data ?? []).map((agent) => [agent.member_id, agent] as const));
   const matches = (task: Task, id: TaskFilter) => id === "all_open"
     ? !["done", "closed"].includes(task.status)
     : id === "created_by_me"
@@ -124,7 +128,14 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
                 <span>{group.tasks.length}</span>
               </header>
               <div className="task-list" role="list">
-                {group.tasks.map((task) => <TaskRow key={task.id} task={task} spaceSlug={spaceSlug} />)}
+                {group.tasks.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    spaceSlug={spaceSlug}
+                    assigneeAgent={task.assignee_agent_member_id ? agentById.get(task.assignee_agent_member_id) : undefined}
+                  />
+                ))}
               </div>
             </section>
           ))}
@@ -134,7 +145,7 @@ function TaskList({ spaceId, spaceSlug, currentMemberId }: { spaceId: string; sp
   );
 }
 
-function TaskRow({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
+function TaskRow({ task, spaceSlug, assigneeAgent }: { task: Task; spaceSlug: string; assigneeAgent?: Agent }) {
   return (
     <article className="task-row" role="listitem">
       <div className="task-row-status">
@@ -145,7 +156,7 @@ function TaskRow({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
         <strong>{task.title}</strong>
       </Link>
       <dl className="task-row-facts">
-        <div><dt>Assignee</dt><dd><TaskAssignee task={task} /></dd></div>
+        <div><dt>Assignee</dt><dd><TaskAssignee task={task} agent={assigneeAgent} /></dd></div>
         <div><dt>Source</dt><dd><ThreadLink thread={task.source_thread} spaceSlug={spaceSlug} label="Source" /></dd></div>
         <div><dt>Updated</dt><dd><time dateTime={task.updated_at}>{formatTaskTime(task.updated_at)}</time></dd></div>
       </dl>
@@ -153,12 +164,27 @@ function TaskRow({ task, spaceSlug }: { task: Task; spaceSlug: string }) {
   );
 }
 
-function TaskAssignee({ task }: { task: Task }) {
+function TaskAssignee({ task, agent }: { task: Task; agent?: Agent }) {
   if (!task.assignee_name || !task.assignee_agent_member_id) return <span className="task-assignee-name task-assignee-name--none">Unassigned</span>;
+  const presence = agent ? agentPresence(agent) : undefined;
+  const statusSignal = agent?.last_error_code
+    ? { tone: "error", label: `Needs attention: ${runErrorLabel(agent.last_error_code)}` }
+    : presence === "working" || presence === "dispatched"
+      ? { tone: "working", label: `${task.assignee_name} is working` }
+      : presence === "offline"
+        ? { tone: "offline", label: `${task.assignee_name} is offline` }
+        : undefined;
   return (
     <span className="task-assignee-name">
       <PixelIdentity name={task.assignee_name} kind="agent" seed={task.assignee_agent_member_id} />
       {task.assignee_name}
+      {statusSignal ? (
+        <span
+          className={`task-assignee-dot task-assignee-dot--${statusSignal.tone}`}
+          aria-label={statusSignal.label}
+          title={statusSignal.label}
+        />
+      ) : null}
     </span>
   );
 }
@@ -355,6 +381,7 @@ function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest
     return <p className="task-latest task-latest--empty">No reply from {name} yet.</p>;
   }
   const body = latest.content.type === "text" ? plainText(latest.content.body_markdown) : "";
+  const isLong = body.length > 240 || body.split("\n").length > 4;
   return (
     <div className="task-latest">
       <header>
@@ -362,7 +389,7 @@ function LatestFromAssignee({ task, latest, alreadyShown }: { task: Task; latest
         <time dateTime={latest.created_at}>{formatRecent(latest.created_at)}</time>
       </header>
       <p className={expanded ? "task-latest-body" : "task-latest-body task-latest-body--clamped"}>{body || "The reply is not plain text."}</p>
-      {body ? (
+      {isLong ? (
         <button className="task-latest-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
           {expanded ? "Show less" : "Show more"}
         </button>

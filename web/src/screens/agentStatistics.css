@@ -29,7 +29,7 @@
 
 .agent-statistics-partial {
   margin: 0;
-  color: var(--you);
+  color: var(--you-ink);
   font-size: var(--text-small);
 }
 
@@ -55,18 +55,22 @@
   width: 100%;
   gap: 10px;
   align-items: center;
-  border: 1px solid transparent;
+  border: 0;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .agent-statistics-list button:hover,
-.agent-statistics-list button:focus-visible,
+.agent-statistics-list button:focus-visible {
+  background: var(--ink-wash);
+}
+
 .agent-statistics-list .agent-statistics-item--active {
-  border-color: var(--line-strong);
-  background: var(--bg-subtle);
+  background: var(--fill-neutral-hover);
 }
 
 .agent-statistics-list button span {
@@ -95,7 +99,7 @@
   min-width: 0;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 1099px) {
   .agent-statistics-layout {
     grid-template-columns: 1fr;
   }

@@ -12,6 +12,7 @@ import { LlmUsagePanel } from "../components/LlmUsagePanel";
 import { PixelIdentity } from "../components/PixelIdentity";
 import { SpacePage } from "../components/SpaceShell";
 import { DialogFrame } from "../components/DialogFrame";
+import { EmptyState } from "../components/EmptyState";
 import { DetailSkeleton } from "../components/Skeleton";
 import { formatDateTime } from "../time";
 
@@ -86,7 +87,12 @@ function ComputersWorkspace({
   const selectedFromHash = activeHash.startsWith("computer-")
     ? activeHash.slice("computer-".length)
     : undefined;
-  const selected = selectedFromHash ? computers.data?.find((computer) => computer.id === selectedFromHash) : undefined;
+  const fallbackComputer = !pairFormOpen ? (onlineComputers[0] ?? computers.data?.[0]) : undefined;
+  const selected = selectedFromHash
+    ? computers.data?.find((computer) => computer.id === selectedFromHash)
+    : !canManage
+      ? fallbackComputer
+      : undefined;
   const selectedAgents = selected ? agents.data?.filter((agent) => agent.computer_id === selected.id) ?? [] : [];
 
   function openAgentDialog(computerId?: string) {
@@ -131,10 +137,13 @@ function ComputersWorkspace({
         </div>
       ) : null}
       {computers.data?.length === 0 ? (
-        canManage ? <ComputerOnboarding active={pairFormOpen} /> : <div className="computer-empty"><h2>No Computers paired</h2><p>A Human Owner or Admin must pair a machine before this Space can host Agents.</p></div>
+        canManage ? <ComputerOnboarding active={pairFormOpen} /> : (
+          <EmptyState icon={Monitor} title="No Computers paired">
+            A Human Owner or Admin must pair a machine before this Space can host Agents.
+          </EmptyState>
+        )
       ) : null}
       {canManage && (!selectedFromHash || pairFormOpen) && computers.data?.length ? <ComputerOnboarding active={pairFormOpen} /> : null}
-      {!canManage && !selectedFromHash && computers.data?.length ? <div className="computer-page-state"><p>Select a Computer from the navigation.</p></div> : null}
       {selected ? (
         <div className="computer-split">
           <ComputerDetail
