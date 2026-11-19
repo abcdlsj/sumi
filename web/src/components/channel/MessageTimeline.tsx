@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { Check, Copy, Hash, Link2, ListTodo, LoaderCircle, MessageSquare, MessageSquareReply, Paperclip, Settings } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -16,11 +16,94 @@ import { TaskStatusIcon } from "../taskStatusIcon";
 import { useSelfMemberId } from "./selfMember";
 import { ToBottomButton } from "./ToBottomButton";
 import { TimelineSkeleton } from "../Skeleton";
-import { provisionalMessage, type OutgoingMessage } from "./outbox";
+import { filterConfirmedOutgoing, provisionalMessage, type OutgoingMessage } from "./outbox";
 import { useUnreadMarker } from "./unreadMarker";
 import { messagesQueryOptions, updateRootMessage, type MessagePages } from "./messageCache";
 
 type MentionTarget = Pick<Member, "id" | "kind" | "display_name"> & { self?: boolean };
+
+/** Uses SPA Link when mounted inside TanStack Router, falling back to an anchor in isolated unit tests. */
+function SafeAgentLink({
+  spaceSlug,
+  agentId,
+  className,
+  role,
+  ariaLabel,
+  title,
+  onClick,
+  children,
+}: {
+  spaceSlug: string;
+  agentId: string;
+  className?: string;
+  role?: string;
+  ariaLabel?: string;
+  title?: string;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  const router = useRouter({ warn: false });
+  if (router) {
+    return (
+      <Link
+        role={role}
+        className={className}
+        to="/s/$spaceSlug/agents/$agentId"
+        params={{ spaceSlug, agentId }}
+        aria-label={ariaLabel}
+        title={title}
+        onClick={onClick}
+      >
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a
+      role={role}
+      className={className}
+      href={`/s/${spaceSlug}/agents/${agentId}`}
+      aria-label={ariaLabel}
+      title={title}
+      onClick={onClick}
+    >
+      {children}
+    </a>
+  );
+}
+
+function SafeTaskLink({
+  spaceSlug,
+  taskId,
+  className,
+  title,
+  children,
+}: {
+  spaceSlug: string;
+  taskId: string;
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  const router = useRouter({ warn: false });
+  if (router) {
+    return (
+      <Link
+        className={className}
+        to="/s/$spaceSlug/tasks/$taskId"
+        params={{ spaceSlug, taskId }}
+        title={title}
+      >
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a className={className} href={`/s/${spaceSlug}/tasks/${taskId}`} title={title}>
+      {children}
+    </a>
+  );
+}
 
 export function MessageTimeline({
   timelineRef,
@@ -114,9 +197,11 @@ export function MessageTimeline({
   const selfMemberId = useSelfMemberId();
   const firstUnreadId = useUnreadMarker(channelId, page?.messages, selfMemberId);
   // Outgoing messages join the same list, so grouping already matches the
-  // Server's copy and nothing shifts when it replaces them.
-  const outgoingByKey = new Map(outgoing.map((item) => [item.key, item] as const));
-  const outgoingMessages = selfAuthor ? outgoing.map((item) => provisionalMessage(item, selfAuthor, channelId)) : [];
+  // Server's copy and nothing shifts when it replaces them. Filter out items
+  // whose confirmed twin has already arrived over SSE.
+  const visibleOutgoing = filterConfirmedOutgoing(outgoing, page?.messages ?? [], selfMemberId);
+  const outgoingByKey = new Map(visibleOutgoing.map((item) => [item.key, item] as const));
+  const outgoingMessages = selfAuthor ? visibleOutgoing.map((item) => provisionalMessage(item, selfAuthor, channelId)) : [];
   const timelineGroups = groupTimelineMessages([...(page?.messages ?? []), ...outgoingMessages]);
   const workers = workingAgents(page?.messages ?? [], members, activityByMemberId, direct);
   const stopped = stoppedAgents(page?.messages ?? [], members, activityByMemberId, errorByMemberId, direct);
@@ -434,9 +519,9 @@ function AgentAvatarMenu({ name, memberId, spaceSlug, onOpenAgentDm, children }:
               <MessageSquare aria-hidden="true" /> Message
             </button>
           ) : null}
-          <a role="menuitem" className="account-menu-item" href={`/s/${spaceSlug}/agents/${memberId}`}>
+          <SafeAgentLink role="menuitem" className="account-menu-item" spaceSlug={spaceSlug} agentId={memberId} onClick={() => setPosition(undefined)}>
             <Settings aria-hidden="true" /> Agent settings
-          </a>
+          </SafeAgentLink>
         </span>
       ) : null}
     </span>
@@ -725,8 +810,15 @@ export function ExpandableMessageText({ messageId, body, mentionedMembers, taskR
 
   useLayoutEffect(() => {
     const node = paragraph.current;
-    if (!node || expanded) return;
-    const measure = () => setOverflowing(node.scrollHeight > node.clientHeight + 1);
+    if (!node) return;
+    const measure = () => {
+      if (expanded) {
+        const lineHeight = Number.parseFloat(window.getComputedStyle(node).lineHeight) || 22;
+        setOverflowing(node.scrollHeight > lineHeight * 8 + 4);
+      } else {
+        setOverflowing(node.scrollHeight > node.clientHeight + 1);
+      }
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
@@ -739,7 +831,7 @@ export function ExpandableMessageText({ messageId, body, mentionedMembers, taskR
       <div ref={paragraph} id={bodyId} className={`message-body${expanded ? " message-body--expanded" : " message-body--collapsed"}`}>
         {renderMessageBody(body, mentionedMembers, taskRefs, spaceSlug)}
       </div>
-      {overflowing || expanded ? (
+      {overflowing || !expanded ? (
         <button className="message-expand" type="button" aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded((value) => !value)}>
           {expanded ? "Show less" : "Show more"}
         </button>
@@ -754,20 +846,20 @@ function AttentionFailureNotice({ message, members }: { message: Message; member
     const failure = message.attention_failures[0];
     const agentName = members.find((member) => member.id === failure.agent_member_id)?.display_name ?? "Agent";
     return (
-      <div className="system-event" role="alert">
+      <div className="system-event" role="alert" title={failure.error_code}>
         <div className="system-event-heading">
-          <span>Could not start <strong>{agentName}</strong>. {failure.retrying ? "Sumi will retry automatically." : "Retry is required."} <code>{failure.error_code}</code></span>
+          <span>Could not start <strong>{agentName}</strong> ({runErrorLabel(failure.error_code)}). {failure.retrying ? "Sumi will retry automatically." : "Retry is required."}</span>
         </div>
       </div>
     );
   }
   return (
     <details className="system-event" role="alert">
-      <summary className="system-event-heading"><span>{message.attention_failures.length} system errors · Show details</span></summary>
+      <summary className="system-event-heading"><span>{message.attention_failures.length} Agents could not start · Show details</span></summary>
       <div className="system-event-details">
         {message.attention_failures.map((failure) => (
-          <p key={failure.agent_member_id}>
-            Could not start <strong>{members.find((member) => member.id === failure.agent_member_id)?.display_name ?? "Agent"}</strong>. {failure.retrying ? "Sumi will retry automatically." : "Retry is required."} <code>{failure.error_code}</code>
+          <p key={failure.agent_member_id} title={failure.error_code}>
+            Could not start <strong>{members.find((member) => member.id === failure.agent_member_id)?.display_name ?? "Agent"}</strong> ({runErrorLabel(failure.error_code)}). {failure.retrying ? "Sumi will retry automatically." : "Retry is required."}
           </p>
         ))}
       </div>
@@ -783,7 +875,7 @@ function highlightMentions(
   keyPrefix: string,
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const mentionPattern = /(^|[^\p{L}\p{N}_@])(@[\p{L}_]+)/giu;
+  const mentionPattern = /(^|[^\p{L}\p{N}_@-])(@[\p{L}\p{N}_-]+)/giu;
   let cursor = 0;
 
   for (const match of body.matchAll(mentionPattern)) {
@@ -796,15 +888,16 @@ function highlightMentions(
     const member = mentionedMembers.get(token.slice(1).toLowerCase());
     nodes.push(
       member?.kind === "agent" ? (
-        <a
+        <SafeAgentLink
           key={`${keyPrefix}-mention-${tokenStart}`}
           className="message-mention message-mention--agent"
-          href={`/s/${spaceSlug}/agents/${member.id}`}
-          aria-label={`Open ${member.display_name} Agent management`}
+          spaceSlug={spaceSlug}
+          agentId={member.id}
+          ariaLabel={`Open ${member.display_name} Agent management`}
           title={`Open ${member.display_name} Agent management`}
         >
           {token}
-        </a>
+        </SafeAgentLink>
       ) : member ? (
         <mark className={`message-mention${member.self ? " message-mention--self" : ""}`} key={`${keyPrefix}-mention-${tokenStart}`}>{token}</mark>
       ) : token,
@@ -833,14 +926,15 @@ function highlightTaskRefs(
     nodes.push(text.slice(cursor, tokenStart));
     nodes.push(
       ref ? (
-        <a
+        <SafeTaskLink
           key={`${keyPrefix}-taskref-${tokenStart}`}
           className="message-task-ref"
-          href={`/s/${spaceSlug}/tasks/${ref.task_id}`}
+          spaceSlug={spaceSlug}
+          taskId={ref.task_id}
           title={`Task !${ref.seq} · ${ref.title}`}
         >
           {token}
-        </a>
+        </SafeTaskLink>
       ) : (
         token
       ),

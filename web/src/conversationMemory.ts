@@ -1,5 +1,6 @@
 const LAST_ROUTE_PREFIX = "sumi.lastConversation.";
 const SCROLL_MEMORY_PREFIX = "sumi.channelScroll.";
+const THREAD_MEMORY_PREFIX = "sumi.openThread.";
 
 export type ConversationRoute =
   | { kind: "channel"; channelSlug: string }
@@ -67,5 +68,26 @@ export function writeChannelScrollMemory(channelId: string, memory: ChannelScrol
     window.localStorage.setItem(`${SCROLL_MEMORY_PREFIX}${channelId}`, JSON.stringify(memory));
   } catch {
     // Scroll memory is a convenience; ignore storage failures.
+  }
+}
+
+export function readOpenThreadMemory(channelId: string): string | undefined {
+  try {
+    const raw = window.localStorage.getItem(`${THREAD_MEMORY_PREFIX}${channelId}`);
+    return raw && raw.length > 0 ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeOpenThreadMemory(channelId: string, threadId: string | undefined): void {
+  try {
+    if (threadId) {
+      window.localStorage.setItem(`${THREAD_MEMORY_PREFIX}${channelId}`, threadId);
+    } else {
+      window.localStorage.removeItem(`${THREAD_MEMORY_PREFIX}${channelId}`);
+    }
+  } catch {
+    // Thread memory is a convenience; ignore storage failures.
   }
 }

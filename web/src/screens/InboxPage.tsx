@@ -86,7 +86,7 @@ function InboxWorkspace({
       void navigate({
         to: "/s/$spaceSlug/channels/$channelSlug",
         params: { spaceSlug, channelSlug: item.channel_slug },
-        hash: item.thread_id ? `message-${item.thread_id}` : undefined,
+        hash: item.thread_id ? `thread-${item.thread_id}` : undefined,
       });
     }
   }
@@ -126,7 +126,12 @@ function InboxWorkspace({
       <div className="inbox-list">
         <div className="inbox-list-inner">
           {inbox.isPending ? <ListSkeleton label="Loading Inbox" rows={4} /> : null}
-          {inbox.error ? <p className="timeline-status timeline-status--error">{inbox.error.message}</p> : null}
+          {inbox.error ? (
+            <div className="timeline-status timeline-status--error" role="alert">
+              <span>Could not load your Inbox.</span>
+              <button className="command-button" type="button" onClick={() => void inbox.refetch()}>Retry</button>
+            </div>
+          ) : null}
           {!inbox.isPending && !inbox.error && stacks.length === 0 ? (
           <EmptyState icon={Inbox} title="Nothing needs your attention" titleId="inbox-empty-title">
             Mentions, DMs and Thread replies meant for you land here.

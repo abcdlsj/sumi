@@ -592,9 +592,9 @@ describe("ChannelPage", () => {
 
     expect(await screen.findByText("First Message")).toBeVisible();
     const systemErrors = screen.getByRole("alert");
-    expect(systemErrors).toHaveTextContent("2 system errors · Show details");
+    expect(systemErrors).toHaveTextContent("2 Agents could not start · Show details");
     expect(systemErrors).not.toHaveAttribute("open");
-    fireEvent.click(screen.getByText("2 system errors · Show details"));
+    fireEvent.click(screen.getByText("2 Agents could not start · Show details"));
     expect(systemErrors).toHaveAttribute("open");
     expect(within(systemErrors).getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("Could not start Lin") === true)).toBeVisible();
     const taskBadge = screen.getByLabelText("Task: !7 in progress · Ship message metadata");

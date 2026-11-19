@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("useSpaceEvents connection", () => {
-  it("refetches everything on every open, and reports a dropped stream", async () => {
+  it("skips redundant global invalidation on initial open, and refetches after a dropped stream", async () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -54,8 +54,7 @@ describe("useSpaceEvents connection", () => {
 
     act(() => { source.readyState = 1; source.onopen?.(); });
     expect(screen.getByLabelText("Connection")).toHaveTextContent("live");
-    // The stream starts at the Server tail, so the first open also has to refetch.
-    expect(invalidate).toHaveBeenCalledWith();
+    expect(invalidate).not.toHaveBeenCalled();
 
     act(() => { source.readyState = 0; source.onerror?.(); });
     expect(screen.getByLabelText("Connection")).toHaveTextContent("reconnecting");

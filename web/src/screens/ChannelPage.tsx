@@ -4,7 +4,8 @@ import { Hash, LoaderCircle, Plus, X } from "lucide-react";
 import { type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {addChannelAgents, createDirectMessage, createMessage, listAgents, listChannelMembers, listComputers, listMembers} from "../api/client";
-import type {Channel, ChannelMembers, CreateMessageInput, Member, Message} from "../api/types";
+import type {Attachment, Channel, ChannelMembers, CreateMessageInput, Member, Message} from "../api/types";
+import { readOpenThreadMemory, writeOpenThreadMemory } from "../conversationMemory";
 import { DialogFrame } from "../components/DialogFrame";
 import { GettingStarted } from "../components/onboarding/GettingStarted";
 import { MessageComposer } from "../components/channel/MessageComposer";
@@ -80,7 +81,11 @@ export function MessageWorkspace({
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
-  const [threadId, setThreadId] = useState<string>();
+  const [threadId, setThreadId] = useState<string | undefined>(() => {
+    if (location.hash.startsWith("thread-")) return location.hash.slice("thread-".length);
+    return readOpenThreadMemory(channel.id);
+  });
+  const consumedHashRef = useRef<string | null>(null);
   const [threadOpenedAtMainSeq, setThreadOpenedAtMainSeq] = useState(0);
   const [threadPaneWidth, setThreadPaneWidth] = useState(360);
   const [threadPaneMaxWidth, setThreadPaneMaxWidth] = useState(480);
@@ -164,21 +169,24 @@ export function MessageWorkspace({
     setThreadOpenedAtMainSeq(latestMainMessageSeq);
     setThreadPaneWidth(threadPaneMaxWidth);
     setThreadId(nextThreadId);
+    writeOpenThreadMemory(channel.id, nextThreadId);
   }
 
   const closeThread = useCallback(() => {
     setThreadId(undefined);
+    writeOpenThreadMemory(channel.id, undefined);
     window.requestAnimationFrame(() => {
       if (timeline.current) timeline.current.scrollTop = channelScrollPosition.current;
       threadTrigger.current?.focus();
     });
-  }, []);
+  }, [channel.id]);
 
   const showLatestChannelMessages = useCallback(() => {
     document.getElementById("channel-heading")?.focus();
     setThreadId(undefined);
+    writeOpenThreadMemory(channel.id, undefined);
     window.requestAnimationFrame(() => timelineScrollApi.current?.scrollToBottom());
-  }, []);
+  }, [channel.id]);
   const messages = useInfiniteQuery(messagesQueryOptions(channel.id));
   const page = timelinePage(messages.data);
   const spaceMembers = useQuery({
@@ -211,13 +219,30 @@ export function MessageWorkspace({
       role_text: agents.data?.find((agent) => agent.member_id === member.id)?.role_text?.trim() || "Agent",
     }));
   useEffect(() => {
-    if (!page || !location.hash.startsWith("message-")) return;
+    const hash = location.hash;
+    if (!hash) {
+      consumedHashRef.current = null;
+      return;
+    }
+    if (consumedHashRef.current === hash) return;
+    if (hash.startsWith("thread-")) {
+      const targetThreadId = hash.slice("thread-".length);
+      if (targetThreadId) {
+        consumedHashRef.current = hash;
+        setThreadPaneWidth(threadPaneMaxWidth);
+        setThreadId(targetThreadId);
+        writeOpenThreadMemory(channel.id, targetThreadId);
+      }
+      return;
+    }
+    if (!page || !hash.startsWith("message-")) return;
+    consumedHashRef.current = hash;
     window.requestAnimationFrame(() => {
-      const target = document.getElementById(location.hash);
+      const target = document.getElementById(hash);
       target?.scrollIntoView({ block: "center" });
       target?.focus({ preventScroll: true });
     });
-  }, [location.hash, page]);
+  }, [channel.id, location.hash, page, threadPaneMaxWidth]);
   const activityByMemberId = new Map(
     (agents.data ?? []).map((agent) => [agent.member_id, agentPresence(agent)] as const),
   );
@@ -235,9 +260,9 @@ export function MessageWorkspace({
     // The event stream may already have patched the page with this message.
     queryClient.setQueryData<MessagePages>(messagesQueryOptions(channel.id).queryKey, (data) => upsertRootMessage(data, message));
   }
-  const outbox = useOutbox(sendMessage, addMessage);
-  function queueMessage(input: CreateMessageInput) {
-    outbox.queue(input);
+  const outbox = useOutbox(sendMessage, addMessage, `channel:${channel.id}`);
+  function queueMessage(input: CreateMessageInput, attachments?: Attachment[]) {
+    outbox.queue(input, attachments);
     window.requestAnimationFrame(() => timelineScrollApi.current?.scrollToBottom());
   }
   const selfMember = [...(channelMembers.data?.members ?? []), ...(spaceMembers.data ?? [])].find((member) => member.id === currentMemberId);

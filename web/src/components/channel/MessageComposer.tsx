@@ -3,7 +3,7 @@ import { ArrowUp, LoaderCircle, Paperclip, Users, X } from "lucide-react";
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 import {uploadAttachment} from "../../api/client";
-import type {CreateMessageInput, Member, Message} from "../../api/types";
+import type {Attachment, CreateMessageInput, Member, Message} from "../../api/types";
 import { PixelIdentity } from "../PixelIdentity";
 
 const DRAFT_STORAGE_PREFIX = "sumi:composer-draft:";
@@ -60,7 +60,7 @@ export function MessageComposer({
   send?: (input: CreateMessageInput) => Promise<Message>;
   onSent?: (message: Message) => void;
   /** Hands the message to an outbox that shows it at once; the composer clears immediately. */
-  queue?: (input: CreateMessageInput) => void;
+  queue?: (input: CreateMessageInput, attachments?: Attachment[]) => void;
   /** Text to put in the composer, e.g. a mention from the setup guide; nonce makes repeats apply. */
   insert?: { text: string; nonce: number };
 }) {
@@ -107,15 +107,15 @@ export function MessageComposer({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = body.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
     const input = {
       body_markdown: trimmed,
       mentions: direct ? [] : mentionIds(trimmed, members),
-      mention_all: direct ? false : /(?:^|\s)@all(?![_\p{L}])/iu.test(trimmed),
+      mention_all: direct ? false : /(?:^|\s)@all(?![_\p{L}\p{N}-])/iu.test(trimmed),
       attachment_ids: attachments.map((attachment) => attachment.id),
     };
     if (queue) {
-      queue(input);
+      queue(input, attachments);
       setBody("");
       setAttachments([]);
       return;
@@ -124,8 +124,8 @@ export function MessageComposer({
   }
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) upload.mutate(file);
+    const files = event.target.files ? [...event.target.files] : [];
+    if (files.length > 0) void attachFiles(files);
     event.target.value = "";
   }
 
@@ -171,6 +171,7 @@ export function MessageComposer({
         ref={fileInput}
         className="visually-hidden"
         type="file"
+        multiple
         aria-label={attachmentAriaLabel}
         onChange={selectFile}
       />
@@ -198,7 +199,7 @@ export function MessageComposer({
         type="submit"
         aria-label={sendButtonLabel}
         title={sendButtonLabel}
-        disabled={submission.isPending || upload.isPending || !body.trim()}
+        disabled={submission.isPending || upload.isPending || (!body.trim() && attachments.length === 0)}
       >
         {submission.isPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}
         <span>Send</span>
@@ -320,6 +321,8 @@ function MentionInput({ ariaLabel, placeholder, rows, value, members, direct, on
         choose(suggestions[Math.min(Math.max(activeIndex - (allSuggestion ? 1 : 0), 0), suggestions.length - 1)]);
       }
     } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       setCursor(-1);
     }
   }
@@ -381,7 +384,7 @@ function mentionSuggestions(members: Member[], rawQuery: string): Member[] {
 function mentionMatch(value: string, cursor: number): { start: number; query: string } | undefined {
   if (cursor < 0) return undefined;
   const prefix = value.slice(0, cursor);
-  const match = prefix.match(/(?:^|[^\p{L}\p{N}_@])@([\p{L}_]*)$/iu);
+  const match = prefix.match(/(?:^|[^\p{L}\p{N}_@-])@([\p{L}\p{N}_-]*)$/iu);
   if (!match) return undefined;
   return { start: cursor - match[1].length - 1, query: match[1] };
 }
@@ -390,7 +393,7 @@ function mentionMatch(value: string, cursor: number): { start: number; query: st
 function mentionIds(body: string, members: Member[]): string[] {
   const byName = new Map(members.map((member) => [member.display_name.toLowerCase(), member.id]));
   const ids = new Set<string>();
-  for (const match of body.matchAll(/(^|[^\p{L}\p{N}_@])@([\p{L}_]+)/giu)) {
+  for (const match of body.matchAll(/(^|[^\p{L}\p{N}_@-])@([\p{L}\p{N}_-]+)/giu)) {
     const id = byName.get(match[2].toLowerCase());
     if (id) ids.add(id);
   }

@@ -138,18 +138,21 @@ export function useLatestMessageScroll(
   }, [latestMessageId, memoryKey, messageIds, scrollRef, updateScrollState]);
 
   // Content grows without a new latest Message: an inline Thread gains a reply, a message is edited,
-  // the working strip appears. A reader parked near the bottom stays at the bottom instead of
-  // drifting up by the height of what arrived.
+  // the working strip appears. Only pin to bottom when scrollHeight actually increases so hover
+  // badges (e.g. "Copied") or non-layout mutations never yank the viewport.
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || typeof MutationObserver === "undefined") return;
     let frame = 0;
+    let lastScrollHeight = element.scrollHeight;
     const observer = new MutationObserver(() => {
       if (!nearBottomRef.current || frame) return;
       frame = window.requestAnimationFrame(() => {
         frame = 0;
-        // The reader may have scrolled up between the mutation and this frame.
-        if (nearBottomRef.current) scrollToBottom();
+        const currentHeight = element.scrollHeight;
+        const grew = currentHeight > lastScrollHeight;
+        lastScrollHeight = currentHeight;
+        if (grew && nearBottomRef.current) scrollToBottom();
       });
     });
     observer.observe(element, { childList: true, characterData: true, subtree: true });

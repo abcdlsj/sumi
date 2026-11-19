@@ -8,7 +8,7 @@ import type {CreateMessageInput, Member, Message, ThreadRead} from "../../api/ty
 import { useLatestMessageScroll } from "../../hooks/useLatestMessageScroll";
 import { MessageComposer } from "./MessageComposer";
 import { CompactMessage } from "./MessageTimeline";
-import { provisionalMessage, useOutbox } from "./outbox";
+import { filterConfirmedOutgoing, provisionalMessage, useOutbox } from "./outbox";
 import { refreshRootMessage } from "./messageCache";
 import { useSelfMemberId } from "./selfMember";
 import { TaskStatusIcon } from "../taskStatusIcon";
@@ -81,7 +81,10 @@ export function ThreadPane({
   useEffect(() => {
     closeButton.current?.focus();
     function handleEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Do not close the Thread pane when a dialog, menu, or mention listbox is open.
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      close();
     }
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
@@ -114,11 +117,12 @@ export function ThreadPane({
     void refreshRootMessage(queryClient, channelId, threadId).catch(() => undefined);
   }
 
-  const outbox = useOutbox(sendReply, addReply);
+  const outbox = useOutbox(sendReply, addReply, `thread:${threadId}`);
   const selfMemberId = useSelfMemberId();
   const self = members.find((member) => member.id === selfMemberId);
-  function queueReply(input: CreateMessageInput) {
-    outbox.queue(input);
+  const visibleOutgoing = filterConfirmedOutgoing(outbox.items, thread.data?.replies ?? [], selfMemberId);
+  function queueReply(input: CreateMessageInput, attachments?: import("../../api/types").Attachment[]) {
+    outbox.queue(input, attachments);
     window.requestAnimationFrame(() => scrollToBottom());
   }
 
@@ -176,18 +180,23 @@ export function ThreadPane({
         <div ref={threadMessagesRef} className="thread-messages">
           {channelHasNewMessages ? (
             <button className="thread-context-update" type="button" onClick={showLatestChannelMessages}>
-              <span>New messages in #{channelSlug}</span>
+              <span>{direct ? "New messages in this conversation" : `New messages in #${channelSlug}`}</span>
               <strong>Return to latest</strong>
             </button>
           ) : null}
           {thread.isPending ? <TimelineSkeleton rows={3} label="Loading Thread" /> : null}
-          {thread.error ? <div className="timeline-status timeline-status--error">{thread.error.message}</div> : null}
+          {thread.error ? (
+            <div className="timeline-status timeline-status--error" role="alert">
+              <span>Could not load this Thread.</span>
+              <button className="command-button" type="button" onClick={() => void thread.refetch()}>Retry</button>
+            </div>
+          ) : null}
           {thread.data ? (
             <>
               <CompactMessage message={thread.data.root} activityStatus={activityByMemberId.get(thread.data.root.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />
               <p className="thread-section-label">{thread.data.replies.length} {thread.data.replies.length === 1 ? "reply" : "replies"}</p>
               {thread.data.replies.map((message) => <CompactMessage key={message.id} message={message} activityStatus={activityByMemberId.get(message.author.id)} spaceSlug={spaceSlug} members={members} direct={direct} onOpenAgentDm={onOpenAgentDm} />)}
-              {self ? outbox.items.map((item) => (
+              {self ? visibleOutgoing.map((item) => (
                 <CompactMessage
                   key={item.key}
                   message={{ ...provisionalMessage(item, { id: self.id, display_name: self.display_name, kind: self.kind }, channelId), placement: "reply" }}
@@ -210,7 +219,8 @@ export function ThreadPane({
         spaceId={spaceId}
         draftKey={threadId}
         members={members}
-        placeholder={`Reply to #${channelSlug}`}
+        direct={direct}
+        placeholder={direct ? "Reply in Thread" : `Reply to #${channelSlug}`}
         ariaLabel="Thread reply"
         attachmentAriaLabel="Choose Thread Attachment"
         attachButtonLabel="Attach file to Thread"

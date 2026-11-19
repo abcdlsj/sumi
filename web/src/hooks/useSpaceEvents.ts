@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { openSpaceEvents } from "../api/client";
+import { apiUrl, openSpaceEvents } from "../api/client";
 import { clearAgentActivityForChannel, isAgentActivityEvent, recordAgentActivity, type SumiEvent } from "../agentActivity";
 import { refreshRootMessage } from "../components/channel/messageCache";
 
@@ -96,8 +96,19 @@ export function useSpaceEvents(
       }
       if (payload.type.startsWith("task.")) {
         void queryClient.invalidateQueries({ queryKey: ["tasks", spaceId] });
-        void queryClient.invalidateQueries({ queryKey: ["messages"] });
-        void queryClient.invalidateQueries({ queryKey: ["thread"] });
+        if (payload.data.thread_id) {
+          void queryClient.invalidateQueries({ queryKey: ["thread", payload.data.thread_id] });
+          if (payload.data.channel_id) {
+            refreshRootMessage(queryClient, payload.data.channel_id, payload.data.thread_id).catch(() => {
+              void queryClient.invalidateQueries({ queryKey: ["messages", payload.data.channel_id] });
+            });
+          }
+        } else if (payload.data.channel_id) {
+          void queryClient.invalidateQueries({ queryKey: ["messages", payload.data.channel_id] });
+        } else {
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          void queryClient.invalidateQueries({ queryKey: ["thread"] });
+        }
       }
     };
     const eventTypes = [
@@ -121,13 +132,16 @@ export function useSpaceEvents(
       "task.unlinked",
       "task.finished",
     ];
+    let disposed = false;
     const attach = (target: EventSource) => {
       for (const type of eventTypes) target.addEventListener(type, invalidate as EventListener);
       target.onopen = () => {
         retryDelay = 1000;
-        // The stream starts at the Server's current tail, so a commit that landed between the
-        // projection queries and this connection has no event here; refetch what is on screen.
-        void queryClient.invalidateQueries();
+        // Only refetch after an actual disconnect or manual reconnect so initial page loads
+        // do not trigger a duplicate invalidation storm across every active query.
+        if (lost) {
+          void queryClient.invalidateQueries();
+        }
         lost = false;
         wasLive = true;
         setConnection("live");
@@ -139,11 +153,34 @@ export function useSpaceEvents(
         if (target.readyState === CLOSED) {
           lost = true;
           window.clearTimeout(retryTimer);
-          retryTimer = window.setTimeout(() => {
-            source = openSpaceEvents(spaceId);
-            attach(source);
-          }, retryDelay);
-          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+          const scheduleReconnect = () => {
+            if (disposed) return;
+            retryTimer = window.setTimeout(() => {
+              if (disposed) return;
+              source = openSpaceEvents(spaceId);
+              attach(source);
+            }, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+          };
+          if (typeof fetch === "function") {
+            void fetch(apiUrl("/api/v1/auth/me"), { credentials: "include" })
+              .then((response) => {
+                if (disposed) return;
+                if (response.status === 401) {
+                  window.location.assign("/login");
+                  return;
+                }
+                if (response.status === 403 || response.status === 404) {
+                  return;
+                }
+                scheduleReconnect();
+              })
+              .catch(() => {
+                scheduleReconnect();
+              });
+          } else {
+            scheduleReconnect();
+          }
         }
       };
     };
@@ -161,6 +198,7 @@ export function useSpaceEvents(
     window.addEventListener("offline", goOffline);
     window.addEventListener("online", goOnline);
     return () => {
+      disposed = true;
       window.clearTimeout(retryTimer);
       window.removeEventListener("offline", goOffline);
       window.removeEventListener("online", goOnline);
