@@ -151,7 +151,7 @@ func TestAgentRuntimeErrorDetailBoundedAndCleared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeError, "", domain.AgentErrModelAuthFailed, strings.Repeat("x", 1000)); err != nil {
+	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeError, "", domain.AgentErrModelAuthFailed, strings.Repeat("x", 1000), nil); err != nil {
 		t.Fatalf("report error: %v", err)
 	}
 	m, err := svc.GetMember(ctx, space.ID, lin.ID)
@@ -162,7 +162,7 @@ func TestAgentRuntimeErrorDetailBoundedAndCleared(t *testing.T) {
 		t.Fatalf("unexpected error fields %q len=%d", m.Agent.LastErrorCode, len(m.Agent.LastErrorDetail))
 	}
 	// Non-error states clear code and detail even if a stale code is sent.
-	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeIdle, "", "stale", "stale"); err != nil {
+	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeIdle, "", "stale", "stale", nil); err != nil {
 		t.Fatalf("report idle: %v", err)
 	}
 	m, _ = svc.GetMember(ctx, space.ID, lin.ID)
@@ -189,5 +189,30 @@ func TestComputerHelloStoresACPProviders(t *testing.T) {
 	}
 	if got := strings.Join(comps[0].ACPProviders, ","); got != "pi,claude" || comps[0].DaemonVersion != "2.1.0" {
 		t.Fatalf("acp_providers=%q version=%q", got, comps[0].DaemonVersion)
+	}
+}
+
+func TestAgentActivityIsEphemeralAndOnlyWhileWorking(t *testing.T) {
+	svc, _, space, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	lin, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Lin", ComputerID: comp.ID, DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeWorking, "", "", "", &domain.AgentActivity{Tool: "execute", StalledSeconds: 700}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := svc.GetMember(ctx, space.ID, lin.ID)
+	if a := m.Agent.Activity; a == nil || a.Tool != "execute" || a.StalledSeconds != 700 {
+		t.Fatalf("working agent must expose activity: %+v", a)
+	}
+	if err := svc.UpdateAgentRuntimeState(ctx, comp.ID, lin.ID, domain.RuntimeIdle, "", "", "", &domain.AgentActivity{Tool: "execute"}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = svc.GetMember(ctx, space.ID, lin.ID)
+	if m.Agent.Activity != nil {
+		t.Fatalf("idle agent must not expose activity: %+v", m.Agent.Activity)
 	}
 }

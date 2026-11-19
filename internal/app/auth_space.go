@@ -313,6 +313,13 @@ func (s *Service) ListMembers(ctx context.Context, spaceID string) ([]domain.Mem
 				t := store.ParseTime(rtUpdated.String)
 				info.RuntimeStateUpdatedAt = &t
 			}
+			if info.RuntimeState == domain.RuntimeWorking {
+				s.activityMu.Lock()
+				if a, ok := s.activity[m.ID]; ok {
+					info.Activity = &a
+				}
+				s.activityMu.Unlock()
+			}
 			m.Agent = info
 		}
 		byID[m.ID] = len(members)
@@ -850,7 +857,11 @@ func (s *Service) GetMember(ctx context.Context, spaceID, memberID string) (doma
 	return domain.Member{}, domain.NewError(domain.CodeNotFound, "member not found")
 }
 
-func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agentMemberID string, state domain.RuntimeState, focusConvID, errorCode, errorDetail string) error {
+func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agentMemberID string, state domain.RuntimeState, focusConvID, errorCode, errorDetail string, activity *domain.AgentActivity) error {
+	activity = domain.SanitizeActivity(activity)
+	if state != domain.RuntimeWorking {
+		activity = nil
+	}
 	if state == domain.RuntimeError {
 		if errorCode == "" {
 			errorCode = domain.AgentErrTurnFailed
@@ -885,6 +896,7 @@ func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agent
 			"focus_conversation_id": focusConvID,
 			"error_code":            errorCode,
 			"error_detail":          errorDetail,
+			"activity":              activity,
 		})
 		if err != nil {
 			return err
@@ -895,6 +907,13 @@ func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agent
 	if err != nil {
 		return err
 	}
+	s.activityMu.Lock()
+	if activity != nil {
+		s.activity[agentMemberID] = *activity
+	} else {
+		delete(s.activity, agentMemberID)
+	}
+	s.activityMu.Unlock()
 	s.dispatchPostCommit(events, nil)
 	return nil
 }

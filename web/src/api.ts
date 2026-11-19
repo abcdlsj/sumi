@@ -48,6 +48,21 @@ export interface AgentInfo {
   last_error_code?: string;
   last_error_detail?: string;
   runtime_state_updated_at?: string;
+  /** Ephemeral in-turn progress, present only while working. */
+  activity?: AgentActivity;
+}
+
+export interface AgentActivity {
+  tool?: string;
+  stalled_seconds?: number;
+}
+
+/** Describes in-turn activity, e.g. "Running execute" or "execute: no output for 12 min". */
+export function activityLabel(a?: AgentActivity): string | null {
+  if (!a?.tool && !a?.stalled_seconds) return null;
+  const tool = a.tool || "tool";
+  if (a.stalled_seconds) return `${tool}: no output for ${Math.max(1, Math.round(a.stalled_seconds / 60))} min`;
+  return `Running ${tool}`;
 }
 
 export interface Member {

@@ -226,6 +226,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 					frame.AgentState.FocusConversationID,
 					frame.AgentState.ErrorCode,
 					frame.AgentState.ErrorDetail,
+					frame.AgentState.Activity,
 				)
 			}
 		}

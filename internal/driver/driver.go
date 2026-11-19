@@ -12,6 +12,23 @@ type TurnInput struct {
 	WorkDir        string
 	MemoryDir      string
 	Env            []string
+	// OnActivity, if set, receives runtime progress during the turn. It must not block.
+	OnActivity func(Activity)
+}
+
+// Activity is one runtime progress signal. Tool names a tool kind or builtin tool name, never
+// its arguments or output. An empty ToolCallID means generic progress (model output, updates).
+type Activity struct {
+	ToolCallID string
+	Tool       string
+	Done       bool
+}
+
+// Emit forwards a to OnActivity when set.
+func (in TurnInput) Emit(a Activity) {
+	if in.OnActivity != nil {
+		in.OnActivity(a)
+	}
 }
 
 type TurnResult struct {

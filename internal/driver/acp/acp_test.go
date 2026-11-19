@@ -215,3 +215,17 @@ func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 		t.Fatalf("session leaked across commands: %q", id)
 	}
 }
+
+func TestActivityOfKeepsOnlyToolLifecycle(t *testing.T) {
+	start := activityOf(json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c1","title":"sumi send --body secret","kind":"execute","status":"pending"}}`))
+	if start != (driver.Activity{ToolCallID: "c1", Tool: "execute"}) {
+		t.Fatalf("tool_call: %+v", start)
+	}
+	done := activityOf(json.RawMessage(`{"update":{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}}`))
+	if !done.Done || done.ToolCallID != "c1" {
+		t.Fatalf("tool_call_update: %+v", done)
+	}
+	if chunk := activityOf(json.RawMessage(`{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}}`)); chunk != (driver.Activity{}) {
+		t.Fatalf("content updates are generic progress only: %+v", chunk)
+	}
+}

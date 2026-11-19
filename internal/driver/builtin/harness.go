@@ -129,6 +129,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 		if err != nil {
 			return driver.TurnResult{InputTokens: totalIn, OutputTokens: totalOut, ToolCalls: totalTools}, driver.Fail(classifyModelErr(err), err)
 		}
+		in.Emit(driver.Activity{})
 		totalIn += resp.InputTokens
 		totalOut += resp.OutputTokens
 		h.history = append(h.history, resp.Message)
@@ -145,7 +146,9 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 
 		for _, tc := range resp.Message.ToolCalls {
 			totalTools++
+			in.Emit(driver.Activity{ToolCallID: tc.ID, Tool: tc.Function.Name})
 			out := executeTool(ctx, tc, in)
+			in.Emit(driver.Activity{ToolCallID: tc.ID, Tool: tc.Function.Name, Done: true})
 			h.history = append(h.history, Message{
 				Role:       openai.ChatMessageRoleTool,
 				ToolCallID: tc.ID,

@@ -33,3 +33,31 @@ describe("ThreadDetail", () => {
     expect(await screen.findByRole("button", { name: "Following" })).toBeTruthy();
   });
 });
+
+describe("AgentDetail activity", () => {
+  function renderAgent(activity: { tool?: string; stalled_seconds?: number }) {
+    const member = {
+      id: "a1",
+      kind: "agent",
+      display_name: "Lin",
+      agent: { role_text: "", driver_kind: "builtin", runtime_state: "working", activity },
+    };
+    const data = { ...boot, members: [member] } as unknown as BootstrapData;
+    const qc = new QueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <DetailPane spaceSlug="s" boot={data} target={{ kind: "agent", memberID: "a1" }} onClose={() => {}} onSelectTarget={() => {}} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows the running tool", () => {
+    renderAgent({ tool: "execute" });
+    expect(screen.getByText("Running execute")).toBeTruthy();
+  });
+
+  it("warns when a tool has been silent", () => {
+    renderAgent({ tool: "execute", stalled_seconds: 720 });
+    expect(screen.getByText("execute: no output for 12 min")).toBeTruthy();
+  });
+});

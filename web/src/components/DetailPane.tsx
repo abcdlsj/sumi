@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, MessageSquare, Monitor, Pencil, RefreshCw, RotateCcw, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, formatClock, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
+import { activityLabel, api, formatClock, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
@@ -471,6 +471,11 @@ function AgentDetail({
                 </button>
               ) : (
                 <div className="text-[14px] font-medium text-fg">{focus?.label ?? "Unknown conversation"}</div>
+              )}
+              {activityLabel(ag.activity) && (
+                <div className={`mt-0.5 text-[12.5px] font-mono truncate ${ag.activity?.stalled_seconds ? "text-warm" : "text-fg-3"}`}>
+                  {activityLabel(ag.activity)}
+                </div>
               )}
             </div>
           </div>

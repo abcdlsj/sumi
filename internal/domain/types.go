@@ -127,6 +127,36 @@ type AgentInfo struct {
 	LastErrorCode         string           `json:"last_error_code,omitempty"`
 	LastErrorDetail       string           `json:"last_error_detail,omitempty"`
 	RuntimeStateUpdatedAt *time.Time       `json:"runtime_state_updated_at,omitempty"`
+	// Activity is ephemeral in-turn progress, only present while working; never persisted.
+	Activity *AgentActivity `json:"activity,omitempty"`
+}
+
+// AgentActivity names the tool kind an Agent is running and, when it has produced no runtime
+// event for a while, how long it has been silent. It never carries tool arguments or output.
+type AgentActivity struct {
+	Tool           string `json:"tool,omitempty"`
+	StalledSeconds int64  `json:"stalled_seconds,omitempty"`
+}
+
+// SanitizeActivity bounds an activity reported by a Computer to a short tool identifier.
+func SanitizeActivity(a *AgentActivity) *AgentActivity {
+	if a == nil {
+		return nil
+	}
+	tool := make([]rune, 0, 32)
+	for _, r := range a.Tool {
+		if len(tool) == 32 {
+			break
+		}
+		if r == '_' || r == '-' || r == '.' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			tool = append(tool, r)
+		}
+	}
+	out := &AgentActivity{Tool: string(tool), StalledSeconds: max(a.StalledSeconds, 0)}
+	if out.Tool == "" && out.StalledSeconds == 0 {
+		return nil
+	}
+	return out
 }
 
 type Computer struct {

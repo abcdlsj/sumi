@@ -246,6 +246,11 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 			}
 		}
 	}
+	if in.OnActivity != nil {
+		fn := func(params json.RawMessage) { in.Emit(activityOf(params)) }
+		p.onUpdate.Store(&fn)
+		defer p.onUpdate.Store(nil)
+	}
 	res, err := p.call(ctx, "session/prompt", map[string]any{
 		"sessionId": d.sessionID,
 		"prompt": []map[string]any{
@@ -323,6 +328,32 @@ func (d *Driver) openSessionLocked(ctx context.Context, p *process, workDir stri
 	return nil
 }
 
+// activityOf maps an ACP session/update to an Activity, keeping only the tool call id, its kind
+// and whether it finished; titles and content may quote prompts and are dropped.
+func activityOf(params json.RawMessage) driver.Activity {
+	var u struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			ToolCallID    string `json:"toolCallId"`
+			Kind          string `json:"kind"`
+			Status        string `json:"status"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(params, &u) != nil {
+		return driver.Activity{}
+	}
+	switch u.Update.SessionUpdate {
+	case "tool_call", "tool_call_update":
+		kind := u.Update.Kind
+		if kind == "" {
+			kind = "tool"
+		}
+		done := u.Update.Status == "completed" || u.Update.Status == "failed"
+		return driver.Activity{ToolCallID: u.Update.ToolCallID, Tool: kind, Done: done}
+	}
+	return driver.Activity{}
+}
+
 type rpcResponse struct {
 	result json.RawMessage
 	err    error
@@ -340,6 +371,9 @@ type process struct {
 
 	pendingMu sync.Mutex
 	pending   map[int64]chan rpcResponse
+
+	// onUpdate receives session/update params for the in-flight turn; nil between turns.
+	onUpdate atomic.Pointer[func(json.RawMessage)]
 
 	done    chan struct{}
 	readErr error
@@ -465,8 +499,12 @@ func (p *process) readLoop(stdout io.Reader) {
 		switch {
 		case msg.Method != "" && hasID:
 			p.answerRequest(msg)
+		case msg.Method == "session/update":
+			// Content is not rendered; only tool lifecycle feeds activity reporting.
+			if fn := p.onUpdate.Load(); fn != nil {
+				(*fn)(msg.Params)
+			}
 		case msg.Method != "":
-			// Notifications such as session/update stream content we do not render.
 		case hasID:
 			var id int64
 			if err := json.Unmarshal(msg.ID, &id); err != nil {

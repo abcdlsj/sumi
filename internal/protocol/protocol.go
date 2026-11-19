@@ -74,6 +74,8 @@ type AgentStateFrame struct {
 	FocusConversationID string              `json:"focus_conversation_id,omitempty"`
 	ErrorCode           string              `json:"error_code,omitempty"`
 	ErrorDetail         string              `json:"error_detail,omitempty"`
+	// Activity accompanies working states with the running tool kind or a stall warning.
+	Activity *domain.AgentActivity `json:"activity,omitempty"`
 }
 
 type AgentControlFrame struct {

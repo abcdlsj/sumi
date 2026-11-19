@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/protocol"
@@ -18,6 +19,11 @@ type Service struct {
 	store    *store.Store
 	hub      *EventHub
 	notifier ComputerNotifier
+
+	// activity holds ephemeral in-turn Agent activity keyed by member id; it is only exposed
+	// while the Agent's persisted runtime_state is working.
+	activityMu sync.Mutex
+	activity   map[string]domain.AgentActivity
 }
 
 func NewService(s *store.Store, hub *EventHub, notifier ComputerNotifier) *Service {
@@ -31,6 +37,7 @@ func NewService(s *store.Store, hub *EventHub, notifier ComputerNotifier) *Servi
 		store:    s,
 		hub:      hub,
 		notifier: notifier,
+		activity: make(map[string]domain.AgentActivity),
 	}
 }
 

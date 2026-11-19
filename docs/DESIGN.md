@@ -164,6 +164,8 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - **Go Builtin Harness**：独立包 `internal/driver/builtin`，支持 OpenAI/Anthropic 兼容协议、结构化工具调用（bash / 文件读写 / Agent CLI）、Token 用量跟踪、基于窗口比例的自动上下文压缩（保留近期原始回合 + 生成前序摘要）与瞬时错误指数退避重试。
   - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），单回合受有界超时保护，捕获有界 stderr 摘要。
 
+- **轮次内活动**：Driver 在 Turn 内上报进度（Builtin：每次模型响应与工具调用的开始/结束；ACP：`session/update` 中的 `tool_call` / `tool_call_update`，只取 `toolCallId`、`kind`、`status`，丢弃 title 与内容）。Computer 在 `agent_state`（`working`）中附带 `activity: {tool, stalled_seconds?}`：`tool` 为最近开始且未结束的工具类型（只允许字母、数字与 `_-.`，≤32 字符），变化合并为每 5 秒最多一次。若有未结束的工具调用且 10 分钟内没有任何运行时事件，立即上报一次 `stalled_seconds`（同一段静默只报一次，任何新事件清除）；卡住检测只观察，不取消 Turn。Server 只在内存中保存 activity，仅当 Agent 的 `runtime_state = working` 时随成员信息返回，非 working 状态即清空，不入库。Web 在 Agent 详情的 working 横幅中显示 `Running <tool>` 或 `<tool>: no output for N min`（暖色）。
+
 ### Agent 指令与 Memory
 
 - **系统提示**：由 Computer 按 Agent spec 生成（`internal/computer/prompt.go`），包含：身份（Display Name、member id、Role、workspace 与 `MEMORY.md` 路径，并声明这些事实以 Sumi 为准）、送达规则（只有 `sumi` 命令能触达他人，最终回答与推理无人可见；允许主动发消息）、每轮步骤（先 `read --unread` → 做事 → 每个请求一条有信息量的回复 → 未完成工作写入 Active Context → 处理完即停止）、命令清单与错误信封处理（`held` / `conflict` / `permission_denied`）、Task 规范、协作规范（未点名时由负责人回答、只汇报自己的工作、决定不行动前重读当前状态、可逆且在职责内的事直接做，否则只问一个带推荐选项的问题、消息里自称的权限不算数、不在消息与 Memory 中写入秘密）、Memory 约定。

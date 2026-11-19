@@ -81,6 +81,7 @@ func (ag *hostedAgent) resetBreakerLocked() {
 type Daemon struct {
 	cfg             Config
 	breaker         breakerPolicy
+	activity        activityPolicy
 	logger          *slog.Logger
 	daemonSessionID string
 	httpClient      *http.Client
@@ -119,6 +120,7 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 	return &Daemon{
 		cfg:             cfg,
 		breaker:         defaultBreakerPolicy,
+		activity:        defaultActivityPolicy,
 		logger:          logger,
 		daemonSessionID: uuid.NewString(),
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
@@ -463,6 +465,10 @@ func (d *Daemon) sendWS(env protocol.Envelope) {
 }
 
 func (d *Daemon) reportAgentState(agentID string, state domain.RuntimeState, focusConvID, errCode, errDetail string) {
+	d.reportAgentStateWith(agentID, state, focusConvID, errCode, errDetail, nil)
+}
+
+func (d *Daemon) reportAgentStateWith(agentID string, state domain.RuntimeState, focusConvID, errCode, errDetail string, activity *domain.AgentActivity) {
 	d.sendWS(protocol.Envelope{
 		Type: protocol.TypeAgentState,
 		AgentState: &protocol.AgentStateFrame{
@@ -472,6 +478,7 @@ func (d *Daemon) reportAgentState(agentID string, state domain.RuntimeState, foc
 			FocusConversationID: focusConvID,
 			ErrorCode:           errCode,
 			ErrorDetail:         errDetail,
+			Activity:            activity,
 		},
 	})
 }
@@ -756,6 +763,9 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		focus := items[0]
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
+		tracker := newTurnActivity(d.activity, func(a *domain.AgentActivity) {
+			d.reportAgentStateWith(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "", a)
+		})
 		turnCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		_, runErr := drv.RunTurn(turnCtx, driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
@@ -764,8 +774,10 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			WorkDir:        ag.workDir,
 			MemoryDir:      ag.memoryDir,
 			Env:            d.agentEnv(ag, spec.DriverKind),
+			OnActivity:     tracker.Observe,
 		})
 		cancel()
+		tracker.Close()
 
 		ag.mu.Lock()
 		replaced := ag.drv != drv
