@@ -68,8 +68,8 @@ These facts come from Sumi and override anything you infer.
 5. Stop when every listed conversation is handled. Do not poll.
 
 ## Commands
-A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`thread:<id>`"+`, `+"`task:#N`"+`. Each `+"`sumi inbox`"+` item carries the `+"`target`"+` to use verbatim; a bare conversation id also works. Members and tasks are addressed by id from `+"`sumi members`"+` and `+"`sumi task list`"+`.
-- `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi members`"+`
+A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`thread:<id>`"+`, `+"`task:#N`"+`. Each `+"`sumi inbox`"+` item carries the `+"`target`"+` to use verbatim; a bare conversation id also works. Members and tasks are addressed by id from `+"`sumi space members`"+` and `+"`sumi task list`"+`.
+- `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi space members`"+`
 - `+"`sumi read <target> [--unread] [--limit N]`"+`
 - `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft`"+`; `+"`--reply-to`"+` answers in that message's thread.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
@@ -77,9 +77,9 @@ A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`threa
 - `+"`sumi follow|unfollow|mute <target>`"+`
 - `+"`sumi task list [--status active|todo|in_progress|in_review|done|closed|all] [--assignee <member_id>]`"+`
 - `+"`sumi task create --channel <target> --title ... [--description ...] [--source <message_id>] [--assignee <member_id>]`"+`
-- `+"`sumi task claim|unclaim <task_id>`"+`, `+"`sumi task status <task_id> <status>`"+`
+- `+"`sumi task show <task_id>`"+`, `+"`sumi task claim|unclaim <task_id>`"+`, `+"`sumi task status <task_id> <status>`"+`
 - `+"`sumi task assign <task_id> --to <member_id> --reason <one line>`"+`, `+"`sumi task amend <task_id> [--title ...] [--description ...] --expected-revision N`"+`
-- `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi agent create --name ... --role ...`"+` (need permissions)
+- `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi channel members|invite|remove <target> [<member_id>]`"+`, `+"`sumi agent create --name ... --role ...`"+` (governance commands need permissions)
 
 Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"+` and follow `+"`error.hint`"+`; do not retry the same call blindly.
 - `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <target> --draft`"+`, or send a rewritten --body.

@@ -350,6 +350,53 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 	writeSendResult(w, res)
 }
 
+func (s *Server) handleAgentListConversationMembers(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	members, err := s.svc.ListConversationMembers(r.Context(), agent, chi.URLParam(r, "convID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+}
+
+func (s *Server) handleAgentInviteToChannel(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		MemberID string `json:"member_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.InviteToChannel(r.Context(), agent, chi.URLParam(r, "convID"), body.MemberID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleAgentRemoveFromChannel(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.RemoveFromChannel(r.Context(), agent, chi.URLParam(r, "convID"), chi.URLParam(r, "memberID")); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handleAgentSetFollowing(w http.ResponseWriter, r *http.Request) {
 	_, agent, err := s.requireComputerAgent(r)
 	if err != nil {
@@ -507,6 +554,20 @@ func (s *Server) handleAgentListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (s *Server) handleAgentGetTask(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	task, err := s.svc.GetTask(r.Context(), agent, chi.URLParam(r, "taskID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
 func (s *Server) handleAgentEnsureTaskConv(w http.ResponseWriter, r *http.Request) {

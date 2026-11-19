@@ -229,11 +229,14 @@ func Run(args []string, stdout io.Writer) int {
 		Short: "List accessible channels and DMs",
 		RunE:  func(_ *cobra.Command, _ []string) error { return call(http.MethodGet, "/conversations", nil) },
 	})
-	root.AddCommand(&cobra.Command{
+	spaceCmd := &cobra.Command{Use: "space", Short: "Space-level queries"}
+	spaceCmd.AddCommand(&cobra.Command{
 		Use:   "members",
 		Short: "List space members",
+		Args:  cobra.NoArgs,
 		RunE:  func(_ *cobra.Command, _ []string) error { return call(http.MethodGet, "/members", nil) },
 	})
+	root.AddCommand(spaceCmd)
 
 	var readUnread bool
 	var readLimit int
@@ -390,6 +393,12 @@ func Run(args []string, stdout io.Writer) int {
 
 	// Task subcommands
 	taskCmd := &cobra.Command{Use: "task", Short: "Manage tasks"}
+	taskCmd.AddCommand(&cobra.Command{
+		Use:   "show <task_id>",
+		Short: "Show one task",
+		Args:  cobra.ExactArgs(1),
+		RunE:  func(_ *cobra.Command, a []string) error { return call(http.MethodGet, "/tasks/"+a[0], nil) },
+	})
 	var taskStatusFilter, taskAssigneeFilter string
 	taskListCmd := &cobra.Command{
 		Use: "list",
@@ -557,6 +566,43 @@ func Run(args []string, stdout io.Writer) int {
 	chCreateCmd.Flags().StringVar(&chTopic, "topic", "", "topic")
 	chCreateCmd.Flags().StringVar(&chSrcConv, "source-conversation", "", "optional conversation id")
 	chCmd.AddCommand(chCreateCmd)
+
+	chCmd.AddCommand(&cobra.Command{
+		Use:   "members <target>",
+		Short: "List who can read a channel",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, a []string) error {
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodGet, "/conversations/"+convID+"/members", nil)
+		},
+	})
+	chCmd.AddCommand(&cobra.Command{
+		Use:   "invite <target> <member_id>",
+		Short: "Add a member to a private channel (needs channel.manage_members)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, a []string) error {
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPost, "/conversations/"+convID+"/members", map[string]any{"member_id": a[1]})
+		},
+	})
+	chCmd.AddCommand(&cobra.Command{
+		Use:   "remove <target> <member_id>",
+		Short: "Remove a member from a channel (needs channel.manage_members, or yourself)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, a []string) error {
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodDelete, "/conversations/"+convID+"/members/"+a[1], nil)
+		},
+	})
 	root.AddCommand(chCmd)
 
 	// Local bootstrap: sign in, ensure Space, pair this machine, write desktop config.

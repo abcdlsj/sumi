@@ -223,6 +223,45 @@ func (s *Service) RemoveFromChannel(ctx context.Context, actor domain.Member, ch
 	return nil
 }
 
+// ListConversationMembers lists who can read the conversation: every member of the Space for a
+// public channel, the explicit member boundary for private channels and DMs. Threads and tasks
+// inherit their parent's boundary.
+func (s *Service) ListConversationMembers(ctx context.Context, viewer domain.Member, convID string) ([]domain.Member, error) {
+	c, err := canAccessConversation(ctx, s.store.ReadDB(), viewer, convID)
+	if err != nil {
+		return nil, err
+	}
+	boundary, err := resolveVisibilityBoundary(ctx, s.store.ReadDB(), c)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.store.ReadDB().QueryContext(ctx,
+		`SELECT m.id, m.space_id, m.kind, m.display_name, m.access_level
+		 FROM members m
+		 WHERE m.space_id = ? AND m.retired_at IS NULL
+		   AND (? = 'public' OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = ? AND cm.member_id = m.id))
+		 ORDER BY m.kind ASC, lower(m.display_name) ASC`,
+		boundary.SpaceID, string(boundary.Kind), boundary.ID,
+	)
+	if err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list conversation members", err)
+	}
+	defer rows.Close()
+
+	members := make([]domain.Member, 0)
+	for rows.Next() {
+		var m domain.Member
+		var kind, access string
+		if err := rows.Scan(&m.ID, &m.SpaceID, &kind, &m.DisplayName, &access); err != nil {
+			return nil, domain.WrapError(domain.CodeInternal, "scan conversation member", err)
+		}
+		m.Kind = domain.MemberKind(kind)
+		m.AccessLevel = domain.AccessLevel(access)
+		members = append(members, m)
+	}
+	return members, rows.Err()
+}
+
 func (s *Service) GetOrCreateDM(ctx context.Context, actor domain.Member, peerMemberID string) (domain.Conversation, error) {
 	if peerMemberID == "" || peerMemberID == actor.ID {
 		return domain.Conversation{}, domain.NewError(domain.CodeInvalidArgument, "peer_member_id must be another member")

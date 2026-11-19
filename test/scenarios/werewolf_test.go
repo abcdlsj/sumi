@@ -85,7 +85,7 @@ func TestWerewolfCommunication(t *testing.T) {
 				}
 
 				if spec.DisplayName == "God" {
-					membersRes, _, err := runSumiCLI(ctx, binPath, in, "members")
+					membersRes, _, err := runSumiCLI(ctx, binPath, in, "space", "members")
 					if err != nil || !membersRes.OK {
 						return driver.TurnResult{}, fmt.Errorf("god members failed")
 					}

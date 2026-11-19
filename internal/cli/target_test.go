@@ -92,6 +92,67 @@ func TestResolveTargetForms(t *testing.T) {
 	}
 }
 
+func TestChannelAndSpaceCommandsUseServerRoutes(t *testing.T) {
+	var seen []string
+	serveSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/conversations":
+			writeFakeJSON(t, w, map[string]any{"conversations": []map[string]any{{"id": "c-ops", "kind": "private", "slug": "ops"}}})
+		case "/members":
+			writeFakeJSON(t, w, map[string]any{"members": []map[string]any{}})
+		case "/tasks/t-1":
+			writeFakeJSON(t, w, map[string]any{"task": map[string]any{"id": "t-1"}})
+		case "/conversations/c-ops/members":
+			if r.Method == http.MethodPost {
+				var body struct {
+					MemberID string `json:"member_id"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MemberID != "m-1" {
+					t.Errorf("invite body = %+v err=%v", body, err)
+				}
+			}
+			writeFakeJSON(t, w, map[string]any{"members": []map[string]any{}, "ok": true})
+		case "/conversations/c-ops/members/m-1":
+			writeFakeJSON(t, w, map[string]any{"ok": true})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			writeFakeJSON(t, w, map[string]any{"error": map[string]any{"code": "not_found"}})
+		}
+	})
+
+	for _, args := range [][]string{
+		{"space", "members"},
+		{"task", "show", "t-1"},
+		{"channel", "members", "#ops"},
+		{"channel", "invite", "#ops", "m-1"},
+		{"channel", "remove", "#ops", "m-1"},
+	} {
+		if env, _ := runCLI(t, args...); !env.OK {
+			t.Fatalf("%v failed: %+v", args, env.Error)
+		}
+	}
+
+	want := []string{
+		"GET /members",
+		"GET /tasks/t-1",
+		"GET /conversations",
+		"GET /conversations/c-ops/members",
+		"GET /conversations",
+		"POST /conversations/c-ops/members",
+		"GET /conversations",
+		"DELETE /conversations/c-ops/members/m-1",
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("requests = %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("request %d = %q, want %q (all: %v)", i, seen[i], want[i], seen)
+		}
+	}
+}
+
 func TestResolveTargetErrors(t *testing.T) {
 	c := testClient(t, fakeServer(t))
 	cases := []struct{ target, code string }{
