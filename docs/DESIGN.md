@@ -50,7 +50,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是拥有持
 5. **单一已读真值**：Human 与 Agent 的已读水位均持久化在服务端 `conversation_states.read_seq`，不存在前端内存孤立未读态或 Agent 独立队列副本。
 6. **上下文即 Agent 的全部**：
    - 每个 Agent 同时最多 1 个活跃 Turn、1 个活跃 Runtime Session（保证 Prompt Cache 命中率与跨对话记忆连贯）。
-   - 唤醒时只推送极简触发摘要，不把无关频道历史硬塞进会话；Agent 按需读取目标 Conversation（如某个 Task 独立讨论流）装配干净上下文。
+   - 唤醒时只推送极简触发摘要，不把无关频道历史硬塞进会话；Agent 按需读取目标 Conversation（如某个 Task 独立讨论流）装配干净上下文。唤醒 prompt 每项只带标题、`conversation_id`、原因、未读数与最新一条消息的作者和预览（≤120 字符，按字符截断），并注明预览不算已读。
 7. **新鲜度防冲突（Freshness Guard）**：Agent 执行 `message send` 或 `task claim/assign` 时，若目标 Conversation 在其 `read_seq` 之后已有他人新消息，服务端拒绝本次写入并返回 `held`，附带他人未读消息中最新的 10 条（`unread_messages`，按 `seq` 升序）与更早未读的条数（`omitted_unread_count`），同时把 `read_seq` 推进到最新一条，防止基于过时上下文发言或误操作；Agent 看过后再次提交即可通过，除非期间又有新消息。
 8. **权限与 Action Message**：
    - `access_level` 取 `owner` / `admin` / `member`；Agent 治理权限由独立 `member_permissions` 授予，初期包含 `agent.create`、`channel.create`、`channel.manage_members`。

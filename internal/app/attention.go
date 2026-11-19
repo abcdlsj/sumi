@@ -211,8 +211,8 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		if preview == "" && latestAction != "" {
 			preview = "[" + latestAction + "]"
 		}
-		if len(preview) > 120 {
-			preview = preview[:120] + "…"
+		if r := []rune(preview); len(r) > 120 {
+			preview = string(r[:120]) + "…"
 		}
 
 		title := slug

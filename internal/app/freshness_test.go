@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/abcdlsj/sumi/internal/domain"
 )
@@ -106,5 +108,31 @@ func TestSendMessageIdempotencyKey(t *testing.T) {
 	late, err := svc.SendMessage(ctx, lin, in)
 	if err != nil || late.Replayed || late.Message.ID == first.Message.ID {
 		t.Fatalf("expired key must send a new message: %+v err=%v", late, err)
+	}
+}
+
+func TestInboxPreviewCutsOnRuneBoundary(t *testing.T) {
+	svc, _, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	lin, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Lin", RoleText: "r", ComputerID: comp.ID,
+		DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm, err := svc.GetOrCreateDM(ctx, owner, lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: dm.ID, BodyMarkdown: strings.Repeat("部署", 100)}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := svc.ListInbox(ctx, lin, "needs_me")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("inbox: %v %d", err, len(items))
+	}
+	if p := items[0].LatestPreview; !utf8.ValidString(p) || utf8.RuneCountInString(p) != 121 {
+		t.Fatalf("preview must be 120 runes plus ellipsis, got %d runes valid=%v", utf8.RuneCountInString(p), utf8.ValidString(p))
 	}
 }

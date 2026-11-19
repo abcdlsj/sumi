@@ -139,9 +139,13 @@ func buildWakePrompt(items []domain.InboxItem) string {
 	var b strings.Builder
 	b.WriteString("Conversations that need you:\n")
 	for _, it := range items {
-		fmt.Fprintf(&b, "- %s (conversation_id=%s, reason=%s, unread=%d, latest_by=%s)\n",
-			it.Title, it.ConversationID, it.Reason, it.UnreadCount, it.LatestAuthorName)
+		fmt.Fprintf(&b, "- %s (conversation_id=%s, reason=%s, unread=%d)\n",
+			it.Title, it.ConversationID, it.Reason, it.UnreadCount)
+		if it.LatestPreview != "" {
+			preview := strings.Join(strings.Fields(it.LatestPreview), " ")
+			fmt.Fprintf(&b, "  latest from %s: %q\n", it.LatestAuthorName, preview)
+		}
 	}
-	b.WriteString("Read each with `sumi read <conversation_id> --unread` before acting. Only `sumi send` reaches anyone.")
+	b.WriteString("Previews only help you choose where to start; they do not count as reading. Read each with `sumi read <conversation_id> --unread` before acting. Only `sumi send` reaches anyone.")
 	return b.String()
 }

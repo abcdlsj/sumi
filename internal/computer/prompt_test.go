@@ -44,3 +44,16 @@ func TestStartupContextBoundsMemory(t *testing.T) {
 		t.Fatalf("truncation must be bounded and rune-safe")
 	}
 }
+
+func TestWakePromptPreviewsLatestMessage(t *testing.T) {
+	p := buildWakePrompt([]domain.InboxItem{
+		{Title: "@Owner", ConversationID: "c1", Reason: "dm", UnreadCount: 2, LatestAuthorName: "Owner", LatestPreview: "部署\n失败了"},
+		{Title: "#general", ConversationID: "c2", Reason: "mention", UnreadCount: 1},
+	})
+	if !strings.Contains(p, `latest from Owner: "部署 失败了"`) || !strings.Contains(p, "conversation_id=c2") {
+		t.Fatalf("wake prompt: %s", p)
+	}
+	if !strings.Contains(p, "do not count as reading") {
+		t.Fatalf("wake prompt must say previews are not reads")
+	}
+}
