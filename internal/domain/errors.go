@@ -12,6 +12,7 @@ const (
 	CodeNotFound         Code = "not_found"
 	CodeConflict         Code = "conflict"
 	CodeHeld             Code = "held"
+	CodeExpired          Code = "expired"
 	CodeRateLimited      Code = "rate_limited"
 	CodeUnavailable      Code = "unavailable"
 	CodeInternal         Code = "internal"

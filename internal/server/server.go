@@ -88,6 +88,9 @@ func (s *Server) registerRoutes() {
 	r.Get("/api/v1/spaces", s.handleListSpaces)
 	r.Post("/api/v1/spaces", s.handleCreateSpace)
 
+	// Confirm-based Computer pairing
+	r.Get("/api/v1/pairings/{pairingID}", s.handleViewPairing)
+
 	// Space-scoped Human APIs
 	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
 		r.Get("/bootstrap", s.handleBootstrap)
@@ -98,6 +101,7 @@ func (s *Server) registerRoutes() {
 
 		r.Get("/computers", s.handleListComputers)
 		r.Post("/computers/pair", s.handlePairComputer)
+		r.Post("/computers/pairings/{pairingID}/confirm", s.handleConfirmPairing)
 
 		r.Post("/agents", s.handleCreateAgent)
 		r.Post("/agents/{agentID}/control", s.handleControlAgent)
@@ -129,6 +133,8 @@ func (s *Server) registerRoutes() {
 
 	// Computer WebSocket + Computer-brokered Agent APIs
 	r.Get("/ws/computer", s.handleComputerWS)
+	r.Post("/api/v1/computer/pairings", s.handleCreatePairing)
+	r.Get("/api/v1/computer/pairings/{pairingID}", s.handlePollPairing)
 	r.Route("/api/v1/computer/agents/{agentID}", func(r chi.Router) {
 		r.Get("/inbox", s.handleAgentInbox)
 		r.Post("/attachments", s.handleAgentUploadAttachment)
@@ -177,6 +183,8 @@ func writeError(w http.ResponseWriter, err error) {
 			status = http.StatusNotFound
 		case domain.CodeConflict, domain.CodeHeld:
 			status = http.StatusConflict
+		case domain.CodeExpired:
+			status = http.StatusGone
 		case domain.CodeRateLimited:
 			status = http.StatusTooManyRequests
 		case domain.CodeUnavailable:

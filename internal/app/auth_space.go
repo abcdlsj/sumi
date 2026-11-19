@@ -416,17 +416,7 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 	}
 	var events []domain.SpaceEvent
 	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO computers (id, space_id, name, hostname, os, token_hash, connection_status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 'offline', ?)`,
-			comp.ID, comp.SpaceID, comp.Name, comp.Hostname, comp.OS, hashToken(rawToken), store.FormatTime(now),
-		); err != nil {
-			return domain.WrapError(domain.CodeInternal, "insert computer", err)
-		}
-		ev, err := store.AppendEvent(ctx, tx, comp.SpaceID, "computer.changed", map[string]any{
-			"computer_id": comp.ID,
-			"status":      "offline",
-		})
+		ev, err := insertComputerTx(ctx, tx, comp, hashToken(rawToken))
 		if err != nil {
 			return err
 		}
@@ -438,6 +428,20 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 	}
 	s.dispatchPostCommit(events, nil)
 	return comp, rawToken, nil
+}
+
+func insertComputerTx(ctx context.Context, tx *sql.Tx, comp domain.Computer, tokenHash string) (domain.SpaceEvent, error) {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO computers (id, space_id, name, hostname, os, token_hash, connection_status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'offline', ?)`,
+		comp.ID, comp.SpaceID, comp.Name, comp.Hostname, comp.OS, tokenHash, store.FormatTime(comp.CreatedAt),
+	); err != nil {
+		return domain.SpaceEvent{}, domain.WrapError(domain.CodeInternal, "insert computer", err)
+	}
+	return store.AppendEvent(ctx, tx, comp.SpaceID, "computer.changed", map[string]any{
+		"computer_id": comp.ID,
+		"status":      "offline",
+	})
 }
 
 func (s *Service) AuthenticateComputer(ctx context.Context, rawToken string) (domain.Computer, error) {
