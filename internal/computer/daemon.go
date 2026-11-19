@@ -547,7 +547,7 @@ func buildDriver(spec protocol.AssignedAgentSpec, homeDir string) (driver.Sessio
 			SessionFile: filepath.Join(homeDir, "session.jsonl"),
 		}, nil)
 	case domain.DriverACP:
-		acfg := acp.Config{Provider: cfg.Provider, Command: cfg.Command}
+		acfg := acp.Config{Provider: cfg.Provider, Command: cfg.Command, SessionFile: filepath.Join(homeDir, "acp-session.json")}
 		argv, err := acfg.ResolvedCommand()
 		if err != nil {
 			return nil, driver.Fail(domain.AgentErrDriverConfigInvalid, err)

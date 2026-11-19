@@ -158,6 +158,7 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - Computer 重连上线时，主动拉取名下所有在线 Agent 的未读触发摘要，绝不漏消息。
 - **Runtime Session**：
   - 每个 Agent 仅维护 1 个活跃 Runtime Session（ACP `sessionId` 或 Builtin 本地 JSONL 会话文件）。
+  - ACP `sessionId` 持久化在 Agent Home 的 `acp-session.json`（0600，连同启动命令 argv 作为指纹）。Daemon 或子进程重启后，若 Agent 在 `initialize` 中声明 `loadSession` 且命令一致，则以 `session/load` 恢复；否则或恢复失败时新建并覆盖记录。恢复出的 session 导致子进程在 prompt 中退出时删除记录，下次新建。
   - Restart 保留 Session；Reset Session 清空会话缓存并新建，保留 Agent 身份、workspace 与 `MEMORY.md`。
   - **Go Builtin Harness**：独立包 `internal/driver/builtin`，支持 OpenAI/Anthropic 兼容协议、结构化工具调用（bash / 文件读写 / Agent CLI）、Token 用量跟踪、基于窗口比例的自动上下文压缩（保留近期原始回合 + 生成前序摘要）与瞬时错误指数退避重试。
   - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），单回合受有界超时保护，捕获有界 stderr 摘要。

@@ -28,6 +28,13 @@ func TestFakeACPAgent(t *testing.T) {
 	}
 	in := bufio.NewScanner(os.Stdin)
 	out := json.NewEncoder(os.Stdout)
+	logMethod := func(m string) {
+		if path := os.Getenv("SUMI_FAKE_ACP_LOG"); path != "" && m != "" {
+			f, _ := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			fmt.Fprintln(f, m)
+			_ = f.Close()
+		}
+	}
 	var promptID json.RawMessage
 	for in.Scan() {
 		var msg struct {
@@ -40,9 +47,15 @@ func TestFakeACPAgent(t *testing.T) {
 			} `json:"result"`
 		}
 		_ = json.Unmarshal(in.Bytes(), &msg)
+		logMethod(msg.Method)
 		switch msg.Method {
 		case "initialize":
-			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"protocolVersion": 1}})
+			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"protocolVersion":   1,
+				"agentCapabilities": map[string]any{"loadSession": mode == "resume"},
+			}})
+		case "session/load":
+			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{}})
 		case "session/new":
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"sessionId": "sess-1"}})
 		case "session/prompt":
@@ -66,7 +79,12 @@ func TestFakeACPAgent(t *testing.T) {
 }
 
 func fakeDriver(mode string) (*Driver, driver.TurnInput) {
-	d := New(Config{Command: []string{os.Args[0], "-test.run=^TestFakeACPAgent$"}})
+	return fakeDriverWith(Config{}, mode)
+}
+
+func fakeDriverWith(cfg Config, mode string) (*Driver, driver.TurnInput) {
+	cfg.Command = []string{os.Args[0], "-test.run=^TestFakeACPAgent$"}
+	d := New(cfg)
 	in := driver.TurnInput{
 		UserPrompt: "hello",
 		WorkDir:    os.TempDir(),
@@ -131,5 +149,57 @@ func TestCloseInterruptsInFlightTurn(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("close too slow")
+	}
+}
+
+func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
+	dir := t.TempDir()
+	logPath := dir + "/methods.log"
+	cfg := Config{SessionFile: dir + "/acp-session.json"}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	run := func() {
+		d, in := fakeDriverWith(cfg, "resume")
+		in.Env = append(in.Env, "SUMI_FAKE_ACP_LOG="+logPath)
+		defer d.Close()
+		if _, err := d.RunTurn(ctx, in); err != nil {
+			t.Fatalf("turn: %v", err)
+		}
+	}
+	methods := func() []string {
+		raw, _ := os.ReadFile(logPath)
+		_ = os.Remove(logPath)
+		var out []string
+		for _, m := range strings.Fields(string(raw)) {
+			if strings.HasPrefix(m, "session/new") || strings.HasPrefix(m, "session/load") {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+
+	run()
+	if got := methods(); len(got) != 1 || got[0] != "session/new" {
+		t.Fatalf("first driver: %v", got)
+	}
+	run() // A new driver (daemon restart) resumes the persisted session.
+	if got := methods(); len(got) != 1 || got[0] != "session/load" {
+		t.Fatalf("restarted driver must resume: %v", got)
+	}
+
+	d, _ := fakeDriverWith(cfg, "resume")
+	if err := d.ResetSession(); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+	run()
+	if got := methods(); len(got) != 1 || got[0] != "session/new" {
+		t.Fatalf("reset must start a new session: %v", got)
+	}
+
+	// A different command never resumes another agent's session.
+	other := New(Config{SessionFile: cfg.SessionFile, Command: []string{"other-agent"}})
+	if id := other.loadSavedSession([]string{"other-agent"}); id != "" {
+		t.Fatalf("session leaked across commands: %q", id)
 	}
 }

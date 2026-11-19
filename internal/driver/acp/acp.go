@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +31,8 @@ const (
 type Config struct {
 	Provider string   `json:"provider"` // "codex" | "claude" | "pi"
 	Command  []string `json:"command,omitempty"`
+	// SessionFile persists the active sessionId so a restarted daemon resumes it via session/load.
+	SessionFile string `json:"-"`
 }
 
 // ResolvedCommand returns the argv to launch; Command overrides the provider default.
@@ -63,6 +68,10 @@ type Driver struct {
 	cfg       Config
 	proc      *process
 	sessionID string
+	// canLoad reports the agent's initialize-time loadSession capability for the current process.
+	canLoad bool
+	// resumed marks a sessionId restored via session/load in the current process.
+	resumed bool
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -76,6 +85,54 @@ func (d *Driver) ResetSession() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.sessionID = ""
+	d.resumed = false
+	return d.forgetSession()
+}
+
+// savedSession is the on-disk record; Command fingerprints the agent so a session is only
+// resumed by the same provider command that created it.
+type savedSession struct {
+	SessionID string   `json:"session_id"`
+	Command   []string `json:"command"`
+}
+
+func (d *Driver) loadSavedSession(argv []string) string {
+	if d.cfg.SessionFile == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(d.cfg.SessionFile)
+	if err != nil {
+		return ""
+	}
+	var s savedSession
+	if json.Unmarshal(raw, &s) != nil || !slices.Equal(s.Command, argv) {
+		return ""
+	}
+	return s.SessionID
+}
+
+func (d *Driver) saveSession(argv []string) error {
+	if d.cfg.SessionFile == "" {
+		return nil
+	}
+	raw, _ := json.Marshal(savedSession{SessionID: d.sessionID, Command: argv})
+	tmp := d.cfg.SessionFile + ".tmp"
+	if err := os.MkdirAll(filepath.Dir(d.cfg.SessionFile), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, d.cfg.SessionFile)
+}
+
+func (d *Driver) forgetSession() error {
+	if d.cfg.SessionFile == "" {
+		return nil
+	}
+	if err := os.Remove(d.cfg.SessionFile); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 
@@ -90,6 +147,8 @@ func (d *Driver) Close() error {
 
 func (d *Driver) stopLocked() {
 	d.sessionID = ""
+	d.canLoad = false
+	d.resumed = false
 	if d.proc != nil {
 		d.proc.kill()
 		d.proc = nil
@@ -143,14 +202,22 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, workDir string, env []
 
 	initCtx, cancel := context.WithTimeout(ctx, initializeTimeout)
 	defer cancel()
-	if _, err := p.call(initCtx, "initialize", map[string]any{
+	res, err := p.call(initCtx, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientCapabilities": map[string]any{},
 		"clientInfo":         map[string]any{"name": "sumi", "version": "2.0.0"},
-	}); err != nil {
+	})
+	if err != nil {
 		d.stopLocked()
 		return startFailure("acp initialize: %v", err, p)
 	}
+	var init struct {
+		AgentCapabilities struct {
+			LoadSession bool `json:"loadSession"`
+		} `json:"agentCapabilities"`
+	}
+	_ = json.Unmarshal(res, &init)
+	d.canLoad = init.AgentCapabilities.LoadSession
 	return nil
 }
 
@@ -163,24 +230,9 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	}
 	p := d.proc
 	if d.sessionID == "" {
-		sessCtx, cancel := context.WithTimeout(ctx, sessionTimeout)
-		res, err := p.call(sessCtx, "session/new", map[string]any{
-			"cwd":        in.WorkDir,
-			"mcpServers": []any{},
-		})
-		cancel()
-		if err != nil {
-			d.stopLocked()
-			return driver.TurnResult{}, startFailure("acp session/new: %v", err, p)
+		if err := d.openSessionLocked(ctx, p, in.WorkDir); err != nil {
+			return driver.TurnResult{}, err
 		}
-		var out struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := json.Unmarshal(res, &out); err != nil || out.SessionID == "" {
-			d.stopLocked()
-			return driver.TurnResult{}, startFailure("acp session/new: %v", errors.New("missing sessionId"), p)
-		}
-		d.sessionID = out.SessionID
 	}
 
 	promptText := in.UserPrompt
@@ -199,6 +251,10 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("acp session/prompt: %w", ctx.Err()))
 		}
 		if p.exited() {
+			if d.resumed {
+				// A resumed session that kills the agent must not be resumed again.
+				_ = d.forgetSession()
+			}
 			d.stopLocked()
 			return driver.TurnResult{}, startFailure("acp process exited during prompt: %v", err, p)
 		}
@@ -212,6 +268,52 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 		return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("acp prompt stopped with %s", stop.StopReason))
 	}
 	return driver.TurnResult{}, nil
+}
+
+// openSessionLocked resumes the persisted session when the agent supports session/load and
+// otherwise starts a new one, persisting its id.
+func (d *Driver) openSessionLocked(ctx context.Context, p *process, workDir string) error {
+	argv, _ := d.cfg.ResolvedCommand()
+	if saved := d.loadSavedSession(argv); saved != "" && d.canLoad {
+		loadCtx, cancel := context.WithTimeout(ctx, sessionTimeout)
+		_, err := p.call(loadCtx, "session/load", map[string]any{
+			"sessionId":  saved,
+			"cwd":        workDir,
+			"mcpServers": []any{},
+		})
+		cancel()
+		if err == nil {
+			d.sessionID, d.resumed = saved, true
+			return nil
+		}
+		if p.exited() {
+			_ = d.forgetSession()
+			d.stopLocked()
+			return startFailure("acp session/load: %v", err, p)
+		}
+	}
+	sessCtx, cancel := context.WithTimeout(ctx, sessionTimeout)
+	res, err := p.call(sessCtx, "session/new", map[string]any{
+		"cwd":        workDir,
+		"mcpServers": []any{},
+	})
+	cancel()
+	if err != nil {
+		d.stopLocked()
+		return startFailure("acp session/new: %v", err, p)
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(res, &out); err != nil || out.SessionID == "" {
+		d.stopLocked()
+		return startFailure("acp session/new: %v", errors.New("missing sessionId"), p)
+	}
+	d.sessionID, d.resumed = out.SessionID, false
+	if err := d.saveSession(argv); err != nil {
+		return driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("persist acp session: %w", err))
+	}
+	return nil
 }
 
 type rpcResponse struct {
