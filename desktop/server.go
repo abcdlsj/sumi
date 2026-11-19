@@ -33,6 +33,7 @@ type runtime struct {
 	daemonC context.CancelFunc
 
 	daemonStatus string
+	closed       bool
 }
 
 func newRuntime(cfg Config, logger *slog.Logger) *runtime {
@@ -104,7 +105,7 @@ func (r *runtime) ensureServer(ctx context.Context) error {
 func (r *runtime) startDaemon(parent context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.daemon != nil || r.cfg.ComputerToken == "" {
+	if r.closed || r.daemon != nil || r.cfg.ComputerToken == "" {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -144,6 +145,9 @@ func (r *runtime) stopDaemon() {
 }
 
 func (r *runtime) shutdown() {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
 	r.stopDaemon()
 	r.mu.Lock()
 	srv := r.httpSrv
@@ -154,6 +158,24 @@ func (r *runtime) shutdown() {
 		_ = srv.Shutdown(ctx)
 		cancel()
 	}
+}
+
+func (r *runtime) hasComputerToken() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cfg.ComputerToken != ""
+}
+
+func (r *runtime) setComputerToken(token string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg.ComputerToken = token
+}
+
+func (r *runtime) setStatus(status string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.daemonStatus = status
 }
 
 func (r *runtime) status() string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -27,6 +28,23 @@ func main() {
 	}
 	rt.startDaemon(bootCtx)
 
+	startURL := cfg.ServerURL + "/"
+	var pr *pairer
+	var firstTicket *pairingTicket
+	if !rt.hasComputerToken() {
+		pr = newPairer(cfg.ServerURL, logger)
+		createCtx, cancel := context.WithTimeout(bootCtx, 10*time.Second)
+		t, err := pr.client.create(createCtx, pr.hostname, pr.osName)
+		cancel()
+		if err != nil {
+			logger.Warn("Cannot create pairing", "error", err.Error())
+		} else {
+			firstTicket = &t
+			startURL = pairURL(cfg.ServerURL, t)
+		}
+		rt.setStatus("waiting for confirmation")
+	}
+
 	app := application.New(application.Options{
 		Name:        "Sumi",
 		Description: "Sumi collaboration workspace",
@@ -44,7 +62,7 @@ func main() {
 		MinWidth:         900,
 		MinHeight:        600,
 		BackgroundColour: application.NewRGBA(244, 242, 236, 255),
-		URL:              cfg.ServerURL + "/",
+		URL:              startURL,
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		window.Hide()
@@ -67,17 +85,47 @@ func main() {
 		statusItem.SetLabel("Computer: " + rt.status())
 	})
 	menu.AddSeparator()
+	pairCtx, stopPairing := context.WithCancel(bootCtx)
 	menu.Add("Quit").OnClick(func(*application.Context) {
+		stopPairing()
 		rt.shutdown()
 		app.Quit()
 	})
 	tray.SetMenu(menu)
+
+	if pr != nil {
+		// Menu and window updates from the pairing goroutine must run on the main thread.
+		refreshStatus := func() {
+			label := "Computer: " + rt.status()
+			application.InvokeAsync(func() { statusItem.SetLabel(label) })
+		}
+		pr.onURL = func(u string) { window.SetURL(u) }
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+			go func() {
+				secret, err := pr.run(pairCtx, firstTicket)
+				if err != nil {
+					return
+				}
+				next := Config{ServerURL: cfg.ServerURL, DataDir: cfg.DataDir, ComputerToken: secret}
+				if err := writeConfigAtomic(configPath(), next); err != nil {
+					logger.Error("Cannot write desktop config", "error", err.Error())
+					rt.setStatus("error")
+					refreshStatus()
+					return
+				}
+				rt.setComputerToken(secret)
+				rt.startDaemon(bootCtx)
+				refreshStatus()
+			}()
+		})
+	}
 
 	code := 0
 	if err := app.Run(); err != nil {
 		logger.Error("Desktop shell exited with error", "error", err.Error())
 		code = 1
 	}
+	stopPairing()
 	rt.shutdown()
 	os.Exit(code)
 }

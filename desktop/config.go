@@ -10,7 +10,7 @@ import (
 
 const defaultServerURL = "http://127.0.0.1:8087"
 
-// Config is the desktop shell's only persistent state. It is written by `sumi pair`.
+// Config is the desktop shell's only persistent state. It is written by confirm-based pairing or `sumi pair`.
 type Config struct {
 	ServerURL     string `json:"server_url"`
 	ComputerToken string `json:"computer_token"`
