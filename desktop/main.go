@@ -4,14 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/icons"
+
+	"github.com/abcdlsj/sumi/internal/cli"
 )
 
 func main() {
+	// The daemon exposes this binary to agents as <data_dir>/bin/sumi; run as the Agent CLI then.
+	if filepath.Base(os.Args[0]) == "sumi" {
+		os.Exit(cli.Run(os.Args[1:], os.Stdout))
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg, err := loadConfig()
