@@ -23,14 +23,30 @@ export interface Space {
   created_at: string;
 }
 
+export type ACPProvider = "pi" | "codex" | "claude";
+
+/** Browser-facing driver config; the API key is never returned, only whether one is set. */
+export interface DriverConfigView {
+  base_url?: string;
+  model?: string;
+  api_key_set?: boolean;
+  provider?: ACPProvider;
+  command?: string[];
+}
+
+export type DriverConfigInput =
+  | { base_url: string; model: string; api_key?: string }
+  | { provider: ACPProvider; command?: string[] };
+
 export interface AgentInfo {
   computer_id?: string;
   role_text: string;
   driver_kind: DriverKind;
-  driver_config_json: string;
+  driver_config?: DriverConfigView;
   runtime_state: RuntimeState;
   focus_conversation_id?: string;
   last_error_code?: string;
+  last_error_detail?: string;
   runtime_state_updated_at?: string;
 }
 
@@ -53,6 +69,7 @@ export interface Computer {
   os: string;
   connection_status: "online" | "offline";
   daemon_version?: string;
+  acp_providers?: ACPProvider[];
   last_seen_at?: string;
   created_at: string;
 }
@@ -314,11 +331,22 @@ export const api = {
     ),
   createAgent: (
     spaceSlug: string,
-    payload: { display_name: string; role_text: string; computer_id: string; driver_kind: DriverKind },
+    payload: {
+      display_name: string;
+      role_text: string;
+      computer_id: string;
+      driver_kind: DriverKind;
+      driver_config: DriverConfigInput;
+    },
   ) =>
     request<{ agent: Member }>(`/api/v1/spaces/${spaceSlug}/agents`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  updateAgentDriver: (spaceSlug: string, agentID: string, driver_kind: DriverKind, driver_config: DriverConfigInput) =>
+    request<{ agent: Member }>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/driver`, {
+      method: "PUT",
+      body: JSON.stringify({ driver_kind, driver_config }),
     }),
   controlAgent: (spaceSlug: string, agentID: string, action: "restart" | "reset_session") =>
     request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/control`, {

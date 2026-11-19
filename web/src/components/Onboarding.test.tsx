@@ -35,7 +35,7 @@ describe("Onboarding", () => {
     wrap(
       <Onboarding step="account" user={null} spaceSlug="" onAuthenticated={onAuth} onSpaceCreated={noop} onComputerDone={noop} onFinish={noop} onLogout={noop} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Create account" }));
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "li.si@example.com" } });
     expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("li_si");
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret-123" } });

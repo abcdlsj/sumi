@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, Laptop, Monitor, Terminal } from "lucide-react";
-import { api, ApiError, nameInput, sanitizeDisplayName, type Computer, type DriverKind } from "../api";
+import { Apple, Bot, Laptop, Monitor, Terminal } from "lucide-react";
+import { api, ApiError, type Computer, type Member } from "../api";
 import { clearPendingPairing, readPendingPairing, type PendingPairing } from "../pairing";
+import { AgentForm } from "./AgentForm";
 import { Button, CopyButton, Field, Segmented, Skeleton, useAction } from "./ui";
 
 function useSpaceBoot(spaceSlug: string, poll: boolean) {
@@ -13,32 +14,34 @@ function useSpaceBoot(spaceSlug: string, poll: boolean) {
   });
 }
 
-function StepHeading({ icon, title, body }: { icon: React.ReactNode; title: string; body: React.ReactNode }) {
+export function StepHeading({ icon, title, body }: { icon: ReactNode; title: string; body: ReactNode }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="w-9 h-9 rounded-[8px] border border-line bg-paper-2 text-ink-2 flex items-center justify-center shrink-0">
-        {icon}
-      </div>
-      <div>
-        <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-        <p className="mt-0.5 text-[12.5px] text-mute leading-relaxed">{body}</p>
+    <div className="flex items-start gap-3.5">
+      <div className="size-10 rounded-[12px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0 [&>svg]:size-5">{icon}</div>
+      <div className="pt-0.5">
+        <h1 className="text-[18px] font-semibold text-fg leading-tight">{title}</h1>
+        <p className="mt-1 text-[14px] text-fg-3 leading-relaxed">{body}</p>
       </div>
     </div>
   );
 }
 
-function ComputerRow({ c }: { c: Computer }) {
+export function ComputerRow({ c }: { c: Computer }) {
   const online = c.connection_status === "online";
   return (
-    <div className="h-11 px-3 flex items-center justify-between text-[13px] animate-rise-in">
-      <span className="flex items-center gap-2.5 min-w-0">
-        <Monitor className="w-4 h-4 text-mute shrink-0" />
-        <span className="font-medium truncate">{c.name}</span>
-        <span className="text-[11.5px] text-faint truncate">{c.hostname}</span>
+    <div className="h-14 px-4 flex items-center gap-3 animate-rise-in">
+      <span className="size-9 rounded-[10px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
+        <Monitor className="size-4" />
       </span>
-      <span className={`inline-flex items-center gap-1.5 text-[12px] ${online ? "text-work" : "text-faint"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${online ? "bg-work" : "bg-[#BDB9AE] animate-breathe"}`} />
-        {online ? "Online" : "Waiting…"}
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-medium text-fg truncate">{c.name}</span>
+        <span className="block text-[12.5px] text-fg-3 truncate">
+          {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
+        </span>
+      </span>
+      <span className={`inline-flex items-center gap-2 text-[13px] font-medium ${online ? "text-work" : "text-fg-3"}`}>
+        <span className={`size-2 rounded-full ${online ? "bg-work" : "bg-fg-4 animate-breathe"}`} />
+        {online ? "Online" : "Waiting for connection"}
       </span>
     </div>
   );
@@ -68,35 +71,31 @@ export function PairingCard({
     if (infoQ.data && !name) setName(infoQ.data.hostname.replace(/\.local$/, ""));
   }, [infoQ.data]);
 
-  const gone =
-    (infoQ.error instanceof ApiError && infoQ.error.status === 404) ||
-    (infoQ.data && infoQ.data.status !== "pending");
+  const dismiss = () => {
+    clearPendingPairing();
+    onDismiss?.();
+  };
 
   if (infoQ.isLoading) {
     return (
-      <div className="border border-line rounded-[8px] p-4 space-y-3">
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-3 w-56" />
-        <Skeleton className="h-9 w-full rounded-[6px]" />
+      <div className="rounded-[14px] border border-line p-5 space-y-3">
+        <Skeleton className="h-5 w-44" />
+        <Skeleton className="h-4 w-60" />
+        <Skeleton className="h-10 w-full rounded-[9px]" />
       </div>
     );
   }
 
+  const gone = (infoQ.error instanceof ApiError && infoQ.error.status === 404) || (infoQ.data && infoQ.data.status !== "pending");
   if (gone || !infoQ.data) {
     return (
-      <div className="border border-line rounded-[8px] p-4 text-[12.5px] text-mute animate-fade-in">
+      <div className="rounded-[14px] border border-line bg-subtle p-5 text-[14px] text-fg-2 animate-fade-in">
         {infoQ.data?.status === "confirmed"
           ? "This computer is already connected."
-          : "This pairing request has expired. The desktop app will issue a new one automatically."}
+          : "This pairing request has expired. The desktop app issues a new one automatically."}
         {onDismiss && (
-          <div className="mt-3">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                clearPendingPairing();
-                onDismiss();
-              }}
-            >
+          <div className="mt-4">
+            <Button variant="secondary" size="sm" onClick={dismiss}>
               Dismiss
             </Button>
           </div>
@@ -117,39 +116,35 @@ export function PairingCard({
           onConfirmed();
         });
       }}
-      className="border border-ink rounded-[8px] overflow-hidden animate-rise-in"
+      className="rounded-[14px] border border-accent shadow-[var(--ring)] bg-card overflow-hidden animate-rise-in"
     >
-      <div className="px-4 py-3 bg-paper-2 border-b border-line flex items-center gap-3">
-        <Laptop className="w-5 h-5 text-ink shrink-0" />
+      <div className="px-5 py-4 flex items-center gap-3.5 border-b border-line">
+        <span className="size-11 rounded-[12px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0">
+          <Laptop className="size-5" />
+        </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] font-semibold truncate">{info.hostname}</div>
-          <div className="text-[11.5px] text-mute">{info.os === "macos" ? "macOS" : "Linux"} · Sumi desktop app</div>
+          <div className="text-[15px] font-semibold text-fg truncate">{info.hostname}</div>
+          <div className="text-[13px] text-fg-3 flex items-center gap-1.5">
+            {info.os === "macos" && <Apple className="size-3.5" />}
+            {info.os === "macos" ? "macOS" : "Linux"} · Sumi desktop app
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-[10.5px] uppercase tracking-wider text-faint">Code</div>
-          <div className="font-mono-num text-[14px] font-semibold tracking-[0.12em]">{pairing.code}</div>
+          <div className="text-[12px] text-fg-3">Code</div>
+          <div className="font-mono text-[17px] font-semibold tracking-[0.18em] text-fg">{pairing.code}</div>
         </div>
       </div>
-      <div className="p-4 space-y-3">
+      <div className="p-5 space-y-4">
         <Field label="Computer name" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
-        <p className="text-[11.5px] text-mute leading-relaxed">
-          Confirm only if the code matches the one shown by the Sumi app on this machine. Agents you create here run
-          on it.
+        <p className="text-[13px] text-fg-3 leading-relaxed">
+          Confirm only if this code matches the one in the Sumi app on your computer. Agents you create here will run on it.
         </p>
         <div className="flex items-center gap-2">
-          <Button type="submit" size="md" loading={busy} className="flex-1">
+          <Button type="submit" size="lg" loading={busy} className="flex-1">
             Connect this computer
           </Button>
           {onDismiss && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              onClick={() => {
-                clearPendingPairing();
-                onDismiss();
-              }}
-            >
+            <Button type="button" variant="ghost" size="lg" onClick={dismiss}>
               Not now
             </Button>
           )}
@@ -159,103 +154,103 @@ export function PairingCard({
   );
 }
 
-export function ComputerStep({ spaceSlug, onNext }: { spaceSlug: string; onNext: () => void }) {
+export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { spaceSlug: string; onNext: () => void; nextLabel?: string }) {
   const qc = useQueryClient();
   const [pairing, setPairing] = useState<PendingPairing | null>(() => readPendingPairing());
-  const [compName, setCompName] = useState("my-mac");
+  const [compName, setCompName] = useState("my-computer");
   const [osName, setOsName] = useState<"macos" | "linux">("macos");
-  const [issued, setIssued] = useState<{ id: string; token: string } | null>(null);
-  const [showManual, setShowManual] = useState(false);
+  const [issued, setIssued] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
   const { busy, run } = useAction();
   const bootQ = useSpaceBoot(spaceSlug, true);
   const computers = bootQ.data?.computers ?? [];
   const anyOnline = computers.some((c) => c.connection_status === "online");
-  const command = issued ? `sumi computer --server ${window.location.origin} --token ${issued.token}` : "";
+  const command = issued ? `sumi computer --server ${window.location.origin} --token ${issued}` : "";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <StepHeading
-        icon={<Monitor className="w-4.5 h-4.5" />}
+        icon={<Monitor />}
         title="Connect a computer"
-        body="Agents live on a computer you own. Their workspace, memory and model credentials never leave it."
+        body="Agents run on a computer you own. Their workspace, memory and coding-agent logins stay on that machine."
       />
 
       {pairing ? (
         <PairingCard spaceSlug={spaceSlug} pairing={pairing} onConfirmed={() => setPairing(null)} onDismiss={() => setPairing(null)} />
-      ) : !issued && computers.length > 0 && !showManual ? (
-        <button type="button" onClick={() => setShowManual(true)} className="text-[12.5px] text-mute hover:text-ink underline decoration-field underline-offset-2">
-          Connect another computer with a command
-        </button>
-      ) : !issued ? (
-        <form
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            void run(async () => {
-              const res = await api.pairComputer(spaceSlug, compName.trim(), compName.trim(), osName);
-              setIssued({ id: res.computer.id, token: res.token });
-              void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-            });
-          }}
-          className="space-y-3"
-        >
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <Field label="Computer name" value={compName} onChange={(e) => setCompName(e.target.value)} required />
-            <Segmented
-              value={osName}
-              onChange={setOsName}
-              options={[
-                { value: "macos", label: "macOS" },
-                { value: "linux", label: "Linux" },
-              ]}
-            />
-          </div>
-          <Button type="submit" size="md" variant={computers.length > 0 ? "secondary" : "primary"} loading={busy} className="w-full">
-            <Terminal className="w-4 h-4" /> Generate connect command
-          </Button>
-          <p className="text-[11.5px] text-faint text-center">Using the Sumi desktop app? It connects itself — just confirm here.</p>
-        </form>
-      ) : (
-        <div className="space-y-2 animate-rise-in">
-          <div className="text-[12px] font-medium text-ink-2">Run this on {compName}:</div>
-          <div className="rounded-[8px] border border-line bg-paper-2 p-3 flex items-start gap-3">
-            <code className="flex-1 font-mono-num text-[11.5px] break-all text-ink-2 leading-relaxed">{command}</code>
+      ) : issued ? (
+        <div className="space-y-2.5 animate-rise-in">
+          <div className="text-[14px] font-medium text-fg">Run this on {compName}</div>
+          <div className="rounded-[12px] border border-line bg-subtle p-3.5 flex items-start gap-3">
+            <Terminal className="size-4 text-fg-3 mt-0.5 shrink-0" />
+            <code className="flex-1 font-mono text-[13px] break-all text-fg-2 leading-relaxed">{command}</code>
             <CopyButton text={command} />
           </div>
-          <p className="text-[11.5px] text-faint">The token is shown once. Keep it private.</p>
+          <p className="text-[13px] text-fg-3">The token is shown once. Keep it private.</p>
+        </div>
+      ) : computers.length > 0 && !manual ? null : (
+        <div className="space-y-4">
+          <div className="rounded-[12px] border border-line bg-subtle px-4 py-3.5 flex items-start gap-3">
+            <Laptop className="size-5 text-fg-2 shrink-0 mt-0.5" />
+            <div className="text-[13.5px] text-fg-2 leading-relaxed">
+              <span className="font-medium text-fg">Using the Sumi desktop app?</span> Open it on your Mac — it asks to join and you confirm it here with one click.
+            </div>
+          </div>
+          <form
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              void run(async () => {
+                const res = await api.pairComputer(spaceSlug, compName.trim(), compName.trim(), osName);
+                setIssued(res.token);
+                void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+              });
+            }}
+            className="space-y-3"
+          >
+            <div className="text-[13px] font-medium text-fg-2">Or connect any machine with a command</div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Field aria-label="Computer name" value={compName} onChange={(e) => setCompName(e.target.value)} required />
+              </div>
+              <Segmented
+                value={osName}
+                onChange={setOsName}
+                options={[
+                  { value: "macos", label: "macOS" },
+                  { value: "linux", label: "Linux" },
+                ]}
+              />
+            </div>
+            <Button type="submit" variant="secondary" loading={busy} icon={<Terminal />} className="w-full">
+              Generate connect command
+            </Button>
+          </form>
         </div>
       )}
 
       {computers.length > 0 && (
-        <div className="border border-line rounded-[8px] divide-y divide-line">
+        <div className="rounded-[12px] border border-line bg-card divide-y divide-line overflow-hidden">
           {computers.map((c) => (
             <ComputerRow key={c.id} c={c} />
           ))}
         </div>
       )}
+      {computers.length > 0 && !manual && !issued && !pairing && (
+        <button type="button" onClick={() => setManual(true)} className="text-[13.5px] text-accent-text hover:underline underline-offset-2">
+          Connect another computer
+        </button>
+      )}
 
       <div className="flex items-center justify-between pt-1">
-        <button type="button" onClick={onNext} className="text-[12.5px] text-mute hover:text-ink">
+        <button type="button" onClick={onNext} className="text-[14px] text-fg-3 hover:text-fg">
           Skip for now
         </button>
-        <Button size="md" disabled={!anyOnline && computers.length === 0} onClick={onNext}>
-          {anyOnline ? (
-            <>
-              <CheckCircle2 className="w-4 h-4" /> Continue
-            </>
-          ) : (
-            "Continue"
-          )}
+        <Button size="lg" disabled={computers.length === 0} onClick={onNext}>
+          {anyOnline || computers.length === 0 ? nextLabel : `${nextLabel} while it connects`}
         </Button>
       </div>
     </div>
   );
 }
-
-const ROLE_PRESETS = [
-  "Senior engineer. Reads the codebase, proposes small reviewed changes.",
-  "Research assistant. Collects sources and writes concise summaries.",
-  "Project coordinator. Breaks requests into Tasks and tracks them.",
-];
 
 export function AgentStep({
   spaceSlug,
@@ -263,125 +258,54 @@ export function AgentStep({
   onSkip,
 }: {
   spaceSlug: string;
-  onDone: (agentMemberID: string) => void;
+  onDone: (agent: Member) => void;
   onSkip: () => void;
 }) {
   const qc = useQueryClient();
   const bootQ = useSpaceBoot(spaceSlug, false);
   const computers = bootQ.data?.computers ?? [];
-  const [computerID, setComputerID] = useState("");
-  const [name, setName] = useState("Lin");
-  const [driver, setDriver] = useState<DriverKind>("builtin");
-  const [role, setRole] = useState(ROLE_PRESETS[0]);
-  const { busy, run } = useAction();
-
-  const chosen = computerID || computers.find((c) => c.connection_status === "online")?.id || computers[0]?.id || "";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <StepHeading
-        icon={<Bot className="w-4.5 h-4.5" />}
+        icon={<Bot />}
         title="Create your first agent"
-        body="An agent is a persistent teammate with its own role and memory. You can add more later."
+        body="An agent is a persistent teammate with its own role, memory and workspace. You can add more later."
       />
       {bootQ.isLoading ? (
         <div className="space-y-3">
-          <Skeleton className="h-9 w-full rounded-[6px]" />
-          <Skeleton className="h-20 w-full rounded-[6px]" />
+          <Skeleton className="h-14 w-full rounded-[12px]" />
+          <Skeleton className="h-24 w-full rounded-[12px]" />
         </div>
       ) : computers.length === 0 ? (
-        <div className="rounded-[8px] border border-line bg-paper-2 p-4 text-[12.5px] text-mute">
+        <div className="rounded-[12px] border border-line bg-subtle p-4 text-[14px] text-fg-2">
           Connect a computer first. Agents need a computer to run on.
         </div>
       ) : (
-        <form
-          id="agent-step"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void run(async () => {
-              const res = await api.createAgent(spaceSlug, {
-                display_name: sanitizeDisplayName(name),
-                role_text: role.trim(),
-                computer_id: chosen,
-                driver_kind: driver,
-              });
-              void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-              onDone(res.agent.id);
-            });
+        <AgentForm
+          spaceSlug={spaceSlug}
+          computers={computers}
+          onCreated={(agent) => {
+            void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+            onDone(agent);
           }}
-          className="space-y-3.5"
-        >
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <Field
-              label="Name"
-              value={name}
-              onChange={(e) => setName(nameInput(e.target.value))}
-              hint="Letters, digits and underscores. Others @mention it by this name."
-              required
-            />
-            <div className="pb-[22px]">
-              <Segmented
-                value={driver}
-                onChange={setDriver}
-                options={[
-                  { value: "builtin", label: "Builtin" },
-                  { value: "acp", label: "ACP" },
-                ]}
-              />
-            </div>
-          </div>
-          {computers.length > 1 && (
-            <div className="space-y-1">
-              <label className="block text-[12px] font-medium text-ink-2">Runs on</label>
-              <select
-                value={chosen}
-                onChange={(e) => setComputerID(e.target.value)}
-                className="w-full h-9 px-2.5 rounded-[6px] border border-field bg-white text-[13px] outline-none focus:border-ink"
-              >
-                {computers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} · {c.connection_status}
-                  </option>
-                ))}
-              </select>
+          footer={(submit) => (
+            <div className="flex items-center justify-between pt-1">
+              <button type="button" onClick={onSkip} className="text-[14px] text-fg-3 hover:text-fg">
+                Skip for now
+              </button>
+              {submit}
             </div>
           )}
-          <div className="space-y-1">
-            <label htmlFor="agent-role" className="block text-[12px] font-medium text-ink-2">
-              Role
-            </label>
-            <textarea
-              id="agent-role"
-              rows={3}
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="w-full px-3 py-2 rounded-[6px] border border-field hover:border-[#BDB9AE] focus:border-ink bg-white text-[13px] outline-none resize-none transition-colors"
-            />
-            <div className="flex flex-wrap gap-1.5">
-              {ROLE_PRESETS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setRole(p)}
-                  className={`h-6 px-2 rounded-[5px] border text-[11.5px] transition-colors ${
-                    role === p ? "border-ink text-ink bg-paper-2" : "border-line text-mute hover:border-field hover:text-ink"
-                  }`}
-                >
-                  {p.split(".")[0]}
-                </button>
-              ))}
-            </div>
-          </div>
-        </form>
+        />
       )}
-      <div className="flex items-center justify-between pt-1">
-        <button type="button" onClick={onSkip} className="text-[12.5px] text-mute hover:text-ink">
-          Skip for now
-        </button>
-        <Button form="agent-step" type="submit" size="md" loading={busy} disabled={computers.length === 0 || !name}>
-          Create agent
-        </Button>
-      </div>
+      {computers.length === 0 && (
+        <div className="flex justify-start">
+          <button type="button" onClick={onSkip} className="text-[14px] text-fg-3 hover:text-fg">
+            Skip for now
+          </button>
+        </div>
+      )}
     </div>
   );
 }

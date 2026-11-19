@@ -1,38 +1,52 @@
-import { useState, type FormEvent } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, CheckCircle2, CircleDashed, Inbox, MessageSquare, Monitor, Plus, Users } from "lucide-react";
 import {
-  api,
-  formatClock,
-  formatDay,
-  type BootstrapData,
-  type InboxItem,
-  type Task,
-  type TaskStatus,
-} from "../api";
+  AtSign,
+  Bot,
+  CheckCircle2,
+  CircleDot,
+  Hash,
+  Inbox,
+  LogOut,
+  MessageSquare,
+  Monitor,
+  Moon,
+  Plus,
+  Sun,
+  SunMoon,
+  Users,
+} from "lucide-react";
+import { api, formatClock, formatDay, type BootstrapData, type InboxItem, type Task, type TaskStatus } from "../api";
+import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
-import { MemberAvatar, RuntimeDot, TaskStatusGlyph } from "./Identity";
+import { agentStatusText, MemberAvatar } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
-import { Button, EmptyState, Segmented, useAction } from "./ui";
+import { Badge, Button, EmptyState, Segmented, TaskStatusIcon, taskStatusLabel, useAction } from "./ui";
 
 export type InboxFilter = "needs_me" | "unread" | "all";
 export type TaskFilter = "active" | "mine" | "done";
+export type AdminTab = "agents" | "computers" | "people" | "settings";
 
-const REASON: Record<string, string> = {
-  dm: "Direct message",
-  mention: "Mentioned you",
-  task: "Task",
-  thread: "Thread",
-  following: "Following",
-  channel: "Channel",
-  channel_all: "Channel",
+const REASON: Record<string, { label: string; icon: ReactNode }> = {
+  dm: { label: "Direct message", icon: <MessageSquare /> },
+  mention: { label: "Mentioned you", icon: <AtSign /> },
+  task: { label: "Task", icon: <CircleDot /> },
+  thread: { label: "Thread reply", icon: <MessageSquare /> },
+  following: { label: "Following", icon: <MessageSquare /> },
+  channel: { label: "Channel", icon: <Hash /> },
+  channel_all: { label: "Channel", icon: <Hash /> },
 };
 
-function ViewHeader({ title, children }: { title: string; children?: React.ReactNode }) {
+export function ViewHeader({ title, icon, children, actions }: { title: string; icon?: ReactNode; children?: ReactNode; actions?: ReactNode }) {
   return (
-    <header className="h-11 px-4 border-b border-line flex items-center gap-3 shrink-0">
-      <h1 className="text-[14px] font-semibold text-ink">{title}</h1>
+    <header className="h-[52px] px-6 border-b border-line flex items-center gap-4 shrink-0 bg-panel">
+      <h1 className="flex items-center gap-2 text-[15px] font-semibold text-fg [&>svg]:size-4 [&>svg]:text-fg-3">
+        {icon}
+        {title}
+      </h1>
       {children}
+      <span className="flex-1" />
+      {actions}
     </header>
   );
 }
@@ -58,36 +72,30 @@ export function InboxView({
     queryFn: () => api.listInbox(spaceSlug, filter).then((r) => r.items),
   });
 
-  function refresh() {
-    void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
   function dismiss(it: InboxItem, fn: () => Promise<unknown>) {
     setLeaving((s) => new Set(s).add(it.conversation_id));
     void run(fn).then((ok) => {
-      if (!ok) {
+      if (!ok)
         setLeaving((s) => {
           const n = new Set(s);
           n.delete(it.conversation_id);
           return n;
         });
-      }
-      refresh();
+      void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
     });
   }
 
   function open(it: InboxItem) {
     if (it.kind === "task" && it.task_id) onOpenDetail({ kind: "task", taskID: it.task_id });
-    else if (it.kind === "thread")
-      onOpenDetail({ kind: "thread", threadConvID: it.conversation_id, rootMessageID: "", parentSlug: it.parent_slug ?? "" });
+    else if (it.kind === "thread") onOpenDetail({ kind: "thread", threadConvID: it.conversation_id, rootMessageID: "", parentSlug: it.parent_slug ?? "" });
     else onOpenConversation(it.conversation_id);
   }
 
   const items = inboxQ.data ?? [];
   return (
-    <section className="flex flex-col h-full min-h-0">
-      <ViewHeader title="Inbox">
+    <section className="flex flex-col h-full min-h-0 bg-bg">
+      <ViewHeader title="Inbox" icon={<Inbox />}>
         <Segmented
           value={filter}
           onChange={onFilter}
@@ -103,70 +111,54 @@ export function InboxView({
           <InboxSkeleton />
         ) : items.length === 0 ? (
           <EmptyState
-            icon={<Inbox className="w-4.5 h-4.5" />}
+            icon={<CheckCircle2 />}
             title="You're all caught up"
-            body={
-              filter === "needs_me"
-                ? "DMs, @mentions, followed threads and Tasks assigned to you show up here."
-                : "Nothing unread right now."
-            }
+            body={filter === "needs_me" ? "DMs, @mentions, followed threads and Tasks assigned to you land here." : "Nothing unread right now."}
           />
         ) : (
-          <div className="divide-y divide-line animate-fade-in">
+          <div className="px-6 py-4 space-y-2 max-w-[920px] animate-fade-in">
             {items.map((it) => {
               const gone = leaving.has(it.conversation_id);
+              const reason = REASON[it.reason] ?? { label: it.reason, icon: <Hash /> };
               return (
                 <div
                   key={it.conversation_id}
-                  className={`group px-4 py-2.5 flex items-center justify-between gap-4 transition-[opacity,transform,background-color] duration-200 ${
-                    gone ? "opacity-0 translate-x-2 pointer-events-none" : ""
-                  } ${it.needs_attention ? "bg-warm-soft hover:bg-[#FDF2EA]" : "hover:bg-paper-2"}`}
+                  className={`group rounded-[12px] border bg-card px-4 py-3 flex items-center gap-3.5 transition-[opacity,transform,box-shadow,border-color] duration-200 hover:shadow-md ${
+                    gone ? "opacity-0 translate-x-3 pointer-events-none" : ""
+                  } ${it.needs_attention ? "border-warm/30" : "border-line"}`}
                 >
-                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => open(it)}>
-                    <div className="flex items-center gap-2 text-[12px]">
-                      {it.reason === "mention" ? (
-                        <AtSign className="w-3.5 h-3.5 text-warm" />
-                      ) : it.reason === "dm" ? (
-                        <MessageSquare className="w-3.5 h-3.5 text-warm" />
-                      ) : it.kind === "task" ? (
-                        <CircleDashed className="w-3.5 h-3.5 text-mute" />
-                      ) : null}
-                      <span className={`font-semibold ${it.needs_attention ? "text-warm" : "text-ink-2"}`}>
-                        {REASON[it.reason] ?? it.reason}
-                      </span>
-                      <span className="text-mute truncate">{it.title}</span>
-                      {it.unread_count > 1 && (
-                        <span className="font-mono-num text-[11px] text-faint">+{it.unread_count}</span>
-                      )}
-                      <span className="font-mono-num text-[11px] text-faint ml-auto shrink-0">{formatClock(it.latest_at)}</span>
+                  <span
+                    className={`size-9 rounded-[10px] flex items-center justify-center shrink-0 [&>svg]:size-4 ${
+                      it.needs_attention ? "bg-warm-soft text-warm" : "bg-subtle text-fg-3"
+                    }`}
+                  >
+                    {reason.icon}
+                  </span>
+                  <button className="min-w-0 flex-1 text-left" onClick={() => open(it)}>
+                    <div className="flex items-center gap-2 text-[13px]">
+                      <span className={`font-semibold ${it.needs_attention ? "text-warm" : "text-fg-2"}`}>{reason.label}</span>
+                      <span className="text-fg-4">·</span>
+                      <span className="text-fg-2 font-medium truncate">{it.title}</span>
+                      {it.unread_count > 1 && <Badge>{it.unread_count} new</Badge>}
                     </div>
-                    <p className="mt-0.5 text-[13px] text-ink truncate">
-                      {it.latest_author_name && <strong className="font-semibold">{it.latest_author_name}: </strong>}
-                      <span className="text-ink-2">{it.latest_preview}</span>
+                    <p className="mt-0.5 text-[14px] text-fg truncate">
+                      {it.latest_author_name && <span className="font-medium">{it.latest_author_name}: </span>}
+                      <span className="text-fg-2">{it.latest_preview}</span>
                     </p>
-                  </div>
+                  </button>
+                  <span className="tabular text-[12.5px] text-fg-3 shrink-0 w-12 text-right">{formatClock(it.latest_at)}</span>
                   <div className="flex items-center gap-1 shrink-0">
                     {(it.kind === "thread" || it.kind === "task") && it.following && (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="opacity-0 group-hover:opacity-100"
-                        onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}
-                      >
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}>
                         Unfollow
                       </Button>
                     )}
                     {(it.kind === "public" || it.kind === "private") && it.notify_level !== "mute" && (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="opacity-0 group-hover:opacity-100"
-                        onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}
-                      >
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}>
                         Mute
                       </Button>
                     )}
-                    <Button variant="secondary" size="xs" onClick={() => dismiss(it, () => api.markDone(spaceSlug, it.conversation_id))}>
+                    <Button variant="secondary" size="sm" icon={<CheckCircle2 />} onClick={() => dismiss(it, () => api.markDone(spaceSlug, it.conversation_id))}>
                       Done
                     </Button>
                   </div>
@@ -180,39 +172,31 @@ export function InboxView({
   );
 }
 
-const STATUS_ORDER: { status: TaskStatus; label: string }[] = [
-  { status: "in_progress", label: "In Progress" },
-  { status: "in_review", label: "In Review" },
-  { status: "todo", label: "To Do" },
-  { status: "done", label: "Done" },
-  { status: "closed", label: "Closed" },
-];
+const STATUS_ORDER: TaskStatus[] = ["in_progress", "in_review", "todo", "done", "closed"];
 
 function TaskRow({ t, onOpen }: { t: Task; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="w-full h-9 px-4 hover:bg-paper-2 flex items-center gap-4 text-left transition-colors">
-      <span className="flex items-center gap-2.5 min-w-0 flex-1">
-        <TaskStatusGlyph status={t.status} />
-        <span className="font-mono-num text-[12px] text-mute w-8 shrink-0">#{t.number}</span>
-        <span className="text-[13px] font-medium text-ink truncate">{t.title}</span>
-        {t.message_count > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-faint shrink-0">
-            <MessageSquare className="w-3 h-3" />
-            <span className="font-mono-num">{t.message_count}</span>
-          </span>
-        )}
-      </span>
-      <span className="w-32 flex items-center gap-1.5 text-[12px] text-ink-2 shrink-0 min-w-0">
+    <button onClick={onOpen} className="w-full h-12 px-4 hover:bg-subtle flex items-center gap-4 text-left transition-colors">
+      <TaskStatusIcon status={t.status} />
+      <span className="tabular text-[13px] text-fg-3 w-10 shrink-0">#{t.number}</span>
+      <span className="text-[14px] font-medium text-fg truncate flex-1">{t.title}</span>
+      {t.message_count > 0 && (
+        <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-3 shrink-0">
+          <MessageSquare className="size-3.5" />
+          <span className="tabular">{t.message_count}</span>
+        </span>
+      )}
+      <span className="w-28 text-[13px] text-fg-3 truncate shrink-0">{t.channel_slug ? `#${t.channel_slug}` : "DM"}</span>
+      <span className="w-36 flex items-center gap-2 text-[13px] text-fg-2 shrink-0 min-w-0">
         {t.assignee_member_id ? (
           <>
-            <MemberAvatar id={t.assignee_member_id} name={t.assignee_display_name ?? "?"} kind={t.assignee_kind ?? "human"} size="sm" />
+            <MemberAvatar id={t.assignee_member_id} name={t.assignee_display_name ?? "?"} kind={t.assignee_kind ?? "human"} size="xs" />
             <span className="truncate">{t.assignee_display_name}</span>
           </>
         ) : (
-          <span className="text-faint">Unassigned</span>
+          <span className="text-fg-4">Unassigned</span>
         )}
       </span>
-      <span className="w-28 text-right text-[12px] text-faint truncate shrink-0">{t.channel_slug ? `#${t.channel_slug}` : "DM"}</span>
     </button>
   );
 }
@@ -230,23 +214,20 @@ export function TasksView({
 }) {
   const tasksQ = useQuery({
     queryKey: ["tasks", spaceSlug, filter],
-    queryFn: () =>
-      api.listTasks(spaceSlug, filter === "done" ? "done" : "active", filter === "mine" ? "mine" : "").then((r) => r.tasks),
+    queryFn: () => api.listTasks(spaceSlug, filter === "done" ? "done" : "active", filter === "mine" ? "mine" : "").then((r) => r.tasks),
   });
   const tasks = tasksQ.data ?? [];
-  const groups = STATUS_ORDER.map((g) => ({ ...g, tasks: tasks.filter((t) => t.status === g.status) })).filter(
-    (g) => g.tasks.length > 0,
-  );
+  const groups = STATUS_ORDER.map((s) => ({ status: s, tasks: tasks.filter((t) => t.status === s) })).filter((g) => g.tasks.length > 0);
 
   return (
-    <section className="flex flex-col h-full min-h-0">
-      <ViewHeader title="Tasks">
+    <section className="flex flex-col h-full min-h-0 bg-bg">
+      <ViewHeader title="Tasks" icon={<CheckCircle2 />}>
         <Segmented
           value={filter}
           onChange={onFilter}
           options={[
             { value: "active", label: "Active" },
-            { value: "mine", label: "Mine" },
+            { value: "mine", label: "Assigned to me" },
             { value: "done", label: "Done" },
           ]}
         />
@@ -256,20 +237,20 @@ export function TasksView({
           <RowListSkeleton />
         ) : groups.length === 0 ? (
           <EmptyState
-            icon={<CheckCircle2 className="w-4.5 h-4.5" />}
+            icon={<CheckCircle2 />}
             title={filter === "done" ? "No finished tasks yet" : filter === "mine" ? "Nothing assigned to you" : "No active tasks"}
             body="Hover any message in a channel and choose Task to turn it into tracked work."
           />
         ) : (
-          <div className="animate-fade-in">
+          <div className="px-6 py-5 space-y-5 animate-fade-in">
             {groups.map((g) => (
               <div key={g.status}>
-                <div className="sticky top-0 z-10 h-8 px-4 bg-paper/95 border-b border-line flex items-center gap-2 text-[11.5px] font-medium text-mute">
-                  <TaskStatusGlyph status={g.status} />
-                  <span>{g.label}</span>
-                  <span className="font-mono-num text-faint">{g.tasks.length}</span>
+                <div className="mb-2 px-1 flex items-center gap-2 text-[13px] font-semibold text-fg-2">
+                  <TaskStatusIcon status={g.status} size={14} />
+                  {taskStatusLabel(g.status)}
+                  <span className="tabular font-normal text-fg-4">{g.tasks.length}</span>
                 </div>
-                <div className="divide-y divide-line">
+                <div className="rounded-[12px] border border-line bg-card divide-y divide-line overflow-hidden">
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} t={t} onOpen={() => onOpenDetail({ kind: "task", taskID: t.id })} />
                   ))}
@@ -283,108 +264,159 @@ export function TasksView({
   );
 }
 
-export type AdminTab = "computers" | "members" | "settings";
+function SectionTitle({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-end justify-between gap-4 mb-3">
+      <div>
+        <h2 className="text-[16px] font-semibold text-fg">{title}</h2>
+        {body && <p className="text-[13.5px] text-fg-3 mt-0.5">{body}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
 
 export function AdminPanel({
-  spaceSlug,
   boot,
   tab,
   onTab,
   onInspectAgent,
-  onOpenSetup,
+  onNewAgent,
+  onConnectComputer,
+  theme,
+  onTheme,
   onLogout,
 }: {
-  spaceSlug: string;
   boot: BootstrapData;
   tab: AdminTab;
   onTab: (t: AdminTab) => void;
   onInspectAgent: (memberID: string) => void;
-  onOpenSetup: (step: "computer" | "agent") => void;
+  onNewAgent: () => void;
+  onConnectComputer: () => void;
+  theme: ThemePref;
+  onTheme: (t: ThemePref) => void;
   onLogout: () => void;
 }) {
-  const qc = useQueryClient();
-  const [agName, setAgName] = useState("");
-  const [agRole, setAgRole] = useState("");
-  const [agDriver, setAgDriver] = useState<"builtin" | "acp">("builtin");
-  const create = useAction();
-
-  async function handleCreateAgent(e: FormEvent) {
-    e.preventDefault();
-    const comp = boot.computers.find((c) => c.connection_status === "online") ?? boot.computers[0];
-    if (!comp || !agName.trim()) return;
-    const ok = await create.run(() =>
-      api.createAgent(spaceSlug, {
-        display_name: agName.trim(),
-        role_text: agRole.trim(),
-        computer_id: comp.id,
-        driver_kind: agDriver,
-      }),
-    );
-    if (!ok) return;
-    setAgName("");
-    setAgRole("");
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
   const humans = boot.members.filter((m) => m.kind === "human");
   const agents = boot.members.filter((m) => m.kind === "agent");
 
   return (
-    <section className="flex flex-col h-full min-h-0">
-      <ViewHeader title="Space">
+    <section className="flex flex-col h-full min-h-0 bg-bg">
+      <ViewHeader title={boot.space.name}>
         <Segmented
           value={tab}
           onChange={onTab}
           options={[
-            { value: "computers", label: "Computers" },
-            { value: "members", label: "Members" },
+            { value: "agents", label: <><Bot />Agents</> },
+            { value: "computers", label: <><Monitor />Computers</> },
+            { value: "people", label: <><Users />People</> },
             { value: "settings", label: "Settings" },
           ]}
         />
       </ViewHeader>
       <div key={tab} className="flex-1 overflow-y-auto scroll-thin animate-fade-in">
-        <div className="p-6 max-w-2xl space-y-6">
+        <div className="px-6 py-6 max-w-[960px]">
+          {tab === "agents" && (
+            <>
+              <SectionTitle
+                title="Agents"
+                body="Persistent teammates. Select one to see its runtime, driver and permissions."
+                action={
+                  <Button icon={<Plus />} onClick={onNewAgent}>
+                    New agent
+                  </Button>
+                }
+              />
+              {agents.length === 0 ? (
+                <div className="rounded-[14px] border border-dashed border-line-strong bg-card">
+                  <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+                  {agents.map((m) => {
+                    const comp = boot.computers.find((c) => c.id === m.agent?.computer_id);
+                    const st = m.agent?.runtime_state;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => onInspectAgent(m.id)}
+                        className="text-left rounded-[14px] border border-line bg-card p-4 hover:shadow-md hover:border-line-strong transition-[box-shadow,border-color]"
+                      >
+                        <div className="flex items-center gap-3">
+                          <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="lg" state={st} ring="var(--card)" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[15px] font-semibold text-fg truncate">{m.display_name}</div>
+                            <div className={`text-[13px] truncate ${st === "working" ? "text-work" : st === "error" ? "text-danger" : "text-fg-3"}`}>
+                              {agentStatusText(boot, m)}
+                            </div>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-[13.5px] text-fg-2 line-clamp-2 min-h-[42px] leading-relaxed">{m.agent?.role_text || "No role defined."}</p>
+                        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                          <Badge>{m.agent?.driver_kind === "acp" ? `ACP · ${m.agent.driver_config?.provider ?? "?"}` : `API · ${m.agent?.driver_config?.model ?? "?"}`}</Badge>
+                          {comp && (
+                            <Badge>
+                              <Monitor />
+                              {comp.name}
+                            </Badge>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
           {tab === "computers" && (
             <>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-[14px] font-semibold">Computers</h2>
-                  <p className="text-[12.5px] text-mute mt-0.5">Machines that host this space's agents.</p>
-                </div>
-                <Button onClick={() => onOpenSetup("computer")}>
-                  <Plus className="w-3.5 h-3.5" /> Connect computer
-                </Button>
-              </div>
+              <SectionTitle
+                title="Computers"
+                body="Machines that host this space's agents."
+                action={
+                  <Button icon={<Plus />} onClick={onConnectComputer}>
+                    Connect computer
+                  </Button>
+                }
+              />
               {boot.computers.length === 0 ? (
-                <div className="border border-dashed border-field rounded-[8px]">
+                <div className="rounded-[14px] border border-dashed border-line-strong bg-card">
                   <EmptyState
-                    icon={<Monitor className="w-4.5 h-4.5" />}
+                    icon={<Monitor />}
                     title="No computers yet"
-                    body="Open the Sumi desktop app on your Mac and confirm it, or run one command on any machine."
-                    action={<Button onClick={() => onOpenSetup("computer")}>Connect a computer</Button>}
+                    body="Open the Sumi desktop app and confirm it, or run one command on any machine."
+                    action={<Button onClick={onConnectComputer}>Connect a computer</Button>}
                   />
                 </div>
               ) : (
-                <div className="border border-line rounded-[8px] divide-y divide-line">
+                <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
                   {boot.computers.map((c) => {
-                    const hosted = agents.filter((a) => a.agent?.computer_id === c.id).length;
+                    const hosted = agents.filter((a) => a.agent?.computer_id === c.id);
+                    const online = c.connection_status === "online";
                     return (
-                      <div key={c.id} className="h-12 px-3.5 flex items-center justify-between text-[13px]">
-                        <span className="flex items-center gap-3 min-w-0">
-                          <Monitor className="w-4 h-4 text-mute shrink-0" />
-                          <span className="min-w-0">
-                            <span className="block font-medium truncate">{c.name}</span>
-                            <span className="block text-[11.5px] text-faint truncate">
-                              {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"} · {hosted} {hosted === 1 ? "agent" : "agents"}
+                      <div key={c.id} className="px-4 py-3.5 flex items-center gap-3.5">
+                        <span className="size-10 rounded-[11px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
+                          <Monitor className="size-5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[14.5px] font-semibold text-fg truncate">{c.name}</div>
+                          <div className="text-[13px] text-fg-3 truncate">
+                            {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
+                            {c.acp_providers && c.acp_providers.length > 0 && ` · ACP: ${c.acp_providers.join(", ")}`}
+                          </div>
+                        </div>
+                        <div className="flex -space-x-1.5">
+                          {hosted.slice(0, 5).map((a) => (
+                            <span key={a.id} className="rounded-[7px] ring-2 ring-[var(--card)]">
+                              <MemberAvatar id={a.id} name={a.display_name} kind="agent" size="sm" />
                             </span>
-                          </span>
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-[12px] ${c.connection_status === "online" ? "text-work" : "text-faint"}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${c.connection_status === "online" ? "bg-work" : "bg-[#BDB9AE]"}`} />
-                          {c.connection_status === "online" ? "Online" : c.last_seen_at ? `Last seen ${formatDay(c.last_seen_at)} ${formatClock(c.last_seen_at)}` : "Offline"}
-                        </span>
+                          ))}
+                        </div>
+                        <Badge tone={online ? "work" : "neutral"}>
+                          <span className={`size-1.5 rounded-full ${online ? "bg-work" : "bg-fg-4"}`} />
+                          {online ? "Online" : c.last_seen_at ? `Seen ${formatDay(c.last_seen_at)} ${formatClock(c.last_seen_at)}` : "Offline"}
+                        </Badge>
                       </div>
                     );
                   })}
@@ -393,87 +425,17 @@ export function AdminPanel({
             </>
           )}
 
-          {tab === "members" && (
+          {tab === "people" && (
             <>
-              <div>
-                <h2 className="text-[14px] font-semibold">Agents</h2>
-                <p className="text-[12.5px] text-mute mt-0.5">Persistent teammates. Select one to manage its runtime and permissions.</p>
-              </div>
-              {boot.computers.length === 0 ? (
-                <div className="p-3.5 rounded-[8px] border border-line bg-paper-2 text-[12.5px] text-mute flex items-center justify-between gap-3">
-                  Agents need a computer to run on.
-                  <Button variant="secondary" onClick={() => onOpenSetup("computer")}>
-                    Connect computer
-                  </Button>
-                </div>
-              ) : (
-                <form onSubmit={handleCreateAgent} className="p-3.5 border border-line rounded-[8px] space-y-2.5">
-                  <div className="grid grid-cols-[1fr_auto] gap-2">
-                    <input
-                      value={agName}
-                      onChange={(e) => setAgName(e.target.value.replace(/[^A-Za-z0-9_]/g, "").slice(0, 32))}
-                      placeholder="Name, e.g. Lin"
-                      className="h-8 px-2.5 rounded-[6px] border border-field focus:border-ink text-[13px] outline-none transition-colors"
-                      required
-                    />
-                    <Segmented
-                      value={agDriver}
-                      onChange={setAgDriver}
-                      options={[
-                        { value: "builtin", label: "Builtin" },
-                        { value: "acp", label: "ACP" },
-                      ]}
-                    />
-                  </div>
-                  <input
-                    value={agRole}
-                    onChange={(e) => setAgRole(e.target.value)}
-                    placeholder="Role, e.g. Backend engineer who reviews Go changes"
-                    className="w-full h-8 px-2.5 rounded-[6px] border border-field focus:border-ink text-[13px] outline-none transition-colors"
-                  />
-                  <Button type="submit" loading={create.busy} disabled={!agName}>
-                    <Plus className="w-3.5 h-3.5" /> Create agent
-                  </Button>
-                </form>
-              )}
-              {agents.length > 0 && (
-                <div className="border border-line rounded-[8px] divide-y divide-line">
-                  {agents.map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => onInspectAgent(m.id)}
-                      className="w-full h-11 px-3.5 flex items-center justify-between text-[13px] hover:bg-paper-2 transition-colors text-left"
-                    >
-                      <span className="flex items-center gap-2.5 min-w-0">
-                        <MemberAvatar id={m.id} name={m.display_name} kind="agent" />
-                        <span className="min-w-0">
-                          <span className="block font-medium truncate">{m.display_name}</span>
-                          <span className="block text-[11.5px] text-faint truncate">{m.agent?.role_text || "No role"}</span>
-                        </span>
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 text-[12px] text-mute capitalize shrink-0">
-                        <RuntimeDot state={m.agent?.runtime_state} />
-                        {m.agent?.runtime_state ?? "offline"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div>
-                <h2 className="text-[14px] font-semibold flex items-center gap-2">
-                  <Users className="w-4 h-4 text-mute" /> People
-                </h2>
-              </div>
-              <div className="border border-line rounded-[8px] divide-y divide-line">
+              <SectionTitle title="People" body="Humans in this space." />
+              <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
                 {humans.map((m) => (
-                  <div key={m.id} className="h-11 px-3.5 flex items-center justify-between text-[13px]">
-                    <span className="flex items-center gap-2.5">
-                      <MemberAvatar id={m.id} name={m.display_name} kind="human" />
-                      <span className="font-medium">{m.display_name}</span>
-                      {m.id === boot.current_member.id && <span className="text-[11.5px] text-faint">you</span>}
-                    </span>
-                    <span className="text-[12px] text-mute capitalize">{m.access_level}</span>
+                  <div key={m.id} className="px-4 h-14 flex items-center gap-3">
+                    <MemberAvatar id={m.id} name={m.display_name} kind="human" size="md" />
+                    <span className="text-[14.5px] font-medium text-fg">{m.display_name}</span>
+                    {m.id === boot.current_member.id && <Badge>You</Badge>}
+                    <span className="flex-1" />
+                    <span className="text-[13px] text-fg-3 capitalize">{m.access_level}</span>
                   </div>
                 ))}
               </div>
@@ -481,18 +443,35 @@ export function AdminPanel({
           )}
 
           {tab === "settings" && (
-            <div className="space-y-4 text-[13px]">
-              <div className="grid grid-cols-[120px_1fr] gap-y-2.5 border border-line rounded-[8px] p-4">
-                <span className="text-mute">Space</span>
-                <span className="font-medium">{boot.space.name}</span>
-                <span className="text-mute">Address</span>
-                <span className="font-mono-num">/{boot.space.slug}</span>
-                <span className="text-mute">Account</span>
-                <span>
-                  {boot.current_member.display_name} <span className="text-faint capitalize">· {boot.current_member.access_level}</span>
-                </span>
+            <div className="space-y-8">
+              <div>
+                <SectionTitle title="Appearance" />
+                <Segmented
+                  value={theme}
+                  onChange={onTheme}
+                  options={[
+                    { value: "system", label: <><SunMoon />System</> },
+                    { value: "light", label: <><Sun />Light</> },
+                    { value: "dark", label: <><Moon />Dark</> },
+                  ]}
+                />
               </div>
-              <Button variant="danger" onClick={onLogout}>
+              <div>
+                <SectionTitle title="Space" />
+                <div className="rounded-[14px] border border-line bg-card divide-y divide-line text-[14px]">
+                  {[
+                    ["Name", boot.space.name],
+                    ["Address", `/${boot.space.slug}`],
+                    ["Your role", boot.current_member.access_level],
+                  ].map(([k, v]) => (
+                    <div key={k} className="px-4 h-12 flex items-center">
+                      <span className="w-40 text-fg-3">{k}</span>
+                      <span className="text-fg font-medium">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Button variant="danger" icon={<LogOut />} onClick={onLogout}>
                 Sign out
               </Button>
             </div>

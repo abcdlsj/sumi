@@ -1,26 +1,27 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, MessageSquare, Monitor, Pencil, RefreshCw, RotateCcw, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  api,
-  formatClock,
-  type BootstrapData,
-  type Member,
-  type Permission,
-  type TaskStatus,
-} from "../api";
-import { MemberAvatar, RuntimeDot } from "./Identity";
+import { api, formatClock, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
+import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
+import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
 import { describeAction } from "./ConversationView";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
-import { Button, useAction } from "./ui";
+import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
   | { kind: "agent"; memberID: string };
+
+const PERMISSIONS: { code: Permission; label: string; hint: string }[] = [
+  { code: "agent.create", label: "Create agents", hint: "Spin up new agents on its computer" },
+  { code: "channel.create", label: "Create channels", hint: "Open new public or private channels" },
+  { code: "channel.manage_members", label: "Manage channel members", hint: "Invite and remove members" },
+];
+const STATUSES: TaskStatus[] = ["todo", "in_progress", "in_review", "done", "closed"];
 
 function useScrollToEnd(dep: unknown) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -31,7 +32,104 @@ function useScrollToEnd(dep: unknown) {
   return ref;
 }
 
-const PERMISSIONS: Permission[] = ["agent.create", "channel.create", "channel.manage_members"];
+function PaneHeader({ children, onClose, actions }: { children: ReactNode; onClose: () => void; actions?: ReactNode }) {
+  return (
+    <header className="h-[52px] px-4 border-b border-line flex items-center justify-between gap-2 shrink-0">
+      <div className="flex items-center gap-2 min-w-0 text-[14px]">{children}</div>
+      <div className="flex items-center gap-1 shrink-0">
+        {actions}
+        <IconButton label="Close panel" onClick={onClose}>
+          <X />
+        </IconButton>
+      </div>
+    </header>
+  );
+}
+
+function KV({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <span className="text-[13px] text-fg-3 h-8 flex items-center">{label}</span>
+      <div className="min-w-0 min-h-8 flex items-center text-[14px] text-fg">{children}</div>
+    </>
+  );
+}
+
+function CompactMessage({ m, spaceSlug }: { m: Message; spaceSlug: string }) {
+  if (m.kind !== "text") {
+    return (
+      <div className="flex items-center gap-2 text-[13px] text-fg-3 pl-1">
+        <span className="size-1.5 rounded-full bg-fg-4 shrink-0" />
+        <span className="min-w-0">
+          <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
+        </span>
+        <span className="tabular text-[12px] text-fg-4 shrink-0">{formatClock(m.created_at)}</span>
+      </div>
+    );
+  }
+  return (
+    <article className="flex items-start gap-2.5 animate-fade-in">
+      <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} size="sm" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 h-5">
+          <span className="text-[13.5px] font-semibold text-fg">{m.author_display_name}</span>
+          <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+        </div>
+        <div className="mt-0.5 text-[14px] leading-relaxed text-fg md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
+        </div>
+        <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
+      </div>
+    </article>
+  );
+}
+
+function ReplyBox({
+  spaceSlug,
+  placeholder,
+  onSend,
+}: {
+  spaceSlug: string;
+  placeholder: string;
+  onSend: (body: string, attachmentIDs: string[]) => Promise<void>;
+}) {
+  const [reply, setReply] = useState("");
+  const draft = useAttachmentDraft(spaceSlug);
+  const { busy, run } = useAction();
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if ((!reply.trim() && draft.ids.length === 0) || draft.uploading) return;
+    const ok = await run(() => onSend(reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`, draft.ids));
+    if (ok) {
+      setReply("");
+      draft.clear();
+    }
+  }
+  return (
+    <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
+      <div className="rounded-[12px] border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+        <AttachmentDraftRow draft={draft} />
+        <div className="p-1.5 flex items-center gap-1">
+          <AttachmentPicker draft={draft} />
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder={placeholder}
+            className="flex-1 h-8 px-1.5 text-[14px] bg-transparent outline-none placeholder:text-fg-4"
+          />
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={busy || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
+            className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors"
+          >
+            <ArrowUp className="size-4" />
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
 
 export function DetailPane({
   spaceSlug,
@@ -39,60 +137,38 @@ export function DetailPane({
   target,
   onClose,
   onSelectTarget,
+  onOpenConversation,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
   target: DetailTarget;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
+  onOpenConversation?: (convID: string) => void;
 }) {
-  if (target.kind === "task") {
-    return <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} />;
-  }
-  if (target.kind === "thread") {
-    return (
-      <ThreadDetail
-        spaceSlug={spaceSlug}
-        threadConvID={target.threadConvID}
-        parentSlug={target.parentSlug}
-        onClose={onClose}
-      />
-    );
-  }
   return (
-    <AgentDetail
-      spaceSlug={spaceSlug}
-      boot={boot}
-      memberID={target.memberID}
-      onClose={onClose}
-      onSelectTarget={onSelectTarget}
-    />
+    <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
+      {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} />}
+      {target.kind === "thread" && <ThreadDetail spaceSlug={spaceSlug} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} />}
+      {target.kind === "agent" && (
+        <AgentDetail
+          spaceSlug={spaceSlug}
+          boot={boot}
+          memberID={target.memberID}
+          onClose={onClose}
+          onSelectTarget={onSelectTarget}
+          onOpenConversation={onOpenConversation}
+        />
+      )}
+    </aside>
   );
 }
 
-function TaskDetail({
-  spaceSlug,
-  boot,
-  taskID,
-  onClose,
-}: {
-  spaceSlug: string;
-  boot: BootstrapData;
-  taskID: string;
-  onClose: () => void;
-}) {
+function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; boot: BootstrapData; taskID: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [reply, setReply] = useState("");
-  const [sending, setSending] = useState(false);
-  const draft = useAttachmentDraft(spaceSlug);
   const act = useAction();
-
-  const taskQ = useQuery({
-    queryKey: ["task", spaceSlug, taskID],
-    queryFn: () => api.getTask(spaceSlug, taskID).then((r) => r.task),
-  });
+  const taskQ = useQuery({ queryKey: ["task", spaceSlug, taskID], queryFn: () => api.getTask(spaceSlug, taskID).then((r) => r.task) });
   const task = taskQ.data ?? boot.tasks.find((t) => t.id === taskID);
-
   const msgsQ = useQuery({
     queryKey: ["messages", spaceSlug, task?.conversation_id],
     queryFn: () => api.listMessages(spaceSlug, task!.conversation_id!, true),
@@ -103,287 +179,218 @@ function TaskDetail({
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["task", spaceSlug, taskID] });
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-    if (task?.conversation_id) {
-      void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, task.conversation_id] });
-    }
+    void qc.invalidateQueries({ queryKey: ["tasks", spaceSlug] });
+    if (task?.conversation_id) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, task.conversation_id] });
   }
 
-  async function handleStatus(status: TaskStatus) {
-    if (!task) return;
-    await act.run(() => api.updateTaskStatus(spaceSlug, task.id, status));
-    refresh();
-  }
-
-  async function handleClaim() {
-    if (!task) return;
-    await act.run(() => api.claimTask(spaceSlug, task.id));
-    refresh();
-  }
-
-  async function handleAssign(memberID: string) {
-    if (!task) return;
-    await act.run(() => api.assignTask(spaceSlug, task.id, memberID));
-    refresh();
-  }
-
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
-    if (!task) return;
-    if (!reply.trim() && draft.ids.length === 0) return;
-    setSending(true);
-    try {
-      let convID = task.conversation_id;
-      if (!convID) {
-        const ensured = await api.ensureTaskConv(spaceSlug, task.id);
-        convID = ensured.task.conversation_id;
-      }
-      if (convID) {
-        await api.sendMessage(
-          spaceSlug,
-          convID,
-          reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
-          undefined,
-          draft.ids,
-        );
-        setReply("");
-        draft.clear();
-        void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
-      }
-      refresh();
-    } finally {
-      setSending(false);
-    }
-  }
-
-  if (!task) {
-    return (
-      <aside className="h-full bg-paper-2 border-l border-line-strong">
-        <DetailSkeleton />
-      </aside>
-    );
-  }
+  if (!task) return <DetailSkeleton />;
+  const open = task.status !== "done" && task.status !== "closed";
 
   return (
-    <aside className="h-full bg-paper-2 border-l border-line-strong flex flex-col min-h-0">
-      <header className="h-11 px-3.5 bg-white border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono-num text-[13px] font-semibold text-[#161614]">#{task.number}</span>
-          <span className="text-[#D5D1C7]">/</span>
-          <span className="text-[12px] text-[#6E6B64] truncate">
-            {task.channel_slug ? `#${task.channel_slug}` : "Direct message"}
-          </span>
-        </div>
-        <button onClick={onClose} className="w-6 h-6 rounded hover:bg-[#F4F2EC] text-[#6E6B64] flex items-center justify-center" aria-label="Close">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </header>
+    <>
+      <PaneHeader onClose={onClose}>
+        <TaskStatusIcon status={task.status} />
+        <span className="tabular font-semibold text-fg">#{task.number}</span>
+        <span className="text-fg-4">in</span>
+        <span className="text-fg-2 truncate">{task.channel_slug ? `#${task.channel_slug}` : "Direct message"}</span>
+      </PaneHeader>
 
-      {/* Structured 2-column Key-Value Task Spec */}
-      <div className="p-3.5 bg-white border-b border-[#E4E1D9] space-y-2.5 shrink-0">
-        <h2 className="text-[14px] font-semibold text-[#161614] leading-snug">{task.title}</h2>
-        {task.description && <p className="text-[12.5px] text-[#45433E] leading-relaxed">{task.description}</p>}
-        <div className="grid grid-cols-[76px_1fr] gap-y-1.5 items-center text-[12px] pt-1.5 border-t border-[#ECEAE3]">
-          <span className="text-[#6E6B64]">Status</span>
-          <div>
-            <select
-              value={task.status}
-              onChange={(e) => void handleStatus(e.target.value as TaskStatus)}
-              className="h-6 px-1.5 rounded border border-[#D5D1C7] bg-white text-[#161614] font-medium text-[12px] outline-none"
-            >
-              <option value="todo">To Do</option>
-              <option value="in_progress">In Progress</option>
-              <option value="in_review">In Review</option>
-              <option value="done">Done</option>
-              <option value="closed">Closed</option>
-            </select>
-          </div>
-
-          <span className="text-[#6E6B64]">Assignee</span>
-          <div className="flex items-center gap-2">
-            <select
-              value={task.assignee_member_id ?? ""}
-              onChange={(e) => void handleAssign(e.target.value)}
-              className="h-6 px-1.5 rounded border border-[#D5D1C7] bg-white text-[#161614] text-[12px] outline-none max-w-[160px]"
-            >
-              <option value="">Unassigned</option>
-              {boot.members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.display_name} ({m.kind})
-                </option>
-              ))}
-            </select>
-            {task.assignee_member_id !== boot.current_member.id && task.status !== "done" && task.status !== "closed" && (
-              <Button size="xs" loading={act.busy} onClick={() => void handleClaim()}>
-                Claim
-              </Button>
-            )}
-          </div>
-
-          <span className="text-[#6E6B64]">Revision</span>
-          <span className="font-mono-num text-[#6E6B64]">rev {task.revision}</span>
+      <div className="px-5 pt-4 pb-4 border-b border-line space-y-3 shrink-0">
+        <h2 className="text-[17px] font-semibold text-fg leading-snug">{task.title}</h2>
+        {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
+        <div className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-1 pt-1">
+          <KV label="Status">
+            <div className="relative">
+              <select
+                value={task.status}
+                onChange={(e) => void act.run(() => api.updateTaskStatus(spaceSlug, task.id, e.target.value as TaskStatus)).then(refresh)}
+                className="h-8 pl-8 pr-3 rounded-[8px] border border-line bg-card text-[14px] font-medium outline-none hover:border-line-strong focus:border-accent appearance-none"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {taskStatusLabel(s)}
+                  </option>
+                ))}
+              </select>
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <TaskStatusIcon status={task.status} size={14} />
+              </span>
+            </div>
+          </KV>
+          <KV label="Assignee">
+            <div className="flex items-center gap-2 min-w-0">
+              <select
+                value={task.assignee_member_id ?? ""}
+                onChange={(e) => void act.run(() => api.assignTask(spaceSlug, task.id, e.target.value)).then(refresh)}
+                className="h-8 px-2.5 rounded-[8px] border border-line bg-card text-[14px] outline-none hover:border-line-strong focus:border-accent max-w-[180px]"
+              >
+                <option value="">Unassigned</option>
+                {boot.members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name}
+                    {m.kind === "agent" ? " (agent)" : ""}
+                  </option>
+                ))}
+              </select>
+              {task.assignee_member_id !== boot.current_member.id && open && (
+                <Button size="sm" variant="soft" loading={act.busy} onClick={() => void act.run(() => api.claimTask(spaceSlug, task.id)).then(refresh)}>
+                  Claim
+                </Button>
+              )}
+            </div>
+          </KV>
+          <KV label="Revision">
+            <span className="tabular text-fg-3">rev {task.revision}</span>
+          </KV>
         </div>
       </div>
 
-      <div className="h-7 px-3.5 bg-[#F4F2EC] border-b border-[#E4E1D9] flex items-center justify-between text-[11.5px] font-medium text-[#6E6B64] shrink-0">
-        <span>Discussion</span>
-        <span className="font-mono-num">{msgsQ.data?.messages.length ?? task.message_count} messages</span>
+      <div className="h-10 px-5 flex items-center justify-between text-[13px] text-fg-3 border-b border-line shrink-0 bg-bg/50">
+        <span className="font-semibold text-fg-2 flex items-center gap-2">
+          <MessageSquare className="size-4" /> Discussion
+        </span>
+        <span className="tabular">{msgsQ.data?.messages.length ?? task.message_count} messages</span>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
         {task.conversation_id && msgsQ.isLoading ? (
           <MessageListSkeleton rows={3} compact />
         ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
-          <div className="py-10 text-center text-[12.5px] text-[#8A867D]">
-            No messages yet. Replying creates #{task.number}'s conversation.
-          </div>
+          <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
         ) : (
-          msgsQ.data!.messages.map((m) =>
-            m.kind === "action" ? (
-              <div key={m.id} className="text-[11.5px] text-[#6E6B64] flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0F8B78]" />
-                <span>
-                  <strong className="text-[#161614] font-medium">{m.author_display_name}</strong>{" "}
-                  {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-                </span>
-                <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
-              </div>
-            ) : (
-              <article key={m.id} className="flex items-start gap-2.5">
-                <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[12.5px] font-semibold text-[#161614]">{m.author_display_name}</span>
-                    <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
-                  </div>
-                  <div className="mt-0.5 text-[13px] leading-relaxed text-[#161614] md break-words">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
-                  </div>
-                  <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
-                </div>
-              </article>
-            ),
-          )
+          msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} />)
         )}
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white shrink-0">
-        <AttachmentDraftRow draft={draft} />
-        <div className="p-2.5 flex items-center gap-2">
-          <AttachmentPicker draft={draft} />
-          <input
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            placeholder={`Reply in #${task.number}…`}
-            className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
-          />
-          <Button loading={sending} disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading} type="submit">
-            Send
-          </Button>
-        </div>
-      </form>
-    </aside>
+      <ReplyBox
+        spaceSlug={spaceSlug}
+        placeholder={`Reply in #${task.number}…`}
+        onSend={async (body, ids) => {
+          let convID = task.conversation_id;
+          if (!convID) convID = (await api.ensureTaskConv(spaceSlug, task.id)).task.conversation_id;
+          if (convID) await api.sendMessage(spaceSlug, convID, body, undefined, ids);
+          refresh();
+        }}
+      />
+    </>
   );
 }
 
-function ThreadDetail({
-  spaceSlug,
-  threadConvID,
-  parentSlug,
-  onClose,
-}: {
-  spaceSlug: string;
-  threadConvID: string;
-  parentSlug: string;
-  onClose: () => void;
-}) {
+function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceSlug: string; threadConvID: string; parentSlug: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [reply, setReply] = useState("");
   const [following, setFollowing] = useState(true);
-  const draft = useAttachmentDraft(spaceSlug);
-  const msgsQ = useQuery({
-    queryKey: ["messages", spaceSlug, threadConvID],
-    queryFn: () => api.listMessages(spaceSlug, threadConvID, true),
-  });
+  const act = useAction();
+  const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
   const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
 
-  async function toggleFollow() {
-    const next = !following;
-    await api.setFollowing(spaceSlug, threadConvID, next);
-    setFollowing(next);
-  }
-
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
-    if (!reply.trim() && draft.ids.length === 0) return;
-    await api.sendMessage(
-      spaceSlug,
-      threadConvID,
-      reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
-      undefined,
-      draft.ids,
-    );
-    setReply("");
-    draft.clear();
-    void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
   return (
-    <aside className="h-full bg-paper-2 border-l border-line-strong flex flex-col min-h-0">
-      <header className="h-11 px-3.5 bg-white border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[13.5px] font-semibold text-[#161614]">Thread</span>
-          <span className="text-[#D5D1C7]">/</span>
-          <span className="text-[12px] text-[#6E6B64]">#{parentSlug}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => void toggleFollow()}
-            className="h-6 px-2 rounded border border-[#E4E1D9] hover:bg-[#F4F2EC] text-[11.5px] font-medium text-[#161614]"
+    <>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          <Button
+            size="sm"
+            variant={following ? "secondary" : "soft"}
+            icon={following ? <Bell /> : <BellOff />}
+            loading={act.busy}
+            onClick={() =>
+              void act.run(async () => {
+                await api.setFollowing(spaceSlug, threadConvID, !following);
+                setFollowing(!following);
+              })
+            }
           >
             {following ? "Following" : "Follow"}
-          </button>
-          <button onClick={onClose} className="w-6 h-6 rounded hover:bg-[#F4F2EC] text-[#6E6B64] flex items-center justify-center" aria-label="Close">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </header>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
+          </Button>
+        }
+      >
+        <MessageSquare className="size-4 text-fg-3" />
+        <span className="font-semibold text-fg">Thread</span>
+        {parentSlug && (
+          <span className="text-fg-3 truncate flex items-center gap-1">
+            <Hash className="size-3.5" />
+            {parentSlug}
+          </span>
+        )}
+      </PaneHeader>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
         {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
-        {(msgsQ.data?.messages ?? []).map((m) => (
-          <article key={m.id} className="flex items-start gap-2.5">
-            <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} size="sm" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
-                <span className="text-[12.5px] font-semibold">{m.author_display_name}</span>
-                <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
+        {(msgsQ.data?.messages ?? []).map((m, i) => (
+          <div key={m.id}>
+            <CompactMessage m={m} spaceSlug={spaceSlug} />
+            {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
+              <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
+                <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
+                <span className="flex-1 h-px bg-line" />
               </div>
-              <div className="mt-0.5 text-[13px] text-[#161614] md break-words">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
-              </div>
-              <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
-            </div>
-          </article>
+            )}
+          </div>
         ))}
       </div>
+      <ReplyBox
+        spaceSlug={spaceSlug}
+        placeholder="Reply in thread…"
+        onSend={async (body, ids) => {
+          await api.sendMessage(spaceSlug, threadConvID, body, undefined, ids);
+          void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+        }}
+      />
+    </>
+  );
+}
 
-      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white shrink-0">
-        <AttachmentDraftRow draft={draft} />
-        <div className="p-2.5 flex items-center gap-2">
-          <AttachmentPicker draft={draft} />
-          <input
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            placeholder="Reply in thread…"
-            className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
-          />
-          <Button disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading} type="submit">
-            Send
-          </Button>
-        </div>
-      </form>
-    </aside>
+function DriverEditor({ spaceSlug, member, boot, onDone }: { spaceSlug: string; member: Member; boot: BootstrapData; onDone: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(member));
+  const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
+  const { busy, run } = useAction();
+  const computer = boot.computers.find((c) => c.id === member.agent?.computer_id);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const errs = validateDriver(draft);
+        setErrors(errs);
+        if (Object.keys(errs).length > 0) return;
+        void run(async () => {
+          await api.updateAgentDriver(spaceSlug, member.id, draft.kind, driverInput(draft));
+          await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          toast(`${member.display_name} restarted with the new driver`, "success");
+          onDone();
+        });
+      }}
+      className="space-y-4 animate-fade-in"
+    >
+      <DriverFields
+        draft={draft}
+        onChange={setDraft}
+        computer={computer}
+        errors={errors}
+        apiKeySet={member.agent?.driver_kind === "builtin" && member.agent.driver_config?.api_key_set}
+      />
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" loading={busy}>
+          Save and restart
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="px-5 py-4">
+      <div className="mb-2.5 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-fg-2 uppercase tracking-[0.04em]">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -393,28 +400,28 @@ function AgentDetail({
   memberID,
   onClose,
   onSelectTarget,
+  onOpenConversation,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
   memberID: string;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
+  onOpenConversation?: (convID: string) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
   const [pending, setPending] = useState<"restart" | "reset_session" | null>(null);
-  const member: Member | undefined = boot.members.find((m) => m.id === memberID);
-  if (!member || !member.agent) return null;
-
-  const comp = boot.computers.find((c) => c.id === member.agent?.computer_id);
-  const canGovern = boot.current_member.access_level === "owner" || boot.current_member.access_level === "admin";
+  const [editing, setEditing] = useState(false);
+  const member = boot.members.find((m) => m.id === memberID);
+  if (!member?.agent) return <DetailSkeleton />;
+  const ag = member.agent;
+  const comp = boot.computers.find((c) => c.id === ag.computer_id);
+  const canGovern = boot.current_member.access_level !== "member";
   const perms = new Set(member.permissions ?? []);
-  const focusTask = boot.tasks.find((t) => t.conversation_id === member.agent?.focus_conversation_id);
-
-  async function togglePerm(p: Permission) {
-    await act.run(() => api.setPermission(spaceSlug, member!.id, p, !perms.has(p)));
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
+  const focus = agentFocus(boot, member);
+  const st = ag.runtime_state;
+  const cfg = ag.driver_config;
 
   async function control(action: "restart" | "reset_session") {
     setPending(action);
@@ -423,87 +430,157 @@ function AgentDetail({
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
-  return (
-    <aside className="h-full bg-white border-l border-line-strong flex flex-col min-h-0">
-      <header className="h-11 px-3.5 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="sm" />
-          <span className="text-[13.5px] font-semibold text-[#161614]">{member.display_name}</span>
-          <span className="px-1.5 rounded bg-[#F1EFEA] text-[11px] text-[#5C5A54]">Agent</span>
-        </div>
-        <button onClick={onClose} className="w-6 h-6 rounded hover:bg-[#F4F2EC] text-[#6E6B64] flex items-center justify-center" aria-label="Close">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </header>
+  const stateTone = st === "working" ? "work" : st === "error" ? "danger" : "neutral";
 
-      <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-[#E4E1D9] text-[12.5px]">
-        <div className="p-3.5 space-y-2.5">
-          <div className="grid grid-cols-[96px_1fr] gap-y-2 items-center">
-            <span className="text-[#6E6B64]">State</span>
-            <span className="inline-flex items-center gap-1.5 font-medium text-[#161614]">
-              <span className={member.agent.runtime_state === "working" ? "animate-breathe" : ""}>
-                <RuntimeDot state={member.agent.runtime_state} />
-              </span>
-              <span className="capitalize">{member.agent.runtime_state}</span>
+  return (
+    <>
+      <PaneHeader onClose={onClose}>
+        <span className="font-semibold text-fg">Agent</span>
+      </PaneHeader>
+      <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
+        <div className="px-5 py-5 flex items-center gap-4">
+          <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[18px] font-semibold text-fg truncate">{member.display_name}</div>
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              <Badge tone={stateTone}>
+                <StatusDot state={st} size={7} ring="transparent" />
+                {stateLabel(st)}
+              </Badge>
+              <Badge>{ag.driver_kind === "acp" ? `ACP · ${cfg?.provider ?? "?"}` : "Model API"}</Badge>
+            </div>
+          </div>
+        </div>
+
+        {st === "working" && (
+          <div className="px-5 py-3.5 bg-work-soft/60 flex items-center gap-3 animate-fade-in">
+            <span className="size-8 rounded-[9px] bg-work-soft text-work flex items-center justify-center shrink-0">
+              <RefreshCw className="size-4 animate-spin [animation-duration:2.4s]" />
             </span>
-            <span className="text-[#6E6B64]">Focus</span>
-            <span>
-              {focusTask ? (
+            <div className="min-w-0 flex-1">
+              <div className="text-[12.5px] text-fg-3">Working in</div>
+              {focus?.convID || focus?.taskID ? (
                 <button
-                  onClick={() => onSelectTarget({ kind: "task", taskID: focusTask.id })}
-                  className="font-mono-num underline decoration-[#D5D1C7]"
+                  onClick={() => (focus.taskID ? onSelectTarget({ kind: "task", taskID: focus.taskID }) : onOpenConversation?.(focus.convID!))}
+                  className="text-[14px] font-medium text-fg hover:underline underline-offset-2 truncate block max-w-full"
                 >
-                  task #{focusTask.number}
+                  {focus.label}
                 </button>
               ) : (
-                <span className="text-[#8A867D]">—</span>
+                <div className="text-[14px] font-medium text-fg">{focus?.label ?? "Unknown conversation"}</div>
               )}
-            </span>
-            <span className="text-[#6E6B64]">Computer</span>
-            <span>{comp ? `${comp.name} · ${comp.connection_status}` : "unassigned"}</span>
-            <span className="text-[#6E6B64]">Driver</span>
-            <span>{member.agent.driver_kind} · 1 active session</span>
+            </div>
+          </div>
+        )}
+
+        {st === "error" && (
+          <div className="px-5 py-3.5 bg-danger-soft flex items-start gap-3 animate-fade-in">
+            <AlertTriangle className="size-4 text-danger shrink-0 mt-0.5" />
+            <div className="min-w-0 text-[13.5px]">
+              <div className="font-semibold text-danger font-mono">{ag.last_error_code || "error"}</div>
+              {ag.last_error_detail && <div className="mt-1 text-fg-2 break-words leading-relaxed">{ag.last_error_detail}</div>}
+              <div className="mt-1.5 text-fg-3">Fix the driver below or restart the agent.</div>
+            </div>
+          </div>
+        )}
+
+        <Section title="Runtime">
+          <div className="grid grid-cols-[96px_1fr] gap-x-3">
+            <KV label="Computer">
+              {comp ? (
+                <span className="flex items-center gap-2 min-w-0">
+                  <Monitor className="size-4 text-fg-3 shrink-0" />
+                  <span className="truncate">{comp.name}</span>
+                  <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-work" : "bg-fg-4"}`} />
+                </span>
+              ) : (
+                <span className="text-fg-3">Unassigned</span>
+              )}
+            </KV>
+            <KV label="Session">1 active session</KV>
           </div>
           {canGovern && (
-            <div className="flex items-center gap-2 pt-2">
-              <Button variant="secondary" className="flex-1" loading={pending === "restart"} onClick={() => void control("restart")}>
+            <div className="mt-3 flex gap-2">
+              <Button variant="secondary" size="sm" className="flex-1" icon={<RefreshCw />} loading={pending === "restart"} onClick={() => void control("restart")}>
                 Restart
               </Button>
-              <Button
-                variant="secondary"
-                className="flex-1"
-                loading={pending === "reset_session"}
-                onClick={() => void control("reset_session")}
-              >
+              <Button variant="secondary" size="sm" className="flex-1" icon={<RotateCcw />} loading={pending === "reset_session"} onClick={() => void control("reset_session")}>
                 Reset session
               </Button>
             </div>
           )}
-        </div>
+        </Section>
 
-        <div className="p-3.5 space-y-1.5">
-          <div className="text-[11.5px] font-semibold text-[#6E6B64]">Role</div>
-          <p className="text-[#45433E] whitespace-pre-wrap">{member.agent.role_text || "No role defined."}</p>
-        </div>
+        <Section
+          title="Driver"
+          action={
+            canGovern && !editing ? (
+              <Button variant="ghost" size="sm" icon={<Pencil />} onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+            ) : null
+          }
+        >
+          {editing ? (
+            <DriverEditor spaceSlug={spaceSlug} member={member} boot={boot} onDone={() => setEditing(false)} />
+          ) : (
+            <div className="grid grid-cols-[96px_1fr] gap-x-3">
+              <KV label="Type">{ag.driver_kind === "acp" ? "Coding agent (ACP)" : "Model API"}</KV>
+              {ag.driver_kind === "acp" ? (
+                <KV label="Provider">
+                  <span className="font-mono text-[13px]">{cfg?.command?.join(" ") || cfg?.provider || "—"}</span>
+                </KV>
+              ) : (
+                <>
+                  <KV label="Base URL">
+                    <span className="font-mono text-[13px] truncate">{cfg?.base_url || "—"}</span>
+                  </KV>
+                  <KV label="Model">
+                    <span className="font-mono text-[13px]">{cfg?.model || "—"}</span>
+                  </KV>
+                  <KV label="API key">{cfg?.api_key_set ? <Badge tone="work">Saved</Badge> : <span className="text-fg-3">Not set</span>}</KV>
+                </>
+              )}
+            </div>
+          )}
+        </Section>
 
-        <div className="p-3.5 space-y-2">
-          <div className="text-[11.5px] font-semibold text-[#6E6B64]">Permissions</div>
-          <div className="divide-y divide-[#ECEAE3] border border-[#E4E1D9] rounded-[5px]">
-            {PERMISSIONS.map((p) => (
-              <label key={p} className="h-8 px-2.5 flex items-center justify-between cursor-pointer">
-                <span className="font-mono-num text-[12px]">{p}</span>
-                <input
-                  type="checkbox"
-                  disabled={!canGovern}
-                  checked={perms.has(p)}
-                  onChange={() => void togglePerm(p)}
-                  className="accent-[#161614]"
-                />
-              </label>
-            ))}
+        <Section title="Role">
+          <p className="text-[14px] text-fg-2 whitespace-pre-wrap leading-relaxed">{ag.role_text || "No role defined."}</p>
+        </Section>
+
+        <Section title="Permissions">
+          <div className="rounded-[12px] border border-line divide-y divide-line overflow-hidden">
+            {PERMISSIONS.map((p) => {
+              const on = perms.has(p.code);
+              return (
+                <label key={p.code} className={`px-3.5 py-2.5 flex items-center gap-3 ${canGovern ? "cursor-pointer hover:bg-subtle" : ""}`}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] text-fg">{p.label}</span>
+                    <span className="block text-[12.5px] text-fg-3">{p.hint}</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="sr-only peer"
+                    disabled={!canGovern}
+                    checked={on}
+                    onChange={() =>
+                      void act.run(() => api.setPermission(spaceSlug, member.id, p.code, !on)).then(() => qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }))
+                    }
+                  />
+                  <span
+                    aria-hidden
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 peer-focus-visible:shadow-[var(--ring)] ${on ? "bg-accent" : "bg-line-strong"} ${canGovern ? "" : "opacity-50"}`}
+                  >
+                    <span className={`block size-4 rounded-full bg-white shadow-sm transition-transform ${on ? "translate-x-4" : ""}`} />
+                  </span>
+                </label>
+              );
+            })}
           </div>
-        </div>
+        </Section>
       </div>
-    </aside>
+    </>
   );
 }

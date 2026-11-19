@@ -1,44 +1,39 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Check, Eye, EyeOff, Laptop } from "lucide-react";
+import { AtSign, Check, Eye, EyeOff, Laptop, Lock, Mail, User as UserIcon } from "lucide-react";
 import { api, ApiError, sanitizeDisplayName, slugInput, slugify, type User } from "../api";
 import { readPendingPairing } from "../pairing";
-import { AgentStep, ComputerStep } from "./Setup";
+import { PixelAvatar } from "./Avatar";
+import { AgentStep, ComputerStep, StepHeading } from "./Setup";
 import { Button, Field, Segmented, SumiMark } from "./ui";
 
 export type OnboardingStep = "account" | "space" | "computer" | "agent";
-const STEPS: { key: OnboardingStep; label: string }[] = [
-  { key: "account", label: "Account" },
-  { key: "space", label: "Space" },
-  { key: "computer", label: "Computer" },
-  { key: "agent", label: "Agent" },
+const STEPS: { key: OnboardingStep; label: string; hint: string }[] = [
+  { key: "account", label: "Account", hint: "Sign in or register" },
+  { key: "space", label: "Space", hint: "Where your team works" },
+  { key: "computer", label: "Computer", hint: "Where agents run" },
+  { key: "agent", label: "First agent", hint: "Your first teammate" },
 ];
 
 function Stepper({ current }: { current: OnboardingStep }) {
   const idx = STEPS.findIndex((s) => s.key === current);
   return (
-    <ol className="flex items-center gap-2" aria-label="Setup progress">
+    <ol className="space-y-1" aria-label="Setup progress">
       {STEPS.map((s, i) => {
         const done = i < idx;
         const active = i === idx;
         return (
-          <li key={s.key} className="flex items-center gap-2 flex-1 min-w-0">
+          <li key={s.key} className="flex items-center gap-3 py-2" aria-current={active ? "step" : undefined}>
             <span
-              className={`w-5 h-5 rounded-full text-[10.5px] font-semibold flex items-center justify-center shrink-0 transition-colors duration-200 ${
-                done ? "bg-ink text-white" : active ? "border-[1.5px] border-ink text-ink" : "border border-field text-faint"
+              className={`size-7 rounded-full text-[12.5px] font-semibold flex items-center justify-center shrink-0 transition-colors duration-200 ${
+                done ? "bg-accent text-white" : active ? "bg-white text-[#17171b]" : "bg-white/8 text-nav-fg-3 border border-white/10"
               }`}
-              aria-current={active ? "step" : undefined}
             >
-              {done ? <Check className="w-3 h-3" /> : i + 1}
+              {done ? <Check className="size-3.5" /> : i + 1}
             </span>
-            <span className={`text-[12px] truncate ${active ? "text-ink font-medium" : "text-faint"}`}>{s.label}</span>
-            {i < STEPS.length - 1 && (
-              <span className="flex-1 h-px bg-line relative overflow-hidden">
-                <span
-                  className="absolute inset-0 bg-ink origin-left transition-transform duration-300 ease-out"
-                  style={{ transform: `scaleX(${done ? 1 : 0})` }}
-                />
-              </span>
-            )}
+            <span className="min-w-0">
+              <span className={`block text-[14px] leading-5 ${active ? "text-white font-medium" : done ? "text-nav-fg" : "text-nav-fg-3"}`}>{s.label}</span>
+              <span className="block text-[12.5px] text-nav-fg-3">{s.hint}</span>
+            </span>
           </li>
         );
       })}
@@ -46,24 +41,52 @@ function Stepper({ current }: { current: OnboardingStep }) {
   );
 }
 
-function Shell({ step, children, footer }: { step: OnboardingStep; children: ReactNode; footer?: ReactNode }) {
+function BrandPanel({ step }: { step: OnboardingStep }) {
+  const seeds = ["lin", "atlas", "nova", "kite", "orbit", "sage"];
   return (
-    <div className="h-full overflow-y-auto bg-paper scroll-thin">
-      <div className="min-h-full flex flex-col items-center justify-center px-4 py-10">
-        <div className="w-full max-w-[440px]">
-          <div className="flex items-center gap-2.5 mb-6">
-            <SumiMark size={26} />
-            <span className="text-[15px] font-semibold tracking-tight">Sumi</span>
-            <span className="text-[12px] text-faint">Humans and agents, one space.</span>
-          </div>
-          <div className="mb-4">
-            <Stepper current={step} />
-          </div>
-          <div key={step} className="bg-white border border-line-strong rounded-[10px] p-6 animate-rise-in">
-            {children}
-          </div>
-          {footer && <div className="mt-4 text-center text-[12px] text-faint">{footer}</div>}
+    <aside className="hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between p-10 relative overflow-hidden">
+      <div
+        aria-hidden
+        className="absolute -top-32 -right-24 size-[380px] rounded-full opacity-40 blur-3xl"
+        style={{ background: "radial-gradient(circle, #5a5bd8 0%, transparent 65%)" }}
+      />
+      <div className="relative">
+        <div className="flex items-center gap-3">
+          <SumiMark size={36} />
+          <span className="text-[19px] font-semibold tracking-tight text-white">Sumi</span>
         </div>
+        <p className="mt-6 text-[22px] leading-snug font-semibold text-white">
+          One workspace for people
+          <br />
+          and persistent agents.
+        </p>
+        <p className="mt-3 text-[14px] text-nav-fg-2 leading-relaxed">
+          Agents keep their memory, pick up Tasks, and reply in channels and DMs like any teammate.
+        </p>
+        <div className="mt-8 flex -space-x-2">
+          {seeds.map((s) => (
+            <span key={s} className="rounded-[10px] ring-4 ring-[var(--nav)]">
+              <PixelAvatar seed={s} size="lg" />
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="relative">
+        <Stepper current={step} />
+      </div>
+    </aside>
+  );
+}
+
+function MobileSteps({ step }: { step: OnboardingStep }) {
+  const idx = STEPS.findIndex((s) => s.key === step);
+  return (
+    <div className="lg:hidden mb-6 flex items-center gap-3">
+      <SumiMark size={30} />
+      <div className="flex-1 flex gap-1.5">
+        {STEPS.map((s, i) => (
+          <span key={s.key} className={`h-1 flex-1 rounded-full transition-colors ${i <= idx ? "bg-accent" : "bg-line-strong"}`} />
+        ))}
       </div>
     </div>
   );
@@ -80,14 +103,8 @@ function fieldError(err: unknown): { field?: "email" | "password" | "display_nam
   return { text };
 }
 
-function PairingNotice() {
-  if (!readPendingPairing()) return null;
-  return (
-    <div className="mb-4 px-3 py-2 rounded-[7px] border border-line bg-paper-2 text-[12px] text-ink-2 flex items-center gap-2">
-      <Laptop className="w-3.5 h-3.5 shrink-0" />
-      This computer is ready to connect. Sign in and confirm it in two steps.
-    </div>
-  );
+function FormError({ text }: { text: string }) {
+  return <div className="px-3.5 py-2.5 rounded-[10px] bg-danger-soft text-danger text-[13.5px] animate-fade-in">{text}</div>;
 }
 
 function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
@@ -99,17 +116,15 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState<ReturnType<typeof fieldError> | null>(null);
   const [busy, setBusy] = useState(false);
+  const pairing = readPendingPairing();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      if (mode === "register") {
-        await api.register(email.trim(), password, sanitizeDisplayName(displayName) || "me");
-      } else {
-        await api.login(email.trim(), password);
-      }
+      if (mode === "register") await api.register(email.trim(), password, sanitizeDisplayName(displayName) || "me");
+      else await api.login(email.trim(), password);
       onAuthenticated();
     } catch (err) {
       setError(fieldError(err));
@@ -120,16 +135,21 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
   const errFor = (f: string) => (error?.field === f ? error.text : undefined);
 
   return (
-    <form onSubmit={submit} className="space-y-4" noValidate={false}>
-      <PairingNotice />
+    <form onSubmit={submit} className="space-y-5">
+      {pairing && (
+        <div className="px-4 py-3 rounded-[12px] bg-accent-soft text-accent-text text-[13.5px] flex items-center gap-2.5">
+          <Laptop className="size-4 shrink-0" />
+          This computer is ready to connect. Sign in, then confirm it.
+        </div>
+      )}
       <div>
-        <h1 className="text-[17px] font-semibold text-ink">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
-        <p className="mt-0.5 text-[12.5px] text-mute">
-          {mode === "login" ? "Sign in to continue to your spaces." : "It takes a minute. No email verification."}
+        <h1 className="text-[24px] font-semibold text-fg tracking-tight">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
+        <p className="mt-1.5 text-[14.5px] text-fg-3">
+          {mode === "login" ? "Sign in to continue to your spaces." : "Takes a minute. No email verification needed."}
         </p>
       </div>
       <Segmented
-        size="md"
+        full
         value={mode}
         onChange={(m) => {
           setMode(m);
@@ -145,7 +165,9 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
         type="email"
         autoComplete="email"
         autoFocus
+        leading={<Mail />}
         value={email}
+        placeholder="you@example.com"
         onChange={(e) => {
           setEmail(e.target.value);
           if (!nameTouched) setDisplayName(sanitizeDisplayName(e.target.value.split("@")[0] ?? ""));
@@ -158,6 +180,7 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
           <Field
             label="Display name"
             autoComplete="nickname"
+            leading={<AtSign />}
             value={displayName}
             onChange={(e) => {
               setNameTouched(true);
@@ -174,6 +197,7 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
         label="Password"
         type={showPw ? "text" : "password"}
         autoComplete={mode === "login" ? "current-password" : "new-password"}
+        leading={<Lock />}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         minLength={8}
@@ -185,16 +209,14 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
             type="button"
             onClick={() => setShowPw((v) => !v)}
             aria-label={showPw ? "Hide password" : "Show password"}
-            className="w-7 h-7 rounded-[5px] text-faint hover:text-ink flex items-center justify-center"
+            className="size-7 rounded-[6px] text-fg-3 hover:text-fg hover:bg-hover flex items-center justify-center"
           >
-            {showPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </button>
         }
       />
-      {error && !error.field && (
-        <div className="px-3 py-2 rounded-[6px] bg-danger-bg text-danger text-[12px] animate-fade-in">{error.text}</div>
-      )}
-      <Button type="submit" size="md" loading={busy} className="w-full">
+      {error && !error.field && <FormError text={error.text} />}
+      <Button type="submit" size="lg" loading={busy} className="w-full">
         {mode === "login" ? "Sign in" : "Create account"}
       </Button>
     </form>
@@ -222,12 +244,20 @@ function SpaceStep({ user, onCreated }: { user: User; onCreated: (slug: string) 
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div>
-        <h1 className="text-[17px] font-semibold text-ink">Create a space</h1>
-        <p className="mt-0.5 text-[12.5px] text-mute">
-          A space holds your channels, tasks, agents and computers. Invite people later.
-        </p>
+    <form onSubmit={submit} className="space-y-6">
+      <StepHeading
+        icon={<UserIcon />}
+        title="Create a space"
+        body="A space holds your channels, tasks, agents and computers. You can invite people later."
+      />
+      <div className="flex items-center gap-3.5 p-4 rounded-[14px] border border-line bg-subtle">
+        <span className="size-12 rounded-[12px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
+          {(name.trim()[0] ?? "S").toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-fg truncate">{name.trim() || "Untitled space"}</div>
+          <div className="text-[13px] text-fg-3 font-mono truncate">/{slug || "…"}</div>
+        </div>
       </div>
       <Field
         label="Name"
@@ -246,19 +276,13 @@ function SpaceStep({ user, onCreated }: { user: User; onCreated: (slug: string) 
           setSlugTouched(true);
           setSlug(slugInput(e.target.value));
         }}
-        className="font-mono-num"
-        hint={
-          <>
-            Used in links: <span className="font-mono-num text-ink-2">/{slug || "…"}</span>
-          </>
-        }
+        className="font-mono"
+        hint="Lowercase letters, digits and hyphens."
         error={error?.field === "slug" ? error.text : undefined}
         required
       />
-      {error && error.field !== "slug" && (
-        <div className="px-3 py-2 rounded-[6px] bg-danger-bg text-danger text-[12px] animate-fade-in">{error.text}</div>
-      )}
-      <Button type="submit" size="md" loading={busy} disabled={!slug || !name.trim()} className="w-full">
+      {error && error.field !== "slug" && <FormError text={error.text} />}
+      <Button type="submit" size="lg" loading={busy} disabled={!slug || !name.trim()} className="w-full">
         Create space
       </Button>
     </form>
@@ -284,23 +308,36 @@ export function Onboarding({
   onFinish: (agentMemberID?: string) => void;
   onLogout: () => void;
 }) {
-  const footer = user ? (
-    <span>
-      Signed in as <span className="text-ink-2">{user.email}</span> ·{" "}
-      <button onClick={onLogout} className="underline decoration-field underline-offset-2 hover:text-ink">
-        Sign out
-      </button>
-    </span>
-  ) : undefined;
+  let body: ReactNode = null;
+  if (step === "account") body = <AccountStep onAuthenticated={onAuthenticated} />;
+  if (step === "space" && user) body = <SpaceStep user={user} onCreated={onSpaceCreated} />;
+  if (step === "computer") body = <ComputerStep spaceSlug={spaceSlug} onNext={onComputerDone} />;
+  if (step === "agent") body = <AgentStep spaceSlug={spaceSlug} onDone={(a) => onFinish(a.id)} onSkip={() => onFinish()} />;
 
   return (
-    <Shell step={step} footer={footer}>
-      {step === "account" && <AccountStep onAuthenticated={onAuthenticated} />}
-      {step === "space" && user && <SpaceStep user={user} onCreated={onSpaceCreated} />}
-      {step === "computer" && <ComputerStep spaceSlug={spaceSlug} onNext={onComputerDone} />}
-      {step === "agent" && (
-        <AgentStep spaceSlug={spaceSlug} onDone={(id) => onFinish(id)} onSkip={() => onFinish()} />
-      )}
-    </Shell>
+    <div className="h-full flex bg-bg">
+      <BrandPanel step={step} />
+      <main className="flex-1 min-w-0 overflow-y-auto scroll-thin">
+        <div className="min-h-full flex flex-col px-6 py-10">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-[460px]">
+              <MobileSteps step={step} />
+              <div key={step} className="animate-rise-in">
+                {body}
+              </div>
+            </div>
+          </div>
+          {user && (
+            <div className="text-center text-[13px] text-fg-3 pt-8">
+              Signed in as <span className="text-fg-2 font-medium">{user.email}</span>
+              <span className="mx-2 text-fg-4">·</span>
+              <button onClick={onLogout} className="hover:text-fg underline decoration-line-strong underline-offset-2">
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }

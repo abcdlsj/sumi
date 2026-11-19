@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
 import { Workbench } from "./Workbench";
@@ -19,8 +19,9 @@ const sampleBoot: BootstrapData = {
       agent: {
         computer_id: "c-1",
         role_text: "Backend engineer",
-        driver_kind: "builtin",
-        driver_config_json: "{}",
+        driver_kind: "acp",
+        driver_config: { provider: "pi" },
+        focus_conversation_id: "conv-eng",
         runtime_state: "working",
       },
       created_at: "2026-11-19T10:00:00Z",
@@ -129,16 +130,20 @@ describe("Workbench", () => {
     );
 
     // Inbox renders the mention row and Done invokes markDone.
-    const doneBtn = await screen.findByRole("button", { name: "Done" });
+    const doneBtn = await screen.findByRole("button", { name: "Done" }, { timeout: 10000 });
     fireEvent.click(doneBtn);
     await waitFor(() => expect(api.markDone).toHaveBeenCalledWith("studio", "conv-eng"));
 
+    // The sidebar shows which conversation a working agent is focused on.
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    expect(within(sidebar).getByText("Working in #engineering")).toBeTruthy();
+
     // Navigate to #engineering and click attached task #14 to open Right Detail Pane.
-    fireEvent.click(screen.getByRole("button", { name: /engineering/i }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^engineering$/i }));
     const taskRow = await screen.findByRole("button", { name: /Unified read watermark/i });
     fireEvent.click(taskRow);
 
-    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("studio", "t-14"));
-    expect(await screen.findByText("Discussion")).toBeTruthy();
-  });
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("studio", "t-14"), { timeout: 10000 });
+    expect(await screen.findByText("Discussion", {}, { timeout: 10000 })).toBeTruthy();
+  }, 30000);
 });

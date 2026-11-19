@@ -3,49 +3,115 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Loader2, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, Copy, Loader2, X } from "lucide-react";
+import type { TaskStatus } from "../api";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
-type Size = "xs" | "sm" | "md";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
+type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-ink text-white hover:bg-[#2F2E2B] active:bg-black",
-  secondary: "bg-white text-ink border border-field hover:border-ink hover:bg-paper-2",
-  ghost: "text-ink-2 hover:bg-hover hover:text-ink",
-  danger: "bg-white text-danger border border-field hover:bg-danger-bg hover:border-danger",
+  primary: "bg-accent text-accent-fg hover:bg-accent-hover shadow-sm",
+  secondary: "bg-card text-fg border border-line-strong hover:bg-subtle shadow-sm",
+  soft: "bg-accent-soft text-accent-text hover:brightness-95",
+  ghost: "text-fg-2 hover:bg-hover hover:text-fg",
+  danger: "bg-card text-danger border border-line-strong hover:bg-danger-soft hover:border-danger",
 };
 const SIZES: Record<Size, string> = {
-  xs: "h-6 px-2 text-[11.5px] gap-1",
-  sm: "h-7 px-2.5 text-[12px] gap-1.5",
-  md: "h-9 px-3.5 text-[13px] gap-2",
+  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-[8px]",
+  md: "h-9 px-3.5 text-[14px] gap-2 rounded-[9px]",
+  lg: "h-11 px-5 text-[15px] gap-2 rounded-[10px]",
 };
 
 export function Button({
   variant = "primary",
-  size = "sm",
+  size = "md",
   loading = false,
+  icon,
   className = "",
   children,
   disabled,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size; loading?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size; loading?: boolean; icon?: ReactNode }) {
   return (
     <button
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex items-center justify-center rounded-[6px] font-medium select-none transition-[background-color,border-color,color,opacity,transform] duration-150 active:scale-[0.98] disabled:opacity-45 disabled:active:scale-100 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-[background-color,border-color,color,opacity,transform,filter] duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
     >
-      {loading && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />}
+      {loading ? <Loader2 className="size-4 animate-spin shrink-0" /> : icon ? <span className="shrink-0 inline-flex [&>svg]:size-4">{icon}</span> : null}
       {children}
     </button>
+  );
+}
+
+export function IconButton({
+  label,
+  children,
+  className = "",
+  active = false,
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; active?: boolean }) {
+  return (
+    <button
+      {...rest}
+      aria-label={label}
+      title={label}
+      className={`size-8 rounded-[8px] inline-flex items-center justify-center transition-colors duration-150 [&>svg]:size-4 ${
+        active ? "bg-hover text-fg" : "text-fg-3 hover:bg-hover hover:text-fg"
+      } ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+const inputBase =
+  "w-full rounded-[9px] border bg-card text-[14px] text-fg outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)] disabled:opacity-60";
+
+function FieldShell({
+  id,
+  label,
+  hint,
+  error,
+  optional,
+  children,
+}: {
+  id: string;
+  label?: string;
+  hint?: ReactNode;
+  error?: string;
+  optional?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {label && (
+        <label htmlFor={id} className="flex items-center gap-1.5 text-[13px] font-medium text-fg-2">
+          {label}
+          {optional && <span className="text-fg-4 font-normal">Optional</span>}
+        </label>
+      )}
+      {children}
+      {error ? (
+        <p className="flex items-center gap-1.5 text-[12.5px] text-danger animate-fade-in">
+          <AlertCircle className="size-3.5 shrink-0" />
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="text-[12.5px] text-fg-3 leading-snug">{hint}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -54,37 +120,79 @@ export function Field({
   hint,
   error,
   trailing,
+  leading,
+  optional,
   className = "",
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; error?: string; trailing?: ReactNode }) {
-  const id = rest.id ?? `f-${label.toLowerCase().replace(/\W+/g, "-")}`;
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label?: string;
+  hint?: ReactNode;
+  error?: string;
+  trailing?: ReactNode;
+  leading?: ReactNode;
+  optional?: boolean;
+}) {
+  const auto = useId();
+  const id = rest.id ?? auto;
   return (
-    <div className="space-y-1">
-      <label htmlFor={id} className="block text-[12px] font-medium text-ink-2">
-        {label}
-      </label>
+    <FieldShell id={id} label={label} hint={hint} error={error} optional={optional}>
       <div className="relative">
+        {leading && <div className="absolute inset-y-0 left-3 flex items-center text-fg-3 [&>svg]:size-4">{leading}</div>}
         <input
           {...rest}
           id={id}
           aria-invalid={error ? true : undefined}
-          className={`w-full h-9 px-3 rounded-[6px] border bg-white text-[13.5px] outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-faint ${
-            error ? "border-danger" : "border-field hover:border-[#BDB9AE] focus:border-ink"
-          } focus:shadow-[0_0_0_3px_rgba(22,22,20,0.06)] ${trailing ? "pr-9" : ""} ${className}`}
+          className={`${inputBase} h-10 ${leading ? "pl-9" : "pl-3"} ${trailing ? "pr-10" : "pr-3"} ${
+            error ? "border-danger" : "border-line-strong hover:border-fg-4"
+          } ${className}`}
         />
-        {trailing && <div className="absolute inset-y-0 right-1 flex items-center">{trailing}</div>}
+        {trailing && <div className="absolute inset-y-0 right-1.5 flex items-center">{trailing}</div>}
       </div>
-      {error ? (
-        <p className="text-[11.5px] text-danger animate-fade-in">{error}</p>
-      ) : hint ? (
-        <p className="text-[11.5px] text-faint">{hint}</p>
-      ) : null}
-    </div>
+    </FieldShell>
   );
 }
 
-export function Skeleton({ className = "" }: { className?: string }) {
-  return <span aria-hidden className={`skeleton block ${className}`} />;
+export function TextArea({
+  label,
+  hint,
+  error,
+  optional,
+  className = "",
+  ...rest
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; hint?: ReactNode; error?: string; optional?: boolean }) {
+  const auto = useId();
+  const id = rest.id ?? auto;
+  return (
+    <FieldShell id={id} label={label} hint={hint} error={error} optional={optional}>
+      <textarea
+        {...rest}
+        id={id}
+        className={`${inputBase} px-3 py-2.5 leading-relaxed resize-none ${error ? "border-danger" : "border-line-strong hover:border-fg-4"} ${className}`}
+      />
+    </FieldShell>
+  );
+}
+
+export function Select({
+  label,
+  hint,
+  className = "",
+  children,
+  ...rest
+}: SelectHTMLAttributes<HTMLSelectElement> & { label?: string; hint?: ReactNode }) {
+  const auto = useId();
+  const id = rest.id ?? auto;
+  return (
+    <FieldShell id={id} label={label} hint={hint}>
+      <select {...rest} id={id} className={`${inputBase} h-10 px-3 border-line-strong hover:border-fg-4 ${className}`}>
+        {children}
+      </select>
+    </FieldShell>
+  );
+}
+
+export function Skeleton({ className = "", nav = false }: { className?: string; nav?: boolean }) {
+  return <span aria-hidden className={`${nav ? "nav-skeleton" : "skeleton"} block ${className}`} />;
 }
 
 export function EmptyState({
@@ -99,15 +207,15 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center px-6 animate-fade-in">
+    <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6 py-10 animate-fade-in">
       {icon && (
-        <div className="w-10 h-10 rounded-[10px] border border-line bg-paper-2 text-mute flex items-center justify-center mb-3">
+        <div className="size-12 rounded-[14px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
           {icon}
         </div>
       )}
-      <div className="text-[13.5px] font-semibold text-ink">{title}</div>
-      {body && <div className="mt-1 text-[12.5px] text-mute max-w-[320px] leading-relaxed">{body}</div>}
-      {action && <div className="mt-4">{action}</div>}
+      <div className="text-[16px] font-semibold text-fg">{title}</div>
+      {body && <div className="mt-1.5 text-[14px] text-fg-3 max-w-[380px] leading-relaxed">{body}</div>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -116,25 +224,27 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
-  size = "sm",
+  full = false,
 }: {
   value: T;
-  options: { value: T; label: ReactNode }[];
+  options: { value: T; label: ReactNode; disabled?: boolean }[];
   onChange: (v: T) => void;
-  size?: "sm" | "md";
+  full?: boolean;
 }) {
   return (
-    <div className={`inline-flex items-center p-0.5 rounded-[7px] bg-paper border border-line ${size === "md" ? "w-full" : ""}`}>
+    <div role="tablist" className={`inline-flex items-center p-[3px] rounded-[10px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
       {options.map((o) => {
         const active = o.value === value;
         return (
           <button
             key={o.value}
             type="button"
+            role="tab"
+            disabled={o.disabled}
             onClick={() => onChange(o.value)}
-            aria-pressed={active}
-            className={`${size === "md" ? "flex-1 h-8 text-[13px]" : "h-6 px-2.5 text-[12px]"} rounded-[5px] transition-[background-color,color,box-shadow] duration-150 ${
-              active ? "bg-white text-ink font-medium shadow-[0_0_0_1px_#E4E1D9]" : "text-mute hover:text-ink"
+            aria-selected={active}
+            className={`${full ? "flex-1" : ""} h-8 px-3 rounded-[7px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,box-shadow] duration-150 disabled:opacity-40 [&>svg]:size-3.5 ${
+              active ? "bg-card text-fg font-medium shadow-sm" : "text-fg-3 hover:text-fg"
             }`}
           >
             {o.label}
@@ -145,13 +255,37 @@ export function Segmented<T extends string>({
   );
 }
 
+export function Badge({
+  tone = "neutral",
+  children,
+  className = "",
+}: {
+  tone?: "neutral" | "accent" | "warm" | "work" | "danger";
+  children: ReactNode;
+  className?: string;
+}) {
+  const tones = {
+    neutral: "bg-subtle text-fg-2 border-line",
+    accent: "bg-accent-soft text-accent-text border-transparent",
+    warm: "bg-warm-soft text-warm border-transparent",
+    work: "bg-work-soft text-work border-transparent",
+    danger: "bg-danger-soft text-danger border-transparent",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 h-[22px] px-2 rounded-[6px] border text-[12px] font-medium whitespace-nowrap [&>svg]:size-3 ${tones[tone]} ${className}`}>
+      {children}
+    </span>
+  );
+}
+
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <Button
       type="button"
       variant="secondary"
-      size="xs"
+      size="sm"
+      icon={copied ? <Check className="text-work" /> : <Copy />}
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setCopied(true);
@@ -159,7 +293,6 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
         });
       }}
     >
-      {copied ? <Check className="w-3 h-3 text-work" /> : <Copy className="w-3 h-3" />}
       {copied ? "Copied" : label}
     </Button>
   );
@@ -169,14 +302,18 @@ export function Modal({
   open,
   onClose,
   children,
-  width = 440,
+  width = 480,
   label,
+  title,
+  description,
 }: {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
   width?: number;
   label: string;
+  title?: string;
+  description?: ReactNode;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -186,30 +323,38 @@ export function Modal({
   }, [open, onClose]);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-40 flex items-start justify-center pt-[12vh] px-4">
-      <div className="absolute inset-0 bg-[#161614]/20 animate-fade-in" onClick={onClose} />
+    <div className="fixed inset-0 z-40 flex items-start justify-center pt-[10vh] px-4">
+      <div className="absolute inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={label}
         style={{ width }}
-        className="relative max-w-full bg-white border border-line-strong rounded-[10px] animate-pop-in"
+        className="relative max-w-full max-h-[80vh] flex flex-col bg-panel border border-line rounded-[14px] shadow-lg animate-pop-in"
       >
-        <button
-          onClick={onClose}
-          aria-label="Close dialog"
-          className="absolute top-2.5 right-2.5 w-6 h-6 rounded-[5px] text-mute hover:bg-paper hover:text-ink flex items-center justify-center"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-        {children}
+        {title ? (
+          <div className="px-6 pt-5 pb-1 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[17px] font-semibold text-fg leading-tight">{title}</h2>
+              {description && <p className="mt-1 text-[13.5px] text-fg-3 leading-relaxed">{description}</p>}
+            </div>
+            <IconButton label="Close dialog" onClick={onClose} className="-mr-2 -mt-1">
+              <X />
+            </IconButton>
+          </div>
+        ) : (
+          <IconButton label="Close dialog" onClick={onClose} className="absolute top-3 right-3 z-10">
+            <X />
+          </IconButton>
+        )}
+        <div className="overflow-y-auto scroll-thin">{children}</div>
       </div>
     </div>,
     document.body,
   );
 }
 
-type ToastItem = { id: number; tone: "error" | "info"; text: string };
+type ToastItem = { id: number; tone: "error" | "info" | "success"; text: string };
 const ToastContext = createContext<(text: string, tone?: ToastItem["tone"]) => void>(() => {});
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -218,22 +363,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((text: string, tone: ToastItem["tone"] = "info") => {
     const id = nextID.current++;
     setItems((prev) => [...prev.slice(-2), { id, tone, text }]);
-    window.setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 4000);
+    window.setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 4500);
   }, []);
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2 pointer-events-none">
         {items.map((t) => (
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto px-3 h-8 rounded-[7px] text-[12.5px] flex items-center gap-2 animate-rise-in ${
-              t.tone === "error" ? "bg-[#3A1712] text-white" : "bg-ink text-white"
-            }`}
+            className="pointer-events-auto max-w-[420px] pl-3 pr-4 py-2.5 rounded-[10px] bg-card border border-line shadow-lg text-[13.5px] text-fg flex items-start gap-2.5 animate-rise-in"
           >
-            {t.tone === "error" && <span className="w-1.5 h-1.5 rounded-full bg-[#F08A74]" />}
-            {t.text}
+            {t.tone === "error" ? (
+              <AlertCircle className="size-4 text-danger shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle2 className="size-4 text-work shrink-0 mt-0.5" />
+            )}
+            <span className="leading-snug">{t.text}</span>
           </div>
         ))}
       </div>
@@ -267,26 +414,17 @@ export function useAction() {
   return { busy, run };
 }
 
-export function SumiMark({ size = 28 }: { size?: number }) {
-  return (
-    <span
-      style={{ width: size, height: size, fontSize: size * 0.44 }}
-      className="rounded-[7px] bg-ink text-white font-semibold inline-flex items-center justify-center shrink-0 select-none"
-    >
-      S
-    </span>
-  );
-}
-
 /** Small anchored menu; closes on outside click and Escape. */
 export function Menu({
   trigger,
   children,
   align = "right",
+  width = 240,
 }: {
   trigger: (open: boolean, toggle: () => void) => ReactNode;
   children: (close: () => void) => ReactNode;
   align?: "left" | "right";
+  width?: number;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -309,7 +447,8 @@ export function Menu({
       {open && (
         <div
           role="menu"
-          className={`absolute z-30 top-full mt-1 ${align === "right" ? "right-0" : "left-0"} min-w-[200px] bg-white border border-line-strong rounded-[8px] p-1 animate-pop-in`}
+          style={{ width }}
+          className={`absolute z-30 top-full mt-1.5 ${align === "right" ? "right-0" : "left-0"} bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in`}
         >
           {children(() => setOpen(false))}
         </div>
@@ -321,11 +460,13 @@ export function Menu({
 export function MenuItem({
   onSelect,
   active,
+  icon,
   children,
   hint,
 }: {
   onSelect: () => void;
   active?: boolean;
+  icon?: ReactNode;
   children: ReactNode;
   hint?: ReactNode;
 }) {
@@ -334,13 +475,77 @@ export function MenuItem({
       role="menuitemradio"
       aria-checked={active}
       onClick={onSelect}
-      className="w-full px-2 py-1.5 rounded-[5px] text-left hover:bg-paper flex items-start gap-2"
+      className="w-full px-2.5 py-2 rounded-[8px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
     >
-      <span className="w-3.5 pt-0.5 shrink-0">{active && <Check className="w-3.5 h-3.5" />}</span>
-      <span className="min-w-0">
-        <span className="block text-[12.5px] text-ink">{children}</span>
-        {hint && <span className="block text-[11px] text-faint leading-snug">{hint}</span>}
+      <span className="size-5 shrink-0 flex items-center justify-center text-fg-3 [&>svg]:size-4">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] text-fg leading-5">{children}</span>
+        {hint && <span className="block text-[12.5px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
       </span>
+      <span className="size-5 shrink-0 flex items-center justify-center text-accent">{active && <Check className="size-4" />}</span>
     </button>
+  );
+}
+
+export function SumiMark({ size = 32 }: { size?: number }) {
+  return (
+    <span
+      style={{ width: size, height: size, borderRadius: size * 0.3 }}
+      className="bg-gradient-to-br from-[#6d6ef0] to-[#4a4bc4] text-white inline-flex items-center justify-center shrink-0 select-none shadow-sm"
+    >
+      <svg viewBox="0 0 24 24" width={size * 0.56} height={size * 0.56} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+        <path d="M16.5 7.5c-1-1.3-2.6-2-4.5-2-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9 2.6 9 7.2 0 2-2 3.4-4.6 3.4-2 0-3.7-.8-4.7-2.2" />
+      </svg>
+    </span>
+  );
+}
+
+const STATUS_META: Record<TaskStatus, { label: string; color: string }> = {
+  todo: { label: "To do", color: "var(--text-3)" },
+  in_progress: { label: "In progress", color: "var(--work)" },
+  in_review: { label: "In review", color: "var(--warm)" },
+  done: { label: "Done", color: "var(--accent)" },
+  closed: { label: "Closed", color: "var(--text-4)" },
+};
+
+export function taskStatusLabel(s: TaskStatus) {
+  return STATUS_META[s].label;
+}
+
+export function TaskStatusIcon({ status, size = 16 }: { status: TaskStatus; size?: number }) {
+  const c = STATUS_META[status].color;
+  const r = 6.5;
+  const circ = 2 * Math.PI * 3.25;
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" className="shrink-0" aria-label={STATUS_META[status].label}>
+      {status === "todo" && <circle cx="8" cy="8" r={r} fill="none" stroke={c} strokeWidth="1.5" strokeDasharray="2.4 2" />}
+      {(status === "in_progress" || status === "in_review") && (
+        <>
+          <circle cx="8" cy="8" r={r} fill="none" stroke={c} strokeWidth="1.5" />
+          <circle
+            cx="8"
+            cy="8"
+            r="3.25"
+            fill="none"
+            stroke={c}
+            strokeWidth="6.5"
+            strokeDasharray={`${circ * (status === "in_progress" ? 0.5 : 0.75)} ${circ}`}
+            transform="rotate(-90 8 8)"
+          />
+        </>
+      )}
+      {status === "done" && (
+        <>
+          <circle cx="8" cy="8" r="7.25" fill={c} />
+          <path d="M5 8.2l2 2 4-4.2" fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+      {status === "closed" && (
+        <>
+          <circle cx="8" cy="8" r="7.25" fill={c} />
+          <path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      )}
+    </svg>
   );
 }

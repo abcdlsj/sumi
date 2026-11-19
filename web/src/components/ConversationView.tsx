@@ -1,29 +1,34 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, AtSign, CornerUpLeft, Hash, ListPlus, MessageSquare, X } from "lucide-react";
+import {
+  ArrowUp,
+  AtSign,
+  Bell,
+  BellOff,
+  ChevronDown,
+  CornerUpLeft,
+  Hash,
+  ListPlus,
+  Lock,
+  MessageSquare,
+  PanelRight,
+  Sparkles,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  api,
-  formatClock,
-  formatDay,
-  type BootstrapData,
-  type Conversation,
-  type Member,
-  type Message,
-  type NotifyLevel,
-} from "../api";
+import { api, formatClock, formatDay, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import type { DetailTarget } from "./DetailPane";
-import { MemberAvatar, RuntimeDot, TaskStatusGlyph } from "./Identity";
+import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { MessageListSkeleton } from "./Skeletons";
-import { Button, EmptyState, Menu, MenuItem, useAction } from "./ui";
+import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
-const NOTIFY: { value: NotifyLevel; label: string; hint: string }[] = [
-  { value: "mentions", label: "Mentions only", hint: "Notify on @mentions and followed threads" },
-  { value: "all", label: "All messages", hint: "Every new message counts as unread for you" },
-  { value: "mute", label: "Muted", hint: "Dim in sidebar; @mentions still reach you" },
+const NOTIFY: { value: NotifyLevel; label: string; hint: string; icon: React.ReactNode }[] = [
+  { value: "mentions", label: "Mentions only", hint: "Notify on @mentions and followed threads", icon: <AtSign /> },
+  { value: "all", label: "All messages", hint: "Every new message counts as unread", icon: <Bell /> },
+  { value: "mute", label: "Muted", hint: "Dim in sidebar; @mentions still reach you", icon: <BellOff /> },
 ];
 
 function sameDay(a: string, b: string) {
@@ -43,7 +48,7 @@ function useStickToBottom(dep: unknown, resetKey: string) {
   }, [dep, resetKey]);
   const onScroll = () => {
     const el = ref.current;
-    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
   };
   return { ref, onScroll };
 }
@@ -57,75 +62,69 @@ function useArrivals(convID: string, messages: Message[] | undefined) {
   return (id: string) => Boolean(initial && !initial.has(id));
 }
 
-function AgentStatusBar({
+export function describeAction(kind?: string, raw?: string): string | undefined {
+  try {
+    const p = raw ? JSON.parse(raw) : {};
+    if (kind === "agent_created") return `created agent ${p.display_name ?? ""}`;
+    if (kind === "channel_created") return `created #${p.slug ?? ""}`;
+    if (kind === "task_event") {
+      if (p.op === "created") return `created #${p.task_number}`;
+      if (p.op === "claimed") return `claimed #${p.task_number}`;
+      if (p.op === "unclaimed") return `unclaimed #${p.task_number}`;
+      if (p.op === "assigned") return `assigned #${p.task_number} to ${p.assignee_name ?? "nobody"}${p.reason ? ` — ${p.reason}` : ""}`;
+      if (p.op === "status_changed") return `moved #${p.task_number} from ${p.from} to ${p.to}`;
+      if (p.op === "amended") return `edited #${p.task_number} (rev ${p.revision})`;
+    }
+  } catch {
+    // ignore malformed payload
+  }
+  return kind;
+}
+
+/** Honest runtime line above the composer: who is working, where, or why not. */
+function AgentStatusLine({
   boot,
   conv,
-  onInspect,
-  replyTarget,
-  onCancelReply,
+  onOpenDetail,
 }: {
   boot: BootstrapData;
   conv: Conversation;
-  onInspect: (memberID: string) => void;
-  replyTarget?: Message;
-  onCancelReply: () => void;
+  onOpenDetail: (t: DetailTarget) => void;
 }) {
-  if (replyTarget) {
-    return (
-      <div className="h-7 px-4 flex items-center justify-between gap-3 text-[12px] animate-fade-in">
-        <span className="flex items-center gap-1.5 min-w-0 text-ink-2">
-          <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
-          <span className="shrink-0">Replying in thread to</span>
-          <strong className="font-medium text-ink shrink-0">{replyTarget.author_display_name}</strong>
-          <span className="truncate text-faint">{replyTarget.body_markdown.slice(0, 120)}</span>
-        </span>
-        <button onClick={onCancelReply} aria-label="Cancel thread reply" className="w-5 h-5 rounded hover:bg-hover text-mute flex items-center justify-center">
-          <X className="w-3 h-3" />
-        </button>
-      </div>
-    );
-  }
   const agents = boot.members.filter((m) => m.kind === "agent");
   const peer = conv.kind === "dm" ? agents.find((a) => a.id === conv.peer_member_id) : undefined;
-  const focusLabel = (a: Member) => {
-    const t = boot.tasks.find((x) => x.conversation_id === a.agent?.focus_conversation_id);
-    if (t) return ` on #${t.number}`;
-    if (a.agent?.focus_conversation_id === conv.id) return " here";
-    return "";
-  };
-  const subject = peer ?? agents.find((a) => a.agent?.runtime_state === "working") ?? agents.find((a) => a.agent?.runtime_state === "error");
-  let text: React.ReactNode = <span className="text-faint">{agents.length === 0 ? "No agents in this space yet" : "All agents idle"}</span>;
-  if (subject?.agent) {
-    const st = subject.agent.runtime_state;
-    const name = <strong className="font-medium text-ink">{subject.display_name}</strong>;
-    text =
-      st === "working" ? (
-        <>
-          {name} working{focusLabel(subject)}
-          {peer && subject.agent.focus_conversation_id && subject.agent.focus_conversation_id !== conv.id && " · message queued"}
-        </>
-      ) : st === "error" ? (
-        <span className="text-warm">
-          {name} error · {subject.agent.last_error_code || "needs attention"}
-        </span>
-      ) : st === "offline" ? (
-        <span className="text-faint">{name} offline · messages wait until its computer reconnects</span>
-      ) : (
-        <span className="text-faint">{name} idle</span>
-      );
-  }
+  const busyHere = agents.filter((a) => a.agent?.runtime_state === "working" && a.agent.focus_conversation_id === conv.id);
+  const subject: Member | undefined = peer ?? busyHere[0];
+  if (!subject?.agent) return null;
+  const st = subject.agent.runtime_state;
+  const focus = agentFocus(boot, subject);
+  const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
+
+  const tone = st === "error" ? "text-danger" : st === "working" ? "text-work" : "text-fg-3";
+  let text = agentStatusText(boot, subject);
+  if (st === "working" && !elsewhere) text = "is working on a reply…";
+  else if (elsewhere) text = `is busy in ${focus?.label ?? "another conversation"} · your message is queued`;
+  else if (st === "idle") text = "is idle · messages wake it";
+  else if (st === "offline") text = "is offline · messages wait until its computer reconnects";
+  else if (st === "error") text = `hit an error · ${subject.agent.last_error_code || "see details"}`;
+
   return (
-    <div className="h-7 px-4 flex items-center text-[12px] text-ink-2">
-      {subject ? (
-        <button onClick={() => onInspect(subject.id)} className="inline-flex items-center gap-2 hover:text-ink min-w-0">
-          <span className={subject.agent?.runtime_state === "working" ? "animate-breathe" : ""}>
-            <RuntimeDot state={subject.agent?.runtime_state} />
-          </span>
-          <span className="truncate">{text}</span>
-        </button>
-      ) : (
-        text
-      )}
+    <div className="px-5 pt-2.5 pb-1 flex items-center gap-2 text-[13px] animate-fade-in">
+      <StatusDot state={st} ring="var(--bg)" size={8} />
+      <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
+        <span className="font-semibold">{subject.display_name}</span> {text}
+      </button>
+      {busyHere.length > 1 && <span className="text-fg-3">+{busyHere.length - 1} more working</span>}
+    </div>
+  );
+}
+
+function DayDivider({ iso }: { iso: string }) {
+  return (
+    <div className="sticky top-0 z-10 py-2 flex justify-center pointer-events-none">
+      <span className="h-6 px-3 rounded-full bg-panel/90 backdrop-blur border border-line text-[12px] font-medium text-fg-3 inline-flex items-center shadow-sm">
+        {formatDay(iso)}
+      </span>
     </div>
   );
 }
@@ -166,29 +165,26 @@ export function ConversationView({
     textRef.current?.focus();
   }, [conv.id]);
 
-  // Auto-grow composer up to a fixed cap so the footer never jumps past it.
   useLayoutEffect(() => {
     const el = textRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [composer]);
 
+  const peer = conv.kind === "dm" ? boot.members.find((m) => m.id === conv.peer_member_id) : undefined;
   const title = conv.kind === "dm" ? conv.peer_display_name ?? "Direct message" : conv.slug ?? "";
   const replyTarget = messages?.find((m) => m.id === replyingTo);
+  const level = conv.notify_level ?? "mentions";
+  const readSeq = msgsQ.data?.read_seq ?? 0;
+  const memberCount = boot.members.length;
 
   async function handleSend(e?: FormEvent) {
     e?.preventDefault();
     const body = composer.trim();
     if ((!body && draft.ids.length === 0) || draft.uploading || send.busy) return;
     const ok = await send.run(() =>
-      api.sendMessage(
-        spaceSlug,
-        conv.id,
-        body || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
-        replyingTo ?? undefined,
-        draft.ids,
-      ),
+      api.sendMessage(spaceSlug, conv.id, body || `Attached ${draft.pending.map((a) => a.name).join(", ")}`, replyingTo ?? undefined, draft.ids),
     );
     if (!ok) return;
     setComposer("");
@@ -202,11 +198,7 @@ export function ConversationView({
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
     await taskAction.run(async () => {
-      const res = await api.createTask(spaceSlug, {
-        channel_id: conv.id,
-        source_message_id: sourceMsgID,
-        title: newTaskTitle.trim(),
-      });
+      const res = await api.createTask(spaceSlug, { channel_id: conv.id, source_message_id: sourceMsgID, title: newTaskTitle.trim() });
       setNewTaskTitle("");
       setCreatingTaskOnMsg(null);
       onOpenDetail({ kind: "task", taskID: res.task.id });
@@ -215,47 +207,46 @@ export function ConversationView({
     });
   }
 
-  const level = conv.notify_level ?? "mentions";
-  const readSeq = msgsQ.data?.read_seq ?? 0;
-
   return (
-    <section className="flex flex-col h-full min-h-0">
-      <header className="h-11 px-4 border-b border-line flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
+    <section className="flex flex-col h-full min-h-0 bg-panel">
+      <header className="h-[52px] px-5 border-b border-line flex items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           {conv.kind === "dm" ? (
-            <MemberAvatar id={conv.peer_member_id ?? ""} name={title} kind={conv.peer_kind ?? "human"} size="sm" />
+            <MemberAvatar
+              id={conv.peer_member_id ?? ""}
+              name={title}
+              kind={conv.peer_kind ?? "human"}
+              size="sm"
+              state={peer?.agent?.runtime_state}
+            />
+          ) : conv.kind === "private" ? (
+            <Lock className="size-4 text-fg-3 shrink-0" />
           ) : (
-            <Hash className="w-3.5 h-3.5 text-mute shrink-0" />
+            <Hash className="size-4 text-fg-3 shrink-0" />
           )}
-          <h1 className="text-[14px] font-semibold text-ink shrink-0">{title}</h1>
-          {conv.kind === "dm" && conv.peer_kind === "agent" && (
-            <span className="px-1.5 rounded bg-paper text-[10.5px] text-mute border border-line">Agent</span>
-          )}
+          <h1 className="text-[15px] font-semibold text-fg truncate">{title}</h1>
+          {peer?.kind === "agent" && <Badge tone="accent">Agent</Badge>}
           {conv.topic && (
             <>
-              <span className="w-px h-3.5 bg-line-strong mx-1 shrink-0" />
-              <span className="text-[12.5px] text-mute truncate">{conv.topic}</span>
+              <span className="w-px h-4 bg-line-strong shrink-0" />
+              <span className="text-[13.5px] text-fg-3 truncate">{conv.topic}</span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {conv.kind === "dm" && conv.peer_kind === "agent" && conv.peer_member_id && (
-            <Button variant="ghost" size="xs" onClick={() => onOpenDetail({ kind: "agent", memberID: conv.peer_member_id! })}>
-              Agent details
-            </Button>
-          )}
+        <div className="flex items-center gap-1.5 shrink-0">
           {conv.kind !== "dm" && (
             <Menu
               trigger={(open, toggle) => (
                 <button
                   onClick={toggle}
                   aria-expanded={open}
-                  className={`h-7 px-2 rounded-[6px] border text-[12px] flex items-center gap-1.5 transition-colors ${
-                    open ? "border-field bg-paper" : "border-line hover:bg-paper"
-                  } ${level === "mute" ? "text-faint" : "text-ink-2"}`}
+                  className={`h-8 px-2.5 rounded-[8px] text-[13px] flex items-center gap-1.5 transition-colors [&>svg]:size-4 ${
+                    open ? "bg-hover text-fg" : "text-fg-2 hover:bg-hover"
+                  }`}
                 >
-                  {level === "mute" ? <BellOff className="w-3.5 h-3.5" /> : level === "all" ? <Bell className="w-3.5 h-3.5" /> : <AtSign className="w-3.5 h-3.5 text-warm" />}
+                  {NOTIFY.find((n) => n.value === level)?.icon}
                   <span>{NOTIFY.find((n) => n.value === level)?.label}</span>
+                  <ChevronDown className="size-3.5 text-fg-3" />
                 </button>
               )}
             >
@@ -264,6 +255,7 @@ export function ConversationView({
                   <MenuItem
                     key={n.value}
                     active={n.value === level}
+                    icon={n.icon}
                     hint={n.hint}
                     onSelect={() => {
                       close();
@@ -279,6 +271,11 @@ export function ConversationView({
               }
             </Menu>
           )}
+          {peer?.kind === "agent" && (
+            <IconButton label="Agent details" onClick={() => onOpenDetail({ kind: "agent", memberID: peer.id })}>
+              <PanelRight />
+            </IconButton>
+          )}
         </div>
       </header>
 
@@ -286,22 +283,29 @@ export function ConversationView({
         {msgsQ.isLoading ? (
           <MessageListSkeleton />
         ) : !messages || messages.length === 0 ? (
-          <EmptyState
-            icon={conv.kind === "dm" ? <MessageSquare className="w-4.5 h-4.5" /> : <Hash className="w-4.5 h-4.5" />}
-            title={conv.kind === "dm" ? `Start a conversation with ${title}` : `This is the start of #${title}`}
-            body={
-              conv.kind === "dm" && conv.peer_kind === "agent"
-                ? "Direct messages always wake the agent. Describe what you need in one message."
-                : "Post a message, then turn any message into a Task with + Task."
-            }
-          />
+          peer?.kind === "agent" ? (
+            <EmptyState
+              icon={<Sparkles />}
+              title={`Say hi to ${title}`}
+              body={`${title} replies in this DM. Describe what you need in one message — it reads the context it needs on its own.`}
+            />
+          ) : (
+            <EmptyState
+              icon={conv.kind === "dm" ? <MessageSquare /> : <Hash />}
+              title={conv.kind === "dm" ? `Start a conversation with ${title}` : `Welcome to #${title}`}
+              body={
+                conv.kind === "dm"
+                  ? "Direct messages always notify the other person."
+                  : `${memberCount} members. @mention an agent to get it working, or turn any message into a Task.`
+              }
+            />
+          )
         ) : (
-          <div className="py-3 animate-fade-in">
+          <div className="pb-4 animate-fade-in">
             {messages.map((m, idx) => {
               const prev = messages[idx - 1];
               const showDay = !prev || !sameDay(prev.created_at, m.created_at);
-              const showNew =
-                readSeq > 0 && m.seq > readSeq && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= readSeq);
+              const showNew = readSeq > 0 && m.seq > readSeq && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= readSeq);
               const grouped =
                 !showDay &&
                 !showNew &&
@@ -310,104 +314,109 @@ export function ConversationView({
                 m.kind === "text" &&
                 prev.author_member_id === m.author_member_id &&
                 new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
+              const author = boot.members.find((x) => x.id === m.author_member_id);
               return (
                 <div key={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
-                  {showDay && (
-                    <div className="px-5 pt-3 pb-1 flex items-center gap-3">
-                      <div className="flex-1 h-px bg-line" />
-                      <span className="text-[11px] font-medium text-faint">{formatDay(m.created_at)}</span>
-                      <div className="flex-1 h-px bg-line" />
-                    </div>
-                  )}
+                  {showDay && <DayDivider iso={m.created_at} />}
                   {showNew && (
-                    <div className="px-5 py-1.5 flex items-center gap-2.5 animate-fade-in">
-                      <div className="flex-1 h-px bg-[#E3AE91]" />
-                      <span className="text-[10.5px] font-semibold uppercase tracking-wider text-warm">New</span>
-                      <div className="flex-1 h-px bg-[#E3AE91]" />
+                    <div className="px-6 py-2 flex items-center gap-3 animate-fade-in">
+                      <div className="flex-1 h-px bg-warm/40" />
+                      <span className="text-[12px] font-semibold text-warm">New messages</span>
+                      <div className="flex-1 h-px bg-warm/40" />
                     </div>
                   )}
                   {m.kind !== "text" ? (
-                    <div className="px-5 py-1 flex items-center gap-3 text-[12px] text-mute">
-                      <span className="w-7 flex justify-center">
-                        <span className="w-1.5 h-1.5 rounded-full bg-work" />
+                    <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
+                      <span className="w-8 flex justify-center">
+                        <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
+                          <Sparkles className="size-3 text-fg-3" />
+                        </span>
                       </span>
-                      <span>
-                        <strong className="font-medium text-ink">{m.author_display_name}</strong>{" "}
-                        {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}{" "}
-                        <span className="font-mono-num text-[11px] text-faint">{formatClock(m.created_at)}</span>
+                      <span className="min-w-0">
+                        <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
+                        <span className="ml-2 tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                       </span>
                     </div>
                   ) : (
                     <article
-                      className={`relative px-5 ${grouped ? "py-0.5" : "pt-2 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
-                        replyingTo === m.id ? "bg-paper" : "hover:bg-paper-2"
+                      className={`relative px-6 ${grouped ? "py-0.5" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
+                        replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/70"
                       }`}
                     >
-                      <div className="w-7 shrink-0">
+                      <div className="w-8 shrink-0">
                         {grouped ? (
-                          <span className="block pt-[3px] text-right font-mono-num text-[10px] text-faint opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="block pt-[3px] text-right tabular text-[11.5px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
                             {formatClock(m.created_at)}
                           </span>
                         ) : (
                           <button
                             onClick={() => m.author_kind === "agent" && onOpenDetail({ kind: "agent", memberID: m.author_member_id })}
-                            className={`mt-0.5 block ${m.author_kind === "agent" ? "" : "cursor-default"}`}
+                            className={`block mt-0.5 ${m.author_kind === "agent" ? "" : "cursor-default"}`}
                             tabIndex={m.author_kind === "agent" ? 0 : -1}
                             aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : undefined}
                           >
-                            <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} />
+                            <MemberAvatar
+                              id={m.author_member_id}
+                              name={m.author_display_name ?? "?"}
+                              kind={m.author_kind ?? "human"}
+                              size="md"
+                              state={author?.agent?.runtime_state}
+                            />
                           </button>
                         )}
                       </div>
-                      <div className="min-w-0 flex-1 max-w-[72ch]">
+                      <div className="min-w-0 flex-1 max-w-[760px]">
                         {!grouped && (
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-[13.5px] font-semibold text-ink">{m.author_display_name}</span>
-                            <span className="font-mono-num text-[11px] text-faint">{formatClock(m.created_at)}</span>
+                          <div className="flex items-center gap-2 h-5">
+                            <span className="text-[14px] font-semibold text-fg">{m.author_display_name}</span>
+                            {m.author_kind === "agent" && <Badge tone="accent" className="!h-[18px] !px-1.5 !text-[11px]">Agent</Badge>}
+                            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                           </div>
                         )}
-                        <div className="mt-0.5 text-[13.5px] leading-[1.55] text-ink md break-words">
+                        <div className={`${grouped ? "" : "mt-1"} text-[14px] leading-[1.6] text-fg md`}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
                         </div>
 
                         <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
 
                         {m.attached_tasks && m.attached_tasks.length > 0 && (
-                          <div className="mt-2 border border-line rounded-[6px] bg-paper-2 divide-y divide-line overflow-hidden max-w-[560px]">
+                          <div className="mt-2.5 rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
                             {m.attached_tasks.map((tk) => (
                               <button
                                 key={tk.id}
                                 onClick={() => onOpenDetail({ kind: "task", taskID: tk.id })}
-                                className="w-full h-8 px-2.5 hover:bg-[#F2F0EA] flex items-center justify-between gap-3 text-left transition-colors"
+                                className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left transition-colors"
                               >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <TaskStatusGlyph status={tk.status} />
-                                  <span className="font-mono-num text-[11.5px] text-mute w-7 shrink-0">#{tk.number}</span>
-                                  <span className="text-[12.5px] font-medium text-ink truncate">{tk.title}</span>
-                                </span>
-                                <span className="flex items-center gap-3 shrink-0 text-[11.5px] text-mute">
-                                  <span>{tk.assignee_display_name || "Unassigned"}</span>
-                                  {tk.message_count > 0 && <span className="font-mono-num text-faint">{tk.message_count} msgs</span>}
-                                </span>
+                                <TaskStatusIcon status={tk.status} />
+                                <span className="tabular text-[13px] text-fg-3 shrink-0">#{tk.number}</span>
+                                <span className="text-[14px] font-medium text-fg truncate flex-1">{tk.title}</span>
+                                {tk.assignee_member_id ? (
+                                  <span className="flex items-center gap-1.5 text-[13px] text-fg-2 shrink-0">
+                                    <MemberAvatar id={tk.assignee_member_id} name={tk.assignee_display_name ?? "?"} kind={tk.assignee_kind ?? "human"} size="xs" />
+                                    {tk.assignee_display_name}
+                                  </span>
+                                ) : (
+                                  <span className="text-[13px] text-fg-4 shrink-0">Unassigned</span>
+                                )}
                               </button>
                             ))}
                           </div>
                         )}
 
                         {creatingTaskOnMsg === m.id && (
-                          <form onSubmit={(e) => void handleCreateTask(e, m.id)} className="mt-2 flex items-center gap-1.5 max-w-[560px] animate-rise-in">
+                          <form onSubmit={(e) => void handleCreateTask(e, m.id)} className="mt-2.5 flex items-center gap-2 max-w-[560px] animate-rise-in">
                             <input
                               autoFocus
                               value={newTaskTitle}
                               onChange={(e) => setNewTaskTitle(e.target.value)}
                               onKeyDown={(e) => e.key === "Escape" && setCreatingTaskOnMsg(null)}
                               placeholder="Task title"
-                              className="flex-1 h-7 px-2 rounded-[6px] border border-ink text-[12.5px] outline-none"
+                              className="flex-1 h-9 px-3 rounded-[9px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
                             />
-                            <Button type="submit" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
-                              Create
+                            <Button type="submit" size="sm" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
+                              Create task
                             </Button>
-                            <Button type="button" variant="ghost" onClick={() => setCreatingTaskOnMsg(null)}>
+                            <Button type="button" size="sm" variant="ghost" onClick={() => setCreatingTaskOnMsg(null)}>
                               Cancel
                             </Button>
                           </form>
@@ -416,44 +425,37 @@ export function ConversationView({
                         {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
                           <button
                             onClick={() =>
-                              onOpenDetail({
-                                kind: "thread",
-                                threadConvID: m.thread_conversation_id!,
-                                rootMessageID: m.id,
-                                parentSlug: conv.slug ?? "dm",
-                              })
+                              onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: conv.slug ?? "dm" })
                             }
-                            className="mt-1 h-6 -ml-1.5 px-1.5 rounded-[5px] inline-flex items-center gap-2 text-[12px] text-ink-2 hover:bg-white hover:text-ink border border-transparent hover:border-line transition-colors"
+                            className="mt-1.5 h-8 pl-2 pr-3 -ml-2 rounded-[8px] inline-flex items-center gap-2 text-[13px] text-accent-text hover:bg-accent-soft transition-colors"
                           >
-                            <MessageSquare className="w-3 h-3 text-mute" />
+                            <MessageSquare className="size-4" />
                             <span className="font-medium">
                               {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}
                             </span>
-                            <span className="font-mono-num text-[11px] text-faint">{formatClock(m.last_reply_at)}</span>
+                            <span className="tabular text-[12px] text-fg-3">Last {formatClock(m.last_reply_at)}</span>
                           </button>
                         ) : null}
                       </div>
 
-                      <div className="absolute right-4 -top-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100 flex items-center bg-white border border-line rounded-[6px] p-0.5">
+                      <div className="absolute right-5 -top-3.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md">
                         <button
                           onClick={() => {
                             setReplyingTo(m.id);
                             textRef.current?.focus();
                           }}
-                          title="Reply in thread"
-                          className="h-6 px-1.5 rounded-[4px] text-[11.5px] text-ink-2 hover:bg-paper hover:text-ink flex items-center gap-1"
+                          className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                         >
-                          <CornerUpLeft className="w-3 h-3" /> Reply
+                          <CornerUpLeft className="size-3.5" /> Reply
                         </button>
                         <button
                           onClick={() => {
                             setNewTaskTitle("");
                             setCreatingTaskOnMsg(m.id);
                           }}
-                          title="Create a Task from this message"
-                          className="h-6 px-1.5 rounded-[4px] text-[11.5px] text-ink-2 hover:bg-paper hover:text-ink flex items-center gap-1"
+                          className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                         >
-                          <ListPlus className="w-3 h-3" /> Task
+                          <ListPlus className="size-3.5" /> Task
                         </button>
                       </div>
                     </article>
@@ -465,16 +467,22 @@ export function ConversationView({
         )}
       </div>
 
-      <div className="border-t border-line bg-paper-2 shrink-0">
-        <AgentStatusBar
-          boot={boot}
-          conv={conv}
-          onInspect={(id) => onOpenDetail({ kind: "agent", memberID: id })}
-          replyTarget={replyTarget}
-          onCancelReply={() => setReplyingTo(null)}
-        />
-        <form onSubmit={(e) => void handleSend(e)} className="px-3 pb-3">
-          <div className="bg-white border border-line-strong rounded-[8px] focus-within:border-ink transition-colors">
+      <div className="shrink-0 bg-bg/60 border-t border-line">
+        <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
+        <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
+          <div className="bg-card border border-line-strong rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+            {replyTarget && (
+              <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
+                <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
+                <span className="text-fg-3 shrink-0">Replying in thread to</span>
+                <span className="font-medium text-fg shrink-0">{replyTarget.author_display_name}</span>
+                <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
+                <span className="flex-1" />
+                <button type="button" onClick={() => setReplyingTo(null)} aria-label="Cancel thread reply" className="size-6 rounded-[6px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
             <textarea
               ref={textRef}
               rows={1}
@@ -488,16 +496,23 @@ export function ConversationView({
                 if (e.key === "Escape" && replyingTo) setReplyingTo(null);
               }}
               placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
-              className="block w-full px-3 pt-2.5 pb-1 min-h-[40px] text-[13.5px] bg-transparent outline-none resize-none placeholder:text-faint scroll-thin"
+              className="block w-full px-4 pt-3 pb-1 min-h-[48px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
             />
             <AttachmentDraftRow draft={draft} />
-            <div className="px-2 pb-2 flex items-center justify-between gap-2">
+            <div className="px-2.5 pb-2.5 flex items-center justify-between gap-2">
               <AttachmentPicker draft={draft} />
-              <div className="flex items-center gap-2">
-                <span className="font-mono-num text-[10.5px] text-faint hidden sm:inline">↵ send · ⇧↵ newline</span>
-                <Button type="submit" size="xs" loading={send.busy} disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading}>
-                  Send
-                </Button>
+              <div className="flex items-center gap-3">
+                <span className="text-[12px] text-fg-4 hidden md:inline">
+                  <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
+                </span>
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
+                  className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
+                >
+                  <ArrowUp className="size-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -505,23 +520,4 @@ export function ConversationView({
       </div>
     </section>
   );
-}
-
-export function describeAction(kind?: string, raw?: string): string | undefined {
-  try {
-    const p = raw ? JSON.parse(raw) : {};
-    if (kind === "agent_created") return `created agent ${p.display_name ?? ""}`;
-    if (kind === "channel_created") return `created #${p.slug ?? ""}`;
-    if (kind === "task_event") {
-      if (p.op === "created") return `created #${p.task_number}`;
-      if (p.op === "claimed") return `claimed #${p.task_number}`;
-      if (p.op === "unclaimed") return `unclaimed #${p.task_number}`;
-      if (p.op === "assigned") return `assigned #${p.task_number} to ${p.assignee_name ?? "nobody"}${p.reason ? `: ${p.reason}` : ""}`;
-      if (p.op === "status_changed") return `moved #${p.task_number} ${p.from} → ${p.to}`;
-      if (p.op === "amended") return `amended #${p.task_number} (rev ${p.revision})`;
-    }
-  } catch {
-    // ignore malformed payload
-  }
-  return kind;
 }
