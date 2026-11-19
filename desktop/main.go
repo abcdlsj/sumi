@@ -20,6 +20,7 @@ func main() {
 		os.Exit(cli.Run(os.Args[1:], os.Stdout))
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	adoptLoginShellPath()
 
 	cfg, err := loadConfig()
 	if err != nil {

@@ -120,6 +120,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 - `desktop/` 是独立 main 包：托盘 + 单个窗口 + 进程内托管本机 Computer Daemon（必要时兼起本机 Server）；窗口直接打开 Server 源（`http://127.0.0.1:<port>`），由 Server 的 `-web-dir` 提供内嵌的 `web/dist`，因此 Browser Session Cookie、SSE 与上传都在真实 HTTP 源上工作，不引入反向代理。
 - 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`，0600），字段 `server_url`、`computer_token`、`data_dir`；由桌面确认式配对或 `sumi pair` 写出。
 - 启动顺序：探活 `server_url` → 若不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 有 token 则启动 Computer Daemon → 开窗。缺 token 时走「确认式配对」：开窗地址附带 `?pair=<id>&code=<code>`，托盘显示 `Computer: waiting for confirmation`；确认后写入配置并启动 Daemon，托盘变为 `Computer: online`，无需重启 App。
+- 薄壳启动时以用户登录 shell（`$SHELL -l`）的 `PATH` 为准，保证从 Finder 启动时 Daemon 也能找到 Homebrew 安装的 `pi` / `codex` / `claude`。
 - 托盘菜单固定四项：`Open Sumi`、`Computer` 状态（只读）、`Restart Computer Daemon`、`Quit`。关闭窗口只隐藏，Server/Daemon/托盘继续运行；Quit 才停止它们并退出。
 - 薄壳不含业务逻辑：鉴权、Space、Agent、附件全部由 Server 与 Daemon 承担。
 
