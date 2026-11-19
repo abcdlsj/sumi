@@ -5,10 +5,13 @@ import "context"
 // TurnInput carries the per-turn wake prompt and execution environment for a single-session agent.
 type TurnInput struct {
 	SystemPrompt string
-	UserPrompt   string
-	WorkDir      string
-	MemoryDir    string
-	Env          []string
+	// StartupContext (the MEMORY.md excerpt) is prepended to UserPrompt only on the first turn
+	// of a fresh Runtime Session; resumed sessions already hold it.
+	StartupContext string
+	UserPrompt     string
+	WorkDir        string
+	MemoryDir      string
+	Env            []string
 }
 
 type TurnResult struct {

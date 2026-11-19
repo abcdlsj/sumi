@@ -229,15 +229,22 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 		return driver.TurnResult{}, err
 	}
 	p := d.proc
+	fresh := false
 	if d.sessionID == "" {
 		if err := d.openSessionLocked(ctx, p, in.WorkDir); err != nil {
 			return driver.TurnResult{}, err
 		}
+		fresh = !d.resumed
 	}
 
+	// ACP has no system role: standing instructions open a fresh session and persist in it.
 	promptText := in.UserPrompt
-	if in.SystemPrompt != "" {
-		promptText = in.SystemPrompt + "\n\n" + in.UserPrompt
+	if fresh {
+		for _, part := range []string{in.StartupContext, in.SystemPrompt} {
+			if part != "" {
+				promptText = part + "\n\n" + promptText
+			}
+		}
 	}
 	res, err := p.call(ctx, "session/prompt", map[string]any{
 		"sessionId": d.sessionID,

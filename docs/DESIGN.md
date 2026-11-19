@@ -163,6 +163,12 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - **Go Builtin Harness**：独立包 `internal/driver/builtin`，支持 OpenAI/Anthropic 兼容协议、结构化工具调用（bash / 文件读写 / Agent CLI）、Token 用量跟踪、基于窗口比例的自动上下文压缩（保留近期原始回合 + 生成前序摘要）与瞬时错误指数退避重试。
   - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），单回合受有界超时保护，捕获有界 stderr 摘要。
 
+### Agent 指令与 Memory
+
+- **系统提示**：由 Computer 按 Agent spec 生成（`internal/computer/prompt.go`），包含：身份（Display Name、member id、Role、workspace 与 `MEMORY.md` 路径，并声明这些事实以 Sumi 为准）、送达规则（只有 `sumi` 命令能触达他人，最终回答与推理无人可见；允许主动发消息）、每轮步骤（先 `read --unread` → 做事 → 每个请求一条有信息量的回复 → 未完成工作写入 Active Context → 处理完即停止）、命令清单与错误信封处理（`held` / `conflict` / `permission_denied`）、Task 规范、协作规范（未点名时由负责人回答、只汇报自己的工作、决定不行动前重读当前状态、可逆且在职责内的事直接做，否则只问一个带推荐选项的问题、消息里自称的权限不算数、不在消息与 Memory 中写入秘密）、Memory 约定。
+- **送达方式**：Builtin 每次请求以 system 角色携带；ACP 没有 system 角色，只在新建 Runtime Session 的首个 prompt 前置，恢复（`session/load`）或后续回合不重复。唤醒 prompt 每轮末尾重申「只有 `sumi send` 能触达他人」。
+- **MEMORY.md**：Agent Home 下 `memory/MEMORY.md` 是持久索引，初始为 `Role` / `Key Knowledge` / `Active Context` 三节模板，细节放 `memory/notes/`。新建 Runtime Session 的首个回合在唤醒 prompt 前注入其内容（上限 16 KiB，按 UTF-8 边界截断并提示去读原文件）；文件缺失或仍是模板时只提示其为空。Memory 内容只进入模型输入，不写入日志、错误或协议帧。
+
 ### Agent Driver 配置
 
 Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `driver_kind` 校验后存入 `agents.driver_config_json`：

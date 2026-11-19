@@ -126,3 +126,32 @@ func TestHarnessToolLoopSessionPersistenceAndCompaction(t *testing.T) {
 		t.Fatalf("expected session file deleted on reset")
 	}
 }
+
+type recordingProvider struct{ calls [][]Message }
+
+func (p *recordingProvider) Complete(_ context.Context, _ string, messages []Message, _ []openai.Tool) (CompletionResponse, error) {
+	p.calls = append(p.calls, append([]Message(nil), messages...))
+	return CompletionResponse{Message: Message{Role: "assistant", Content: "ok"}}, nil
+}
+
+func TestStartupContextOnlyOpensFreshSession(t *testing.T) {
+	root := t.TempDir()
+	prov := &recordingProvider{}
+	h, err := New(Config{SessionFile: filepath.Join(root, "session.jsonl")}, prov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := driver.TurnInput{SystemPrompt: "rules", StartupContext: "MEMORY", UserPrompt: "wake", WorkDir: root, MemoryDir: root}
+	for i := 0; i < 2; i++ {
+		if _, err := h.RunTurn(context.Background(), in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := prov.calls[0], prov.calls[1]
+	if first[0].Role != "system" || !strings.HasPrefix(first[1].Content, "MEMORY") {
+		t.Fatalf("fresh session must open with startup context: %+v", first)
+	}
+	if last := second[len(second)-1]; last.Content != "wake" {
+		t.Fatalf("later turns must not repeat startup context: %q", last.Content)
+	}
+}

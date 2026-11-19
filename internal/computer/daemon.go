@@ -510,7 +510,7 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 	}
 	memFile := filepath.Join(ag.memoryDir, "MEMORY.md")
 	if _, err := os.Stat(memFile); os.IsNotExist(err) {
-		_ = os.WriteFile(memFile, []byte("# Memory\n"), 0o600)
+		_ = os.WriteFile(memFile, []byte(memoryTemplate), 0o600)
 	}
 	var drv driver.SessionDriver
 	var err error
@@ -715,25 +715,14 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		focus := items[0]
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
-		sysPrompt := fmt.Sprintf(
-			"You are %s, a persistent AI collaborator in Sumi.\nRole: %s\nUse the `sumi` CLI via bash for all Sumi actions (`sumi inbox`, `sumi read <conv_id> --unread`, `sumi send <conv_id> --body ...`, `sumi task ...`).\nBe concise and direct. Never send filler confirmations.",
-			spec.DisplayName, spec.RoleText,
-		)
-		var b strings.Builder
-		b.WriteString("You have unread attention items:\n")
-		for _, it := range items {
-			fmt.Fprintf(&b, "- %s (conversation_id=%s, reason=%s, unread=%d, latest_by=%s)\n",
-				it.Title, it.ConversationID, it.Reason, it.UnreadCount, it.LatestAuthorName)
-		}
-		b.WriteString("Read the relevant conversation(s) with `sumi read <conversation_id> --unread` before acting.")
-
 		turnCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		_, runErr := drv.RunTurn(turnCtx, driver.TurnInput{
-			SystemPrompt: sysPrompt,
-			UserPrompt:   b.String(),
-			WorkDir:      ag.workDir,
-			MemoryDir:    ag.memoryDir,
-			Env:          d.agentEnv(ag, spec.DriverKind),
+			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
+			StartupContext: buildStartupContext(spec, ag.memoryDir),
+			UserPrompt:     buildWakePrompt(items),
+			WorkDir:        ag.workDir,
+			MemoryDir:      ag.memoryDir,
+			Env:            d.agentEnv(ag, spec.DriverKind),
 		})
 		cancel()
 

@@ -106,7 +106,11 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.history = append(h.history, Message{Role: openai.ChatMessageRoleUser, Content: in.UserPrompt})
+	userPrompt := in.UserPrompt
+	if len(h.history) == 0 && in.StartupContext != "" {
+		userPrompt = in.StartupContext + "\n\n" + userPrompt
+	}
+	h.history = append(h.history, Message{Role: openai.ChatMessageRoleUser, Content: userPrompt})
 	var totalIn, totalOut, totalTools int
 	tools := builtinToolsSpec()
 

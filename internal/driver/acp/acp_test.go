@@ -40,6 +40,11 @@ func TestFakeACPAgent(t *testing.T) {
 		var msg struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			} `json:"params"`
 			Result struct {
 				Outcome struct {
 					OptionID string `json:"optionId"`
@@ -60,6 +65,9 @@ func TestFakeACPAgent(t *testing.T) {
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"sessionId": "sess-1"}})
 		case "session/prompt":
 			promptID = msg.ID
+			if len(msg.Params.Prompt) > 0 && strings.HasPrefix(msg.Params.Prompt[0].Text, "SYS") {
+				logMethod("prompt-with-system")
+			}
 			for i := 0; i < 500; i++ {
 				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "sess-1", "n": i}})
 			}
@@ -161,9 +169,12 @@ func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 	run := func() {
 		d, in := fakeDriverWith(cfg, "resume")
 		in.Env = append(in.Env, "SUMI_FAKE_ACP_LOG="+logPath)
+		in.SystemPrompt, in.StartupContext = "SYS rules", "memory"
 		defer d.Close()
-		if _, err := d.RunTurn(ctx, in); err != nil {
-			t.Fatalf("turn: %v", err)
+		for i := 0; i < 2; i++ {
+			if _, err := d.RunTurn(ctx, in); err != nil {
+				t.Fatalf("turn: %v", err)
+			}
 		}
 	}
 	methods := func() []string {
@@ -171,20 +182,21 @@ func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 		_ = os.Remove(logPath)
 		var out []string
 		for _, m := range strings.Fields(string(raw)) {
-			if strings.HasPrefix(m, "session/new") || strings.HasPrefix(m, "session/load") {
+			if m == "session/new" || m == "session/load" || m == "prompt-with-system" {
 				out = append(out, m)
 			}
 		}
 		return out
 	}
 
+	// Standing instructions open a fresh session once; later turns and resumed sessions omit them.
 	run()
-	if got := methods(); len(got) != 1 || got[0] != "session/new" {
+	if got := strings.Join(methods(), ","); got != "session/new,prompt-with-system" {
 		t.Fatalf("first driver: %v", got)
 	}
 	run() // A new driver (daemon restart) resumes the persisted session.
-	if got := methods(); len(got) != 1 || got[0] != "session/load" {
-		t.Fatalf("restarted driver must resume: %v", got)
+	if got := strings.Join(methods(), ","); got != "session/load" {
+		t.Fatalf("restarted driver must resume without re-sending instructions: %v", got)
 	}
 
 	d, _ := fakeDriverWith(cfg, "resume")
@@ -193,7 +205,7 @@ func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 	}
 	_ = d.Close()
 	run()
-	if got := methods(); len(got) != 1 || got[0] != "session/new" {
+	if got := strings.Join(methods(), ","); got != "session/new,prompt-with-system" {
 		t.Fatalf("reset must start a new session: %v", got)
 	}
 
