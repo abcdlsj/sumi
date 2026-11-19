@@ -103,6 +103,8 @@ func (s *Server) registerRoutes() {
 		r.Post("/agents/{agentID}/control", s.handleControlAgent)
 
 		r.Get("/conversations", s.handleListConversations)
+		r.Post("/attachments", s.handleUploadAttachment)
+		r.Get("/attachments/{attachmentID}", s.handleDownloadAttachment)
 		r.Post("/channels", s.handleCreateChannel)
 		r.Post("/dm", s.handleCreateDM)
 		r.Get("/conversations/{convID}/messages", s.handleListMessages)
@@ -129,6 +131,8 @@ func (s *Server) registerRoutes() {
 	r.Get("/ws/computer", s.handleComputerWS)
 	r.Route("/api/v1/computer/agents/{agentID}", func(r chi.Router) {
 		r.Get("/inbox", s.handleAgentInbox)
+		r.Post("/attachments", s.handleAgentUploadAttachment)
+		r.Get("/attachments/{attachmentID}", s.handleAgentDownloadAttachment)
 		r.Get("/conversations", s.handleAgentConversations)
 		r.Get("/conversations/{convID}/messages", s.handleAgentReadMessages)
 		r.Post("/conversations/{convID}/messages", s.handleAgentSendMessage)
@@ -657,8 +661,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		BodyMarkdown     string `json:"body_markdown"`
-		ReplyToMessageID string `json:"reply_to_message_id"`
+		BodyMarkdown     string   `json:"body_markdown"`
+		ReplyToMessageID string   `json:"reply_to_message_id"`
+		AttachmentIDs    []string `json:"attachment_ids"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, err)
@@ -668,6 +673,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationID:   chi.URLParam(r, "convID"),
 		ReplyToMessageID: body.ReplyToMessageID,
 		BodyMarkdown:     body.BodyMarkdown,
+		AttachmentIDs:    body.AttachmentIDs,
 	})
 	if err != nil {
 		writeError(w, err)

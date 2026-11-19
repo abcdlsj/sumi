@@ -12,6 +12,7 @@ import {
   type TaskStatus,
 } from "../api";
 import { MemberAvatar, RuntimeDot } from "./Identity";
+import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
@@ -71,6 +72,7 @@ function TaskDetail({
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const draft = useAttachmentDraft(spaceSlug);
 
   const taskQ = useQuery({
     queryKey: ["task", spaceSlug, taskID],
@@ -112,7 +114,8 @@ function TaskDetail({
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
-    if (!task || !reply.trim()) return;
+    if (!task) return;
+    if (!reply.trim() && draft.ids.length === 0) return;
     setSending(true);
     try {
       let convID = task.conversation_id;
@@ -121,8 +124,15 @@ function TaskDetail({
         convID = ensured.task.conversation_id;
       }
       if (convID) {
-        await api.sendMessage(spaceSlug, convID, reply.trim());
+        await api.sendMessage(
+          spaceSlug,
+          convID,
+          reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
+          undefined,
+          draft.ids,
+        );
         setReply("");
+        draft.clear();
         void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
       }
       refresh();
@@ -235,6 +245,7 @@ function TaskDetail({
                   <div className="mt-0.5 text-[13px] leading-relaxed text-[#161614] prose prose-sm max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
                   </div>
+                  <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
                 </div>
               </article>
             ),
@@ -242,20 +253,24 @@ function TaskDetail({
         )}
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white p-2.5 flex items-center gap-2 shrink-0">
-        <input
-          value={reply}
-          onChange={(e) => setReply(e.target.value)}
-          placeholder={`Reply in #${task.number}…`}
-          className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
-        />
-        <button
-          disabled={sending || !reply.trim()}
-          type="submit"
-          className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40"
-        >
-          Send
-        </button>
+      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white shrink-0">
+        <AttachmentDraftRow draft={draft} />
+        <div className="p-2.5 flex items-center gap-2">
+          <AttachmentPicker draft={draft} />
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder={`Reply in #${task.number}…`}
+            className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
+          />
+          <button
+            disabled={sending || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
+            type="submit"
+            className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
       </form>
     </aside>
   );
@@ -275,6 +290,7 @@ function ThreadDetail({
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
   const [following, setFollowing] = useState(true);
+  const draft = useAttachmentDraft(spaceSlug);
   const msgsQ = useQuery({
     queryKey: ["messages", spaceSlug, threadConvID],
     queryFn: () => api.listMessages(spaceSlug, threadConvID, true),
@@ -288,9 +304,16 @@ function ThreadDetail({
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
-    if (!reply.trim()) return;
-    await api.sendMessage(spaceSlug, threadConvID, reply.trim());
+    if (!reply.trim() && draft.ids.length === 0) return;
+    await api.sendMessage(
+      spaceSlug,
+      threadConvID,
+      reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
+      undefined,
+      draft.ids,
+    );
     setReply("");
+    draft.clear();
     void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
@@ -328,21 +351,30 @@ function ThreadDetail({
               <div className="mt-0.5 text-[13px] text-[#161614] prose prose-sm max-w-none">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
               </div>
+              <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
             </div>
           </article>
         ))}
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white p-2.5 flex items-center gap-2 shrink-0">
-        <input
-          value={reply}
-          onChange={(e) => setReply(e.target.value)}
-          placeholder="Reply in thread…"
-          className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
-        />
-        <button disabled={!reply.trim()} type="submit" className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40">
-          Send
-        </button>
+      <form onSubmit={handleSend} className="border-t border-[#E4E1D9] bg-white shrink-0">
+        <AttachmentDraftRow draft={draft} />
+        <div className="p-2.5 flex items-center gap-2">
+          <AttachmentPicker draft={draft} />
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder="Reply in thread…"
+            className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
+          />
+          <button
+            disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading}
+            type="submit"
+            className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
       </form>
     </aside>
   );

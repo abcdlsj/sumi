@@ -12,6 +12,12 @@ import {
 } from "../api";
 import { DetailPane, type DetailTarget } from "./DetailPane";
 import { MemberAvatar, RuntimeDot, TaskStatusGlyph } from "./Identity";
+import {
+  AttachmentDraftRow,
+  AttachmentPicker,
+  MessageAttachments,
+  useAttachmentDraft,
+} from "./Attachments";
 
 type MainView =
   | { kind: "conversation"; convID: string }
@@ -40,6 +46,7 @@ export function Workbench({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const draft = useAttachmentDraft(spaceSlug);
 
   // Default to #general once bootstrap arrives.
   useEffect(() => {
@@ -116,10 +123,19 @@ export function Workbench({
 
   async function handleSendMessage(e: FormEvent) {
     e.preventDefault();
-    if (!activeConv || !composer.trim()) return;
-    await api.sendMessage(spaceSlug, activeConv.id, composer.trim(), replyingTo ?? undefined);
+    if (!activeConv) return;
+    const body = composer.trim();
+    if (!body && draft.ids.length === 0) return;
+    await api.sendMessage(
+      spaceSlug,
+      activeConv.id,
+      body || (draft.pending.length > 0 ? `Attached ${draft.pending.map((a) => a.name).join(", ")}` : ""),
+      replyingTo ?? undefined,
+      draft.ids,
+    );
     setComposer("");
     setReplyingTo(null);
+    draft.clear();
     void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, activeConv.id] });
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
@@ -455,6 +471,8 @@ export function Workbench({
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
                           </div>
 
+                          <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
+
                           {/* Compact 32px Task Table (1:N per root message) */}
                           {m.attached_tasks && m.attached_tasks.length > 0 && (
                             <div className="mt-2 border border-[#E4E1D9] rounded-[6px] bg-[#FAF9F6] divide-y divide-[#E4E1D9] overflow-hidden">
@@ -591,15 +609,21 @@ export function Workbench({
                   }
                   className="w-full px-4 pt-2.5 pb-1 text-[13.5px] bg-transparent outline-none resize-none placeholder:text-[#8A867D]"
                 />
-                <div className="px-3 pb-2 flex items-center justify-end gap-2">
-                  <span className="font-mono-num text-[11px] text-[#8A867D]">↵ Send</span>
-                  <button
-                    disabled={!composer.trim()}
-                    type="submit"
-                    className="h-6 px-2.5 rounded-[5px] bg-[#161614] hover:bg-[#2F2E2B] text-white text-[12px] font-medium disabled:opacity-40"
-                  >
-                    Send
-                  </button>
+                <AttachmentDraftRow draft={draft} />
+                <div className="px-3 pb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <AttachmentPicker draft={draft} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono-num text-[11px] text-[#8A867D]">↵ Send</span>
+                    <button
+                      disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading}
+                      type="submit"
+                      className="h-6 px-2.5 rounded-[5px] bg-[#161614] hover:bg-[#2F2E2B] text-white text-[12px] font-medium disabled:opacity-40"
+                    >
+                      Send
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>

@@ -523,6 +523,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		env := append(os.Environ(),
 			"SUMI_SOCKET="+d.SocketPath(),
 			"SUMI_DRIVER_TOKEN="+ag.driverToken,
+			"SUMI_ATTACHMENT_DIR="+filepath.Join(ag.workDir, "attachments"),
 			"HOME="+ag.homeDir,
 		)
 		turnCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)

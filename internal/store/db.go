@@ -44,6 +44,7 @@ type Store struct {
 	writeDB *sql.DB
 	readDB  *sql.DB
 	writeMu sync.Mutex
+	objects *ObjectStore
 }
 
 // Open initializes a SQLite database at path (or ":memory:" for isolated tests).
@@ -74,7 +75,24 @@ func Open(path string) (*Store, error) {
 	readDB.SetMaxOpenConns(8)
 	readDB.SetMaxIdleConns(4)
 
-	s := &Store{writeDB: writeDB, readDB: readDB}
+	objectRoot := filepath.Join(filepath.Dir(path), "objects")
+	if path == ":memory:" {
+		tmpDir, err := os.MkdirTemp("", "sumi-mem-objects-")
+		if err != nil {
+			_ = writeDB.Close()
+			_ = readDB.Close()
+			return nil, fmt.Errorf("create temp object root: %w", err)
+		}
+		objectRoot = tmpDir
+	}
+	objects, err := newObjectStore(objectRoot)
+	if err != nil {
+		_ = writeDB.Close()
+		_ = readDB.Close()
+		return nil, err
+	}
+
+	s := &Store{writeDB: writeDB, readDB: readDB, objects: objects}
 	if err := s.initPragmasAndSchema(); err != nil {
 		_ = s.Close()
 		return nil, err
@@ -138,6 +156,11 @@ func (s *Store) Close() error {
 // ReadDB returns the concurrent read pool.
 func (s *Store) ReadDB() *sql.DB {
 	return s.readDB
+}
+
+// Objects returns the attachment blob store that sits next to the SQLite file.
+func (s *Store) Objects() *ObjectStore {
+	return s.objects
 }
 
 // WithWriteTx runs fn inside a serialized SQLite transaction.

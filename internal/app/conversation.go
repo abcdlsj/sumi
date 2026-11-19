@@ -365,7 +365,8 @@ type SendMessageInput struct {
 	ConversationID   string
 	ReplyToMessageID string // If set on a channel/dm message, routes into (or lazily creates) that message's thread conversation.
 	BodyMarkdown     string
-	EnforceFreshness bool // True for Agent writes: refuses if unread messages from others exist after read_seq.
+	AttachmentIDs    []string // Previously uploaded attachments owned by the actor; bound in the same write transaction.
+	EnforceFreshness bool     // True for Agent writes: refuses if unread messages from others exist after read_seq.
 }
 
 type SendMessageResult struct {
@@ -378,6 +379,9 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 	body := strings.TrimSpace(in.BodyMarkdown)
 	if body == "" {
 		return SendMessageResult{}, domain.NewError(domain.CodeInvalidArgument, "body_markdown is required")
+	}
+	if len(in.AttachmentIDs) > domain.MaxAttachmentsPerMessage {
+		return SendMessageResult{}, domain.NewError(domain.CodeInvalidArgument, "at most 10 attachments per message")
 	}
 
 	var result SendMessageResult
@@ -446,6 +450,12 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		msg, err := insertMessageTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindText, body, "", "{}", mentionAll, mentionIDs)
 		if err != nil {
 			return err
+		}
+		if len(in.AttachmentIDs) > 0 {
+			if err := bindAttachmentsTx(ctx, tx, actor, msg.ID, targetMeta.SpaceID, in.AttachmentIDs); err != nil {
+				return err
+			}
+			msg.Attachments = loadBoundAttachmentsTx(ctx, tx, msg.ID)
 		}
 
 		// Author has seen up to their own message; auto-follow thread/task on reply.
@@ -778,6 +788,34 @@ func queryMessages(ctx context.Context, q queryer, convID string, afterSeq int64
 	return msgs, rows.Err()
 }
 
+// loadBoundAttachmentsTx reads attachments just bound inside the same transaction.
+func loadBoundAttachmentsTx(ctx context.Context, tx *sql.Tx, messageID string) []domain.Attachment {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT a.id, a.space_id, a.uploader_member_id, a.name, a.media_type, a.size_bytes, a.created_at
+		 FROM message_attachments ma
+		 JOIN attachments a ON a.id = ma.attachment_id
+		 WHERE ma.message_id = ?
+		 ORDER BY ma.position ASC`,
+		messageID,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []domain.Attachment
+	for rows.Next() {
+		var att domain.Attachment
+		var createdAt string
+		if err := rows.Scan(&att.ID, &att.SpaceID, &att.UploaderMemberID, &att.Name, &att.MediaType, &att.SizeBytes, &createdAt); err != nil {
+			return nil
+		}
+		att.MessageID = messageID
+		att.CreatedAt = store.ParseTime(createdAt)
+		out = append(out, att)
+	}
+	return out
+}
+
 type ListMessagesInput struct {
 	ConversationID string
 	AfterSeq       int64
@@ -806,6 +844,7 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 	if err != nil {
 		return nil, 0, err
 	}
+	s.loadMessageAttachments(ctx, msgs)
 
 	// Enrich channel/DM root messages with compact thread reply counts and attached tasks.
 	if c.Kind != domain.ConversationThread && c.Kind != domain.ConversationTask && len(msgs) > 0 {

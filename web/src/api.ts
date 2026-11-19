@@ -99,6 +99,17 @@ export interface Task {
   updated_at: string;
 }
 
+export interface Attachment {
+  id: string;
+  space_id: string;
+  uploader_member_id: string;
+  name: string;
+  media_type: string;
+  size_bytes: number;
+  message_id?: string;
+  created_at: string;
+}
+
 export interface Message {
   id: string;
   space_id: string;
@@ -116,6 +127,7 @@ export interface Message {
   thread_conversation_id?: string;
   last_reply_at?: string;
   attached_tasks?: Task[];
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -158,8 +170,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(path, {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {  const resp = await fetch(path, {
     credentials: "include",
     ...init,
     headers: {
@@ -198,11 +209,34 @@ export const api = {
     request<{ messages: Message[]; read_seq: number }>(
       `/api/v1/spaces/${spaceSlug}/conversations/${convID}/messages?limit=100&mark_read=${markRead}`,
     ),
-  sendMessage: (spaceSlug: string, convID: string, body_markdown: string, reply_to_message_id?: string) =>
+  sendMessage: (
+    spaceSlug: string,
+    convID: string,
+    body_markdown: string,
+    reply_to_message_id?: string,
+    attachment_ids?: string[],
+  ) =>
     request<{ message: Message }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body_markdown, reply_to_message_id }),
+      body: JSON.stringify({ body_markdown, reply_to_message_id, attachment_ids }),
     }),
+  uploadAttachment: async (spaceSlug: string, file: File): Promise<Attachment> => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const resp = await fetch(`/api/v1/spaces/${spaceSlug}/attachments`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = data?.error;
+      throw new ApiError(resp.status, err?.code ?? "internal", err?.message ?? `HTTP ${resp.status}`);
+    }
+    return data.attachment as Attachment;
+  },
+  attachmentURL: (spaceSlug: string, attachmentID: string) =>
+    `/api/v1/spaces/${spaceSlug}/attachments/${attachmentID}`,
   markDone: (spaceSlug: string, convID: string) =>
     request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/done`, { method: "POST" }),
   setNotifyLevel: (spaceSlug: string, convID: string, level: NotifyLevel) =>

@@ -317,8 +317,9 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var body struct {
-		BodyMarkdown     string `json:"body_markdown"`
-		ReplyToMessageID string `json:"reply_to_message_id"`
+		BodyMarkdown     string   `json:"body_markdown"`
+		ReplyToMessageID string   `json:"reply_to_message_id"`
+		AttachmentIDs    []string `json:"attachment_ids"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, err)
@@ -328,6 +329,7 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 		ConversationID:   chi.URLParam(r, "convID"),
 		ReplyToMessageID: body.ReplyToMessageID,
 		BodyMarkdown:     body.BodyMarkdown,
+		AttachmentIDs:    body.AttachmentIDs,
 		EnforceFreshness: true,
 	})
 	if err != nil {

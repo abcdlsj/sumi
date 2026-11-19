@@ -163,27 +163,39 @@ type Conversation struct {
 	PeerRuntime     RuntimeState `json:"peer_runtime_state,omitempty"`
 }
 
+type Attachment struct {
+	ID               string    `json:"id"`
+	SpaceID          string    `json:"space_id"`
+	UploaderMemberID string    `json:"uploader_member_id"`
+	Name             string    `json:"name"`
+	MediaType        string    `json:"media_type"`
+	SizeBytes        int64     `json:"size_bytes"`
+	MessageID        string    `json:"message_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 type Message struct {
-	ID               string      `json:"id"`
-	SpaceID          string      `json:"space_id"`
-	ConversationID   string      `json:"conversation_id"`
-	Seq              int64       `json:"seq"`
-	AuthorMemberID   string      `json:"author_member_id"`
-	AuthorName       string      `json:"author_display_name,omitempty"`
-	AuthorKind       MemberKind  `json:"author_kind,omitempty"`
-	Kind             MessageKind `json:"kind"`
-	BodyMarkdown     string      `json:"body_markdown"`
-	ActionKind       ActionKind  `json:"action_kind,omitempty"`
-	PayloadJSON      string      `json:"payload_json,omitempty"`
-	MentionAll       bool        `json:"mention_all,omitempty"`
-	MentionMemberIDs []string    `json:"mention_member_ids,omitempty"`
-	ReplyCount       int64       `json:"reply_count,omitempty"`
-	ThreadConvID     string      `json:"thread_conversation_id,omitempty"`
-	LastReplyAt      *time.Time  `json:"last_reply_at,omitempty"`
-	AttachedTasks    []Task      `json:"attached_tasks,omitempty"`
-	CreatedAt        time.Time   `json:"created_at"`
-	EditedAt         *time.Time  `json:"edited_at,omitempty"`
-	DeletedAt        *time.Time  `json:"deleted_at,omitempty"`
+	ID               string       `json:"id"`
+	SpaceID          string       `json:"space_id"`
+	ConversationID   string       `json:"conversation_id"`
+	Seq              int64        `json:"seq"`
+	AuthorMemberID   string       `json:"author_member_id"`
+	AuthorName       string       `json:"author_display_name,omitempty"`
+	AuthorKind       MemberKind   `json:"author_kind,omitempty"`
+	Kind             MessageKind  `json:"kind"`
+	BodyMarkdown     string       `json:"body_markdown"`
+	ActionKind       ActionKind   `json:"action_kind,omitempty"`
+	PayloadJSON      string       `json:"payload_json,omitempty"`
+	MentionAll       bool         `json:"mention_all,omitempty"`
+	MentionMemberIDs []string     `json:"mention_member_ids,omitempty"`
+	ReplyCount       int64        `json:"reply_count,omitempty"`
+	ThreadConvID     string       `json:"thread_conversation_id,omitempty"`
+	LastReplyAt      *time.Time   `json:"last_reply_at,omitempty"`
+	AttachedTasks    []Task       `json:"attached_tasks,omitempty"`
+	Attachments      []Attachment `json:"attachments,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	EditedAt         *time.Time   `json:"edited_at,omitempty"`
+	DeletedAt        *time.Time   `json:"deleted_at,omitempty"`
 }
 
 type Task struct {
@@ -288,4 +300,22 @@ func ValidatePermission(p Permission) error {
 	default:
 		return NewError(CodeInvalidArgument, "invalid permission")
 	}
+}
+
+const (
+	// MaxAttachmentBytes bounds a single uploaded file.
+	MaxAttachmentBytes int64 = 25 << 20
+	// MaxAttachmentsPerMessage bounds attachments carried by one message.
+	MaxAttachmentsPerMessage = 10
+)
+
+func ValidateAttachmentName(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || len(trimmed) > 200 {
+		return NewError(CodeInvalidArgument, "attachment name must be 1-200 characters")
+	}
+	if strings.ContainsAny(trimmed, "/\\\x00") || trimmed == "." || trimmed == ".." {
+		return NewError(CodeInvalidArgument, "attachment name must not contain path separators")
+	}
+	return nil
 }
