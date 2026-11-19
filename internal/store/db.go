@@ -22,7 +22,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const ExpectedSchemaVersion = 1
+const ExpectedSchemaVersion = 2
 
 const timeFormat = "2006-01-02T15:04:05.000000Z"
 

@@ -1,11 +1,11 @@
--- Sumi v2 SQLite baseline schema (version 1).
+-- Sumi v2 SQLite baseline schema (version 2).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TEXT NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO schema_meta (version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -69,6 +69,7 @@ CREATE TABLE computers (
     token_hash TEXT UNIQUE,
     connection_status TEXT NOT NULL CHECK (connection_status IN ('offline', 'online')),
     daemon_version TEXT NOT NULL DEFAULT '',
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
     last_seen_at TEXT,
     created_at TEXT NOT NULL,
     deleted_at TEXT
@@ -100,6 +101,7 @@ CREATE TABLE agents (
     runtime_state TEXT NOT NULL DEFAULT 'offline' CHECK (runtime_state IN ('idle', 'working', 'offline', 'error')),
     focus_conversation_id TEXT,
     last_error_code TEXT NOT NULL DEFAULT '',
+    last_error_detail TEXT NOT NULL DEFAULT '' CHECK (length(last_error_detail) <= 240),
     runtime_state_updated_at TEXT,
     created_at TEXT NOT NULL
 );

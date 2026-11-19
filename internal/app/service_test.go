@@ -53,7 +53,7 @@ func setupTestService(t *testing.T) (*Service, *spyNotifier, domain.Space, domai
 	if err != nil {
 		t.Fatalf("pair computer: %v", err)
 	}
-	if _, err := svc.SetComputerStatus(ctx, comp.ID, "online", "2.0.0"); err != nil {
+	if _, err := svc.SetComputerStatus(ctx, comp.ID, "online", &ComputerHello{DaemonVersion: "2.0.0"}); err != nil {
 		t.Fatalf("set computer online: %v", err)
 	}
 	return svc, spy, space, owner, comp
@@ -68,7 +68,7 @@ func TestTaskDecouplingLazyConversationAndFreshnessGuard(t *testing.T) {
 		DisplayName: "Lin",
 		RoleText:    "Backend engineer",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create Lin: %v", err)
@@ -77,7 +77,7 @@ func TestTaskDecouplingLazyConversationAndFreshnessGuard(t *testing.T) {
 		DisplayName: "Kira",
 		RoleText:    "Reviewer",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create Kira: %v", err)
@@ -209,7 +209,7 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 		DisplayName: "Lin",
 		RoleText:    "Coordinator",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create Lin: %v", err)
@@ -220,7 +220,7 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 		DisplayName: "Sora",
 		RoleText:    "Helper",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	var domErr *domain.Error
 	if !errors.As(err, &domErr) || domErr.Code != domain.CodePermissionDenied {
@@ -235,10 +235,10 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 	generalID := convs[0].ID
 
 	sora, err := svc.CreateAgent(ctx, lin, CreateAgentInput{
-		DisplayName:          "Sora",
-		RoleText:             "Helper",
-		ComputerID:           comp.ID,
-		DriverKind:           domain.DriverBuiltin,
+		DisplayName: "Sora",
+		RoleText:    "Helper",
+		ComputerID:  comp.ID,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 		SourceConversationID: generalID,
 	})
 	if err != nil || sora.DisplayName != "Sora" {
@@ -280,3 +280,5 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 		t.Fatalf("expected 0 inbox items after MarkDone, got %+v err=%v", needsMe, err)
 	}
 }
+
+var testBuiltinConfig = domain.DriverConfig{BaseURL: "http://127.0.0.1:1/v1", Model: "test-model"}

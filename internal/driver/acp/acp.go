@@ -8,11 +8,21 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
+)
+
+const (
+	// initializeTimeout covers a first `npx -y` package download.
+	initializeTimeout = 120 * time.Second
+	sessionTimeout    = 120 * time.Second
+	stderrTailBytes   = 2048
 )
 
 type Config struct {
@@ -20,19 +30,30 @@ type Config struct {
 	Command  []string `json:"command,omitempty"`
 }
 
-func (c Config) resolvedCommand() ([]string, error) {
+// ResolvedCommand returns the argv to launch; Command overrides the provider default.
+func (c Config) ResolvedCommand() ([]string, error) {
 	if len(c.Command) > 0 {
 		return c.Command, nil
 	}
 	switch c.Provider {
-	case "codex":
+	case domain.ACPProviderCodex:
 		return []string{"npx", "-y", "@zed-industries/codex-acp@0.16.0"}, nil
-	case "claude":
+	case domain.ACPProviderClaude:
 		return []string{"npx", "-y", "@zed-industries/claude-code-acp@0.16.2"}, nil
-	case "pi":
+	case domain.ACPProviderPi:
 		return []string{"npx", "-y", "pi-acp@0.0.34"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported acp provider %q", c.Provider)
+	}
+}
+
+// ProviderBinaries lists the executables a provider's default command needs on PATH.
+func ProviderBinaries(provider string) []string {
+	switch provider {
+	case domain.ACPProviderPi, domain.ACPProviderCodex, domain.ACPProviderClaude:
+		return []string{provider, "npx"}
+	default:
+		return nil
 	}
 }
 
@@ -40,15 +61,15 @@ func (c Config) resolvedCommand() ([]string, error) {
 type Driver struct {
 	mu        sync.Mutex
 	cfg       Config
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    *bufio.Scanner
+	proc      *process
 	sessionID string
-	reqID     atomic.Int64
+
+	closeOnce sync.Once
+	closed    chan struct{}
 }
 
 func New(cfg Config) *Driver {
-	return &Driver{cfg: cfg}
+	return &Driver{cfg: cfg, closed: make(chan struct{})}
 }
 
 func (d *Driver) ResetSession() error {
@@ -58,64 +79,77 @@ func (d *Driver) ResetSession() error {
 	return nil
 }
 
+// Close kills the child without waiting for an in-flight turn, so a replaced driver releases promptly.
 func (d *Driver) Close() error {
+	d.closeOnce.Do(func() { close(d.closed) })
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.stopLocked()
-}
-
-func (d *Driver) stopLocked() error {
-	d.sessionID = ""
-	if d.stdin != nil {
-		_ = d.stdin.Close()
-		d.stdin = nil
-	}
-	if d.cmd != nil && d.cmd.Process != nil {
-		_ = d.cmd.Process.Kill()
-		_ = d.cmd.Wait()
-	}
-	d.cmd = nil
-	d.stdout = nil
+	d.stopLocked()
 	return nil
 }
 
+func (d *Driver) stopLocked() {
+	d.sessionID = ""
+	if d.proc != nil {
+		d.proc.kill()
+		d.proc = nil
+	}
+}
+
+func (d *Driver) isClosed() bool {
+	select {
+	case <-d.closed:
+		return true
+	default:
+		return false
+	}
+}
+
+func startFailure(format string, err error, p *process) error {
+	msg := fmt.Sprintf(format, err)
+	if p != nil {
+		if tail := p.stderr.lastLines(2); tail != "" {
+			msg += "; stderr: " + tail
+		}
+	}
+	return driver.Fail(domain.AgentErrDriverStartFailed, errors.New(msg))
+}
+
 func (d *Driver) ensureStartedLocked(ctx context.Context, workDir string, env []string) error {
-	if d.cmd != nil && d.cmd.Process != nil {
+	if d.proc != nil && !d.proc.exited() {
 		return nil
 	}
-	argv, err := d.cfg.resolvedCommand()
+	d.stopLocked()
+	if d.isClosed() {
+		return driver.Fail(domain.AgentErrDriverStartFailed, errors.New("acp driver closed"))
+	}
+	argv, err := d.cfg.ResolvedCommand()
 	if err != nil {
-		return err
+		return driver.Fail(domain.AgentErrDriverConfigInvalid, err)
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = workDir
-	cmd.Env = env
-	stdin, err := cmd.StdinPipe()
+	p, err := startProcess(argv, workDir, env)
 	if err != nil {
-		return err
+		return startFailure("start acp process: %v", err, nil)
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start acp process: %w", err)
-	}
-	d.cmd = cmd
-	d.stdin = stdin
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	d.stdout = scanner
+	d.proc = p
+	// Close must be able to kill the child while a turn holds d.mu.
+	go func() {
+		select {
+		case <-d.closed:
+			p.kill()
+		case <-p.done:
+		}
+	}()
 
-	initCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	initCtx, cancel := context.WithTimeout(ctx, initializeTimeout)
 	defer cancel()
-	if _, err := d.rpcLocked(initCtx, "initialize", map[string]any{
+	if _, err := p.call(initCtx, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientCapabilities": map[string]any{},
 		"clientInfo":         map[string]any{"name": "sumi", "version": "2.0.0"},
 	}); err != nil {
-		_ = d.stopLocked()
-		return fmt.Errorf("acp initialize: %w", err)
+		d.stopLocked()
+		return startFailure("acp initialize: %v", err, p)
 	}
 	return nil
 }
@@ -127,22 +161,24 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	if err := d.ensureStartedLocked(ctx, in.WorkDir, in.Env); err != nil {
 		return driver.TurnResult{}, err
 	}
+	p := d.proc
 	if d.sessionID == "" {
-		sessCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		res, err := d.rpcLocked(sessCtx, "session/new", map[string]any{
+		sessCtx, cancel := context.WithTimeout(ctx, sessionTimeout)
+		res, err := p.call(sessCtx, "session/new", map[string]any{
 			"cwd":        in.WorkDir,
 			"mcpServers": []any{},
 		})
 		cancel()
 		if err != nil {
-			_ = d.stopLocked()
-			return driver.TurnResult{}, fmt.Errorf("acp session/new: %w", err)
+			d.stopLocked()
+			return driver.TurnResult{}, startFailure("acp session/new: %v", err, p)
 		}
 		var out struct {
 			SessionID string `json:"sessionId"`
 		}
 		if err := json.Unmarshal(res, &out); err != nil || out.SessionID == "" {
-			return driver.TurnResult{}, errors.New("acp session/new missing sessionId")
+			d.stopLocked()
+			return driver.TurnResult{}, startFailure("acp session/new: %v", errors.New("missing sessionId"), p)
 		}
 		d.sessionID = out.SessionID
 	}
@@ -151,97 +187,263 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	if in.SystemPrompt != "" {
 		promptText = in.SystemPrompt + "\n\n" + in.UserPrompt
 	}
-	res, err := d.rpcLocked(ctx, "session/prompt", map[string]any{
+	res, err := p.call(ctx, "session/prompt", map[string]any{
 		"sessionId": d.sessionID,
 		"prompt": []map[string]any{
 			{"type": "text", "text": promptText},
 		},
 	})
 	if err != nil {
-		return driver.TurnResult{}, err
+		if ctx.Err() != nil {
+			p.notify("session/cancel", map[string]any{"sessionId": d.sessionID})
+			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("acp session/prompt: %w", ctx.Err()))
+		}
+		if p.exited() {
+			d.stopLocked()
+			return driver.TurnResult{}, startFailure("acp process exited during prompt: %v", err, p)
+		}
+		return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("acp session/prompt: %w", err))
 	}
 	var stop struct {
 		StopReason string `json:"stopReason"`
 	}
 	_ = json.Unmarshal(res, &stop)
 	if stop.StopReason != "" && stop.StopReason != "end_turn" {
-		return driver.TurnResult{}, fmt.Errorf("acp prompt stopped with %s", stop.StopReason)
+		return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("acp prompt stopped with %s", stop.StopReason))
 	}
 	return driver.TurnResult{}, nil
 }
 
-func (d *Driver) rpcLocked(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := d.reqID.Add(1)
-	req := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  method,
-		"params":  params,
-	}
-	raw, err := json.Marshal(req)
+type rpcResponse struct {
+	result json.RawMessage
+	err    error
+}
+
+// process owns one ACP child. A single reader goroutine dispatches responses to pending calls,
+// answers agent->client requests, and drops notifications so stdout never stalls.
+type process struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stderr *tailBuffer
+
+	writeMu sync.Mutex
+	nextID  atomic.Int64
+
+	pendingMu sync.Mutex
+	pending   map[int64]chan rpcResponse
+
+	done    chan struct{}
+	readErr error
+	killed  sync.Once
+}
+
+func startProcess(argv []string, workDir string, env []string) (*process, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = workDir
+	cmd.Env = env
+	// Own process group so kill also reaps launcher children (npx -> node).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
 	}
-	raw = append(raw, '\n')
-	if _, err := d.stdin.Write(raw); err != nil {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
 		return nil, err
 	}
-
-	type lineRes struct {
-		line []byte
-		ok   bool
-		err  error
+	tail := &tailBuffer{max: stderrTailBytes}
+	cmd.Stderr = tail
+	if err := cmd.Start(); err != nil {
+		return nil, err
 	}
-	for {
-		ch := make(chan lineRes, 1)
-		go func() {
-			ok := d.stdout.Scan()
-			var b []byte
-			if ok {
-				b = append([]byte(nil), d.stdout.Bytes()...)
-			}
-			ch <- lineRes{line: b, ok: ok, err: d.stdout.Err()}
-		}()
+	p := &process{
+		cmd:     cmd,
+		stdin:   stdin,
+		stderr:  tail,
+		pending: make(map[int64]chan rpcResponse),
+		done:    make(chan struct{}),
+	}
+	go p.readLoop(stdout)
+	return p, nil
+}
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case r := <-ch:
-			if !r.ok {
-				if r.err != nil {
-					return nil, r.err
-				}
-				return nil, io.EOF
-			}
-			var msg struct {
-				ID     *int64          `json:"id"`
-				Method string          `json:"method"`
-				Params json.RawMessage `json:"params"`
-				Result json.RawMessage `json:"result"`
-				Error  *struct {
-					Code    int    `json:"code"`
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if err := json.Unmarshal(r.line, &msg); err != nil {
+func (p *process) exited() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *process) kill() {
+	p.killed.Do(func() {
+		_ = p.stdin.Close()
+		if p.cmd.Process != nil {
+			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+		}
+		go func() { _ = p.cmd.Wait() }()
+	})
+}
+
+func (p *process) write(msg map[string]any) error {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	_, err = p.stdin.Write(append(raw, '\n'))
+	return err
+}
+
+func (p *process) notify(method string, params any) {
+	_ = p.write(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+}
+
+func (p *process) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	id := p.nextID.Add(1)
+	ch := make(chan rpcResponse, 1)
+	p.pendingMu.Lock()
+	p.pending[id] = ch
+	p.pendingMu.Unlock()
+	defer func() {
+		p.pendingMu.Lock()
+		delete(p.pending, id)
+		p.pendingMu.Unlock()
+	}()
+
+	if err := p.write(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.done:
+		if p.readErr != nil {
+			return nil, fmt.Errorf("acp process ended: %w", p.readErr)
+		}
+		return nil, errors.New("acp process ended")
+	case r := <-ch:
+		if r.err != nil {
+			return nil, fmt.Errorf("acp rpc %s: %w", method, r.err)
+		}
+		return r.result, nil
+	}
+}
+
+type inbound struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+	Result json.RawMessage `json:"result"`
+	Error  *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func (p *process) readLoop(stdout io.Reader) {
+	defer close(p.done)
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		var msg inbound
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+		hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
+		switch {
+		case msg.Method != "" && hasID:
+			p.answerRequest(msg)
+		case msg.Method != "":
+			// Notifications such as session/update stream content we do not render.
+		case hasID:
+			var id int64
+			if err := json.Unmarshal(msg.ID, &id); err != nil {
 				continue
 			}
-			// Auto-approve permission requests inside full-access agent sandbox.
-			if msg.Method == "session/request_permission" && msg.ID != nil {
-				reply, _ := json.Marshal(map[string]any{
-					"jsonrpc": "2.0",
-					"id":      *msg.ID,
-					"result":  map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "allow_once"}},
-				})
-				_, _ = d.stdin.Write(append(reply, '\n'))
+			p.pendingMu.Lock()
+			ch := p.pending[id]
+			p.pendingMu.Unlock()
+			if ch == nil {
 				continue
 			}
-			if msg.ID != nil && *msg.ID == id {
-				if msg.Error != nil {
-					return nil, fmt.Errorf("acp rpc %s error %d: %s", method, msg.Error.Code, msg.Error.Message)
-				}
-				return msg.Result, nil
+			if msg.Error != nil {
+				ch <- rpcResponse{err: fmt.Errorf("error %d: %s", msg.Error.Code, msg.Error.Message)}
+			} else {
+				ch <- rpcResponse{result: msg.Result}
 			}
 		}
 	}
+	p.readErr = scanner.Err()
+}
+
+// answerRequest auto-approves permission prompts inside the full-access agent workspace and
+// rejects other client methods, which Sumi does not advertise in clientCapabilities.
+func (p *process) answerRequest(msg inbound) {
+	if msg.Method != "session/request_permission" {
+		_ = p.write(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      msg.ID,
+			"error":   map[string]any{"code": -32601, "message": "method not supported by sumi"},
+		})
+		return
+	}
+	var params struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	_ = json.Unmarshal(msg.Params, &params)
+	optionID := "allow_once"
+	for _, kind := range []string{"allow_always", "allow_once"} {
+		found := false
+		for _, o := range params.Options {
+			if o.Kind == kind {
+				optionID, found = o.OptionID, true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	_ = p.write(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      msg.ID,
+		"result":  map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}},
+	})
+}
+
+// tailBuffer keeps the last max bytes written, for bounded stderr diagnostics.
+type tailBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(b []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, b...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = append([]byte(nil), t.buf[over:]...)
+	}
+	return len(b), nil
+}
+
+// lastLines returns up to n trailing non-empty lines joined by " | ".
+func (t *tailBuffer) lastLines(n int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	lines := strings.Split(string(t.buf), "\n")
+	out := make([]string, 0, n)
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			out = append([]string{l}, out...)
+		}
+	}
+	return strings.Join(out, " | ")
 }

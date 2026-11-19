@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
+	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
 )
 
@@ -30,15 +33,6 @@ type Config struct {
 }
 
 func (c *Config) normalize() {
-	if c.BaseURL == "" {
-		c.BaseURL = os.Getenv("OPENAI_BASE_URL")
-	}
-	if c.APIKey == "" {
-		c.APIKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if c.Model == "" {
-		c.Model = "gpt-4o-mini"
-	}
 	if c.ContextWindowTokens <= 0 {
 		c.ContextWindowTokens = 128000
 	}
@@ -82,10 +76,7 @@ func New(cfg Config, provider Provider) (*Harness, error) {
 		if cfg.BaseURL != "" {
 			sdkCfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 		}
-		provider = &openAIProvider{
-			apiKey: cfg.APIKey,
-			client: openai.NewClientWithConfig(sdkCfg),
-		}
+		provider = &openAIProvider{client: openai.NewClientWithConfig(sdkCfg)}
 	}
 	h := &Harness{
 		cfg:      cfg,
@@ -132,7 +123,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 
 		resp, err := h.completeWithRetry(ctx, reqMsgs, tools)
 		if err != nil {
-			return driver.TurnResult{InputTokens: totalIn, OutputTokens: totalOut, ToolCalls: totalTools}, err
+			return driver.TurnResult{InputTokens: totalIn, OutputTokens: totalOut, ToolCalls: totalTools}, driver.Fail(classifyModelErr(err), err)
 		}
 		totalIn += resp.InputTokens
 		totalOut += resp.OutputTokens
@@ -189,16 +180,50 @@ func (h *Harness) completeWithRetry(ctx context.Context, msgs []Message, tools [
 	return CompletionResponse{}, lastErr
 }
 
+func httpStatusOf(err error) int {
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.HTTPStatusCode
+	}
+	var reqErr *openai.RequestError
+	if errors.As(err, &reqErr) {
+		return reqErr.HTTPStatusCode
+	}
+	return 0
+}
+
+func isConnectionErr(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	var opErr *net.OpError
+	return errors.As(err, &opErr) || errors.As(err, &netErr) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 func isRetryableErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	var apiErr *openai.APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.HTTPStatusCode == 429 || apiErr.HTTPStatusCode >= 500
+	if status := httpStatusOf(err); status != 0 {
+		return status == 429 || status >= 500
 	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "timeout") || strings.Contains(s, "connection reset")
+	return isConnectionErr(err)
+}
+
+// classifyModelErr maps a final (post-retry) model call error to an agent error code.
+func classifyModelErr(err error) string {
+	status := httpStatusOf(err)
+	switch {
+	case status == 401 || status == 403:
+		return domain.AgentErrModelAuthFailed
+	case status >= 500:
+		return domain.AgentErrModelUnreachable
+	case status == 0 && isConnectionErr(err):
+		return domain.AgentErrModelUnreachable
+	default:
+		return domain.AgentErrTurnFailed
+	}
 }
 
 func (h *Harness) needsCompaction(systemPrompt string) bool {
@@ -423,14 +448,10 @@ func executeTool(ctx context.Context, tc ToolCall, in driver.TurnInput) string {
 }
 
 type openAIProvider struct {
-	apiKey string
 	client *openai.Client
 }
 
 func (p *openAIProvider) Complete(ctx context.Context, model string, messages []Message, tools []openai.Tool) (CompletionResponse, error) {
-	if p.apiKey == "" {
-		return CompletionResponse{}, errors.New("missing OPENAI_API_KEY for builtin driver")
-	}
 	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:    model,
 		Messages: messages,

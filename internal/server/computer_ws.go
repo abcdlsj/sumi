@@ -140,7 +140,10 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	specs, err := s.svc.SetComputerStatus(r.Context(), comp.ID, "online", env.Hello.DaemonVersion)
+	specs, err := s.svc.SetComputerStatus(r.Context(), comp.ID, "online", &app.ComputerHello{
+		DaemonVersion: env.Hello.DaemonVersion,
+		ACPProviders:  env.Hello.ACPProviders,
+	})
 	if err != nil {
 		_ = wsConn.Close(websocket.StatusInternalError, "failed to mark computer online")
 		return
@@ -166,7 +169,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 	})
 	if err := wsConn.Write(r.Context(), websocket.MessageText, ackRaw); err != nil {
 		if s.hub.Unregister(cc) {
-			_, _ = s.svc.SetComputerStatus(context.Background(), comp.ID, "offline", "")
+			_, _ = s.svc.SetComputerStatus(context.Background(), comp.ID, "offline", nil)
 		}
 		return
 	}
@@ -192,7 +195,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		close(cc.sendCh)
 		<-writerDone
 		if s.hub.Unregister(cc) {
-			_, _ = s.svc.SetComputerStatus(context.Background(), comp.ID, "offline", "")
+			_, _ = s.svc.SetComputerStatus(context.Background(), comp.ID, "offline", nil)
 			s.logger.Info("Computer disconnected", "computer_id", comp.ID)
 		}
 	}()
@@ -211,7 +214,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		switch frame.Type {
 		case protocol.TypeHeartbeat:
 			if frame.Heartbeat != nil && frame.Heartbeat.DaemonSessionID == cc.daemonSessionID {
-				_, _ = s.svc.SetComputerStatus(r.Context(), comp.ID, "online", "")
+				_, _ = s.svc.SetComputerStatus(r.Context(), comp.ID, "online", nil)
 			}
 		case protocol.TypeAgentState:
 			if frame.AgentState != nil && frame.AgentState.DaemonSessionID == cc.daemonSessionID {
@@ -222,6 +225,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 					frame.AgentState.RuntimeState,
 					frame.AgentState.FocusConversationID,
 					frame.AgentState.ErrorCode,
+					frame.AgentState.ErrorDetail,
 				)
 			}
 		}
@@ -425,12 +429,12 @@ func (s *Server) handleAgentCreateAgent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var body struct {
-		DisplayName          string            `json:"display_name"`
-		RoleText             string            `json:"role_text"`
-		ComputerID           string            `json:"computer_id"`
-		DriverKind           domain.DriverKind `json:"driver_kind"`
-		DriverConfigJSON     string            `json:"driver_config_json"`
-		SourceConversationID string            `json:"source_conversation_id"`
+		DisplayName          string              `json:"display_name"`
+		RoleText             string              `json:"role_text"`
+		ComputerID           string              `json:"computer_id"`
+		DriverKind           domain.DriverKind   `json:"driver_kind"`
+		DriverConfig         domain.DriverConfig `json:"driver_config"`
+		SourceConversationID string              `json:"source_conversation_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, err)
@@ -439,15 +443,12 @@ func (s *Server) handleAgentCreateAgent(w http.ResponseWriter, r *http.Request) 
 	if body.ComputerID == "" {
 		body.ComputerID = comp.ID
 	}
-	if body.DriverKind == "" {
-		body.DriverKind = domain.DriverBuiltin
-	}
 	created, err := s.svc.CreateAgent(r.Context(), agent, app.CreateAgentInput{
 		DisplayName:          body.DisplayName,
 		RoleText:             body.RoleText,
 		ComputerID:           body.ComputerID,
 		DriverKind:           body.DriverKind,
-		DriverConfigJSON:     body.DriverConfigJSON,
+		DriverConfig:         body.DriverConfig,
 		SourceConversationID: body.SourceConversationID,
 	})
 	if err != nil {

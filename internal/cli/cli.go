@@ -405,14 +405,24 @@ func Run(args []string, stdout io.Writer) int {
 
 	// Agent subcommands
 	agentCmd := &cobra.Command{Use: "agent", Short: "Manage agents"}
-	var agName, agRole, agDriver, agSrcConv string
+	var agName, agRole, agDriver, agSrcConv, agProvider, agBaseURL, agModel string
 	agentCreateCmd := &cobra.Command{
 		Use: "create",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			// api_key is never accepted on argv to keep secrets out of process listings.
+			cfg := map[string]any{}
+			switch agDriver {
+			case "acp":
+				cfg["provider"] = agProvider
+			default:
+				cfg["base_url"] = agBaseURL
+				cfg["model"] = agModel
+			}
 			return call(http.MethodPost, "/agents", map[string]any{
 				"display_name":           agName,
 				"role_text":              agRole,
 				"driver_kind":            agDriver,
+				"driver_config":          cfg,
 				"source_conversation_id": agSrcConv,
 			})
 		},
@@ -420,6 +430,9 @@ func Run(args []string, stdout io.Writer) int {
 	agentCreateCmd.Flags().StringVar(&agName, "name", "", "display_name")
 	agentCreateCmd.Flags().StringVar(&agRole, "role", "", "role text")
 	agentCreateCmd.Flags().StringVar(&agDriver, "driver", "builtin", "builtin|acp")
+	agentCreateCmd.Flags().StringVar(&agProvider, "provider", "", "acp provider: pi|codex|claude")
+	agentCreateCmd.Flags().StringVar(&agBaseURL, "base-url", "", "builtin OpenAI-compatible base URL")
+	agentCreateCmd.Flags().StringVar(&agModel, "model", "", "builtin model")
 	agentCreateCmd.Flags().StringVar(&agSrcConv, "source-conversation", "", "optional conversation id")
 	agentCmd.AddCommand(agentCreateCmd)
 	root.AddCommand(agentCmd)

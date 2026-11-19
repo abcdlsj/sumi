@@ -271,7 +271,7 @@ func (s *Service) ListMembers(ctx context.Context, spaceID string) ([]domain.Mem
 	rows, err := s.store.ReadDB().QueryContext(ctx,
 		`SELECT m.id, m.space_id, m.kind, m.display_name, m.access_level, m.created_at, m.retired_at,
 		        a.computer_id, a.role_text, a.driver_kind, a.driver_config_json, a.runtime_state,
-		        a.focus_conversation_id, a.last_error_code, a.runtime_state_updated_at
+		        a.focus_conversation_id, a.last_error_code, a.last_error_detail, a.runtime_state_updated_at
 		 FROM members m
 		 LEFT JOIN agents a ON a.member_id = m.id
 		 WHERE m.space_id = ? AND m.retired_at IS NULL
@@ -288,10 +288,10 @@ func (s *Service) ListMembers(ctx context.Context, spaceID string) ([]domain.Mem
 	for rows.Next() {
 		var m domain.Member
 		var kind, access, createdAt string
-		var retiredAt, compID, roleText, driverKind, driverCfg, rtState, focusConv, errCode, rtUpdated sql.NullString
+		var retiredAt, compID, roleText, driverKind, driverCfg, rtState, focusConv, errCode, errDetail, rtUpdated sql.NullString
 		if err := rows.Scan(
 			&m.ID, &m.SpaceID, &kind, &m.DisplayName, &access, &createdAt, &retiredAt,
-			&compID, &roleText, &driverKind, &driverCfg, &rtState, &focusConv, &errCode, &rtUpdated,
+			&compID, &roleText, &driverKind, &driverCfg, &rtState, &focusConv, &errCode, &errDetail, &rtUpdated,
 		); err != nil {
 			return nil, domain.WrapError(domain.CodeInternal, "scan member", err)
 		}
@@ -303,10 +303,11 @@ func (s *Service) ListMembers(ctx context.Context, spaceID string) ([]domain.Mem
 				ComputerID:          compID.String,
 				RoleText:            roleText.String,
 				DriverKind:          domain.DriverKind(driverKind.String),
-				DriverConfigJSON:    driverCfg.String,
+				DriverConfig:        domain.ParseDriverConfig(driverCfg.String).Redact(domain.DriverKind(driverKind.String)),
 				RuntimeState:        domain.RuntimeState(rtState.String),
 				FocusConversationID: focusConv.String,
 				LastErrorCode:       errCode.String,
+				LastErrorDetail:     errDetail.String,
 			}
 			if rtUpdated.Valid {
 				t := store.ParseTime(rtUpdated.String)
@@ -412,6 +413,7 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 		Hostname:         hostname,
 		OS:               osName,
 		ConnectionStatus: "offline",
+		ACPProviders:     []string{},
 		CreatedAt:        now,
 	}
 	var events []domain.SpaceEvent
@@ -448,20 +450,40 @@ func (s *Service) AuthenticateComputer(ctx context.Context, rawToken string) (do
 	if rawToken == "" {
 		return domain.Computer{}, domain.NewError(domain.CodeUnauthenticated, "missing computer token")
 	}
-	var c domain.Computer
-	var createdAt string
-	var lastSeen sql.NullString
-	err := s.store.ReadDB().QueryRowContext(ctx,
-		`SELECT id, space_id, name, hostname, os, connection_status, daemon_version, last_seen_at, created_at
-		 FROM computers WHERE token_hash = ? AND deleted_at IS NULL`,
+	c, err := scanComputer(s.store.ReadDB().QueryRowContext(ctx,
+		`SELECT `+computerColumns+` FROM computers WHERE token_hash = ? AND deleted_at IS NULL`,
 		hashToken(rawToken),
-	).Scan(&c.ID, &c.SpaceID, &c.Name, &c.Hostname, &c.OS, &c.ConnectionStatus, &c.DaemonVersion, &lastSeen, &createdAt)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Computer{}, domain.NewError(domain.CodeUnauthenticated, "invalid computer token")
 	}
 	if err != nil {
 		return domain.Computer{}, domain.WrapError(domain.CodeInternal, "query computer", err)
 	}
+	return c, nil
+}
+
+const computerColumns = `id, space_id, name, hostname, os, connection_status, daemon_version, capabilities_json, last_seen_at, created_at`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// computerCapabilities is the computers.capabilities_json document reported in hello.
+type computerCapabilities struct {
+	ACPProviders []string `json:"acp_providers"`
+}
+
+func scanComputer(row rowScanner) (domain.Computer, error) {
+	var c domain.Computer
+	var capsJSON, createdAt string
+	var lastSeen sql.NullString
+	if err := row.Scan(&c.ID, &c.SpaceID, &c.Name, &c.Hostname, &c.OS, &c.ConnectionStatus, &c.DaemonVersion, &capsJSON, &lastSeen, &createdAt); err != nil {
+		return domain.Computer{}, err
+	}
+	var caps computerCapabilities
+	_ = json.Unmarshal([]byte(capsJSON), &caps)
+	c.ACPProviders = sanitizeACPProviders(caps.ACPProviders)
 	c.CreatedAt = store.ParseTime(createdAt)
 	if lastSeen.Valid {
 		t := store.ParseTime(lastSeen.String)
@@ -470,10 +492,23 @@ func (s *Service) AuthenticateComputer(ctx context.Context, rawToken string) (do
 	return c, nil
 }
 
+// sanitizeACPProviders keeps known providers only, in canonical order, never nil.
+func sanitizeACPProviders(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, p := range domain.ACPProviders {
+		for _, got := range in {
+			if got == p {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
 func (s *Service) ListComputers(ctx context.Context, spaceID string) ([]domain.Computer, error) {
 	rows, err := s.store.ReadDB().QueryContext(ctx,
-		`SELECT id, space_id, name, hostname, os, connection_status, daemon_version, last_seen_at, created_at
-		 FROM computers WHERE space_id = ? AND deleted_at IS NULL ORDER BY created_at ASC`,
+		`SELECT `+computerColumns+` FROM computers WHERE space_id = ? AND deleted_at IS NULL ORDER BY created_at ASC`,
 		spaceID,
 	)
 	if err != nil {
@@ -482,23 +517,23 @@ func (s *Service) ListComputers(ctx context.Context, spaceID string) ([]domain.C
 	defer rows.Close()
 	out := make([]domain.Computer, 0)
 	for rows.Next() {
-		var c domain.Computer
-		var createdAt string
-		var lastSeen sql.NullString
-		if err := rows.Scan(&c.ID, &c.SpaceID, &c.Name, &c.Hostname, &c.OS, &c.ConnectionStatus, &c.DaemonVersion, &lastSeen, &createdAt); err != nil {
+		c, err := scanComputer(rows)
+		if err != nil {
 			return nil, err
-		}
-		c.CreatedAt = store.ParseTime(createdAt)
-		if lastSeen.Valid {
-			t := store.ParseTime(lastSeen.String)
-			c.LastSeenAt = &t
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
 }
 
-func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, daemonVersion string) ([]protocol.AssignedAgentSpec, error) {
+// ComputerHello carries the capability fields a Computer reports when it connects.
+type ComputerHello struct {
+	DaemonVersion string
+	ACPProviders  []string
+}
+
+// SetComputerStatus records connection status; hello is non-nil only for a fresh hello frame.
+func (s *Service) SetComputerStatus(ctx context.Context, computerID, status string, hello *ComputerHello) ([]protocol.AssignedAgentSpec, error) {
 	now := time.Now().UTC()
 	var events []domain.SpaceEvent
 	var specs []protocol.AssignedAgentSpec
@@ -508,10 +543,19 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, dae
 			return domain.WrapError(domain.CodeNotFound, "computer not found", err)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE computers SET connection_status = ?, daemon_version = CASE WHEN ? <> '' THEN ? ELSE daemon_version END, last_seen_at = ? WHERE id = ?`,
-			status, daemonVersion, daemonVersion, store.FormatTime(now), computerID,
+			`UPDATE computers SET connection_status = ?, last_seen_at = ? WHERE id = ?`,
+			status, store.FormatTime(now), computerID,
 		); err != nil {
 			return domain.WrapError(domain.CodeInternal, "update computer status", err)
+		}
+		if hello != nil {
+			caps, _ := json.Marshal(computerCapabilities{ACPProviders: sanitizeACPProviders(hello.ACPProviders)})
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE computers SET daemon_version = ?, capabilities_json = ? WHERE id = ?`,
+				hello.DaemonVersion, string(caps), computerID,
+			); err != nil {
+				return domain.WrapError(domain.CodeInternal, "update computer capabilities", err)
+			}
 		}
 		if status == "offline" {
 			if _, err := tx.ExecContext(ctx,
@@ -521,7 +565,7 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, dae
 				return domain.WrapError(domain.CodeInternal, "mark agents offline", err)
 			}
 		}
-		if status != currentStatus {
+		if status != currentStatus || hello != nil {
 			ev, err := store.AppendEvent(ctx, tx, spaceID, "computer.changed", map[string]any{
 				"computer_id": computerID,
 				"status":      status,
@@ -533,7 +577,7 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, dae
 		}
 		if status == "online" {
 			rows, err := tx.QueryContext(ctx,
-				`SELECT m.id, m.space_id, m.display_name, a.role_text, a.driver_kind, a.driver_config_json
+				`SELECT `+agentSpecColumns+`
 				 FROM agents a JOIN members m ON m.id = a.member_id
 				 WHERE a.computer_id = ? AND m.retired_at IS NULL`,
 				computerID,
@@ -543,12 +587,10 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, dae
 			}
 			defer rows.Close()
 			for rows.Next() {
-				var sp protocol.AssignedAgentSpec
-				var dk string
-				if err := rows.Scan(&sp.MemberID, &sp.SpaceID, &sp.DisplayName, &sp.RoleText, &dk, &sp.DriverConfigJSON); err != nil {
+				sp, err := scanAgentSpec(rows)
+				if err != nil {
 					return err
 				}
-				sp.DriverKind = domain.DriverKind(dk)
 				specs = append(specs, sp)
 			}
 			if err := rows.Err(); err != nil {
@@ -564,12 +606,25 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status, dae
 	return specs, nil
 }
 
+const agentSpecColumns = `m.id, m.space_id, m.display_name, a.role_text, a.driver_kind, a.driver_config_json`
+
+func scanAgentSpec(row rowScanner) (protocol.AssignedAgentSpec, error) {
+	var sp protocol.AssignedAgentSpec
+	var dk, cfg string
+	if err := row.Scan(&sp.MemberID, &sp.SpaceID, &sp.DisplayName, &sp.RoleText, &dk, &cfg); err != nil {
+		return protocol.AssignedAgentSpec{}, err
+	}
+	sp.DriverKind = domain.DriverKind(dk)
+	sp.DriverConfig = domain.ParseDriverConfig(cfg)
+	return sp, nil
+}
+
 type CreateAgentInput struct {
 	DisplayName          string
 	RoleText             string
 	ComputerID           string
 	DriverKind           domain.DriverKind
-	DriverConfigJSON     string
+	DriverConfig         domain.DriverConfig
 	SourceConversationID string // Optional: emits an agent_created Action Message in this conversation.
 }
 
@@ -584,15 +639,13 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 	if err := domain.ValidateDisplayName(in.DisplayName); err != nil {
 		return domain.Member{}, err
 	}
-	if in.DriverKind != domain.DriverACP && in.DriverKind != domain.DriverBuiltin {
-		return domain.Member{}, domain.NewError(domain.CodeInvalidArgument, "driver_kind must be acp or builtin")
+	cfg, err := domain.NormalizeDriverConfig(in.DriverKind, in.DriverConfig)
+	if err != nil {
+		return domain.Member{}, err
 	}
-	cfg := strings.TrimSpace(in.DriverConfigJSON)
-	if cfg == "" {
-		cfg = "{}"
-	}
-	if !json.Valid([]byte(cfg)) {
-		return domain.Member{}, domain.NewError(domain.CodeInvalidArgument, "driver_config_json must be valid JSON")
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		return domain.Member{}, domain.WrapError(domain.CodeInternal, "encode driver config", err)
 	}
 
 	now := time.Now().UTC()
@@ -631,7 +684,7 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO agents (member_id, space_id, computer_id, role_text, driver_kind, driver_config_json, runtime_state, runtime_state_updated_at, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			memberID, actor.SpaceID, in.ComputerID, in.RoleText, string(in.DriverKind), cfg, string(rtState), store.FormatTime(now), store.FormatTime(now),
+			memberID, actor.SpaceID, in.ComputerID, in.RoleText, string(in.DriverKind), string(cfgJSON), string(rtState), store.FormatTime(now), store.FormatTime(now),
 		); err != nil {
 			return domain.WrapError(domain.CodeInternal, "insert agent", err)
 		}
@@ -679,11 +732,11 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 			AccessLevel: domain.AccessMember,
 			CreatedAt:   now,
 			Agent: &domain.AgentInfo{
-				ComputerID:       in.ComputerID,
-				RoleText:         in.RoleText,
-				DriverKind:       in.DriverKind,
-				DriverConfigJSON: cfg,
-				RuntimeState:     rtState,
+				ComputerID:   in.ComputerID,
+				RoleText:     in.RoleText,
+				DriverKind:   in.DriverKind,
+				DriverConfig: cfg.Redact(in.DriverKind),
+				RuntimeState: rtState,
 			},
 		}
 		return nil
@@ -698,19 +751,114 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 			AgentMemberID: memberID,
 			Action:        "provision",
 			Spec: &protocol.AssignedAgentSpec{
-				MemberID:         memberID,
-				SpaceID:          actor.SpaceID,
-				DisplayName:      in.DisplayName,
-				RoleText:         in.RoleText,
-				DriverKind:       in.DriverKind,
-				DriverConfigJSON: cfg,
+				MemberID:     memberID,
+				SpaceID:      actor.SpaceID,
+				DisplayName:  in.DisplayName,
+				RoleText:     in.RoleText,
+				DriverKind:   in.DriverKind,
+				DriverConfig: cfg,
 			},
 		})
 	}
 	return created, nil
 }
 
-func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agentMemberID string, state domain.RuntimeState, focusConvID, errorCode string) error {
+// UpdateAgentDriver replaces an Agent's driver config; an empty api_key keeps the stored one.
+// The hosting Computer receives a fresh provision so it rebuilds the driver.
+func (s *Service) UpdateAgentDriver(ctx context.Context, actor domain.Member, agentMemberID string, kind domain.DriverKind, in domain.DriverConfig) (domain.Member, error) {
+	ok, err := hasPermission(ctx, s.store.ReadDB(), actor, domain.PermAgentCreate)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if !ok {
+		return domain.Member{}, domain.NewError(domain.CodePermissionDenied, "missing agent.create permission")
+	}
+	var spec protocol.AssignedAgentSpec
+	var computerID, compStatus string
+	var events []domain.SpaceEvent
+	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var compID, status sql.NullString
+		row := tx.QueryRowContext(ctx,
+			`SELECT `+agentSpecColumns+`, a.computer_id, c.connection_status
+			 FROM agents a JOIN members m ON m.id = a.member_id
+			 LEFT JOIN computers c ON c.id = a.computer_id
+			 WHERE a.member_id = ? AND a.space_id = ? AND m.retired_at IS NULL`,
+			agentMemberID, actor.SpaceID,
+		)
+		var dk, cfgJSON string
+		if err := row.Scan(&spec.MemberID, &spec.SpaceID, &spec.DisplayName, &spec.RoleText, &dk, &cfgJSON, &compID, &status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.NewError(domain.CodeNotFound, "agent not found")
+			}
+			return domain.WrapError(domain.CodeInternal, "query agent", err)
+		}
+		computerID, compStatus = compID.String, status.String
+		stored := domain.ParseDriverConfig(cfgJSON)
+		if strings.TrimSpace(in.APIKey) == "" && domain.DriverKind(dk) == kind {
+			in.APIKey = stored.APIKey
+		}
+		cfg, err := domain.NormalizeDriverConfig(kind, in)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return domain.WrapError(domain.CodeInternal, "encode driver config", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE agents SET driver_kind = ?, driver_config_json = ?, last_error_code = '', last_error_detail = '' WHERE member_id = ?`,
+			string(kind), string(raw), agentMemberID,
+		); err != nil {
+			return domain.WrapError(domain.CodeInternal, "update agent driver", err)
+		}
+		spec.DriverKind = kind
+		spec.DriverConfig = cfg
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "agent.updated", map[string]any{
+			"member_id": agentMemberID,
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+		return nil
+	})
+	if err != nil {
+		return domain.Member{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	if computerID != "" && compStatus == "online" {
+		s.notifier.SendControl(computerID, protocol.AgentControlFrame{
+			AgentMemberID: agentMemberID,
+			Action:        "provision",
+			Spec:          &spec,
+		})
+	}
+	return s.GetMember(ctx, actor.SpaceID, agentMemberID)
+}
+
+// GetMember returns one non-retired member with its Browser-safe agent projection.
+func (s *Service) GetMember(ctx context.Context, spaceID, memberID string) (domain.Member, error) {
+	members, err := s.ListMembers(ctx, spaceID)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	for _, m := range members {
+		if m.ID == memberID {
+			return m, nil
+		}
+	}
+	return domain.Member{}, domain.NewError(domain.CodeNotFound, "member not found")
+}
+
+func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agentMemberID string, state domain.RuntimeState, focusConvID, errorCode, errorDetail string) error {
+	if state == domain.RuntimeError {
+		if errorCode == "" {
+			errorCode = domain.AgentErrTurnFailed
+		}
+		errorDetail = domain.BoundErrorDetail(errorDetail)
+	} else {
+		errorCode, errorDetail = "", ""
+	}
 	now := time.Now().UTC()
 	var events []domain.SpaceEvent
 	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
@@ -726,8 +874,8 @@ func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agent
 			focus = focusConvID
 		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE agents SET runtime_state = ?, focus_conversation_id = ?, last_error_code = ?, runtime_state_updated_at = ? WHERE member_id = ?`,
-			string(state), focus, errorCode, store.FormatTime(now), agentMemberID,
+			`UPDATE agents SET runtime_state = ?, focus_conversation_id = ?, last_error_code = ?, last_error_detail = ?, runtime_state_updated_at = ? WHERE member_id = ?`,
+			string(state), focus, errorCode, errorDetail, store.FormatTime(now), agentMemberID,
 		); err != nil {
 			return domain.WrapError(domain.CodeInternal, "update agent runtime state", err)
 		}
@@ -736,6 +884,7 @@ func (s *Service) UpdateAgentRuntimeState(ctx context.Context, computerID, agent
 			"runtime_state":         state,
 			"focus_conversation_id": focusConvID,
 			"error_code":            errorCode,
+			"error_detail":          errorDetail,
 		})
 		if err != nil {
 			return err

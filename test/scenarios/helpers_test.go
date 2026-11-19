@@ -79,6 +79,7 @@ func startScenarioEnv(t *testing.T, factory func(spec protocol.AssignedAgentSpec
 		ServerURL:     ts.URL,
 		ComputerToken: token,
 		DataDir:       filepath.Join(t.TempDir(), "daemon"),
+		SumiBinary:    binPath,
 		DriverFactory: factory,
 	}, nil)
 	if err := d.Start(ctx); err != nil {
@@ -167,3 +168,5 @@ func (f *funcDriver) Close() error        { return nil }
 
 var _ = os.Getenv
 var _ = http.StatusOK
+
+var scenarioBuiltinConfig = domain.DriverConfig{BaseURL: "http://127.0.0.1:1/v1", Model: "test-model"}

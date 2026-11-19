@@ -2,7 +2,7 @@ package protocol
 
 import "github.com/abcdlsj/sumi/internal/domain"
 
-const Version = 1
+const Version = 2
 
 // Envelope is the single JSON frame shape exchanged on the Server <-> Computer WebSocket.
 type Envelope struct {
@@ -36,6 +36,8 @@ type HelloFrame struct {
 	DaemonVersion   string `json:"daemon_version"`
 	Hostname        string `json:"hostname"`
 	OS              string `json:"os"`
+	// ACPProviders lists ACP providers whose commands resolve on the Computer's PATH.
+	ACPProviders []string `json:"acp_providers"`
 }
 
 type HelloAckFrame struct {
@@ -46,12 +48,13 @@ type HelloAckFrame struct {
 }
 
 type AssignedAgentSpec struct {
-	MemberID         string            `json:"member_id"`
-	SpaceID          string            `json:"space_id"`
-	DisplayName      string            `json:"display_name"`
-	RoleText         string            `json:"role_text"`
-	DriverKind       domain.DriverKind `json:"driver_kind"`
-	DriverConfigJSON string            `json:"driver_config_json"`
+	MemberID    string            `json:"member_id"`
+	SpaceID     string            `json:"space_id"`
+	DisplayName string            `json:"display_name"`
+	RoleText    string            `json:"role_text"`
+	DriverKind  domain.DriverKind `json:"driver_kind"`
+	// DriverConfig is the full config including api_key; it is only sent to the hosting Computer.
+	DriverConfig domain.DriverConfig `json:"driver_config"`
 }
 
 type HeartbeatFrame struct {
@@ -70,6 +73,7 @@ type AgentStateFrame struct {
 	RuntimeState        domain.RuntimeState `json:"runtime_state"`
 	FocusConversationID string              `json:"focus_conversation_id,omitempty"`
 	ErrorCode           string              `json:"error_code,omitempty"`
+	ErrorDetail         string              `json:"error_detail,omitempty"`
 }
 
 type AgentControlFrame struct {

@@ -105,6 +105,7 @@ func (s *Server) registerRoutes() {
 
 		r.Post("/agents", s.handleCreateAgent)
 		r.Post("/agents/{agentID}/control", s.handleControlAgent)
+		r.Put("/agents/{agentID}/driver", s.handleUpdateAgentDriver)
 
 		r.Get("/conversations", s.handleListConversations)
 		r.Post("/attachments", s.handleUploadAttachment)
@@ -527,12 +528,12 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DisplayName          string            `json:"display_name"`
-		RoleText             string            `json:"role_text"`
-		ComputerID           string            `json:"computer_id"`
-		DriverKind           domain.DriverKind `json:"driver_kind"`
-		DriverConfigJSON     string            `json:"driver_config_json"`
-		SourceConversationID string            `json:"source_conversation_id"`
+		DisplayName          string              `json:"display_name"`
+		RoleText             string              `json:"role_text"`
+		ComputerID           string              `json:"computer_id"`
+		DriverKind           domain.DriverKind   `json:"driver_kind"`
+		DriverConfig         domain.DriverConfig `json:"driver_config"`
+		SourceConversationID string              `json:"source_conversation_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, err)
@@ -543,7 +544,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		RoleText:             body.RoleText,
 		ComputerID:           body.ComputerID,
 		DriverKind:           body.DriverKind,
-		DriverConfigJSON:     body.DriverConfigJSON,
+		DriverConfig:         body.DriverConfig,
 		SourceConversationID: body.SourceConversationID,
 	})
 	if err != nil {
@@ -551,6 +552,28 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"agent": agent})
+}
+
+func (s *Server) handleUpdateAgentDriver(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		DriverKind   domain.DriverKind   `json:"driver_kind"`
+		DriverConfig domain.DriverConfig `json:"driver_config"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	agent, err := s.svc.UpdateAgentDriver(r.Context(), actor, chi.URLParam(r, "agentID"), body.DriverKind, body.DriverConfig)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agent": agent})
 }
 
 func (s *Server) handleControlAgent(w http.ResponseWriter, r *http.Request) {

@@ -233,7 +233,7 @@ func TestWerewolfCommunication(t *testing.T) {
 			DisplayName: name,
 			RoleText:    "Werewolf participant " + name,
 			ComputerID:  env.comp.ID,
-			DriverKind:  domain.DriverBuiltin,
+			DriverKind:  domain.DriverBuiltin, DriverConfig: scenarioBuiltinConfig,
 		})
 		if err != nil {
 			t.Fatalf("create agent %s: %v", name, err)

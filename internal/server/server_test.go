@@ -127,10 +127,11 @@ func TestEndToEndHTTPComputerWSAndSSE(t *testing.T) {
 
 	// 3. Create Agent Lin -> Computer receives provision control frame
 	resp, agentOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces/studio/agents", map[string]any{
-		"display_name": "Lin",
-		"role_text":    "Engineer",
-		"computer_id":  compID,
-		"driver_kind":  domain.DriverBuiltin,
+		"display_name":  "Lin",
+		"role_text":     "Engineer",
+		"computer_id":   compID,
+		"driver_kind":   domain.DriverBuiltin,
+		"driver_config": map[string]any{"base_url": "http://127.0.0.1:1/v1", "model": "m"},
 	}, "")
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create agent status=%d", resp.StatusCode)

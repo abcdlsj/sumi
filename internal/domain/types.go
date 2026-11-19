@@ -118,14 +118,15 @@ type Member struct {
 }
 
 type AgentInfo struct {
-	ComputerID            string       `json:"computer_id,omitempty"`
-	RoleText              string       `json:"role_text"`
-	DriverKind            DriverKind   `json:"driver_kind"`
-	DriverConfigJSON      string       `json:"driver_config_json"`
-	RuntimeState          RuntimeState `json:"runtime_state"`
-	FocusConversationID   string       `json:"focus_conversation_id,omitempty"`
-	LastErrorCode         string       `json:"last_error_code,omitempty"`
-	RuntimeStateUpdatedAt *time.Time   `json:"runtime_state_updated_at,omitempty"`
+	ComputerID            string           `json:"computer_id,omitempty"`
+	RoleText              string           `json:"role_text"`
+	DriverKind            DriverKind       `json:"driver_kind"`
+	DriverConfig          DriverConfigView `json:"driver_config"`
+	RuntimeState          RuntimeState     `json:"runtime_state"`
+	FocusConversationID   string           `json:"focus_conversation_id,omitempty"`
+	LastErrorCode         string           `json:"last_error_code,omitempty"`
+	LastErrorDetail       string           `json:"last_error_detail,omitempty"`
+	RuntimeStateUpdatedAt *time.Time       `json:"runtime_state_updated_at,omitempty"`
 }
 
 type Computer struct {
@@ -136,6 +137,7 @@ type Computer struct {
 	OS               string     `json:"os"`
 	ConnectionStatus string     `json:"connection_status"`
 	DaemonVersion    string     `json:"daemon_version,omitempty"`
+	ACPProviders     []string   `json:"acp_providers"`
 	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 }

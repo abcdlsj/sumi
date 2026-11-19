@@ -144,7 +144,7 @@ func TestPairingConfirmRequiresOwnerOrAdmin(t *testing.T) {
 		t.Fatalf("create pairing: %v", err)
 	}
 	agent, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
-		DisplayName: "Lin", ComputerID: comp.ID, DriverKind: domain.DriverBuiltin,
+		DisplayName: "Lin", ComputerID: comp.ID, DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)

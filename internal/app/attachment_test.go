@@ -57,7 +57,7 @@ func TestAttachmentUploadBindAndVisibility(t *testing.T) {
 		DisplayName: "Outsider",
 		RoleText:    "not a member of #attach",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -119,7 +119,7 @@ func TestBindAttachmentsRejectsForeignUploader(t *testing.T) {
 		DisplayName: "LinAttach",
 		RoleText:    "helper",
 		ComputerID:  comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)

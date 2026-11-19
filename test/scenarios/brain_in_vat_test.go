@@ -103,6 +103,8 @@ func TestBrainInVat(t *testing.T) {
 					"agent", "create",
 					"--name", "XiaoZhu",
 					"--role", "Helper created by LinChe",
+					"--base-url", "http://127.0.0.1:1/v1",
+					"--model", "test-model",
 					"--source-conversation", convID,
 				)
 				if err != nil || !createRes.OK {
@@ -138,7 +140,7 @@ func TestBrainInVat(t *testing.T) {
 		DisplayName: "LinChe",
 		RoleText:    "Lead engineer",
 		ComputerID:  env.comp.ID,
-		DriverKind:  domain.DriverBuiltin,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: scenarioBuiltinConfig,
 	})
 	if err != nil {
 		t.Fatalf("create LinChe: %v", err)

@@ -200,6 +200,7 @@ func (s *Service) ConfirmPairing(ctx context.Context, actor domain.Member, id, c
 			OS:               p.os,
 			ConnectionStatus: "offline",
 			DaemonVersion:    p.daemonVersion,
+			ACPProviders:     []string{},
 			CreatedAt:        now,
 		}
 		ev, err := insertComputerTx(ctx, tx, comp, p.tokenHash)
