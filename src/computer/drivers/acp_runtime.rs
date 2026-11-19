@@ -43,6 +43,9 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(45);
 // Booting the provider behind the first `session/new`; the adapter itself is already answering.
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(60);
+// Bounded turn duration so a wedged adapter or tool call never pins an Agent indefinitely.
+const TURN_TIMEOUT: Duration = Duration::from_secs(1800);
+const STDERR_RING_CAP: usize = 4096;
 const MAX_TURN_ATTEMPTS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -314,12 +317,24 @@ struct AcpProcess {
     sessions: BTreeSet<String>,
     /// Outstanding `session/prompt` request ids; their responses end the turn.
     prompts: BTreeMap<u64, RunId>,
+    prompt_started_at: BTreeMap<RunId, (String, tokio::time::Instant)>,
     active_runs: BTreeMap<String, RunId>,
     failure_reasons: BTreeMap<RunId, String>,
     completions: VecDeque<DriverCompletion>,
+    stderr_tail: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl AcpProcess {
+    fn stderr_excerpt(&self) -> Option<String> {
+        let tail = self.stderr_tail.lock().ok()?;
+        let trimmed = tail.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    }
+
     async fn spawn(
         provider: Provider,
         launch: &AcpLaunch,
@@ -347,7 +362,7 @@ impl AcpProcess {
             .env("SUMI_DRIVER_TOKEN", driver_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         if provider == Provider::Codex
             && let Some((key, value)) = codex_provider_environment(&provider_home).await?
@@ -373,6 +388,29 @@ impl AcpProcess {
             .map_err(|_| ApplicationError::DriverUnavailable)?;
         let stdin = child.stdin.take().ok_or(ApplicationError::Internal)?;
         let stdout = child.stdout.take().ok_or(ApplicationError::Internal)?;
+        let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        if let Some(stderr) = child.stderr.take() {
+            let tail = std::sync::Arc::clone(&stderr_tail);
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Ok(mut buf) = tail.lock() {
+                        if !buf.is_empty() {
+                            buf.push('\n');
+                        }
+                        buf.push_str(&line);
+                        if buf.len() > STDERR_RING_CAP {
+                            let excess = buf.len() - STDERR_RING_CAP;
+                            let cut = buf
+                                .char_indices()
+                                .find(|(idx, _)| *idx >= excess)
+                                .map_or(buf.len(), |(idx, _)| idx);
+                            buf.drain(..cut);
+                        }
+                    }
+                }
+            });
+        }
         let mut process = Self {
             provider,
             child,
@@ -383,11 +421,13 @@ impl AcpProcess {
             next_request_id: 1,
             sessions: BTreeSet::new(),
             prompts: BTreeMap::new(),
+            prompt_started_at: BTreeMap::new(),
             active_runs: BTreeMap::new(),
             failure_reasons: BTreeMap::new(),
             completions: VecDeque::new(),
+            stderr_tail,
         };
-        let initialized: InitializeResponse = process
+        let initialized: InitializeResponse = match process
             .request(
                 "initialize",
                 &InitializeRequest::new(ProtocolVersion::V1)
@@ -398,7 +438,20 @@ impl AcpProcess {
                     ),
                 HANDSHAKE_TIMEOUT,
             )
-            .await?;
+            .await
+        {
+            Ok(initialized) => initialized,
+            Err(error) => {
+                if let Some(stderr) = process.stderr_excerpt() {
+                    tracing::warn!(
+                        provider = ?provider,
+                        stderr_bytes = stderr.len(),
+                        "ACP adapter initialize failed with stderr diagnostics"
+                    );
+                }
+                return Err(error.into());
+            }
+        };
         if initialized.protocol_version != ProtocolVersion::V1 {
             return Err(ApplicationError::DriverUnavailable);
         }
@@ -461,8 +514,9 @@ impl AcpProcess {
         };
         let modes = match modes {
             Ok(modes) => modes,
-            Err(RpcFailure::Remote) => return Ok(false),
-            Err(RpcFailure::Transport) => return Err(ApplicationError::DriverUnavailable),
+            // Treat both remote rejection and transport timeout on resume/load as a lost session
+            // so RunService can cleanly start a fresh generation instead of aborting startup.
+            Err(RpcFailure::Remote | RpcFailure::Transport) => return Ok(false),
         };
         self.grant_full_access(locator, modes).await?;
         self.sessions.insert(locator.to_owned());
@@ -533,6 +587,8 @@ impl AcpProcess {
         }))
         .await?;
         self.prompts.insert(request_id, run_id);
+        self.prompt_started_at
+            .insert(run_id, (locator.to_owned(), tokio::time::Instant::now()));
         self.active_runs.insert(locator.to_owned(), run_id);
         Ok(())
     }
@@ -636,6 +692,7 @@ impl AcpProcess {
 
     fn finish_prompt(&mut self, run_id: RunId, message: &Value) {
         self.active_runs.retain(|_, active| *active != run_id);
+        self.prompt_started_at.remove(&run_id);
         let outcome = if let Some(error) = message.get("error") {
             Err(error_reason(error))
         } else {
@@ -681,6 +738,26 @@ impl AcpProcess {
     }
 
     async fn poll_messages(&mut self) -> Result<(), ApplicationError> {
+        let now = tokio::time::Instant::now();
+        let timed_out: Vec<(RunId, String)> = self
+            .prompt_started_at
+            .iter()
+            .filter(|(_, (_, started))| now.duration_since(*started) >= TURN_TIMEOUT)
+            .map(|(run_id, (locator, _))| (*run_id, locator.clone()))
+            .collect();
+        for (run_id, locator) in timed_out {
+            tracing::warn!(%run_id, timeout_secs = TURN_TIMEOUT.as_secs(), "ACP turn timed out");
+            let _ = self.cancel(&locator).await;
+            self.prompts.retain(|_, active| *active != run_id);
+            self.active_runs.retain(|_, active| *active != run_id);
+            self.prompt_started_at.remove(&run_id);
+            self.failure_reasons
+                .insert(run_id, "ACP turn timed out".to_owned());
+            self.completions.push_back(DriverCompletion {
+                run_id,
+                outcome: DriverTurnOutcome::Failed,
+            });
+        }
         loop {
             let line = match tokio::time::timeout(Duration::from_millis(1), self.stdout.next_line())
                 .await
@@ -906,9 +983,10 @@ impl StructuredProviderClient for AcpRuntimeClient {
             self.discard_process(agent_id).await;
         }
         let mut terminal = Vec::new();
-        for (completion, reason) in completions {
+        for (mut completion, reason) in completions {
+            let is_transient = reason.as_deref().is_some_and(is_retryable_failure);
             let retry = completion.outcome == DriverTurnOutcome::Failed
-                && reason.as_deref().is_some_and(is_retryable_failure)
+                && is_transient
                 && self
                     .run_inputs
                     .get(&completion.run_id)
@@ -928,6 +1006,9 @@ impl StructuredProviderClient for AcpRuntimeClient {
                     self.run_inputs.insert(completion.run_id, run);
                     continue;
                 }
+            }
+            if completion.outcome == DriverTurnOutcome::Failed && is_transient {
+                completion.outcome = DriverTurnOutcome::TransientFailed;
             }
             self.run_inputs.remove(&completion.run_id);
             self.run_owners.remove(&completion.run_id);
@@ -963,12 +1044,20 @@ fn is_retryable_failure(reason: &str) -> bool {
         "server error",
         "service unavailable",
         "overloaded",
+        "429",
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "529",
+        "temporarily unavailable",
+        "try again later",
         "bad gateway",
         "gateway timeout",
         "http 500",
         "http 502",
         "http 503",
         "http 504",
+        "\"status\":429",
         "\"status\":500",
         "\"status\":502",
         "\"status\":503",

@@ -54,6 +54,7 @@ impl std::error::Error for AgentError {}
 pub enum TurnOutcome {
     Completed,
     Failed,
+    TransientFailed,
     Interrupted,
 }
 
@@ -432,12 +433,18 @@ impl AgentRuntime {
             {
                 Ok(()) => TurnOutcome::Completed,
                 Err(error) => {
+                    let transient = crate::engine::is_transient_provider_error(&error);
                     tracing::warn!(
                         %run_id,
+                        transient,
                         failure_code = failure_code(&error),
                         "Builtin turn failed"
                     );
-                    TurnOutcome::Failed
+                    if transient {
+                        TurnOutcome::TransientFailed
+                    } else {
+                        TurnOutcome::Failed
+                    }
                 }
             };
             if outcome == TurnOutcome::Completed {
@@ -448,7 +455,7 @@ impl AgentRuntime {
                             attachments: Vec::new(),
                             blocked_tools: request_owned.blocked_tools.clone(),
                         };
-                        if engine
+                        if let Err(error) = engine
                             .run_with_retries_preserving_usage(
                                 &continuation,
                                 &mut session,
@@ -456,9 +463,12 @@ impl AgentRuntime {
                                 None,
                             )
                             .await
-                            .is_err()
                         {
-                            outcome = TurnOutcome::Failed;
+                            outcome = if crate::engine::is_transient_provider_error(&error) {
+                                TurnOutcome::TransientFailed
+                            } else {
+                                TurnOutcome::Failed
+                            };
                             task_mailbox.close();
                             break;
                         }

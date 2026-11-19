@@ -118,7 +118,10 @@ impl RecoveryService {
             .await?;
         let mut failed = false;
         for run in runs {
-            if !matches!(run.view().state, LocalRunState::Running) {
+            if !matches!(
+                run.view().state,
+                LocalRunState::Starting | LocalRunState::Running
+            ) {
                 continue;
             }
             if driver.process_evidence(&run).await? == ProcessEvidence::Controlled {

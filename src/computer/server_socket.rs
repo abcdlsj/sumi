@@ -496,25 +496,35 @@ where
         let result = if let Some(result) = pending_activity_results.remove(&query_id) {
             result
         } else {
+            let page_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
             loop {
                 let frame = if let Some(frame) = pending.pop_front() {
                     frame
                 } else {
-                    let frame = match reader.next().await {
-                        Some(Ok(frame)) => frame,
-                        Some(Err(error)) => {
+                    let frame = match tokio::time::timeout_at(page_deadline, reader.next()).await {
+                        Ok(Some(Ok(frame))) => frame,
+                        Ok(Some(Err(error))) => {
                             pending.extend(deferred);
                             return Err(anyhow::anyhow!(error)
                                 .context("Server failed during Channel activity query"));
                         }
-                        None => {
+                        Ok(None) => {
                             pending.extend(deferred);
                             return Err(anyhow::anyhow!(
                                 "Server closed during Channel activity query"
                             ));
                         }
+                        Err(_) => {
+                            pending.extend(deferred);
+                            return Err(anyhow::anyhow!(
+                                "Channel activity query timed out after 15s"
+                            ));
+                        }
                     };
                     let WebSocketMessage::Text(encoded) = frame else {
+                        if let WebSocketMessage::Ping(payload) = frame {
+                            let _ = writer.send(WebSocketMessage::Pong(payload)).await;
+                        }
                         continue;
                     };
                     match serde_json::from_str::<ServerFrame>(&encoded) {

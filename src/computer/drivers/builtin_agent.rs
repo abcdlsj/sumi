@@ -290,6 +290,7 @@ impl StructuredProviderClient for BuiltinRuntimeClient {
                 outcome: match outcome {
                     TurnOutcome::Completed => DriverTurnOutcome::Completed,
                     TurnOutcome::Failed => DriverTurnOutcome::Failed,
+                    TurnOutcome::TransientFailed => DriverTurnOutcome::TransientFailed,
                     TurnOutcome::Interrupted => DriverTurnOutcome::Interrupted,
                 },
             });

@@ -1,12 +1,12 @@
 use crate::computer::core::{
     home::LocalAgentState,
     scheduler::{PendingRun, Scheduler},
-    supervisor::LocalRunState,
+    supervisor::{ItemDisposition, LocalRunState, TerminalStatus},
 };
 
 use super::{
     ApplicationError,
-    ports::{AgentHomePort, ComputerTransaction, DriverPort, TransactionPort},
+    ports::{AgentHomePort, ComputerTransaction, DriverPort, LocalErrorCode, TransactionPort},
     run::RunService,
 };
 
@@ -87,6 +87,51 @@ impl SchedulerService {
                     RunService::stop(store, driver, pending.run_id).await?;
                 }
                 Err(ApplicationError::NotFound) => {}
+                // Isolate single-agent driver/session startup failures so they do not tear down
+                // the Computer's WebSocket connection and disrupt other Agents.
+                Err(
+                    error @ (ApplicationError::DriverUnavailable | ApplicationError::SessionLost),
+                ) => {
+                    let error_code = match error {
+                        ApplicationError::SessionLost => LocalErrorCode::SessionUnavailable,
+                        _ => LocalErrorCode::DriverError,
+                    };
+                    tracing::warn!(
+                        run_id = %pending.run_id,
+                        agent_id = %pending.agent_id,
+                        ?error_code,
+                        "local Run failed during driver startup"
+                    );
+                    let item_outcomes = store
+                        .transact(async |transaction| {
+                            Ok(transaction.run(pending.run_id)?.map(|run| {
+                                run.view()
+                                    .deliveries
+                                    .values()
+                                    .map(|delivery| {
+                                        (
+                                            delivery.item.item_id,
+                                            delivery
+                                                .disposition
+                                                .unwrap_or(ItemDisposition::Released),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            }))
+                        })
+                        .await?;
+                    if let Some(item_outcomes) = item_outcomes {
+                        let _ = RunService::finish(
+                            store,
+                            pending.run_id,
+                            TerminalStatus::Failed,
+                            item_outcomes,
+                            None,
+                            Some(error_code),
+                        )
+                        .await;
+                    }
+                }
                 Err(error) => return Err(error),
             }
         }

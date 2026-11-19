@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -14,6 +15,7 @@ use super::{
 };
 
 const MAX_TURN_ATTEMPTS: usize = 3;
+const DEFAULT_TURN_TIMEOUT: Duration = Duration::from_secs(1800);
 
 /// Represents the context for a single agent turn.
 #[derive(Clone, Debug)]
@@ -128,12 +130,20 @@ impl Engine {
         }
         let mut append_input = true;
         for attempt in 1..=MAX_TURN_ATTEMPTS {
-            match self
-                .run_once(turn, session, events, sink, append_input)
-                .await
+            match tokio::time::timeout(
+                DEFAULT_TURN_TIMEOUT,
+                self.run_once(turn, session, events, sink, append_input),
+            )
+            .await
             {
-                Ok(()) => return Ok(()),
-                Err(error) if attempt < MAX_TURN_ATTEMPTS && is_retryable_error(&error) => {
+                Ok(Ok(())) => return Ok(()),
+                Err(_) => {
+                    return Err(anyhow::anyhow!(
+                        "provider turn timed out after {}s",
+                        DEFAULT_TURN_TIMEOUT.as_secs()
+                    ));
+                }
+                Ok(Err(error)) if attempt < MAX_TURN_ATTEMPTS && is_retryable_error(&error) => {
                     tracing::warn!(
                         attempt,
                         max_attempts = MAX_TURN_ATTEMPTS,
@@ -142,7 +152,7 @@ impl Engine {
                     );
                     append_input = false;
                 }
-                Err(error) => return Err(error),
+                Ok(Err(error)) => return Err(error),
             }
         }
         unreachable!("the final turn attempt returns from the loop")
@@ -445,6 +455,14 @@ fn is_retryable_error(error: &anyhow::Error) -> bool {
         "network is unreachable",
         "error sending request",
         "http status server error",
+        "429",
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "overloaded",
+        "529",
+        "temporarily unavailable",
+        "try again later",
         "500 internal server error",
         "502 bad gateway",
         "503 service unavailable",
@@ -452,6 +470,10 @@ fn is_retryable_error(error: &anyhow::Error) -> bool {
     ]
     .iter()
     .any(|marker| text.contains(marker))
+}
+
+pub fn is_transient_provider_error(error: &anyhow::Error) -> bool {
+    is_retryable_error(error)
 }
 
 #[cfg(test)]

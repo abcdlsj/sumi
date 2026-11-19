@@ -14,6 +14,8 @@ use crate::{
 pub(crate) struct AgentCli {
     #[arg(long, global = true)]
     pub(crate) json: bool,
+    #[arg(long, global = true)]
+    pub(crate) idempotency_key: Option<IdempotencyKey>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
@@ -123,8 +125,14 @@ enum TaskCommand {
         thread_id: ThreadId,
     },
     SubmitReview {
-        #[arg(long)]
-        body_file: std::path::PathBuf,
+        #[arg(
+            long,
+            conflicts_with = "body_file",
+            required_unless_present = "body_file"
+        )]
+        body: Option<String>,
+        #[arg(long, conflicts_with = "body", required_unless_present = "body")]
+        body_file: Option<std::path::PathBuf>,
         #[arg(long, default_value = "focus")]
         post_to: String,
     },
@@ -232,8 +240,14 @@ pub(crate) struct AgentArgs {
 enum AgentCommand {
     Create {
         name: String,
-        #[arg(long)]
-        role_file: std::path::PathBuf,
+        #[arg(
+            long,
+            conflicts_with = "role_file",
+            required_unless_present = "role_file"
+        )]
+        role: Option<String>,
+        #[arg(long, conflicts_with = "role", required_unless_present = "role")]
+        role_file: Option<std::path::PathBuf>,
         #[arg(long)]
         driver: String,
         #[arg(long)]
@@ -270,7 +284,11 @@ enum MemoryCommand {
     },
     Write {
         path: String,
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["file", "stdin"])]
+        body: Option<String>,
+        #[arg(long, conflicts_with_all = ["body", "stdin"])]
+        file: Option<std::path::PathBuf>,
+        #[arg(long, conflicts_with_all = ["body", "file"])]
         stdin: bool,
     },
 }
@@ -386,11 +404,20 @@ impl AgentCli {
                 command: TaskCommand::UnlinkThread { thread_id },
             }) => (Action::TaskUnlinkThread { thread_id }, true),
             Command::Task(TaskArgs {
-                command: TaskCommand::SubmitReview { body_file, post_to },
+                command:
+                    TaskCommand::SubmitReview {
+                        body,
+                        body_file,
+                        post_to,
+                    },
             }) => {
-                let body = tokio::fs::read_to_string(body_file)
-                    .await
-                    .map_err(|_| "--body-file could not be read")?;
+                let body = match (body, body_file) {
+                    (Some(body), None) => body,
+                    (None, Some(path)) => tokio::fs::read_to_string(path)
+                        .await
+                        .map_err(|_| "--body-file could not be read")?,
+                    _ => return Err("submit-review requires either --body or --body-file"),
+                };
                 (
                     Action::TaskSubmitReview {
                         body,
@@ -518,14 +545,19 @@ impl AgentCli {
                 command:
                     AgentCommand::Create {
                         name,
+                        role,
                         role_file,
                         driver,
                         computer_id,
                     },
             }) => {
-                let role = tokio::fs::read_to_string(role_file)
-                    .await
-                    .map_err(|_| "--role-file could not be read")?;
+                let role = match (role, role_file) {
+                    (Some(role), None) => role,
+                    (None, Some(path)) => tokio::fs::read_to_string(path)
+                        .await
+                        .map_err(|_| "--role-file could not be read")?,
+                    _ => return Err("agent create requires either --role or --role-file"),
+                };
                 let driver = match driver.as_str() {
                     "codex" => DriverKind::Acp {
                         provider: AcpProvider::Codex,
@@ -574,17 +606,24 @@ impl AgentCli {
                 command: MemoryCommand::Read { path },
             }) => (Action::MemoryRead { path }, false),
             Command::Memory(MemoryArgs {
-                command: MemoryCommand::Write { path, stdin: true },
-            }) => (
-                Action::MemoryWrite {
-                    path,
-                    content: stdin.ok_or("stdin is required")?,
-                },
-                true,
-            ),
-            Command::Memory(MemoryArgs {
-                command: MemoryCommand::Write { stdin: false, .. },
-            }) => return Err("memory write requires --stdin"),
+                command:
+                    MemoryCommand::Write {
+                        path,
+                        body,
+                        file,
+                        stdin: use_stdin,
+                    },
+            }) => {
+                let content = match (body, file, use_stdin) {
+                    (Some(body), None, false) => body,
+                    (None, Some(file_path), false) => tokio::fs::read_to_string(file_path)
+                        .await
+                        .map_err(|_| "--file could not be read")?,
+                    (None, None, true) => stdin.ok_or("stdin is required")?,
+                    _ => return Err("memory write requires --body, --file, or --stdin"),
+                };
+                (Action::MemoryWrite { path, content }, true)
+            }
             Command::Thread(ThreadArgs {
                 command:
                     ThreadCommand::Read {
@@ -604,9 +643,12 @@ impl AgentCli {
                 false,
             ),
         };
+        let explicit_key = self.idempotency_key;
         Ok((
             action,
-            writes.then(|| IdempotencyKey::from_uuid(uuid::Uuid::now_v7())),
+            writes.then(|| {
+                explicit_key.unwrap_or_else(|| IdempotencyKey::from_uuid(uuid::Uuid::now_v7()))
+            }),
         ))
     }
 }

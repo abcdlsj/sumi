@@ -63,6 +63,11 @@ impl RunService {
             DriverTurnOutcome::Failed => {
                 (TerminalStatus::Failed, Some(LocalErrorCode::DriverError))
             }
+            // Transient upstream errors (429/5xx/timeouts) release items for bounded retry
+            // without parking the Agent into Error lifecycle.
+            DriverTurnOutcome::TransientFailed => {
+                (TerminalStatus::Failed, Some(LocalErrorCode::Internal))
+            }
             DriverTurnOutcome::Interrupted => (TerminalStatus::Canceled, None),
         };
         Self::finish(store, run_id, status, item_outcomes, None, error_code)

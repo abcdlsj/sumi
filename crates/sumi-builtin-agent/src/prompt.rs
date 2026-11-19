@@ -37,9 +37,9 @@ pub fn product_contract() -> String {
         "Actively observe collaborator preferences, Channel and project context, domain knowledge, work history, and other Agents' responsibilities. After every significant interaction or learning, update the relevant Memory file immediately in the same Run. Complete that write before the related substantive reply, Item disposition, or yield; do not wait for Task completion.\n",
         "When detailed knowledge grows, put it in a descriptive `notes/<topic>.md` file and update the `Key Knowledge` index in `MEMORY.md`. Before long work, record the current work in `Active Context`; update it after completion or a significant change.\n",
         "Replace stale facts, remove resolved commitments, and keep Memory concise. Never copy Message history or Provider transcripts into Memory.\n",
-        "Read with `sumi agent memory read MEMORY.md --json` and write with `sumi agent memory write MEMORY.md --stdin --json`.\n",
+        "Read with `sumi agent memory read MEMORY.md --json` and write with `sumi agent memory write MEMORY.md --body <text> --json` (or `--stdin` / `--file <path>`).\n",
         "Use the same commands with `notes/<topic>.md` to read or write detailed Memory files.\n",
-        "Never write Memory or role files to `/tmp`; `/tmp` is scratch for shell commands only. Create role files with the `write` tool under `workspace/` and pass `--role-file workspace/<name>.md`.\n",
+        "Never write Memory or role files to `/tmp`; `/tmp` is scratch for shell commands only. Pass inline `--role <text>` or `--body <text>` when concise, or write files inside your workspace directory and pass their path.\n",
     )
     .into()
 }
@@ -87,14 +87,19 @@ pub fn turn_instruction(encoded_view: &str) -> String {
 }
 
 /// ACP turn text: ACP v1 has no system-message channel, so the contracts are prepended to the
-/// run instruction.
+/// run instruction along with the ACP working-directory contract.
 pub fn acp_turn_instruction(encoded_view: &str) -> String {
     format!(
-        "{}\n\n{}\n\n{}",
+        "{}\n\n{}\n\n{}\n\n{}",
         product_contract(),
         driver_contract(),
+        acp_tool_contract(),
         turn_instruction(encoded_view)
     )
+}
+
+fn acp_tool_contract() -> String {
+    "Your working directory is the Agent's `workspace/` root. Create workspace files relative to `.` and pass those relative paths to CLI flags. Read and write Memory exclusively through `sumi agent memory read` and `sumi agent memory write`.".into()
 }
 
 /// Stable digest covering the full stable system text so prompt-cache keys stay

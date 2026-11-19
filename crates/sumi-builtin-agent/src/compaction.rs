@@ -96,6 +96,11 @@ impl ContextStrategy for BuiltinContext {
             self.config.keep_recent_tokens,
         );
         if cut.first_kept == 0 {
+            // When a single turn produced oversized tool output, trimming tool results gives
+            // the reactive context-limit retry a smaller payload instead of deadlocking.
+            if reason == "context_limit" {
+                session.truncate_oversized_tool_outputs(4_000);
+            }
             return Ok(());
         }
 

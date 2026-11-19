@@ -132,17 +132,25 @@ impl PostgresTransaction {
         channel_id: ChannelId,
         error_code: &str,
     ) -> Result<bool, ApplicationError> {
+        // Back off failed pending items so a broken candidate does not spin every 1s poll
+        // and starve the 64-item dispatch batch. Compare against the pre-update error code
+        // so callers only emit a message.updated projection when the failure reason changes.
         let changed = sqlx::query(
-            "UPDATE inbox_items SET last_error_code=$2 WHERE id=$1 AND status='pending' \
-             AND last_error_code IS DISTINCT FROM $2",
+            "WITH prev AS (SELECT id, last_error_code FROM inbox_items WHERE id=$1 AND status='pending') \
+             UPDATE inbox_items i \
+             SET last_error_code=$2, \
+                 available_at=GREATEST(i.available_at, NOW() + INTERVAL '15 seconds') \
+             FROM prev \
+             WHERE i.id = prev.id \
+             RETURNING (prev.last_error_code IS DISTINCT FROM $2)",
         )
         .bind(item_id.into_uuid())
         .bind(error_code)
-        .execute(&mut *self.connection)
+        .fetch_optional(&mut *self.connection)
         .await
         .map_err(map_sqlx)?
-        .rows_affected()
-            == 1;
+        .and_then(|row| row.try_get::<bool, _>(0).ok())
+        .unwrap_or(false);
         if changed && let Some(message_id) = message_id {
             let space_id: Uuid = sqlx::query_scalar("SELECT space_id FROM messages WHERE id=$1")
                 .bind(message_id.into_uuid())

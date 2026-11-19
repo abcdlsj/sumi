@@ -238,6 +238,7 @@ pub(in crate::computer) enum ProcessEvidence {
 pub(in crate::computer) enum DriverTurnOutcome {
     Completed,
     Failed,
+    TransientFailed,
     Interrupted,
 }
 

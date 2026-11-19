@@ -84,6 +84,37 @@ impl Session {
         }
         changed
     }
+
+    /// Truncates oversized tool outputs in-place when compaction cannot advance
+    /// the cut point (e.g., a single turn produced a huge tool output).
+    pub fn truncate_oversized_tool_outputs(&mut self, max_chars: usize) -> bool {
+        let mut changed = false;
+        let head_len = max_chars / 2;
+        let tail_len = max_chars.saturating_sub(head_len);
+        for message in &mut self.messages {
+            if message.role != "tool" {
+                continue;
+            }
+            for result in &mut message.tool_results {
+                let char_count = result.content.chars().count();
+                if char_count <= max_chars {
+                    continue;
+                }
+                let head: String = result.content.chars().take(head_len).collect();
+                let tail: String = result
+                    .content
+                    .chars()
+                    .skip(char_count.saturating_sub(tail_len))
+                    .collect();
+                result.content = format!(
+                    "{head}\n\n[... truncated {} chars for context limit ...]\n\n{tail}",
+                    char_count.saturating_sub(head_len + tail_len)
+                );
+                changed = true;
+            }
+        }
+        changed
+    }
 }
 
 const IMAGE_UNSUPPORTED_NOTE: &str = "[System note: Image payloads were omitted because the current model endpoint does not support image input. Do not infer visual details; tell the user you cannot inspect the image and ask for a text description or a vision-capable model.]";
@@ -104,6 +135,28 @@ mod tests {
         assert_eq!(restored.messages.len(), 1);
         assert_eq!(restored.metadata["compaction"]["through"], 1);
         assert_eq!(restored.metadata["compaction"]["summary"], "summary");
+    }
+
+    #[test]
+    fn truncates_oversized_tool_outputs_without_touching_short_ones() {
+        let mut session = Session::default();
+        session.add(Message::tool(vec![ToolResult {
+            tool_call_id: "call-1".into(),
+            content: "short".into(),
+            error: String::new(),
+        }]));
+        session.add(Message::tool(vec![ToolResult {
+            tool_call_id: "call-2".into(),
+            content: "a".repeat(6000),
+            error: String::new(),
+        }]));
+
+        assert!(session.truncate_oversized_tool_outputs(1000));
+        assert_eq!(session.messages[0].tool_results[0].content, "short");
+        let truncated = &session.messages[1].tool_results[0].content;
+        assert!(truncated.len() < 1200);
+        assert!(truncated.contains("truncated"));
+        assert!(!session.truncate_oversized_tool_outputs(1200));
     }
 
     #[test]
