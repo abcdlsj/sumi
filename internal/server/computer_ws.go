@@ -335,16 +335,13 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 		BodyMarkdown:     body.BodyMarkdown,
 		AttachmentIDs:    body.AttachmentIDs,
 		EnforceFreshness: true,
+		IdempotencyKey:   r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if res.Held {
-		writeJSON(w, http.StatusConflict, res)
-		return
-	}
-	writeJSON(w, http.StatusCreated, res)
+	writeSendResult(w, res)
 }
 
 func (s *Server) handleAgentSetFollowing(w http.ResponseWriter, r *http.Request) {

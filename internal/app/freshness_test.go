@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -50,5 +52,59 @@ func TestFreshnessGuardHoldsWithNewestUnreadWindow(t *testing.T) {
 	ok, err := svc.SendMessage(ctx, lin, SendMessageInput{ConversationID: dm.ID, BodyMarkdown: "reply", EnforceFreshness: true})
 	if err != nil || ok.Held {
 		t.Fatalf("retry after hold must send: held=%v err=%v", ok.Held, err)
+	}
+}
+
+func TestSendMessageIdempotencyKey(t *testing.T) {
+	svc, _, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	lin, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Lin", RoleText: "r", ComputerID: comp.ID,
+		DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm, err := svc.GetOrCreateDM(ctx, owner, lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := SendMessageInput{ConversationID: dm.ID, BodyMarkdown: "result", EnforceFreshness: true, IdempotencyKey: "k1"}
+	first, err := svc.SendMessage(ctx, lin, in)
+	if err != nil || first.Held || first.Replayed {
+		t.Fatalf("first send: %+v err=%v", first, err)
+	}
+	again, err := svc.SendMessage(ctx, lin, in)
+	if err != nil || !again.Replayed || again.Message.ID != first.Message.ID {
+		t.Fatalf("retry must replay the original message: %+v err=%v", again, err)
+	}
+	page, err := svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: dm.ID, Limit: 50})
+	if err != nil || len(page.Messages) != 1 {
+		t.Fatalf("retry posted a duplicate: n=%d err=%v", len(page.Messages), err)
+	}
+
+	in.BodyMarkdown = "different"
+	var de *domain.Error
+	if _, err := svc.SendMessage(ctx, lin, in); !errors.As(err, &de) || de.Code != domain.CodeConflict {
+		t.Fatalf("reused key with another body must conflict, got %v", err)
+	}
+
+	// Keys are scoped per actor.
+	other, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: dm.ID, BodyMarkdown: "result", IdempotencyKey: "k1"})
+	if err != nil || other.Replayed {
+		t.Fatalf("another actor's key must not replay: %+v err=%v", other, err)
+	}
+
+	// After the window the same key sends anew.
+	if err := svc.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE idempotency_records SET created_at = '2000-01-01T00:00:00Z'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	in.BodyMarkdown = "result"
+	late, err := svc.SendMessage(ctx, lin, in)
+	if err != nil || late.Replayed || late.Message.ID == first.Message.ID {
+		t.Fatalf("expired key must send a new message: %+v err=%v", late, err)
 	}
 }

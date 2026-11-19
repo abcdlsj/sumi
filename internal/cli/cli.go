@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -45,6 +46,11 @@ func NewFromEnv() (*Client, error) {
 }
 
 func (c *Client) Do(method, path string, body any) (int, []byte, error) {
+	return c.DoWithKey(method, path, body, "")
+}
+
+// DoWithKey sends a JSON request with an optional Idempotency-Key header.
+func (c *Client) DoWithKey(method, path string, body any, idemKey string) (int, []byte, error) {
 	var r io.Reader
 	contentType := ""
 	if body != nil {
@@ -55,10 +61,14 @@ func (c *Client) Do(method, path string, body any) (int, []byte, error) {
 		r = bytes.NewReader(raw)
 		contentType = "application/json"
 	}
-	return c.do(method, path, r, contentType)
+	return c.doKeyed(method, path, r, contentType, idemKey)
 }
 
 func (c *Client) do(method, path string, r io.Reader, contentType string) (int, []byte, error) {
+	return c.doKeyed(method, path, r, contentType, "")
+}
+
+func (c *Client) doKeyed(method, path string, r io.Reader, contentType, idemKey string) (int, []byte, error) {
 	req, err := http.NewRequest(method, "http://unix"+path, r)
 	if err != nil {
 		return 0, nil, err
@@ -66,6 +76,9 @@ func (c *Client) do(method, path string, r io.Reader, contentType string) (int, 
 	req.Header.Set("Authorization", "Bearer "+c.driverToken)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	if idemKey != "" {
+		req.Header.Set("Idempotency-Key", idemKey)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -230,30 +243,68 @@ func Run(args []string, stdout io.Writer) int {
 	var sendBody string
 	var sendReplyTo string
 	var sendAttach []string
+	var sendDraft bool
 	sendCmd := &cobra.Command{
 		Use:   "send <conversation_id>",
 		Args:  cobra.ExactArgs(1),
-		Short: "Send a message (protected by Freshness Guard)",
-		RunE: func(_ *cobra.Command, a []string) error {
+		Short: "Send a message (protected by Freshness Guard); --draft resends a held message",
+		RunE: func(cmd *cobra.Command, a []string) error {
 			c, err := NewFromEnv()
 			if err != nil {
 				return fail(localError(codeUnauthenticated, err), nil)
 			}
-			ids, err := c.uploadAll(sendAttach)
-			if err != nil {
-				return fail(asEnvelopeError(err), nil)
+			var d draft
+			if sendDraft {
+				if cmd.Flags().Changed("body") || len(sendAttach) > 0 || sendReplyTo != "" {
+					return fail(localError(codeInvalidArgument, errors.New("--draft cannot be combined with --body, --attach or --reply-to")), nil)
+				}
+				if d, err = loadDraft(a[0]); err != nil {
+					return fail(localError(codeInvalidArgument, err), nil)
+				}
+			} else {
+				if strings.TrimSpace(sendBody) == "" {
+					return fail(localError(codeInvalidArgument, errors.New("--body is required (or --draft to resend a held message)")), nil)
+				}
+				key, err := sendKey(a[0], sendReplyTo, sendBody, sendAttach)
+				if err != nil {
+					return fail(localError(codeInvalidArgument, err), nil)
+				}
+				ids, err := c.uploadAll(sendAttach)
+				if err != nil {
+					return fail(asEnvelopeError(err), nil)
+				}
+				d = draft{ConversationID: a[0], ReplyToMessageID: sendReplyTo, BodyMarkdown: sendBody, AttachmentIDs: ids, IdempotencyKey: key}
 			}
-			return call(http.MethodPost, "/conversations/"+a[0]+"/messages", map[string]any{
-				"body_markdown":       sendBody,
-				"reply_to_message_id": sendReplyTo,
-				"attachment_ids":      ids,
-			})
+			status, raw, err := c.DoWithKey(http.MethodPost, "/conversations/"+d.ConversationID+"/messages", map[string]any{
+				"body_markdown":       d.BodyMarkdown,
+				"reply_to_message_id": d.ReplyToMessageID,
+				"attachment_ids":      d.AttachmentIDs,
+			}, d.IdempotencyKey)
+			if err != nil {
+				return fail(localError(codeUnavailable, err), nil)
+			}
+			if e, data := responseError(status, raw); e != nil {
+				if e.Code == codeHeld {
+					if err := saveDraft(d); err == nil {
+						if m, ok := data.(map[string]any); ok {
+							m["draft_saved"] = true
+						}
+						e.Hint = hintHeldDraft
+					}
+				}
+				return fail(e, data)
+			}
+			deleteDraft(d.ConversationID)
+			var parsed any
+			_ = json.Unmarshal(raw, &parsed)
+			writeEnvelope(stdout, true, parsed, nil)
+			return nil
 		},
 	}
 	sendCmd.Flags().StringVar(&sendBody, "body", "", "message markdown")
 	sendCmd.Flags().StringVar(&sendReplyTo, "reply-to", "", "root message id for thread reply")
 	sendCmd.Flags().StringArrayVar(&sendAttach, "attach", nil, "local file to upload and attach (repeatable)")
-	_ = sendCmd.MarkFlagRequired("body")
+	sendCmd.Flags().BoolVar(&sendDraft, "draft", false, "resend the draft saved when the last send was held")
 	root.AddCommand(sendCmd)
 
 	root.AddCommand(&cobra.Command{

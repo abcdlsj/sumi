@@ -367,6 +367,8 @@ type SendMessageInput struct {
 	BodyMarkdown     string
 	AttachmentIDs    []string // Previously uploaded attachments owned by the actor; bound in the same write transaction.
 	EnforceFreshness bool     // True for Agent writes: refuses if unread messages from others exist after read_seq.
+	// IdempotencyKey makes a retried send return the original message instead of posting twice.
+	IdempotencyKey string
 }
 
 type SendMessageResult struct {
@@ -375,6 +377,8 @@ type SendMessageResult struct {
 	UnreadMessages []domain.Message `json:"unread_messages,omitempty"`
 	// OmittedUnreadCount counts older unread messages not included in UnreadMessages.
 	OmittedUnreadCount int64 `json:"omitted_unread_count,omitempty"`
+	// Replayed marks a result returned for a repeated Idempotency-Key; nothing new was posted.
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendMessageInput) (SendMessageResult, error) {
@@ -385,6 +389,13 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 	if len(in.AttachmentIDs) > domain.MaxAttachmentsPerMessage {
 		return SendMessageResult{}, domain.NewError(domain.CodeInvalidArgument, "at most 10 attachments per message")
 	}
+	if len(in.IdempotencyKey) > maxIdempotencyKey {
+		return SendMessageResult{}, domain.NewError(domain.CodeInvalidArgument, "Idempotency-Key is longer than 128 characters")
+	}
+	requestHash := ""
+	if in.IdempotencyKey != "" {
+		requestHash = messageRequestHash(in)
+	}
 
 	var result SendMessageResult
 	var events []domain.SpaceEvent
@@ -394,6 +405,16 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		targetMeta, err := canAccessConversation(ctx, tx, actor, in.ConversationID)
 		if err != nil {
 			return err
+		}
+		if in.IdempotencyKey != "" {
+			prev, err := replayMessageTx(ctx, tx, actor.ID, in.IdempotencyKey, requestHash)
+			if err != nil {
+				return err
+			}
+			if prev != nil {
+				result = SendMessageResult{Message: *prev, Replayed: true}
+				return nil
+			}
 		}
 
 		// Lazily create or resolve Thread conversation when ReplyToMessageID is provided.
@@ -448,6 +469,11 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		msg, err := insertMessageTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindText, body, "", "{}", mentionAll, mentionIDs)
 		if err != nil {
 			return err
+		}
+		if in.IdempotencyKey != "" {
+			if err := recordIdempotencyTx(ctx, tx, actor.ID, in.IdempotencyKey, requestHash, msg.ID); err != nil {
+				return err
+			}
 		}
 		if len(in.AttachmentIDs) > 0 {
 			if err := bindAttachmentsTx(ctx, tx, actor, msg.ID, targetMeta.SpaceID, in.AttachmentIDs); err != nil {
@@ -504,8 +530,11 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 	if err != nil {
 		return SendMessageResult{}, err
 	}
-	if !result.Held {
+	if !result.Held && !result.Replayed {
 		s.dispatchPostCommit(events, wakes)
+	}
+	if result.Replayed {
+		s.loadMessageAttachments(ctx, []domain.Message{result.Message})
 	}
 	return result, nil
 }

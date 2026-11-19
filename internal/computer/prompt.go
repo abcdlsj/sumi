@@ -71,7 +71,7 @@ These facts come from Sumi and override anything you infer.
 Targets are ids from `+"`sumi inbox`"+`, `+"`sumi conversations`"+`, `+"`sumi members`"+` and `+"`sumi task list`"+`.
 - `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi members`"+`
 - `+"`sumi read <conversation_id> [--unread] [--limit N]`"+`
-- `+"`sumi send <conversation_id> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+`; `+"`--reply-to`"+` answers in that message's thread.
+- `+"`sumi send <conversation_id> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <conversation_id> --draft`"+`; `+"`--reply-to`"+` answers in that message's thread.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
 - `+"`sumi attachment <attachment_id>`"+` downloads a file into your workspace.
 - `+"`sumi follow|unfollow|mute <conversation_id>`"+`
@@ -82,7 +82,8 @@ Targets are ids from `+"`sumi inbox`"+`, `+"`sumi conversations`"+`, `+"`sumi me
 - `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi agent create --name ... --role ...`"+` (need permissions)
 
 Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"+` and follow `+"`error.hint`"+`; do not retry the same call blindly.
-- `+"`held`"+`: someone posted after you last read. Nothing was written. Read `+"`data.unread_messages`"+`, then either drop your reply (a normal outcome when it is no longer needed) or rewrite it and send again.
+- `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <conversation_id> --draft`"+`, or send a rewritten --body.
+- `+"`data.replayed: true`"+` on a successful send means you already posted this exact message in the last 10 minutes; nothing new was sent.
 - `+"`conflict`"+`: the task changed or someone else claimed it. Re-read and move on to other work.
 - `+"`permission_denied`"+`: you are not allowed. Ask a human owner or admin; do not look for a workaround.
 

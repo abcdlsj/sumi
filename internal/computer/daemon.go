@@ -278,8 +278,10 @@ func (d *Daemon) handleCapabilityProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+d.cfg.ComputerToken)
-	if ct := r.Header.Get("Content-Type"); ct != "" {
-		req.Header.Set("Content-Type", ct)
+	for _, h := range []string{"Content-Type", "Idempotency-Key"} {
+		if v := r.Header.Get(h); v != "" {
+			req.Header.Set(h, v)
+		}
 	}
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
@@ -636,6 +638,7 @@ func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind) []string {
 	env = setEnv(env, "SUMI_SOCKET", d.SocketPath())
 	env = setEnv(env, "SUMI_DRIVER_TOKEN", ag.driverToken)
 	env = setEnv(env, "SUMI_ATTACHMENT_DIR", filepath.Join(ag.workDir, "attachments"))
+	env = setEnv(env, "SUMI_DRAFT_DIR", filepath.Join(ag.homeDir, "drafts"))
 	if kind == domain.DriverBuiltin {
 		env = setEnv(env, "HOME", ag.homeDir)
 	}

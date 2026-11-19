@@ -166,6 +166,17 @@ func (s *Server) registerRoutes() {
 	}
 }
 
+func writeSendResult(w http.ResponseWriter, res app.SendMessageResult) {
+	switch {
+	case res.Held:
+		writeJSON(w, http.StatusConflict, res)
+	case res.Replayed:
+		writeJSON(w, http.StatusOK, res)
+	default:
+		writeJSON(w, http.StatusCreated, res)
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -708,12 +719,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ReplyToMessageID: body.ReplyToMessageID,
 		BodyMarkdown:     body.BodyMarkdown,
 		AttachmentIDs:    body.AttachmentIDs,
+		IdempotencyKey:   r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, res)
+	writeSendResult(w, res)
 }
 
 func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {

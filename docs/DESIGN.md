@@ -105,7 +105,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 10. `message_mentions` / `attachments` / `message_attachments`：结构化 `@mention` 目标与附件关联。`attachments` 只存元数据（`name`、`media_type`、`size_bytes`、`sha256`、`object_path`），文件本体落在数据目录的 `objects/` 下（按 `sha256` 分片命名），`message_attachments.position` 决定展示顺序。
 11. `tasks`：`id`、`space_id`、`number`（Space 内自增）、`channel_id`、`source_message_id`（非唯一）、`conversation_id`（懒创建，可为空）、`title`、`description`、`status`、`creator_member_id`、`assignee_member_id`、`revision`、`created_at`、`updated_at`。
 12. `conversation_states`：`(conversation_id, member_id)` → `read_seq`、`notify_level`、`following`、`done_seq`、`updated_at`。
-13. `idempotency_records` / `events`：HTTP 写请求幂等记录与 Space 提交序事件日志（事务提交后由进程内 pub/sub 实时推送 Browser SSE，支持 `Last-Event-ID` 断点续传）。
+13. `idempotency_records` / `events`：HTTP 写请求幂等记录（目前用于发送 Message：`(actor, "message.send", Idempotency-Key)` → 消息 id 与请求哈希；10 分钟内同 key 同请求返回原消息并标记 `replayed: true`（HTTP 200，不再写入、不再唤醒），同 key 不同请求返回 `conflict`，过期后同 key 视为新请求）与 Space 提交序事件日志（事务提交后由进程内 pub/sub 实时推送 Browser SSE，支持 `Last-Event-ID` 断点续传）。
 
 ### 附件
 
@@ -194,6 +194,8 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
   - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带未读数与是否提及）。
   - `sumi read <target> [--unread]`：读取目标对话（`#channel`、`dm:@name`、`thread:<id>`、`task:#N`）并推进 `read_seq`。
   - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。
+    - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。Agent 读完后可放弃（正常结果）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写；发送成功后删除该草稿。`--draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
+    - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。
   - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。
   - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>`：管理自身注意力。
   - `sumi task list|show|create|claim|unclaim|assign|status|amend`：完整 Task 协作原语。
