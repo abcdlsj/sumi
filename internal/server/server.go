@@ -154,6 +154,7 @@ func (s *Server) registerRoutes() {
 		r.Post("/channels", s.handleAgentCreateChannel)
 		r.Get("/tasks", s.handleAgentListTasks)
 		r.Post("/tasks", s.handleAgentCreateTask)
+		r.Post("/tasks/{taskID}/conversation", s.handleAgentEnsureTaskConv)
 		r.Post("/tasks/{taskID}/claim", s.handleAgentClaimTask)
 		r.Post("/tasks/{taskID}/unclaim", s.handleAgentUnclaimTask)
 		r.Post("/tasks/{taskID}/assign", s.handleAgentAssignTask)

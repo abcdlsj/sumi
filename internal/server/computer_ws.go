@@ -509,6 +509,20 @@ func (s *Server) handleAgentListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
+func (s *Server) handleAgentEnsureTaskConv(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	task, err := s.svc.EnsureTaskConversation(r.Context(), agent, chi.URLParam(r, "taskID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
+}
+
 func (s *Server) handleAgentCreateTask(w http.ResponseWriter, r *http.Request) {
 	_, agent, err := s.requireComputerAgent(r)
 	if err != nil {

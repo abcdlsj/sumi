@@ -79,16 +79,16 @@ func responseError(status int, raw []byte) (*EnvelopeError, any) {
 	return e, nil
 }
 
-const hintHeldDraft = "Your message was saved as a draft. Read data.unread_messages (older ones: `sumi read <conversation_id> --limit N`). Then either drop it (a normal outcome when it is no longer needed), send it unchanged with `sumi send <conversation_id> --draft`, or send a rewritten --body."
+const hintHeldDraft = "Your message was saved as a draft. Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then either drop it (a normal outcome when it is no longer needed), send it unchanged with `sumi send <target> --draft`, or send a rewritten --body."
 
 func hintFor(code string) string {
 	switch code {
 	case codeHeld:
-		return "Read data.unread_messages (older ones: `sumi read <conversation_id> --limit N`). Then decide: skip if your reply is no longer needed, or rewrite it and run the command again."
+		return "Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then decide: skip if your reply is no longer needed, or rewrite it and run the command again."
 	case "invalid_argument":
 		return "Fix the argument named in message; run `sumi <command> --help` for usage."
 	case "not_found":
-		return "Check the id: `sumi conversations`, `sumi members`, or `sumi task list --status all`."
+		return "Check the target: `sumi inbox` and `sumi conversations` list `#channel` / `dm:@name`, `sumi task list --status all` lists `task:#N`."
 	case "permission_denied":
 		return "You lack this permission. Ask a human owner or admin in the conversation instead of retrying."
 	case "conflict":

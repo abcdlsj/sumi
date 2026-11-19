@@ -263,6 +263,7 @@ type ConversationState struct {
 
 type InboxItem struct {
 	ConversationID   string           `json:"conversation_id"`
+	Target           string           `json:"target"`
 	Kind             ConversationKind `json:"kind"`
 	Title            string           `json:"title"`
 	ParentSlug       string           `json:"parent_slug,omitempty"`

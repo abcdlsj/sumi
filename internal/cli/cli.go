@@ -199,6 +199,19 @@ func Run(args []string, stdout io.Writer) int {
 		writeEnvelope(stdout, true, parsed, nil)
 		return nil
 	}
+	// resolveConv maps a user-facing target (`#channel`, `dm:@name`, `thread:<id>`, `task:#N`) to a
+	// conversation id, reporting failures as envelope errors.
+	resolveConv := func(target string) (string, error) {
+		c, err := NewFromEnv()
+		if err != nil {
+			return "", fail(localError(codeUnauthenticated, err), nil)
+		}
+		id, e := resolveTarget(c, target)
+		if e != nil {
+			return "", fail(e, nil)
+		}
+		return id, nil
+	}
 
 	var inboxFilter string
 	inboxCmd := &cobra.Command{
@@ -225,11 +238,15 @@ func Run(args []string, stdout io.Writer) int {
 	var readUnread bool
 	var readLimit int
 	readCmd := &cobra.Command{
-		Use:   "read <conversation_id>",
+		Use:   "read <target>",
 		Args:  cobra.ExactArgs(1),
-		Short: "Read messages from a conversation and advance read_seq",
+		Short: "Read messages from a conversation (#channel, dm:@name, thread:<id>, task:#N) and advance read_seq",
 		RunE: func(_ *cobra.Command, a []string) error {
-			q := fmt.Sprintf("/conversations/%s/messages?limit=%d", a[0], readLimit)
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			q := fmt.Sprintf("/conversations/%s/messages?limit=%d", convID, readLimit)
 			if readUnread {
 				q += "&unread=true"
 			}
@@ -245,27 +262,32 @@ func Run(args []string, stdout io.Writer) int {
 	var sendAttach []string
 	var sendDraft bool
 	sendCmd := &cobra.Command{
-		Use:   "send <conversation_id>",
+		Use:   "send <target>",
 		Args:  cobra.ExactArgs(1),
 		Short: "Send a message (protected by Freshness Guard); --draft resends a held message",
 		RunE: func(cmd *cobra.Command, a []string) error {
+			if sendDraft {
+				if cmd.Flags().Changed("body") || len(sendAttach) > 0 || sendReplyTo != "" {
+					return fail(localError(codeInvalidArgument, errors.New("--draft cannot be combined with --body, --attach or --reply-to")), nil)
+				}
+			} else if strings.TrimSpace(sendBody) == "" {
+				return fail(localError(codeInvalidArgument, errors.New("--body is required (or --draft to resend a held message)")), nil)
+			}
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
 			c, err := NewFromEnv()
 			if err != nil {
 				return fail(localError(codeUnauthenticated, err), nil)
 			}
 			var d draft
 			if sendDraft {
-				if cmd.Flags().Changed("body") || len(sendAttach) > 0 || sendReplyTo != "" {
-					return fail(localError(codeInvalidArgument, errors.New("--draft cannot be combined with --body, --attach or --reply-to")), nil)
-				}
-				if d, err = loadDraft(a[0]); err != nil {
+				if d, err = loadDraft(convID); err != nil {
 					return fail(localError(codeInvalidArgument, err), nil)
 				}
 			} else {
-				if strings.TrimSpace(sendBody) == "" {
-					return fail(localError(codeInvalidArgument, errors.New("--body is required (or --draft to resend a held message)")), nil)
-				}
-				key, err := sendKey(a[0], sendReplyTo, sendBody, sendAttach)
+				key, err := sendKey(convID, sendReplyTo, sendBody, sendAttach)
 				if err != nil {
 					return fail(localError(codeInvalidArgument, err), nil)
 				}
@@ -273,7 +295,7 @@ func Run(args []string, stdout io.Writer) int {
 				if err != nil {
 					return fail(asEnvelopeError(err), nil)
 				}
-				d = draft{ConversationID: a[0], ReplyToMessageID: sendReplyTo, BodyMarkdown: sendBody, AttachmentIDs: ids, IdempotencyKey: key}
+				d = draft{ConversationID: convID, ReplyToMessageID: sendReplyTo, BodyMarkdown: sendBody, AttachmentIDs: ids, IdempotencyKey: key}
 			}
 			status, raw, err := c.DoWithKey(http.MethodPost, "/conversations/"+d.ConversationID+"/messages", map[string]any{
 				"body_markdown":       d.BodyMarkdown,
@@ -315,24 +337,36 @@ func Run(args []string, stdout io.Writer) int {
 		},
 	})
 	root.AddCommand(&cobra.Command{
-		Use:  "follow <conversation_id>",
+		Use:  "follow <target>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
-			return call(http.MethodPut, "/conversations/"+a[0]+"/follow", map[string]any{"following": true})
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPut, "/conversations/"+convID+"/follow", map[string]any{"following": true})
 		},
 	})
 	root.AddCommand(&cobra.Command{
-		Use:  "unfollow <conversation_id>",
+		Use:  "unfollow <target>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
-			return call(http.MethodPut, "/conversations/"+a[0]+"/follow", map[string]any{"following": false})
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPut, "/conversations/"+convID+"/follow", map[string]any{"following": false})
 		},
 	})
 	root.AddCommand(&cobra.Command{
-		Use:  "mute <conversation_id>",
+		Use:  "mute <target>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
-			return call(http.MethodPut, "/conversations/"+a[0]+"/notify", map[string]any{"level": "mute"})
+			convID, err := resolveConv(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPut, "/conversations/"+convID+"/notify", map[string]any{"level": "mute"})
 		},
 	})
 
@@ -371,8 +405,16 @@ func Run(args []string, stdout io.Writer) int {
 	taskCreateCmd := &cobra.Command{
 		Use: "create",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			channelID := tcChannel
+			if channelID != "" {
+				resolved, err := resolveConv(channelID)
+				if err != nil {
+					return err
+				}
+				channelID = resolved
+			}
 			return call(http.MethodPost, "/tasks", map[string]any{
-				"channel_id":         tcChannel,
+				"channel_id":         channelID,
 				"source_message_id":  tcSource,
 				"title":              tcTitle,
 				"description":        tcDesc,
@@ -380,7 +422,7 @@ func Run(args []string, stdout io.Writer) int {
 			})
 		},
 	}
-	taskCreateCmd.Flags().StringVar(&tcChannel, "channel", "", "channel_id")
+	taskCreateCmd.Flags().StringVar(&tcChannel, "channel", "", "channel target (#channel) or conversation id")
 	taskCreateCmd.Flags().StringVar(&tcSource, "source", "", "source_message_id")
 	taskCreateCmd.Flags().StringVar(&tcTitle, "title", "", "title")
 	taskCreateCmd.Flags().StringVar(&tcDesc, "description", "", "description")
@@ -461,12 +503,20 @@ func Run(args []string, stdout io.Writer) int {
 				cfg["base_url"] = agBaseURL
 				cfg["model"] = agModel
 			}
+			sourceConv := agSrcConv
+			if sourceConv != "" {
+				resolved, err := resolveConv(sourceConv)
+				if err != nil {
+					return err
+				}
+				sourceConv = resolved
+			}
 			return call(http.MethodPost, "/agents", map[string]any{
 				"display_name":           agName,
 				"role_text":              agRole,
 				"driver_kind":            agDriver,
 				"driver_config":          cfg,
-				"source_conversation_id": agSrcConv,
+				"source_conversation_id": sourceConv,
 			})
 		},
 	}
@@ -486,11 +536,19 @@ func Run(args []string, stdout io.Writer) int {
 	chCreateCmd := &cobra.Command{
 		Use: "create",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			sourceConv := chSrcConv
+			if sourceConv != "" {
+				resolved, err := resolveConv(sourceConv)
+				if err != nil {
+					return err
+				}
+				sourceConv = resolved
+			}
 			return call(http.MethodPost, "/channels", map[string]any{
 				"slug":                   chSlug,
 				"kind":                   chKind,
 				"topic":                  chTopic,
-				"source_conversation_id": chSrcConv,
+				"source_conversation_id": sourceConv,
 			})
 		},
 	}

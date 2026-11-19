@@ -13,7 +13,7 @@ import (
 func TestSystemPromptCarriesIdentityAndPaths(t *testing.T) {
 	spec := protocol.AssignedAgentSpec{MemberID: "m-1", DisplayName: "Lin", RoleText: "Backend owner", DriverKind: domain.DriverACP}
 	p := buildSystemPrompt(spec, "/home/a/workspace", "/home/a/memory")
-	for _, want := range []string{"@Lin", "m-1", "Backend owner", "/home/a/workspace", "/home/a/memory/MEMORY.md", "error.hint", "held"} {
+	for _, want := range []string{"@Lin", "m-1", "Backend owner", "/home/a/workspace", "/home/a/memory/MEMORY.md", "error.hint", "held", "task:#N", "dm:@name"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("system prompt missing %q", want)
 		}
@@ -47,10 +47,10 @@ func TestStartupContextBoundsMemory(t *testing.T) {
 
 func TestWakePromptPreviewsLatestMessage(t *testing.T) {
 	p := buildWakePrompt([]domain.InboxItem{
-		{Title: "@Owner", ConversationID: "c1", Reason: "dm", UnreadCount: 2, LatestAuthorName: "Owner", LatestPreview: "部署\n失败了"},
-		{Title: "#general", ConversationID: "c2", Reason: "mention", UnreadCount: 1},
+		{Title: "@Owner", Target: "dm:@Owner", Kind: domain.ConversationDM, ConversationID: "c1", Reason: "dm", UnreadCount: 2, LatestAuthorName: "Owner", LatestPreview: "部署\n失败了"},
+		{Title: "#general", Target: "#general", Kind: domain.ConversationPublic, ConversationID: "c2", Reason: "mention", UnreadCount: 1},
 	})
-	if !strings.Contains(p, `latest from Owner: "部署 失败了"`) || !strings.Contains(p, "conversation_id=c2") {
+	if !strings.Contains(p, `latest from Owner: "部署 失败了"`) || !strings.Contains(p, "target=#general") {
 		t.Fatalf("wake prompt: %s", p)
 	}
 	if !strings.Contains(p, "do not count as reading") {

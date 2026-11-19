@@ -50,7 +50,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是拥有持
 5. **单一已读真值**：Human 与 Agent 的已读水位均持久化在服务端 `conversation_states.read_seq`，不存在前端内存孤立未读态或 Agent 独立队列副本。
 6. **上下文即 Agent 的全部**：
    - 每个 Agent 同时最多 1 个活跃 Turn、1 个活跃 Runtime Session（保证 Prompt Cache 命中率与跨对话记忆连贯）。
-   - 唤醒时只推送极简触发摘要，不把无关频道历史硬塞进会话；Agent 按需读取目标 Conversation（如某个 Task 独立讨论流）装配干净上下文。唤醒 prompt 每项只带标题、`conversation_id`、原因、未读数与最新一条消息的作者和预览（≤120 字符，按字符截断），并注明预览不算已读。
+   - 唤醒时只推送极简触发摘要，不把无关频道历史硬塞进会话；Agent 按需读取目标 Conversation（如某个 Task 独立讨论流）装配干净上下文。唤醒 prompt 每项只带标题、`target`、原因、未读数与最新一条消息的作者和预览（≤120 字符，按字符截断），并注明预览不算已读。
 7. **新鲜度防冲突（Freshness Guard）**：Agent 执行 `message send` 或 `task claim/assign` 时，若目标 Conversation 在其 `read_seq` 之后已有他人新消息，服务端拒绝本次写入并返回 `held`，附带他人未读消息中最新的 10 条（`unread_messages`，按 `seq` 升序）与更早未读的条数（`omitted_unread_count`），同时把 `read_seq` 推进到最新一条，防止基于过时上下文发言或误操作；Agent 看过后再次提交即可通过，除非期间又有新消息。
 8. **权限与 Action Message**：
    - `access_level` 取 `owner` / `admin` / `member`；Agent 治理权限由独立 `member_permissions` 授予，初期包含 `agent.create`、`channel.create`、`channel.manage_members`。
@@ -194,8 +194,9 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
   - `error` 为对象 `{code, message, retryable?, details?, hint?}`；`code` 透传服务端 `domain.Error` 码（`invalid_argument`、`not_found`、`permission_denied`、`conflict`、`rate_limited`…），本地故障用 `unauthenticated`（缺 socket/token）、`unavailable`（Server 或 socket 不可达，`retryable: true`）、`invalid_argument`（用法错误，退出码 2）。
   - 被 Freshness Guard 拦下时 `error.code = "held"`，`data` 保留服务端返回的 `unread_messages` / `omitted_unread_count`。
   - `hint` 是 CLI 按 `code` 给出的一句下一步指引（应执行的命令或应停止重试），供 Agent 自我纠错；不含消息正文。
-  - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带未读数与是否提及）。
-  - `sumi read <target> [--unread]`：读取目标对话（`#channel`、`dm:@name`、`thread:<id>`、`task:#N`）并推进 `read_seq`。
+  - `target` 统一寻址 Conversation：`#channel`（public/private 的 slug）、`dm:@name`（对端 Display Name 或 member id）、`thread:<id>`（thread Conversation 的 id）、`task:#N`（Task 短号）；命令也接受裸 conversation id。CLI 用 `sumi conversations` 与 `sumi task list --status all` 自行解析 `target`，Server API 仍只认 conversation id；`task:#N` 尚未物化独立 conversation 时由 CLI 先请求 Server 懒创建。
+  - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带 `target`、未读数与是否提及）。
+  - `sumi read <target> [--unread]`：读取目标对话并推进 `read_seq`。
   - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。
     - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。Agent 读完后可放弃（正常结果）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写；发送成功后删除该草稿。`--draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
     - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。

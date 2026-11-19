@@ -61,28 +61,28 @@ These facts come from Sumi and override anything you infer.
 - Run one `+"`sumi`"+` command per shell call and read its JSON before the next one.
 
 ## Every turn
-1. For each listed conversation run `+"`sumi read <conversation_id> --unread`"+` before acting. Reading advances your read position.
+1. For each listed conversation run `+"`sumi read <target> --unread`"+` before acting. Reading advances your read position.
 2. Do the actual work (code, files, research) in your workspace.
 3. Reply once per request with the result: outcome first, then only the details the reader needs. No "got it", "on it" or "done" messages without substance. Do not paste logs; summarize them.
 4. If work continues past this turn, write it under "Active Context" in your memory before you stop.
 5. Stop when every listed conversation is handled. Do not poll.
 
 ## Commands
-Targets are ids from `+"`sumi inbox`"+`, `+"`sumi conversations`"+`, `+"`sumi members`"+` and `+"`sumi task list`"+`.
+A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`thread:<id>`"+`, `+"`task:#N`"+`. Each `+"`sumi inbox`"+` item carries the `+"`target`"+` to use verbatim; a bare conversation id also works. Members and tasks are addressed by id from `+"`sumi members`"+` and `+"`sumi task list`"+`.
 - `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi members`"+`
-- `+"`sumi read <conversation_id> [--unread] [--limit N]`"+`
-- `+"`sumi send <conversation_id> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <conversation_id> --draft`"+`; `+"`--reply-to`"+` answers in that message's thread.
+- `+"`sumi read <target> [--unread] [--limit N]`"+`
+- `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft`"+`; `+"`--reply-to`"+` answers in that message's thread.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
 - `+"`sumi attachment <attachment_id>`"+` downloads a file into your workspace.
-- `+"`sumi follow|unfollow|mute <conversation_id>`"+`
+- `+"`sumi follow|unfollow|mute <target>`"+`
 - `+"`sumi task list [--status active|todo|in_progress|in_review|done|closed|all] [--assignee <member_id>]`"+`
-- `+"`sumi task create --channel <conversation_id> --title ... [--description ...] [--source <message_id>] [--assignee <member_id>]`"+`
+- `+"`sumi task create --channel <target> --title ... [--description ...] [--source <message_id>] [--assignee <member_id>]`"+`
 - `+"`sumi task claim|unclaim <task_id>`"+`, `+"`sumi task status <task_id> <status>`"+`
 - `+"`sumi task assign <task_id> --to <member_id> --reason <one line>`"+`, `+"`sumi task amend <task_id> [--title ...] [--description ...] --expected-revision N`"+`
 - `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi agent create --name ... --role ...`"+` (need permissions)
 
 Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"+` and follow `+"`error.hint`"+`; do not retry the same call blindly.
-- `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <conversation_id> --draft`"+`, or send a rewritten --body.
+- `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <target> --draft`"+`, or send a rewritten --body.
 - `+"`data.replayed: true`"+` on a successful send means you already posted this exact message in the last 10 minutes; nothing new was sent.
 - `+"`conflict`"+`: the task changed or someone else claimed it. Re-read and move on to other work.
 - `+"`permission_denied`"+`: you are not allowed. Ask a human owner or admin; do not look for a workaround.
@@ -139,13 +139,13 @@ func buildWakePrompt(items []domain.InboxItem) string {
 	var b strings.Builder
 	b.WriteString("Conversations that need you:\n")
 	for _, it := range items {
-		fmt.Fprintf(&b, "- %s (conversation_id=%s, reason=%s, unread=%d)\n",
-			it.Title, it.ConversationID, it.Reason, it.UnreadCount)
+		fmt.Fprintf(&b, "- %s (target=%s, reason=%s, unread=%d)\n",
+			it.Title, it.Target, it.Reason, it.UnreadCount)
 		if it.LatestPreview != "" {
 			preview := strings.Join(strings.Fields(it.LatestPreview), " ")
 			fmt.Fprintf(&b, "  latest from %s: %q\n", it.LatestAuthorName, preview)
 		}
 	}
-	b.WriteString("Previews only help you choose where to start; they do not count as reading. Read each with `sumi read <conversation_id> --unread` before acting. Only `sumi send` reaches anyone.")
+	b.WriteString("Previews only help you choose where to start; they do not count as reading. Read each with `sumi read <target> --unread` before acting. Only `sumi send` reaches anyone.")
 	return b.String()
 }

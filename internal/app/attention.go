@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,19 @@ func (s *Service) SetFollowing(ctx context.Context, actor domain.Member, convID 
 
 // ListInbox computes the unified attention view for both Humans and Agents from conversation_states.
 // filter: "needs_me" (default) | "unread" | "all".
+// inboxTarget renders the CLI target an Agent can pass straight to `sumi read` / `sumi send`.
+func inboxTarget(kind domain.ConversationKind, convID, slug, peerName string, taskNumber int64) string {
+	switch kind {
+	case domain.ConversationPublic, domain.ConversationPrivate:
+		return "#" + slug
+	case domain.ConversationDM:
+		return "dm:@" + peerName
+	case domain.ConversationTask:
+		return "task:#" + strconv.FormatInt(taskNumber, 10)
+	}
+	return "thread:" + convID
+}
+
 func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter string) ([]domain.InboxItem, error) {
 	if filter == "" {
 		filter = "needs_me"
@@ -229,6 +243,7 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 
 		items = append(items, domain.InboxItem{
 			ConversationID:   convID,
+			Target:           inboxTarget(kind, convID, slug, peerName, taskNumber),
 			Kind:             kind,
 			Title:            title,
 			ParentSlug:       parentSlug,

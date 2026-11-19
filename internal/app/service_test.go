@@ -272,6 +272,9 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 	if err != nil || len(needsMe) != 1 || needsMe[0].Reason != "mention" {
 		t.Fatalf("expected 1 mention inbox item, got %+v err=%v", needsMe, err)
 	}
+	if want := "#" + convs[0].Slug; needsMe[0].Target != want {
+		t.Fatalf("inbox target = %q, want %q", needsMe[0].Target, want)
+	}
 	if err := svc.MarkDone(ctx, owner, generalID); err != nil {
 		t.Fatalf("mark done: %v", err)
 	}
