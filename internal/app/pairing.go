@@ -22,6 +22,8 @@ const (
 	pairingCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	maxHostnameLen      = 253
 	maxDaemonVersionLen = 64
+	// maxPendingPairings bounds unauthenticated writes regardless of how many peers call.
+	maxPendingPairings = 200
 )
 
 // PairingTicket is returned once to the requesting Computer; Code and Secret are never stored in plaintext.
@@ -129,6 +131,21 @@ func (s *Service) CreatePairing(ctx context.Context, hostname, osName, daemonVer
 	now := time.Now().UTC()
 	t := PairingTicket{ID: uuid.NewString(), Code: code, Secret: secret, ExpiresAt: now.Add(pairingTTL)}
 	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		nowStr := store.FormatTime(now)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM computer_pairings WHERE status = 'pending' AND expires_at < ?`, nowStr,
+		); err != nil {
+			return domain.WrapError(domain.CodeInternal, "prune pairings", err)
+		}
+		var pending int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM computer_pairings WHERE status = 'pending'`,
+		).Scan(&pending); err != nil {
+			return domain.WrapError(domain.CodeInternal, "count pairings", err)
+		}
+		if pending >= maxPendingPairings {
+			return domain.NewError(domain.CodeRateLimited, "too many pending pairing requests; try again later").WithRetryable(true)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO computer_pairings (id, code_hash, token_hash, hostname, os, daemon_version, status, expires_at, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,

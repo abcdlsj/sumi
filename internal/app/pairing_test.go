@@ -175,3 +175,30 @@ func TestCreatePairingValidatesInput(t *testing.T) {
 		requireCode(t, err, domain.CodeInvalidArgument)
 	}
 }
+
+func TestCreatePairingCapsPendingAndPrunesExpired(t *testing.T) {
+	svc, _, _, _, _ := setupTestService(t)
+	ctx := context.Background()
+	for i := 0; i < maxPendingPairings; i++ {
+		if _, err := svc.CreatePairing(ctx, "mac.local", "macos", ""); err != nil {
+			t.Fatalf("create pairing %d: %v", i, err)
+		}
+	}
+	_, err := svc.CreatePairing(ctx, "mac.local", "macos", "")
+	requireCode(t, err, domain.CodeRateLimited)
+
+	past := store.FormatTime(time.Now().UTC().Add(-time.Second))
+	if err := svc.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE computer_pairings SET expires_at = ? WHERE status = 'pending'`, past)
+		return err
+	}); err != nil {
+		t.Fatalf("expire pairings: %v", err)
+	}
+	if _, err := svc.CreatePairing(ctx, "mac.local", "macos", ""); err != nil {
+		t.Fatalf("create after expiry: %v", err)
+	}
+	var n int
+	if err := svc.store.ReadDB().QueryRow(`SELECT COUNT(*) FROM computer_pairings`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("expired pending rows must be pruned, have %d (err=%v)", n, err)
+	}
+}

@@ -35,6 +35,8 @@ type Server struct {
 	hub    *computerHub
 	router *chi.Mux
 	logger *slog.Logger
+
+	pairingLimiter *ipLimiter
 }
 
 func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
@@ -56,11 +58,12 @@ func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
 	}
 
 	s := &Server{
-		svc:    svc,
-		cfg:    cfg,
-		hub:    hub,
-		router: r,
-		logger: logger,
+		pairingLimiter: newIPLimiter(pairingRequestsPerMinute, time.Minute),
+		svc:            svc,
+		cfg:            cfg,
+		hub:            hub,
+		router:         r,
+		logger:         logger,
 	}
 	s.registerRoutes()
 	return s
@@ -672,7 +675,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 	afterSeq, _ := strconv.ParseInt(r.URL.Query().Get("after_seq"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	markRead := r.URL.Query().Get("mark_read") == "true"
-	msgs, readSeq, err := s.svc.ListMessages(r.Context(), member, app.ListMessagesInput{
+	page, err := s.svc.ListMessages(r.Context(), member, app.ListMessagesInput{
 		ConversationID: chi.URLParam(r, "convID"),
 		AfterSeq:       afterSeq,
 		Limit:          limit,
@@ -682,7 +685,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs, "read_seq": readSeq})
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {

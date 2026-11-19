@@ -4,10 +4,18 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/abcdlsj/sumi/internal/domain"
 )
+
+const pairingRequestsPerMinute = 6
 
 // handleCreatePairing is intentionally unauthenticated; the returned secret is the only proof of ownership.
 func (s *Server) handleCreatePairing(w http.ResponseWriter, r *http.Request) {
+	if !s.pairingLimiter.allow(r) {
+		writeError(w, domain.NewError(domain.CodeRateLimited, "too many pairing requests; try again in a minute").WithRetryable(true))
+		return
+	}
 	var body struct {
 		Hostname      string `json:"hostname"`
 		OS            string `json:"os"`

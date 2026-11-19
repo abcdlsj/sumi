@@ -94,3 +94,27 @@ func TestPairingRoutes(t *testing.T) {
 		t.Fatalf("confirmed poll status=%d body=%v", resp.StatusCode, out)
 	}
 }
+
+func TestCreatePairingRateLimitedPerIP(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	ts := httptest.NewServer(New(app.NewService(st, app.NewEventHub(), nil), Config{}, nil).Handler())
+	defer ts.Close()
+	body := map[string]any{"hostname": "mac.local", "os": "macos"}
+	for i := 0; i < pairingRequestsPerMinute; i++ {
+		resp, _ := doJSON(t, &http.Client{}, http.MethodPost, ts.URL+"/api/v1/computer/pairings", body, "")
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("request %d status=%d", i, resp.StatusCode)
+		}
+	}
+	resp, out := doJSON(t, &http.Client{}, http.MethodPost, ts.URL+"/api/v1/computer/pairings", body, "")
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("over-limit status=%d", resp.StatusCode)
+	}
+	if e, _ := out["error"].(map[string]any); e["code"] != "rate_limited" {
+		t.Fatalf("error = %v", out["error"])
+	}
+}
