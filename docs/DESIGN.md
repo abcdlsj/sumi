@@ -148,28 +148,35 @@ test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
 
 ### 布局与信息架构
 
-桌面采用三栏结构，严格克制一级导航：
+桌面采用紧凑的 4 列工作台结构，所有列共用严格的 `44px` 顶栏高度与 1px 贯通分隔线；不使用漂浮阴影卡片，以平实底色层级和 1px 结构线确立稳定边界：
 
-1. **Left Sidebar（240px，只留高频沟通与工作）**
-   - 顶部：Space 名称菜单（点开进入 Members / Computers / Settings 管理页，不占一级导航）+ `⌘K` 快速跳转。
-   - **Inbox**：唯一注意力中心，暖色胶囊只统计真正需要我处理的对话数（不被静音或普通未读污染）。
-   - **Tasks**：轻量工作视图（默认过滤“指派给我 / 我关注的进行中 Task”）。
-   - **Channels**：普通未读仅加粗名称；被 `@mention` 显示暖色数字；静音的频道置灰降低视觉权重。
+1. **Left Anchor Rail（44px）**
+   - 顶部：Space 切换标识与新建 Space 入口。
+   - 底部：Space 管理入口（Computers 带在线状态点、Members & Permissions、Space Settings），不占主侧栏一级导航。
+
+2. **Sidebar（228px，28px 紧凑行高，只留高频沟通与工作）**
+   - 顶部（44px）：Space 名称 + `⌘K` 快速跳转。
+   - **Inbox**：唯一注意力中心，暖色数字仅统计真正需要我处理的对话数。
+   - **Tasks**：轻量工作视图（默认过滤“Active / Mine”）。
+   - **Channels**：普通未读仅加粗名称 + 细点；被 `@mention` 显示暖色数字；静音的频道置灰降低视觉权重。
    - **Direct Messages**：Human 与 Agent 同等展示，附简洁状态点（Idle / Working / Offline / Error）。
+   - 底部：紧凑本人账户条。
 
-2. **Main Pane（主工作区）**
+3. **Main Pane（主工作区）**
    - **Channel / DM 视图**：
-     - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 最近时间）。
-     - 消息下挂载的 Task 以紧凑单行条展示（状态图标 + `#N` + 标题 + 负责人头像）；一条消息可挂多个 Task。
-     - 服务端持久化 `New` 未读分隔线；底部固定一行诚实的 Agent 状态条（`Lin is working` / `Lin is busy elsewhere · queued` / `Lin is offline` / `Lin needs attention`），出现与消失不引起消息跳动。
+     - 44px 顶栏：频道名、主题、通知级别切换器（`Mentions only` / `All messages` / `Muted`）与成员入口。
+     - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
+     - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
+     - 服务端持久化 `New` 未读分隔线；底部贴合 28px 固定高度的诚实 Agent 状态条（`Lin working on #14` / `Lin busy elsewhere · message queued` / `Lin offline` / `Lin error`）+ 贴底结构化 Composer，不漂浮不跳动。
    - **Inbox Triage 视图**：
-     - 左侧待处理对话列表（筛选：`Needs me` / `Unread` / `All`），右侧原地打开对话直接回复；
-     - 每行提供一键 `Done`、`Mark unread`、`Unfollow`、`Mute channel`，不强制跳离分流流程。
+     - 紧凑待处理列表（筛选：`Needs me` / `Unread` / `All`），每行提供一键 `Done`、`Unfollow`、`Mute`，点击原地打开对应对话或右侧面板。
+   - **Tasks 视图**：
+     - 按状态分组的紧凑表格行（`36px` 行高，等宽 `#N`、标题、负责人、来源频道对齐成列），点击在右栏原地打开 Task 详情与独立讨论流。
 
-3. **Right Detail Pane（按需展开的聚焦面板，380–480px）**
-   - 点 Thread → 展开该 Thread 完整对话与 Follow/Unfollow 开关。
-   - 点 Task → 展开 **Task 卡片（原地 Claim / Assign / 改状态 / 编辑标题描述）+ 该 Task 自己的独立讨论流**，不打断主频道上下文。
-   - 点 Agent → 展开 Agent 真实运行态（当前状态、正在处理哪条对话、最近状态流转、Restart / Reset Session、Permission 管理）。
+4. **Right Detail Pane（388px，按需展开的结构化聚焦面板）**
+   - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关。
+   - 点 Task → 上半部为固定列宽的 2 列 Key-Value 属性表（Status / Assignee / Source / Revision，原地 Claim / Assign / 改状态 / 编辑），下半部为 `Discussion` 分区头 + 该 Task 自己的独立讨论流与贴底回复框。
+   - 点 Agent → 展开 2 列 Key-Value 运行态表（State / Focus / Queued / Computer / Driver / 1 active session + `Restart` / `Reset session`）、原子 Permission 开关表与 State log。
 
 ---
 
