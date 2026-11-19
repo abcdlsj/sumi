@@ -83,8 +83,9 @@ internal/
   cli/                 # Agent CLI（--json 稳定信封输出）
   protocol/            # Server ↔ Computer 版本化消息定义
 web/                   # React + TypeScript + Vite Web UI
-desktop/               # Wails 薄壳（托盘 + 托管本机 Computer Daemon + 嵌 Web UI）
+desktop/               # Wails v3 薄壳（托盘 + 托管本机 Computer Daemon + 嵌 Web UI）
 test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
+Makefile               # 唯一开发/构建/运行入口（make help 列出全部目标）
 ```
 
 ### SQLite 数据模型（核心表）
@@ -101,10 +102,39 @@ test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
 7. `conversations`：`id`、`space_id`、`kind`（`public` / `private` / `dm` / `thread` / `task`）、`slug`、`topic`、`parent_conversation_id`、`root_message_id`、`task_id`、`next_seq`。
 8. `conversation_members`：Channel 与 DM 的成员边界（Thread 与 Task 继承父级成员边界）。
 9. `messages`：`id`、`conversation_id`、`seq`、`author_member_id`、`kind`（`text` / `action` / `system`）、`body_markdown`、`action_kind`、`payload_json`、`edited_at`、`deleted_at`。
-10. `message_mentions` / `attachments` / `message_attachments`：结构化 `@mention` 目标与附件关联。
+10. `message_mentions` / `attachments` / `message_attachments`：结构化 `@mention` 目标与附件关联。`attachments` 只存元数据（`name`、`media_type`、`size_bytes`、`sha256`、`object_path`），文件本体落在数据目录的 `objects/` 下（按 `sha256` 分片命名），`message_attachments.position` 决定展示顺序。
 11. `tasks`：`id`、`space_id`、`number`（Space 内自增）、`channel_id`、`source_message_id`（非唯一）、`conversation_id`（懒创建，可为空）、`title`、`description`、`status`、`creator_member_id`、`assignee_member_id`、`revision`、`created_at`、`updated_at`。
 12. `conversation_states`：`(conversation_id, member_id)` → `read_seq`、`notify_level`、`following`、`done_seq`、`updated_at`。
 13. `idempotency_records` / `events`：HTTP 写请求幂等记录与 Space 提交序事件日志（事务提交后由进程内 pub/sub 实时推送 Browser SSE，支持 `Last-Event-ID` 断点续传）。
+
+### 附件
+
+- **上传**：`POST /api/v1/spaces/{slug}/attachments`（`multipart/form-data`，字段 `file`）；Computer 代理由 `POST /api/v1/computer/agents/{agentID}/attachments` 走同一实现。单文件上限 25 MiB、单条 Message 最多 10 个附件。
+- **落盘**：写入数据目录 `objects/<sha256 前两位>/<sha256>`，先写临时文件再原子 rename；先写文件后写 `attachments` 行，事务失败时清理未引用对象。`attachments` 行记录 `uploader_member_id` 与 `space_id`，服务端不信任客户端声明的大小与类型。
+- **绑定**：发送 Message 时以 `attachment_ids` 引用；服务端校验附件属于同一 Space、上传者是当前 actor、且尚未绑定到其他 Message。绑定在同一写事务内完成，不产生悬挂引用。
+- **读取**：`GET /api/v1/spaces/{slug}/attachments/{id}`；仅当访问者能访问引用它的 Conversation（尚未绑定时仅上传者）才返回文件，响应带 `Content-Type`、`Content-Disposition: attachment` 与 `ETag`。
+- **日志红线**：附件名、媒体类型、体积与哈希可以记录，文件内容与 Message 正文永不入库日志。
+
+### 桌面薄壳（Wails v3）
+
+- `desktop/` 是独立 main 包：托盘 + 单个窗口 + 进程内托管本机 Computer Daemon（必要时兼起本机 Server）；窗口直接打开 Server 源（`http://127.0.0.1:<port>`），由 Server 的 `-web-dir` 提供内嵌的 `web/dist`，因此 Browser Session Cookie、SSE 与上传都在真实 HTTP 源上工作，不引入反向代理。
+- 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`），字段 `server_url`、`computer_token`、`data_dir`；由 `sumi pair` 生成。
+- 启动顺序：探活 `server_url` → 若不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 启动 Computer Daemon → 开窗。缺 computer token 时窗口照常打开，托盘菜单显示 `Computer: not paired`，不静默失败。
+- 托盘菜单固定四项：`Open Sumi`、`Computer` 状态（只读）、`Restart Computer Daemon`、`Quit`。关闭窗口只隐藏，Server/Daemon/托盘继续运行；Quit 才停止它们并退出。
+- 薄壳不含业务逻辑：鉴权、Space、Agent、附件全部由 Server 与 Daemon 承担。
+
+### 配对与本地引导（`sumi pair`）
+
+- `sumi pair --server ... --email ... --password ... --space ...`：注册或登录 → 取得/创建 Space → 配对一台 Computer → 写出 `desktop.json`（0600）。
+- 每次执行都会配对新 Computer（服务端不回传既有 token），故不要把它当幂等命令；重复执行会在 Space 里多出一台同名机器。
+
+### 本地开发与运行（Makefile）
+
+- `make dev`：Server（`:8087`，`.sumi/sumi.db`）+ Vite 开发服务器并行；Web 走 Vite 代理。
+- `make build`：构建 `web/dist` 与 `bin/sumi`；`make desktop`：把 `web/dist` 同步进 `desktop/assets/dist` 并构建桌面二进制。
+- `make pair EMAIL=... PASSWORD=...`：调用 `sumi pair`，配对本机并写出桌面配置。
+- `make app`：构建并启动 Server，随后打开桌面薄壳；`make stop` 停止后台 Server。
+- `make test` / `make lint` 对应 AGENTS.md 的验证要求，不改动其他行为。
 
 ### Server ↔ Computer 协议与调度
 
@@ -124,7 +154,8 @@ test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
 - 命令极简、面向 `Conversation` 与 `Task`，所有命令支持 `--json` 输出统一信封：
   - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带未读数与是否提及）。
   - `sumi read <target> [--unread]`：读取目标对话（`#channel`、`dm:@name`、`thread:<id>`、`task:#N`）并推进 `read_seq`。
-  - `sumi send <target> [--body ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）。
+  - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。
+  - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。
   - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>`：管理自身注意力。
   - `sumi task list|show|create|claim|unclaim|assign|status|amend`：完整 Task 协作原语。
   - `sumi channel create|invite|remove|members`、`sumi agent create`、`sumi space members`：治理与查询（受 Permission 校验）。
@@ -167,6 +198,7 @@ test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
      - 44px 顶栏：频道名、主题、通知级别切换器（`Mentions only` / `All messages` / `Muted`）与成员入口。
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
+     - Composer 支持选择文件上传（`Attach`），上传成功后以紧凑 chip 展示，图片附件在消息内联渲染，其他附件显示为下载链接。
      - 服务端持久化 `New` 未读分隔线；底部贴合 28px 固定高度的诚实 Agent 状态条（`Lin working on #14` / `Lin busy elsewhere · message queued` / `Lin offline` / `Lin error`）+ 贴底结构化 Composer，不漂浮不跳动。
    - **Inbox Triage 视图**：
      - 紧凑待处理列表（筛选：`Needs me` / `Unread` / `All`），每行提供一键 `Done`、`Unfollow`、`Mute`，点击原地打开对应对话或右侧面板。
