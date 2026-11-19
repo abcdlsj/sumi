@@ -300,7 +300,7 @@ func (s *Server) handleAgentReadMessages(w http.ResponseWriter, r *http.Request)
 	afterSeq, _ := strconv.ParseInt(r.URL.Query().Get("after_seq"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	unreadOnly := r.URL.Query().Get("unread") == "true"
-	msgs, readSeq, err := s.svc.ListMessages(r.Context(), agent, app.ListMessagesInput{
+	page, err := s.svc.ListMessages(r.Context(), agent, app.ListMessagesInput{
 		ConversationID: chi.URLParam(r, "convID"),
 		AfterSeq:       afterSeq,
 		UnreadOnly:     unreadOnly,
@@ -311,7 +311,7 @@ func (s *Server) handleAgentReadMessages(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs, "read_seq": readSeq})
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) {

@@ -260,14 +260,14 @@ func TestWerewolfCommunication(t *testing.T) {
 	}
 
 	waitUntil(t, 20*time.Second, "God posts GAME_OVER", func() bool {
-		msgs, _, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{
+		page, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{
 			ConversationID: group.ID,
 			Limit:          100,
 		})
 		if err != nil {
 			return false
 		}
-		for _, m := range msgs {
+		for _, m := range page.Messages {
 			if m.AuthorName == "God" && strings.Contains(m.BodyMarkdown, "GAME_OVER") {
 				return true
 			}
@@ -280,7 +280,7 @@ func TestWerewolfCommunication(t *testing.T) {
 	}
 
 	// Assert all 5 agents participated in the public channel.
-	msgs, _, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{
+	page, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{
 		ConversationID: group.ID,
 		Limit:          100,
 	})
@@ -288,7 +288,7 @@ func TestWerewolfCommunication(t *testing.T) {
 		t.Fatalf("read final group messages: %v", err)
 	}
 	speakers := make(map[string]bool)
-	for _, m := range msgs {
+	for _, m := range page.Messages {
 		speakers[m.AuthorName] = true
 	}
 	for _, name := range names {

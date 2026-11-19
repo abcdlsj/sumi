@@ -129,6 +129,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时持有的 secret；服务端只存 hash，不保存任何明文。
 
 1. **申请**（无鉴权）：`POST /api/v1/computer/pairings`，请求 `{hostname, os, daemon_version}`，返回 `{pairing: {id, code, expires_at}, secret}`。`code` 为 6 位易读字符（不含 `0/O/1/I`），`secret` 为 32 字节随机 token；`computer_pairings` 只存 `code_hash` 与 `token_hash`，状态 `pending`，10 分钟后过期。
+   - **限流**：同一来源 IP 每分钟最多 6 次申请（进程内令牌桶，超限返回 `rate_limited` / 429）；全局未过期 `pending` 申请最多 200 条，超出同样返回 `rate_limited`。每次申请在同一写事务内删除已过期的 `pending` 行，表不会无限增长。
 2. **查看**（Browser Session）：`GET /api/v1/pairings/{id}?code=...` 返回 `{pairing: {id, hostname, os, status, expires_at}}`；code 不符与不存在一律返回 `not_found`。
 3. **确认**（owner / admin）：`POST /api/v1/spaces/{slug}/computers/pairings/{id}/confirm`，请求 `{code, name}`。同一写事务内创建 `computers` 行（`token_hash` 直接取自 pairing）并把 pairing 置为 `confirmed`、写入 `computer_id` 与 `space_id`，发出 `computer.changed`。pairing 只能确认一次；已过期返回 `expired`。
 4. **轮询**（Bearer secret）：`GET /api/v1/computer/pairings/{id}`，返回 `{status, space_slug?, computer_id?}`；secret 不符返回 `not_found`。确认后 Computer 以该 secret 作为 computer token 连接 `/ws/computer`。
@@ -250,7 +251,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
      - 按状态分组的紧凑表格行（`36px` 行高，等宽 `#N`、标题、负责人、来源频道对齐成列），点击在右栏原地打开 Task 详情与独立讨论流。
 
 4. **Right Detail Pane（400px，按需展开的结构化聚焦面板）**
-   - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关。
+   - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关；开关初值取服务端 `conversation_states.following`（消息列表响应附带 `following` 字段），不在前端假设。
    - 点 Task → 上半部为固定列宽的 2 列 Key-Value 属性表（Status / Assignee / Source / Revision，原地 Claim / Assign / 改状态 / 编辑），下半部为 `Discussion` 分区头 + 该 Task 自己的独立讨论流与贴底回复框。
    - 点 Agent → 头部大头像 + 运行态；Key-Value 运行态表（State / Focus / Computer / Driver / Model）；最近错误（code + detail）；`Restart` / `Reset session`；Driver 配置可原地编辑；Role；原子 Permission 开关。
 

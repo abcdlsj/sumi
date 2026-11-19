@@ -282,3 +282,33 @@ func TestPermissionsAndAttentionNoiseControl(t *testing.T) {
 }
 
 var testBuiltinConfig = domain.DriverConfig{BaseURL: "http://127.0.0.1:1/v1", Model: "test-model"}
+
+func TestListMessagesReportsViewerFollowing(t *testing.T) {
+	svc, _, _, owner, _ := setupTestService(t)
+	ctx := context.Background()
+	convs, err := svc.ListConversations(ctx, owner)
+	if err != nil || len(convs) == 0 {
+		t.Fatalf("list conversations: %v", err)
+	}
+	root, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: convs[0].ID, BodyMarkdown: "root"})
+	if err != nil {
+		t.Fatalf("send root: %v", err)
+	}
+	reply, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: convs[0].ID, ReplyToMessageID: root.Message.ID, BodyMarkdown: "reply"})
+	if err != nil {
+		t.Fatalf("send reply: %v", err)
+	}
+	threadID := reply.Message.ConversationID
+
+	page, err := svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: threadID})
+	if err != nil || !page.Following {
+		t.Fatalf("replying must follow the thread: page.Following=%v err=%v", page.Following, err)
+	}
+	if err := svc.SetFollowing(ctx, owner, threadID, false); err != nil {
+		t.Fatalf("unfollow: %v", err)
+	}
+	page, err = svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: threadID})
+	if err != nil || page.Following {
+		t.Fatalf("unfollow must be reflected: page.Following=%v err=%v", page.Following, err)
+	}
+}

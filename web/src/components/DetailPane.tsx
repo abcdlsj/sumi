@@ -278,9 +278,9 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
 
 function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceSlug: string; threadConvID: string; parentSlug: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [following, setFollowing] = useState(true);
   const act = useAction();
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
+  const following = msgsQ.data?.following;
   const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
 
   return (
@@ -288,20 +288,23 @@ function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceS
       <PaneHeader
         onClose={onClose}
         actions={
-          <Button
-            size="sm"
-            variant={following ? "secondary" : "soft"}
-            icon={following ? <Bell /> : <BellOff />}
-            loading={act.busy}
-            onClick={() =>
-              void act.run(async () => {
-                await api.setFollowing(spaceSlug, threadConvID, !following);
-                setFollowing(!following);
-              })
-            }
-          >
-            {following ? "Following" : "Follow"}
-          </Button>
+          following === undefined ? null : (
+            <Button
+              size="sm"
+              variant={following ? "secondary" : "soft"}
+              icon={following ? <Bell /> : <BellOff />}
+              loading={act.busy}
+              onClick={() =>
+                void act.run(async () => {
+                  await api.setFollowing(spaceSlug, threadConvID, !following);
+                  await qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
+                  void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+                })
+              }
+            >
+              {following ? "Following" : "Follow"}
+            </Button>
+          )
         }
       >
         <MessageSquare className="size-4 text-fg-3" />

@@ -824,16 +824,24 @@ type ListMessagesInput struct {
 	MarkRead       bool
 }
 
-func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in ListMessagesInput) ([]domain.Message, int64, error) {
+// MessagePage is one read of a Conversation together with the viewer's attention state.
+type MessagePage struct {
+	Messages  []domain.Message `json:"messages"`
+	ReadSeq   int64            `json:"read_seq"`
+	Following bool             `json:"following"`
+}
+
+func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in ListMessagesInput) (MessagePage, error) {
 	c, err := canAccessConversation(ctx, s.store.ReadDB(), viewer, in.ConversationID)
 	if err != nil {
-		return nil, 0, err
+		return MessagePage{}, err
 	}
 	var currentReadSeq int64
+	var following bool
 	_ = s.store.ReadDB().QueryRowContext(ctx,
-		`SELECT read_seq FROM conversation_states WHERE conversation_id = ? AND member_id = ?`,
+		`SELECT read_seq, following FROM conversation_states WHERE conversation_id = ? AND member_id = ?`,
 		c.ID, viewer.ID,
-	).Scan(&currentReadSeq)
+	).Scan(&currentReadSeq, &following)
 
 	afterSeq := in.AfterSeq
 	if in.UnreadOnly && currentReadSeq > afterSeq {
@@ -842,7 +850,7 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 
 	msgs, err := queryMessages(ctx, s.store.ReadDB(), c.ID, afterSeq, in.Limit, "")
 	if err != nil {
-		return nil, 0, err
+		return MessagePage{}, err
 	}
 	s.loadMessageAttachments(ctx, msgs)
 
@@ -907,5 +915,5 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 			_ = s.MarkRead(ctx, viewer, c.ID, lastSeq)
 		}
 	}
-	return msgs, currentReadSeq, nil
+	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following}, nil
 }

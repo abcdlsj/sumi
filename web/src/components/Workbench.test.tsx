@@ -99,6 +99,7 @@ describe("Workbench", () => {
     vi.spyOn(api, "markDone").mockResolvedValue({ ok: true });
     vi.spyOn(api, "listMessages").mockResolvedValue({
       read_seq: 1,
+      following: false,
       messages: [
         {
           id: "msg-1",

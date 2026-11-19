@@ -63,9 +63,9 @@ func TestPiACPEndToEnd(t *testing.T) {
 	var reply string
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
-		msgs, _, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{ConversationID: dm.ID, Limit: 50})
+		page, err := env.svc.ListMessages(ctx, env.owner, app.ListMessagesInput{ConversationID: dm.ID, Limit: 50})
 		if err == nil {
-			for _, m := range msgs {
+			for _, m := range page.Messages {
 				if m.AuthorMemberID == agent.ID && m.Kind == domain.MessageKindText {
 					reply = m.BodyMarkdown
 				}
