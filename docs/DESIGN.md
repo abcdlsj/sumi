@@ -160,6 +160,21 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - **Go Builtin Harness**：独立包 `internal/driver/builtin`，支持 OpenAI/Anthropic 兼容协议、结构化工具调用（bash / 文件读写 / Agent CLI）、Token 用量跟踪、基于窗口比例的自动上下文压缩（保留近期原始回合 + 生成前序摘要）与瞬时错误指数退避重试。
   - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），单回合受有界超时保护，捕获有界 stderr 摘要。
 
+### Agent Driver 配置
+
+Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `driver_kind` 校验后存入 `agents.driver_config_json`：
+
+| driver_kind | 字段 | 校验 |
+| --- | --- | --- |
+| `builtin` | `base_url`（OpenAI 兼容端点，必填，http/https）、`model`（必填）、`api_key`（可空，本地网关可不需要） | 不合法返回 `invalid_argument` 并指明字段 |
+| `acp` | `provider`（`pi` / `codex` / `claude`，必填）或 `command`（argv 数组，覆盖 provider 默认命令） | 同上 |
+
+- **凭据处理**：`api_key` 只在服务端存储，并只随 provision spec 下发给承载该 Agent 的 Computer。任何面向 Browser 的响应都把它替换为 `api_key_set: true/false`，日志与错误中不出现。
+- **修改**：`PUT /api/v1/spaces/{slug}/agents/{agentID}/driver`，请求 `{driver_kind, driver_config}`；`api_key` 省略或为空字符串表示保留原值。修改后 Server 向 Computer 重新下发 `provision`，Computer 关闭旧 Driver 并按新 spec 重建（保留 workspace 与 `MEMORY.md`，Runtime Session 清空）。
+- **Computer 能力**：Computer 在 `hello` 中上报 `acp_providers`（本机 PATH 上能找到的 `pi` / `codex` / `claude`），Server 存在 `computers.capabilities_json`，Web 据此只列出可用的 ACP provider。
+- **运行环境**：Daemon 在 Agent 环境里把 `sumi` CLI 放到 `PATH` 最前（`<data_dir>/bin/sumi` 指向当前可执行文件，桌面薄壳也能以 `sumi` 名义执行 CLI）。Builtin 的 `HOME` 设为 Agent Home；ACP 子进程保留用户 `HOME`，以便读取 `pi` / `codex` / `claude` 自己的登录凭据，工作目录为 Agent 的 `workspace/`。
+- **错误呈现**：Turn 或 Driver 失败时 Computer 上报 `error_code` 与有界的 `error_detail`（≤ 240 字符，只含 Driver/HTTP 错误描述，不含 prompt 或消息正文）；Server 存入 `agents.last_error_code` / `last_error_detail`。错误码：`driver_config_invalid`、`driver_start_failed`、`model_auth_failed`、`model_unreachable`、`turn_failed`、`inbox_unreachable`。下一次 Turn 成功后清空。
+
 ### Agent CLI
 
 - 命令极简、面向 `Conversation` 与 `Task`，所有命令支持 `--json` 输出统一信封：
@@ -174,22 +189,24 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 
 ### 安全与运维诊断
 
-- **三认证面隔离**：Browser Session Cookie、Computer Bearer Token、本地 Driver Token 互不通用；服务端只存 hash，模型凭据不出 Computer。
-- **沙箱边界**：Builtin 工具与 ACP 子进程受限于当前 Agent Home（`workspace/` 与 `memory/`），不可跨 Agent 读取凭据或目录。
+- **三认证面隔离**：Browser Session Cookie、Computer Bearer Token、本地 Driver Token 互不通用；服务端只存 hash。模型凭据按「Agent Driver 配置」一节存储与下发，永不返回给 Browser。
+- **沙箱边界**：Builtin 工具受限于当前 Agent Home（`workspace/` 与 `memory/`），不可跨 Agent 读取目录；ACP 子进程以 `workspace/` 为工作目录，权限边界由对应 coding agent 自身负责。
 - **日志规则**：使用 `log/slog` 结构化日志；日志、审计与错误 `details` **禁止包含** Message、Attachment、Memory、Secret 或 Prompt 正文，仅记录稳定 ID、错误码、序号与耗时。
 
 ---
 
-## 三、界面（克制、可靠沟通与低打扰）
+## 三、界面（清晰、可靠沟通与低打扰）
 
-### 视觉原则（Clarity）
+### 视觉原则
 
-- 中性纸感底色、1px 发丝线分隔、单一选中态，无渐变/模糊/多余装饰。
-- 颜色只留给三个明确语义：**Need me（暖色）**、**Agent working（青色）**、**Task status（图形 + 克制语义色）**。
-- 身份由形状区分：Human 圆形头像，Agent 圆角方形像素印章。
-- **加载**：首屏、侧栏、消息流、Inbox、Tasks 与右栏在数据到达前显示与真实内容同几何的骨架（纯色块 + 透明度呼吸，不用渐变扫光），数据到达后原位淡入替换，不出现布局跳动。
-- **动效**：只动 `opacity` 与 `transform`，时长 120–220ms、`ease-out`；用于视图切换淡入、右栏滑入、新消息出现、弹层与 Toast。遵守 `prefers-reduced-motion: reduce`，此时关闭全部动效。
-- **反馈**：写操作有按钮内 loading 态，失败以底部 Toast 呈现错误码文案；不使用 `window.prompt` / `alert`。
+- **主题**：浅色工作区 + 深色导航栏为默认；支持暗色模式（跟随系统，设置里可切换 `System / Light / Dark`，存 `localStorage`）。全部颜色走 CSS 变量，组件不写死色值。
+- **层级**：正文 14px / 行高 1.55；次要信息 13px；辅助标签不小于 12px。标题 15–18px semibold。图标 16px（行内 14px），与相邻文字基线居中对齐，统一 `gap-2`。
+- **表面**：工作区用三层底色（背景 / 面板 / 卡片）+ 1px 分隔线；卡片与弹层可用柔和阴影，圆角 8–12px。一个品牌强调色（靛蓝），语义色只用于：**Need me（暖橙）**、**Agent working（青绿）**、**Error（红）**、**Task status**。
+- **身份**：Human 圆形字母头像；Agent 为 GitHub identicon 风格的 5×5 对称像素头像（由 member id 哈希决定图案与色相），圆角方形，右下角叠加运行态徽标（idle 灰 / working 青绿呼吸 / error 红 / offline 空心）。
+- **Agent 状态可见**：凡出现 Agent 的地方（侧栏、消息作者、DM 顶栏、详情）都能看到运行态；`working` 时显示正在处理的对话名称（`Working in #general`、`Working on #14`、`Working in a private conversation`），可点击跳转。
+- **加载**：首屏、侧栏、消息流、Inbox、Tasks 与右栏在数据到达前显示与真实内容同几何的骨架（纯色块 + 透明度呼吸），数据到达后原位淡入替换，不出现布局跳动。
+- **动效**：只动 `opacity` 与 `transform`，时长 120–240ms、`ease-out`；用于视图切换、右栏滑入、新消息出现、弹层与 Toast。遵守 `prefers-reduced-motion: reduce`。
+- **反馈**：写操作有按钮内 loading 态，失败以 Toast 呈现服务端错误文案；表单错误就地显示在字段下；不使用 `window.prompt` / `alert`。
 
 ### Onboarding（首次使用）
 
@@ -198,29 +215,30 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 1. **Account**：`Sign in` / `Create account` 分段切换；邮箱、密码（可显隐）、注册时的 Display Name（按邮箱前缀预填并按规则清洗）。字段级错误就地显示。
 2. **Space**：输入名称，slug 按名称自动生成（可手动改）；已有 Space 的账号跳过此步。
 3. **Computer**：桌面 App 带来的 pending pairing 显示为确认卡片（hostname + code + `Connect this computer`）；浏览器中则调用 `computers/pair` 生成命令，一键复制，并实时显示该 Computer 是否上线。
-4. **First Agent**：在已上线的 Computer 上创建第一个 Agent（名称、Driver、Role），完成后直接进入与其的 DM。
+4. **First Agent**：在已上线的 Computer 上创建第一个 Agent：名称、Role、Driver（ACP 选本机可用 provider；Builtin 填 Base URL / Model / API Key），完成后直接进入与其的 DM。
 
 进入工作台后，若 Space 内没有 Computer 或没有 Agent，侧栏底部显示 `Finish setup` 入口，重新打开第 3、4 步。已登录用户在工作台中遇到 pending pairing 时，同样弹出确认卡片。
 
 ### 布局与信息架构
 
-桌面采用紧凑的 4 列工作台结构，所有列共用严格的 `44px` 顶栏高度与 1px 贯通分隔线；不使用漂浮阴影卡片，以平实底色层级和 1px 结构线确立稳定边界：
+桌面采用紧凑的 4 列工作台结构，所有列共用 `52px` 顶栏高度与 1px 贯通分隔线；不使用漂浮阴影卡片，以平实底色层级和 1px 结构线确立稳定边界：
 
-1. **Left Anchor Rail（44px）**
+1. **Left Anchor Rail（56px，深色）**
    - 顶部：Space 切换标识与新建 Space 入口。
    - 底部：Space 管理入口（Computers 带在线状态点、Members & Permissions、Space Settings），不占主侧栏一级导航。
 
-2. **Sidebar（228px，28px 紧凑行高，只留高频沟通与工作）**
+2. **Sidebar（260px，深色，32px 行高，只留高频沟通与工作）**
    - 顶部（44px）：Space 名称 + `⌘K` 快速跳转。
    - **Inbox**：唯一注意力中心，暖色数字仅统计真正需要我处理的对话数。
    - **Tasks**：轻量工作视图（默认过滤“Active / Mine”）。
    - **Channels**：普通未读仅加粗名称 + 细点；被 `@mention` 显示暖色数字；静音的频道置灰降低视觉权重。
-   - **Direct Messages**：Human 与 Agent 同等展示，附简洁状态点（Idle / Working / Offline / Error）。
+   - **Agents**：每个 Agent 一行（像素头像 + 名称 + 运行态），`working` 时第二行显示正在处理的对话；点击打开 DM。
+   - **People**：其他 Human 的 DM。
    - 底部：紧凑本人账户条。
 
 3. **Main Pane（主工作区）**
    - **Channel / DM 视图**：
-     - 44px 顶栏：频道名、主题、通知级别切换器（`Mentions only` / `All messages` / `Muted`）与成员入口。
+     - 52px 顶栏：频道名、主题、通知级别切换器（`Mentions only` / `All messages` / `Muted`）与成员入口。
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
      - Composer 支持选择文件上传（`Attach`），上传成功后以紧凑 chip 展示，图片附件在消息内联渲染，其他附件显示为下载链接。
@@ -230,10 +248,10 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
    - **Tasks 视图**：
      - 按状态分组的紧凑表格行（`36px` 行高，等宽 `#N`、标题、负责人、来源频道对齐成列），点击在右栏原地打开 Task 详情与独立讨论流。
 
-4. **Right Detail Pane（388px，按需展开的结构化聚焦面板）**
+4. **Right Detail Pane（400px，按需展开的结构化聚焦面板）**
    - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关。
    - 点 Task → 上半部为固定列宽的 2 列 Key-Value 属性表（Status / Assignee / Source / Revision，原地 Claim / Assign / 改状态 / 编辑），下半部为 `Discussion` 分区头 + 该 Task 自己的独立讨论流与贴底回复框。
-   - 点 Agent → 展开 2 列 Key-Value 运行态表（State / Focus / Queued / Computer / Driver / 1 active session + `Restart` / `Reset session`）、原子 Permission 开关表与 State log。
+   - 点 Agent → 头部大头像 + 运行态；Key-Value 运行态表（State / Focus / Computer / Driver / Model）；最近错误（code + detail）；`Restart` / `Reset session`；Driver 配置可原地编辑；Role；原子 Permission 开关。
 
 ---
 
