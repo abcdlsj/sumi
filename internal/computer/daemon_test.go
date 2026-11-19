@@ -199,3 +199,20 @@ func TestAgentEnvDropsComputerCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestActivityOnlySentToServersThatAdvertiseIt(t *testing.T) {
+	d := NewDaemon(Config{DataDir: t.TempDir()}, nil)
+	ch := make(chan protocol.Envelope, 4)
+	d.wsSendCh = ch
+	act := &domain.AgentActivity{Tool: "execute"}
+
+	d.reportAgentStateWith("a1", domain.RuntimeWorking, "c1", "", "", act)
+	if len(ch) != 0 {
+		t.Fatalf("activity sent to a server without %s", protocol.CapAgentActivity)
+	}
+	d.serverCaps = []string{protocol.CapAgentActivity}
+	d.reportAgentStateWith("a1", domain.RuntimeWorking, "c1", "", "", act)
+	if env := <-ch; env.AgentState == nil || env.AgentState.Activity == nil || env.AgentState.Activity.Tool != "execute" {
+		t.Fatalf("activity frame: %+v", env.AgentState)
+	}
+}

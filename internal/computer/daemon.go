@@ -90,6 +90,7 @@ type Daemon struct {
 	agents       map[string]*hostedAgent
 	tokenToAgent map[string]string
 	wsSendCh     chan protocol.Envelope
+	serverCaps   []string
 	socketPath   string
 	socketServer *http.Server
 	socketLn     net.Listener
@@ -354,6 +355,7 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 			Hostname:        hostname,
 			OS:              hostOS(),
 			ACPProviders:    detectACPProviders(),
+			Capabilities:    protocol.Supported,
 		},
 	}
 	helloBytes, _ := json.Marshal(hello)
@@ -370,9 +372,14 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 		return fmt.Errorf("unexpected hello_ack")
 	}
 
+	if !protocol.Compatible(ack.HelloAck.ProtocolVersion) {
+		return fmt.Errorf("server protocol version %d is not supported", ack.HelloAck.ProtocolVersion)
+	}
+
 	sendCh := make(chan protocol.Envelope, 64)
 	d.mu.Lock()
 	d.wsSendCh = sendCh
+	d.serverCaps = ack.HelloAck.Capabilities
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
@@ -451,6 +458,12 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 	}
 }
 
+func (d *Daemon) serverHas(c string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return protocol.Has(d.serverCaps, c)
+}
+
 func (d *Daemon) sendWS(env protocol.Envelope) {
 	d.mu.RLock()
 	ch := d.wsSendCh
@@ -469,6 +482,9 @@ func (d *Daemon) reportAgentState(agentID string, state domain.RuntimeState, foc
 }
 
 func (d *Daemon) reportAgentStateWith(agentID string, state domain.RuntimeState, focusConvID, errCode, errDetail string, activity *domain.AgentActivity) {
+	if activity != nil && !d.serverHas(protocol.CapAgentActivity) {
+		return
+	}
 	d.sendWS(protocol.Envelope{
 		Type: protocol.TypeAgentState,
 		AgentState: &protocol.AgentStateFrame{

@@ -24,8 +24,10 @@ import (
 type computerConn struct {
 	computerID      string
 	daemonSessionID string
-	conn            *websocket.Conn
-	sendCh          chan protocol.Envelope
+	// capabilities advertised by the Computer; gate Server -> Computer features on these.
+	capabilities []string
+	conn         *websocket.Conn
+	sendCh       chan protocol.Envelope
 }
 
 type computerHub struct {
@@ -135,7 +137,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		_ = wsConn.Close(websocket.StatusPolicyViolation, "expected hello frame")
 		return
 	}
-	if env.Hello.ProtocolVersion != protocol.Version {
+	if !protocol.Compatible(env.Hello.ProtocolVersion) {
 		_ = wsConn.Close(websocket.StatusPolicyViolation, "unsupported protocol version")
 		return
 	}
@@ -152,11 +154,13 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 	cc := &computerConn{
 		computerID:      comp.ID,
 		daemonSessionID: env.Hello.DaemonSessionID,
+		capabilities:    env.Hello.Capabilities,
 		conn:            wsConn,
 		sendCh:          make(chan protocol.Envelope, 64),
 	}
 	s.hub.Register(cc)
-	s.logger.Info("Computer connected", "computer_id", comp.ID, "daemon_session_id", cc.daemonSessionID)
+	s.logger.Info("Computer connected", "computer_id", comp.ID, "daemon_session_id", cc.daemonSessionID,
+		"protocol_version", env.Hello.ProtocolVersion, "capabilities", strings.Join(cc.capabilities, ","))
 
 	ackRaw, _ := json.Marshal(protocol.Envelope{
 		Type: protocol.TypeHelloAck,
@@ -165,6 +169,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 			ComputerID:      comp.ID,
 			SpaceID:         comp.SpaceID,
 			Agents:          specs,
+			Capabilities:    protocol.Supported,
 		},
 	})
 	if err := wsConn.Write(r.Context(), websocket.MessageText, ackRaw); err != nil {

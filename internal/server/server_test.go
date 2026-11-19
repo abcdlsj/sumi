@@ -124,6 +124,9 @@ func TestEndToEndHTTPComputerWSAndSSE(t *testing.T) {
 	if err := json.Unmarshal(ackBytes, &ack); err != nil || ack.Type != protocol.TypeHelloAck {
 		t.Fatalf("unexpected ack: %s", string(ackBytes))
 	}
+	if !protocol.Has(ack.HelloAck.Capabilities, protocol.CapAgentActivity) {
+		t.Fatalf("hello_ack must advertise server capabilities: %v", ack.HelloAck.Capabilities)
+	}
 
 	// 3. Create Agent Lin -> Computer receives provision control frame
 	resp, agentOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces/studio/agents", map[string]any{

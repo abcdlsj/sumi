@@ -2,7 +2,35 @@ package protocol
 
 import "github.com/abcdlsj/sumi/internal/domain"
 
-const Version = 2
+// Version is the protocol revision this build speaks; MinVersion is the oldest peer revision
+// it still accepts. Additive features are negotiated through Capabilities instead of bumping
+// Version, so mismatched desktop and server builds keep connecting.
+const (
+	Version    = 2
+	MinVersion = 2
+)
+
+// Capabilities this build understands. A side only uses a feature when the peer advertised it.
+const (
+	// CapAgentActivity: the Server accepts agent_state.activity.
+	CapAgentActivity = "agent_activity"
+)
+
+// Supported lists every capability of this build, advertised in hello and hello_ack.
+var Supported = []string{CapAgentActivity}
+
+// Has reports whether caps contains c.
+func Has(caps []string, c string) bool {
+	for _, x := range caps {
+		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
+// Compatible reports whether a peer speaking version v can connect.
+func Compatible(v int) bool { return v >= MinVersion && v <= Version }
 
 // Envelope is the single JSON frame shape exchanged on the Server <-> Computer WebSocket.
 type Envelope struct {
@@ -38,6 +66,7 @@ type HelloFrame struct {
 	OS              string `json:"os"`
 	// ACPProviders lists ACP providers whose commands resolve on the Computer's PATH.
 	ACPProviders []string `json:"acp_providers"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type HelloAckFrame struct {
@@ -45,6 +74,7 @@ type HelloAckFrame struct {
 	ComputerID      string              `json:"computer_id"`
 	SpaceID         string              `json:"space_id"`
 	Agents          []AssignedAgentSpec `json:"agents"`
+	Capabilities    []string            `json:"capabilities,omitempty"`
 }
 
 type AssignedAgentSpec struct {

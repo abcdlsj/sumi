@@ -151,7 +151,8 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 
 ### Server ↔ Computer 协议与调度
 
-- **连接**：单一 WebSocket，握手携带 `protocol_version`、`daemon_session_id`；15s 心跳，45s 超时判离线。
+- **连接**：单一 WebSocket，握手携带 `protocol_version`、`daemon_session_id`、`capabilities`；15s 心跳，45s 超时判离线。
+- **版本与能力协商**：双方接受 `[MinVersion, Version]` 范围内的对端版本（当前均为 2），超出则断开。新增的向后兼容功能不提升版本号，而是在 `hello.capabilities` / `hello_ack.capabilities` 中声明；一方只在对端声明了某能力时才使用该功能。当前能力：`agent_activity`（Server 接受 `agent_state.activity`）。
 - **唤醒机制（无重型队列）**：
   - 当任意写事务为某个 Agent 产生高优先触发（DM / `@mention` / `following` 新消息 / Task `assign`）时，事务提交后 Server 通过 WebSocket 向其所在 Computer 发送轻量 `wake(agent_id, conversation_id, reason)` 通知。
   - Computer 若该 Agent 当前空闲，立即启动一轮 Turn；若正忙，仅置本地 `dirty = true`，当前 Turn 结束后自动查询 `inbox` 继续处理剩余未读触发。
