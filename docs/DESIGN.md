@@ -119,9 +119,10 @@ Driver：
 - ACP 进程环境只含 `HOME`（Agent Home）、`PATH`、`LANG`、`SUMI_SOCKET`、`SUMI_DRIVER_TOKEN`、`[computer.acp.<provider>].env` 与 provider 私有项：codex 为 `CODEX_HOME=drivers/codex` 及 config 声明的 env_key；claude 为 `CLAUDE_CONFIG_DIR=drivers/claude` 及 daemon 环境中的 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN`；pi 为 `PI_CODING_AGENT_DIR=drivers/pi` 及 daemon 环境中的 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`OPENROUTER_API_KEY`。
 - Computer 配置 `pi_agent_dir_source` 指向本机 pi agent 目录（通常是 `~/.pi/agent`）时，pi Agent 在 provision 与 configure 时从中复制 `settings.json`、`auth.json`、`models.json` 到 `drivers/pi`；`settings.json` 声明的 packages 由 pi 自行安装。`AGENTS.md`、skills、extensions 与 sessions 属于本机用户的个人上下文，不复制。
 - ACP Driver 以全权限运行：session 建立后若 agent 提供全权限 mode（codex `full-access`、claude `bypassPermissions`）则切换到该 mode；`session/request_permission` 选择 allow 选项。Computer 不宣告 fs 与 terminal client capability。
-- ACP 恢复 Provider Session 时，agent 宣告 `sessionCapabilities.resume` 则用 `session/resume`，否则宣告 `loadSession` 则用 `session/load` 并丢弃重放的 `session/update`；两者都不支持或请求失败时 Session 丢失。关闭 Session 仅在宣告 `sessionCapabilities.close` 时发送 `session/close`。
-- ACP 回合以 `session/prompt` 响应结束：`end_turn` 为 Completed，`cancelled` 为 Interrupted，其余 stop reason 与错误为 Failed。interrupt 发送 `session/cancel`。
-- ACP 握手与 Provider 启动分开计时：`initialize` 45 秒（健康的 adapter 一声就到，沉默的进程视为起不来），首次 `session/new` 60 秒（此时 adapter 进程已经在应答，npx 下载已经结束，只剩 provider 自身启动；缺凭据或命令错误的 adapter 永远不回，不能一直算作在工作）。两者超时都把该 Run 判为 driver_error。
+- ACP 恢复 Provider Session 时，agent 宣告 `sessionCapabilities.resume` 则用 `session/resume`，否则宣告 `loadSession` 则用 `session/load` 并丢弃重放的 `session/update`；两者都不支持、请求失败或传输超时时视为 Session 丢失，由 Run 流程创建新 generation 并启动新 Session。关闭 Session 仅在宣告 `sessionCapabilities.close` 时发送 `session/close`。
+- ACP 回合以 `session/prompt` 响应结束：`end_turn` 为 Completed，`cancelled` 为 Interrupted，其余 stop reason 与错误为 Failed。interrupt 发送 `session/cancel`。ACP 子进程捕获有界 `stderr` 尾部缓冲（不含敏感正文），在启动或回合失败时输出结构化诊断摘要，避免故障静默。
+- ACP 握手、Provider 启动与单回合均受有界超时保护：`initialize` 45 秒，首次 `session/new` 60 秒，单回合总执行默认 1800 秒（Builtin Driver 同样受该总回合超时约束）。超时后终止挂起执行并上报对应失败，防止单次故障永久占锁 Agent。
+- ACP 与 Builtin 的工作目录边界明确区分：Builtin 工具与 bash 以 Agent Home 根为基准（`workspace/...`、`memory/...`），ACP 子进程以 `workspace/` 为工作目录；注入给不同 Driver 的操作指引按其真实工作目录生成。
 
 ### 协议与投递
 
@@ -130,7 +131,8 @@ Driver：
 - Computer 每 15 秒发送 heartbeat 与 WebSocket ping；任一端 45 秒内未收到任何帧即判定连接失效并断开，Computer 随即重连。建连 20 秒、单帧发送 30 秒超时。连接持续 60 秒以上后，重连退避从最小间隔重新开始。Server 只在同一 Computer 没有更新的连接时把它标记为 offline。
 - 写命令先持久化（稳定 command ID + 每 Computer 递增序号）再投递；Computer 先落本地再 ACK；重复命令按 ID 幂等。
 - query 是独立请求-响应通道：不持久化、不重放、不进 command 序号。
-- RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。传输失败才断开连接。
+- RunStart 的 Channel activity 查询被 Server 拒绝时，Computer 只对该命令回 Rejected，连接继续处理其余命令；Server 按拒绝结果补偿该 Run。查询等待期间不得阻塞心跳、中断或丢进程检测；仅传输失败时断开连接。
+- 单个 Agent 的 Run 启动或 Driver 故障（如 `DriverUnavailable`）只在本地记录该 Run 失败并上报，不得向上穿透断开整台 Computer 的 WebSocket 连接。
 - 业务写入与 outbox 属于同一事务；外部发送失败由 outbox 重试。
 - Computer 重连握手同步 daemon session ID、command watermark 和本地 Run 实况：hello 携带本次连接的 daemon session ID、已结算（applied 或 rejected）的最高 command 序号和仍持有本地状态的 Run 列表；Server 只补发其后的、未 ACK 的命令，仍处 pending 的命令因此一定会被重发。heartbeat、Run result 与 command result 携带产生它们的 daemon session ID，Server 丢弃与本次握手不同的会话帧。
 - 以 Member 身份发起的 HTTP 写操作都必须带 `Idempotency-Key`（UUID），缺失时返回 invalid_argument。Server 在业务事务内按 (actor, action, key) 写 `idempotency_records`：同一 key 重发同一请求返回当前结果、不再写入，也不重复下发 Computer command；同一 key 用于另一个资源返回 conflict。没有 Member 身份的入口（注册、登录、登出、接受邀请、开始配对）不收该头：注册以邮箱唯一约束防重，接受邀请对同一用户重放返回同一 Member，登录与登出重发没有额外副作用。
@@ -156,9 +158,9 @@ Driver：
 
 - 状态为 dispatched → working → completed / yielded / failed / canceled。不设置 queued、starting、finalizing、stopping。
 - 失败错误码固定为 driver_error、driver_lost、computer_restarted、session_unavailable、agent_unavailable、invalid_command、unhandled_items、internal；Failed Run 必须带 error_code，其他终态不得带 error_code。
-- Driver 临时错误在 Computer 内最多尝试 3 次（首次加 2 次重试）；最终失败才上报，Server 只对该 Run 计一次 Item retry。
+- Driver 临时错误（含 429 rate limit、5xx、连接重置与超时）在 Computer 内最多尝试 3 次（首次加 2 次重试）；最终失败才上报，Server 只对该 Run 计一次 Item retry。
 - Computer 离线是可达性问题，不是 Run 失败；离线期间 Run 保持原状态。
-- 一个 ACP 进程失败只让其 Agent 的 Run 以 driver_lost 失败；同一次轮询中其他 Agent 的完成照常投递，不使连接循环报错。
+- 一个 ACP 进程失败只让其 Agent 的 Run 以 driver_lost 失败（覆盖 Starting 与 Running 状态）；同一次轮询中其他 Agent 的完成照常投递，不使连接循环报错。
 - `computer.max_concurrent_runs` 只是内存保护阈值，不是调度器；超过上限的 Run 排队等待，不因等待失败。
 - Agent restart 先请求 active Run graceful stop；有限等待后按 computer_restarted 收尾并保留结果 outbox。
 - yield 对本次 Items 逐条给出 handled、released 或 deferred；deferred 用 Item 的 available_at 表达。
@@ -173,7 +175,8 @@ Driver：
 - 一段对话只由一个 Run 回应：hard Item 与 working Run 属于同一 Agent 且同一 Focus Thread 时 attach 到该 Run。两者只有一方带 Task 时，在同一事务把另一方绑定到该 Task（Run 绑定时下发 RunTaskBound，TODO Task 按首个 Task Run 规则推进为 In Progress）；两者带不同 Task 或 Focus 不同时保持 pending 并发送 notice，notice 不泄露正文。
 - Run 进入 working 时，同一 Agent、同一 Focus Thread 上 pending 的 hard Item 按同一规则 attach，补上 dispatched 期间到达的 Item。
 - Run 失败时未处理 Items 返回 pending 并增加 retry_count；超过 max_retry_count 进入 dead，并创建不含正文的 system Item。system Item 自身进入 dead 时不再创建新的 system Item：一个无法处理的 notice 只终结一次，不自行续链。
-- 以 `driver_error` 失败的 Run 让该 Agent 进入 error：Item 仍回 pending，但不自动重派——同一份 Driver 配置再试一次只会同样失败，而且每次尝试都要等到 Driver 放弃才能报错。error 是等人处理的静止状态，标签显示 Error、失败原因取 `last_error_code`：改 Driver（立即回到 active）、Restart 或 Retry setup 都会重新开始尝试。
+- 以 `driver_error` 失败的 Run 区分瞬时故障与配置故障：仅在确认非瞬时故障（如凭据缺失、权限拒绝、命令配置错误）时让该 Agent 进入 error 停泊状态（标签显示 Error、原因取 `last_error_code`，改 Driver、Restart 或 Retry setup 后恢复 active）；瞬时故障（如 429 限流、上游 5xx、超时）释放 Item 并按正常退避与 `max_retry_count` 重试，不冻结 Agent。
+- Server 派发 pending Item 失败时按指数退避推后 `available_at`（如 5s → 15s → 60s），避免坏项每秒空转挤占派发批次。
 - Agent 显式 release 的 Item 不增加 retry_count；重复 command、receipt 丢失和重复 result 不重复计数。
 - 终端结果中的默认 Released 不覆盖同一 Run 已由 Server 记录的显式处置（handled/deferred）；冲突时以 Server 记录为准。
 - Agent 对外暴露的 `last_error_code` 取该 Agent 最近一次终结 Run 的失败原因：其后若有 completed、yielded 或 canceled 的 Run，旧失败原因不再上报；pending Item 自身的 dispatch 错误在无更近失败 Run 时才作为兜底。
@@ -210,7 +213,7 @@ Driver：
 - Builtin Provider Session 持久化每次模型调用的 token usage 与嵌入方写入的上下文元数据；`sumi-builtin-agent` harness 把每次压缩记录（触发原因、边界、估算 source/summary token）写入 session metadata，供运行期观测与 harness 基准测试使用。
 - `sumi-agent-core` 是通用 agent runtime，不拥有 prompt 与压缩策略；`sumi-builtin-agent`（Sumi Computer）与 `sumi-telegram-agent`（Telegram）各自实现 `ContextStrategy`，提示词完全独立。
 - Builtin 上下文压缩按模型上下文窗口与触发比例（`computer.builtin.context_window_tokens`、`compaction_trigger_ratio`）预判触发，provider 返回上下文超限错误时再触发一次压缩重试；两种路径都写入压缩记录。
-- Builtin 压缩保留最近 `compaction_keep_recent_tokens`（默认 20000）token 的原始消息，切割点只落在 user/assistant 消息上；切到 turn 中间时为 turn 前缀单独生成摘要，并在摘要后附加被压缩消息中的文件读写清单。
+- Builtin 压缩保留最近 `compaction_keep_recent_tokens`（默认 20000）token 的原始消息，切割点只落在 user/assistant 消息上；切到 turn 中间时为 turn 前缀单独生成摘要，并在摘要后附加被压缩消息中的文件读写清单。若单轮工具输出过大导致常规切割点落在起点（无可压缩前缀），先对超长工具输出做有界截断再执行压缩重试，避免死锁。
 - Builtin 上下文用量估算优先使用 provider 最近一次调用上报的 input tokens，再按字符数估算其后追加的消息；没有用量数据时才全部按字符估算。
 - `memory/MEMORY.md` 是每个 Run 开始必须读取的主文件；产生影响后续协作的新知识时，Agent 必须在相关对外动作前写入。
 - Builtin 文件工具与 bash 以 Agent Home 根为路径基准：文件工具使用 `workspace/<path>` 或 `memory/<path>`，裸路径（`MEMORY.md`、`notes/<topic>.md`）默认落在 Memory 根，绝对路径仅接受落在 `workspace/` 或 `memory/` 内的；bash 使用同一路径，shell 写入允许 `workspace/`、`runs/`（`TMPDIR`）与系统临时目录 `/tmp`（macOS 沙箱放行 `/private/tmp`，Linux 沙箱挂载私有 `/tmp`），持久文件放 `workspace/`，`/tmp` 只作 scratch。macOS 系统 bash 3.2 的 here-doc/here-string 临时文件固定写 `/tmp` 且忽略 `TMPDIR`，因此放行 `/tmp` 是 heredoc 可用的前提；有 Homebrew bash（`/opt/homebrew/bin/bash` 或 `/usr/local/bin/bash`）时优先使用，其临时文件遵循 `TMPDIR` 落入 `runs/`。Memory CLI 的 `path` 相对 Memory 根（如 `MEMORY.md`、`notes/<topic>.md`）。
@@ -226,7 +229,7 @@ Driver：
 
 ### Agent CLI
 
-- 所有自动化调用使用 `--json`；stdout 只能输出一个 JSON envelope，诊断输出写入 stderr。
+- 所有自动化调用使用 `--json`；stdout 只能输出一个 JSON envelope，诊断输出写入 stderr。写命令支持可选 `--idempotency-key <uuid>` 供重试复用；`memory write` 支持 `--body`、`--file` 与 `--stdin`，`task submit-review` 支持 `--body` 与 `--body-file`，`agent create` 支持 `--role` 与 `--role-file`。
 - 稳定错误码：invalid_argument、unauthenticated、permission_denied、not_found、conflict、context_changed、rate_limited、unavailable、internal。
 - `details` 只包含错误处理需要的结构化标识，不得包含 Message、Attachment、Memory、Secret 或 Provider transcript 正文。
 - Server 为每个 Run 记录已观察位置，Agent 不传序号。位置有三类：Channel 全量、Channel Root、Thread。RunStart 把 Focus Channel 全量位置设为 `channel_snapshot_seq`，把 Focus Thread 位置设为 Focus 最新序号；`thread read` 推进 Thread 位置，`channel read` 推进 Channel 全量位置。位置只能推进到本次实际返回的最大序号，且仅当原位置之后、该序号之前没有未返回的其他成员文本消息。Thread 的有效位置取 Thread 与所属 Channel 全量位置中的较大者；Channel Root 同理。
@@ -307,10 +310,10 @@ Driver：
   - **For you**（暖色）：有人在等你。时间线不高亮整条 Message；正文里对我的 mention 用 `--you-ink`；侧边栏 Inbox 计数使用 `--you-soft` 胶囊。
   - **Agent working**（青色 `--live`）：Agent 正在处理。头像外圈呼吸环；时间线底部、composer 上方固定一条工作状态（Agent 小印章 + 三点动画 + `X is working`；只有该 Run 属于 Task 时才补上目标，写成 `X is working on <Task>`，Channel 地址不写，因为读者就在那段对话里；多人时合并为 `X and Y are working`），只列出近期在这段对话里发言或被提到的 Agent（DM 中总是对方）；这条位置始终预留，出现和消失都不推动消息。最后一次动作只在 hover（`title`）中显示，不展开执行过程，也不提供过程控制。
 - Agent 所在 Computer 不可达时，Agent 显示为 Offline：头像不显示呼吸环，角标为中性灰点，不出现在工作状态条中；工作状态条的位置改为一行中性文字 `X is offline · continues when its Computer reconnects`，列入规则与工作状态相同。Computer 重新连接后恢复原状态，界面不提供重试或检测操作。
-- 颜色 token 定义在 `web/src/styles/tokens.css`：底色 `--bg #FFFFFF`、侧栏 `--bg-sidebar #F7F6F4`、subtle `#F3F2EF`；墨色 `--ink #1C1B19`、`--ink-2 #4F4D48`、`--muted #6F6C65`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DE`、`--line-strong #D3CFC8`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色；阴影、遮罩、墨底上的文字等组合值同样定义为 token。
+- 颜色 token 定义在 `web/src/styles/tokens.css`：纸感底色 `--bg #FFFFFF`、画布 `--bg-canvas #FAF9F7`、侧栏 `--bg-sidebar #F5F4F0`、subtle `#F0EFEA`；墨色 `--ink #181715`、`--ink-2 #4A4843`、`--muted #6B6860`（在白底、侧栏、subtle 上对比度均 ≥ 4.5:1）；线 `--line #E6E3DC`、`--line-strong #D1CCC2`；信号 `--you* / --live*`；状态 `--status-*`；图表 `--series-1/2/3`。页面样式只引用 token，不写字面颜色、硬编码字号、非标圆角或非必要 `!important`；样式按基础、控件、Shell、弹窗、页面和触屏模块化组织。
 - Space accent 只取四个预置色（`#F0602F`、`#E8B42D`、`#3C9E8F`、`#6C5CE7`），在创建 Space 时选择。进入 Space 后由 SpaceShell 写入 `--accent`、`--accent-hover`、`--accent-ink`（白底上可读的加深色）、`--accent-soft` 和 `--on-accent`（按对比度选白或墨色）；只用于 Space 标识、主要按钮与发送键、开关与勾选、当前导航图标和正文链接，不用于底色或注意力信号。离开 Space 的页面回到墨色默认值。
-- 字体：Geist（中文回退 Noto Sans SC）；代码、Task 编号、数值使用 Geist Mono 与 tabular figures。Channel 名、Driver 名和时间是文字，使用 Geist。
-- 字号层级：页面 header（Channel、Tasks、Members、Inbox、Computers、Settings 等 56px 顶栏）的标题统一 17px/600，Task 与 Agent 详情的大标题 23px/600、区域标题 13.5px/600（句首大写，不用全大写）、正文与 Message 14.5px、辅助信息 13.5px、元数据 12.5px。整套字号在 Astryx 基准上统一乘 1.05（浏览器 110% 缩放偏大、100% 偏小的折中），行高仍用无单位比例随字号缩放。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
+- 字体：正文与 UI 使用 `Inter`（中文回退 `Noto Sans SC` 与系统无衬线），标题使用 `Plus Jakarta Sans`（回退 `Inter`），代码、Task 编号、数值使用 `JetBrains Mono`（回退 `Geist Mono` 与系统等宽）与 tabular figures。Channel 名、Driver 名和时间是文字，使用正文无衬线。
+- 字号层级全部通过 token（`--text-2xs` 到 `--text-2xl`）定义：页面 header（56px 顶栏）标题 17px/600，Task 与 Agent 详情大标题 24px/650、区域标题 13.5px/600（句首大写，不用全大写）、正文与 Message 14.5px、辅助信息 13.5px、元数据 12.5px。页面 header 与弹窗头只放标题和操作：不加解释页面用途的说明句，标题上方不放小标签（kicker）。
 - 组件尺度参照 Astryx Neutral 主题，样式由 Sumi 自写 CSS 实现，不引入组件库：控件高度默认 32px、紧凑 28px；圆角分四级（`--radius-xs` 4px 用于标记，`--radius-sm` 6px 用于控件内部的菜单项，`--radius-md` 10px 用于按钮、输入框与下拉，`--radius-lg` 12px 用于卡片、弹窗与 Composer），徽标与状态胶囊为全圆角；阴影分三级（`--shadow-raised` 抬起卡片、`--shadow-popover` 浮层、`--shadow-dialog` 弹窗），每级由 1px 描边定边界、两层投影承担高度；图标只取三档：12px 用于紧凑标记（区段标题、命令说明、附件小条），16px 用于控件与导航，20px 用于空态与提示，品牌标记和插图不在此列。
 - 按钮无边框：主要 CTA 为实心 accent，次要按钮为半透明中性填充（`--fill-neutral`），危险按钮为浅红底红字，icon button 只在 hover 时显示 `--ink-wash`；hover 与按下逐级加深填充，按下时缩放到 `--press-scale`（0.98），`prefers-reduced-motion` 下不缩放。输入框与 SumiSelect 触发器为 1px `--line-strong` 线框：hover 在内侧加 2px 浅环，聚焦时线变墨色并保留 2px 内环，尺寸不变。自定义下拉（SumiSelect）浮层使用 `--shadow-popover`，选中项加粗并带勾；表单不渲染浏览器原生 select。
 - 选中态：Sidebar 导航当前项与分段控件的选中块是白色抬起卡片（`--shadow-selected`）；页内筛选与 tab 的当前项是中性填充（`--fill-neutral-hover`）。hover 只叠加 `--ink-wash`。
@@ -330,7 +333,7 @@ Driver：
 - 选中态与 tab 切换不改变字重或尺寸，避免点击后文字和相邻控件位移；分段控件（如 24h / 7d / 30d）使用中性半透明底槽（`--fill-neutral`）+ 白色抬起选中块。
 - 空态统一使用居中的 EmptyState：抬起的图标块、一句标题、一行说明、可选的下一步按钮；不留大片空白或只显示一行灰字。空 Channel 的开场说明在时间线中垂直居中。
 - DM 列表中 Agent 正在工作时显示青色 `Working`，否则显示 Role 摘要。
-- 1100px 及以上保持三栏；低于 1100px 出现顶栏（`Open navigation` 菜单按钮、Space 名称、Inbox 计数），Sidebar 变为抽屉，Thread 覆盖 Channel；低于 700px 使用单列，Thread 和 Task 详情为全屏路由。
+- 1100px 及以上保持三栏；低于 1100px 出现顶栏（`Open navigation` 菜单按钮、Space 名称、Inbox 计数），Sidebar 变为抽屉，Thread 覆盖 Channel；低于 700px 使用单列，Thread 和 Task 详情为全屏路由。全站样式严格只使用这两个断点（`1099px` 与 `699px`）。
 - Header 高 56px。Message 正文、Thread 回复预览、Task Result 与 Agent 活动预览的最大宽度是 `--measure-text`（68ch），窗口再宽也不拉长行；附件、Task 标识与 Composer 仍占满整列。消息较少时时间线贴近 Composer，像聊天一样从底部开始。
 - Composer 是抬起的白色卡片（`--shadow-raised`、圆角 `--radius-lg`），输入框本身无边框；高度随内容增长到 240px 后内部滚动。左下为附件，右下为 32px 圆角方形发送按钮（ArrowUp，空内容时变浅），提示 `⌘ Enter to send`。文件可拖到 Composer 上（显示 `Drop to attach` 遮罩）或直接粘贴，按顺序上传为附件。
 - 返回 Channel 时恢复上次退出的滚动位置（无保存位置时定位到最新 Message）和打开的 Thread；离开 Conversation 区域后，Conversation 入口与 Space 首页回到上次所在的 Channel/DM；Composer 未发送正文按对话保存在浏览器本地，发送成功后清除。
@@ -351,7 +354,8 @@ Driver：
 
 ### 连接与反馈
 
-- 实时连接断开 2.5 秒后，页面顶部居中出现小胶囊：离线时 `You are offline.`，否则 `Reconnecting…`，右侧 `Retry now`；后台按指数退避（最长 30 秒）自动重连，浏览器重新联网时立即重连。重连成功后刷新全部数据，补上断线期间的变化。
+- 实时连接断开 2.5 秒后，页面顶部居中出现小胶囊：离线时 `You are offline.`，否则 `Reconnecting…`，右侧 `Retry now`；后台按指数退避（最长 30 秒）自动重连，浏览器重新联网时立即重连。仅在曾经断线重连后（或遇到 `Last-Event-ID` 过期 `context_changed` 时）才刷新数据，首次连接不重复失效缓存；检测到会话失效（401）时停止重连并跳转登录。
+- 所有站内链接（包含消息内 `@mention`、`!seq` Task 引用与头像菜单）均走 SPA 路由跳转，不触发整页重载；乐观发送队列按对话维度持久化于前端应用状态，切换 Channel 或关闭 Thread 不丢弃待发/失败消息，并与实时 SSE 到达消息去重。
 - 改变状态的操作（创建 Task、改 Task 状态、关注 Thread、加入 Channel、改权限、更新/退役 Agent、移除 Computer、清空 Inbox 等）完成后在右上角 header 下方（手机为顶栏下方，避开 composer 和软键盘）显示一条墨色提示，成功 3.5 秒、失败 7 秒后消失，失败会写明原因；同时最多 3 条，可手动关闭。
 - 未知地址显示 404 页（`This page does not exist`），页面渲染出错显示错误页（`Something went wrong on this page`、Try again）；两者都给一条回去的路：在 Space 内回到该 Space，否则去登录。
 - Settings 的 Account and Space 分组底部提供 Sign out。
@@ -378,15 +382,15 @@ Driver：
 - Task 状态颜色只作用于状态图形本身（TODO 灰、In Progress 青、In Review 暖、Done 绿、Closed 浅灰），标签底色保持中性。
 - Action Message 使用紧凑结构化行，显示 actor、动作和资源链接，不显示原始 JSON、命令参数或内部 ID；普通 composer 不能选择 action kind。
 - System Notice 渲染为居中系统信息行：成员名用 ink，正文 muted；不画横线、无边框；同一日期内连续多条默认折叠，折叠按钮为纯文字。成员关系变更按动作聚合：相邻的 `<name> joined the channel`（或 `left` / `was removed`）合并为一行，名字以 `, ` 分隔、最后一个名字前用 ` and `，多人被移除时用 `were removed`；被合并的 Message 保留各自的 `#message-<id>` 锚点；其余 notice 各占一行。
-- Agent attention 失败在来源 Message 下方显示 inline notice，包含目标 Agent、稳定错误码和重试状态，不显示数据库错误或正文副本。
-- Agent 最近一次 Run 以失败结束时，在时间线下方状态行显示 `<Agent> stopped on an error <code>`：稳定错误码原样显示，一句人类可读的完整原因作为 title；该 Agent 重新开始 Run 或之后有非失败 Run 时该行消失，不写入消息流。
+- Agent attention 失败在来源 Message 下方显示 inline notice，包含目标 Agent、人话错误说明和重试状态（原始错误码仅置于 `title` 提示，不直接暴露为正文，也不显示数据库错误或正文副本）。
+- Agent 最近一次 Run 以失败结束时，在时间线下方状态行显示 `<Agent> stopped: <人话原因>`（原始错误码置于 `title` 供排障）；该 Agent 重新开始 Run 或之后有非失败 Run 时该行消失，不写入消息流。
 - Message 正文支持常用 Markdown（含 `- [x]` / `- [ ]` 任务列表渲染）；正文中的 mention 和 Task 引用只渲染 Server 返回的结构化结果，不根据符号推断。
 - 普通 Message 正文默认完整展开，第一次看到就能读到全部；超过 8 个视觉行的长正文提供纯文字的 `Show less` 收起，收起后显示 `Show more`，按实际排版高度判断，不按字符数推断。
 
 ### Task 页面
 
 - Tasks 页面使用 list/detail 布局，是对话的辅助入口，不是项目管理页面；入口保留在侧边栏。列表内容最宽 960px，标题列吸收多余宽度，Assignee、Source Thread 与更新时间保持右对齐。
-- 筛选固定为 All open、To do、In progress、In review、Done、Closed、Created by me，每个筛选带数量；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee（Agent 小印章 + 名字）、Source Thread、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
+- 筛选固定为 All open、To do、In progress、In review、Done、Closed、Created by me，每个筛选带数量；列表按状态分组，组标题带数量，不显示列头；行内依次为状态图形、`!seq` 与标题、Assignee（Agent 小印章 + 名字 + 实时运行状态点：Working / Offline / Needs attention）、Source Thread（含 DM 可点击跳转）、更新时间；默认先显示 In Review，再显示 In Progress 和 TODO，各组按 updated_at 倒序。
 - Task 详情 header 副标题为 `!seq · #channel`（DM 为 `Direct message`）。正文依次显示：Request（白底卡片，来源对话的第一条消息与最新 3 条 reply，右上角 Open Thread）、Task facts（Created by、Created、Updated；TODO 未指派时可选择 Agent 开始）、Actions、Result（仅 Done）、Close reason（仅 Closed）；侧栏只有 Activity。
 - In review 时 Request 卡片顶部固定一条 assignee 最近回复：标题 `Latest from {Agent}` 与相对时间，正文默认完整展开（长正文可 `Show less` 收起）；该消息若已在下方 3 条 reply 中则不重复出现；assignee 没有回复时显示 `No reply from {Agent} yet.`
 - Actions 按状态分两组。TODO（未指派）时说明需要先指派 Agent；In Progress 与 In review 显示 Mark done（主色），`Close Task…` 退到次要位置，单独一行，弹窗选择理由 + 可选备注；In review 另有 `Request changes` 与 Mark done 并列。不提供其它状态操作按钮。
@@ -404,16 +408,16 @@ Driver：
 - Inbox 页 header 提供 Mark all read，一次将当前 Human 全部 pending Item 标记为已读；没有待读 Item 时不显示按钮。
 - Agent Inbox 不向普通 Member 公开；Owner/Admin 只能读取来源摘要和错误代码。
 - Members 页面按 Agents、Humans 分组显示扁平列表行：身份（头像 + 名字 + 行内状态点；Agent 工作中时跟当前步骤，否则跟 Role 的第一行；自己显示 You）、Access 控制（自定义下拉）、右侧固定列的 30px 轻量图标（Agent 的 Manage 与 Message）。Channel 的 Add Agents 浮层在没有可加 Agent 时提供 Create an Agent。Permission 在 Agent 详情逐项管理，分区名为 `What it can do`，每项用人话命名（Create Channels、Invite to Channels、Remove from Channels、Create Agents）并附一句说明，不显示 `channel.create` 等原始名，不提供 Role 套餐。
-- Computers 页面左侧分栏为已配对列表和配对入口；没有已配对 Computer 时不显示分栏，整页为配对 onboarding。配对命令整条换行显示，任何视口都读得到完整命令，不横向截断。
+- Computers 页面左侧分栏为已配对列表和配对入口；存在已配对 Computer 且未指定 hash 时自动选中首台（优先在线）Computer；没有已配对 Computer 时不显示分栏，整页为配对 onboarding。配对命令整条换行显示，任何视口都读得到完整命令，不横向截断。
 - Computer 更新状态在 Server 持久化协议完成前不进入 UI；第一期只通过 Computer 本地结构化日志和 update journal 诊断，禁止从在线或离线状态推断更新结果。
-- Agent 详情头部只显示安静信号（Activity、Computer 可达性、出错时 `Needs attention`，hover 看原因的人话），不提供 DM 按钮；facts 条为 Status、Computer、Driver，值使用 13px 并截断超长文本。
-- Agent 详情 Overview：Current work（Task、Conversation `#channel`、Doing `Working / Starting / Nothing right now`、Computer）、Identity、Setup（Ready / In progress / Failed、Computer、Last problem）、Conversations with other Agents（仅 Owner/Admin）、What it can do。不显示 Session、Provision、本地 Run 诊断；Settings tab 不显示 attention 参数。
+- Agent 详情头部只显示安静信号（Activity、Computer 可达性、出错时 `Needs attention`，hover 看原因的人话），不提供 DM 按钮；facts 条为 Status、Computer、Driver，值使用 13px 并截断超长文本。默认打开 `Overview` 页签，与头部去重不重复平铺同一 Computer 字段。
+- Agent 详情 Overview：Current work（Task、Conversation `#channel`、Doing `Working / Starting / Nothing right now`）、Identity、Setup（Ready / In progress / Failed、Last problem）、Conversations with other Agents（仅 Owner/Admin）、What it can do。不显示 Session、Provision、本地 Run 诊断；Settings tab 不显示 attention 参数。权限变更提示使用人话名称（如 `Create Channels allowed.`），不显示原始权限名。
 - Agent 详情 Activity feed 按时间倒序；不显示工具参数；发送消息的行在下方显示该 Message 的纯文本预览（subtle 底，正文样式，不用等宽字体，截断以省略号结尾），预览经所在 Thread 读取，已删除或不可读的 Message 不显示预览；时间右对齐，字号统一。Activity 页签已经是这个视图的名字，页面不再重复一个 Activity 标题。
 - 详情分区使用扁平布局：不绘制卡片边框、底色或阴影，用 1px `--line` 分隔线组织。
 
 ### Agent insights
 
-- `Agent insights` 是默认关闭的实验功能：只有 Settings 开启后，Sidebar 的 Space tools 才显示 Agent insights 入口；路由为 `/s/$spaceSlug/insights`，未开启时直达页面显示禁用说明与 Settings 链接。
+- `Agent insights` 是默认开启的实验功能：在 Settings 中可关闭，开启时 Sidebar 的 Space tools 显示 Agent insights 入口；路由为 `/s/$spaceSlug/insights`，关闭时直达页面显示禁用说明与 Settings 链接。
 - insights 页面顶部是 `Statistics` 与 `Graph` 两个页内 tab（`/insights/stats`、`/insights/graph`），下方展示对应内容。
 - Statistics 页按 Agent 聚合 LLM 消耗：左列是可选中 Agent 列表（像素印章 + input/output 摘要），右侧显示该 Agent 的请求数、input/output/cached 统计卡、SVG 曲线和按 model 的分组表；支持 24h/7d/30d。部分 Computer 查询失败时显示部分数据警告，全部失败时显示错误与 Retry，不显示为无 usage。
 - Graph 页为力导向关系图 + 右侧详情面板；画布为侧栏底色的平面，不画网格线。节点是 Agent 像素印章头像（与 PixelIdentity 同源算法，SVG 内联渲染，不依赖 HTML foreignObject）+ display name；边是 Agent 之间的互动关系，使用 1px 细线，hover/focus 显示总数，选中态只通过头像描边与整体明暗区分。
@@ -424,7 +428,7 @@ Driver：
 ### Settings
 
 - Sidebar 底部身份行右侧提供 Settings 入口（齿轮图标），路由为 `/s/$spaceSlug/settings`。
-- Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、Space 颜色（色块 + 四个预设名 Flame／Gold／Teal／Iris 之一，不显示十六进制原值）和你的访问级别；`Keyboard shortcuts` 分组列出快捷键；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
+- Settings 是单页：`Account and Space` 分组列出名字、邮箱、Space、地址、Space 颜色（色块 + 四个预设名 Flame／Gold／Teal／Iris 之一，不显示十六进制原值）和你的访问级别；`Experimental features` 分组以带边框的列表列出所有已注册 feature，每行是名称、说明和右侧开关（`role="switch"`）；`Keyboard shortcuts` 分组列出快捷键；feature 自带的配置项在开启后显示在该行下方。`#feature-<id>` 链接滚动到并高亮对应行。
 - feature 通过注册表（`featureRegistry`）声明 id、名称、类型、描述、storageKey、`defaultEnabled` 和可选配置项；后续新增 feature 只改注册表，无需改页面结构。
 - 实验类型（experimental）的行即启用开关；所有状态只持久化在浏览器 localStorage（`sumi.feature.<id>`），不上传 Server。localStorage 无值时按 `defaultEnabled` 显示，写过的值（"0" / "1"）保持不变；当前唯一的实验为 Agent insights（默认开启），关闭后 Sidebar 隐藏对应入口。
 
