@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/abcdlsj/sumi/internal/driver"
 )
@@ -32,9 +32,6 @@ type Config struct {
 func (c *Config) normalize() {
 	if c.BaseURL == "" {
 		c.BaseURL = os.Getenv("OPENAI_BASE_URL")
-	}
-	if c.BaseURL == "" {
-		c.BaseURL = "https://api.openai.com/v1"
 	}
 	if c.APIKey == "" {
 		c.APIKey = os.Getenv("OPENAI_API_KEY")
@@ -56,23 +53,9 @@ func (c *Config) normalize() {
 	}
 }
 
-type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-}
-
-type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
-}
-
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
+type Message = openai.ChatCompletionMessage
+type ToolCall = openai.ToolCall
+type FunctionCall = openai.FunctionCall
 
 type CompletionResponse struct {
 	Message      Message
@@ -80,9 +63,9 @@ type CompletionResponse struct {
 	OutputTokens int
 }
 
-// Provider abstracts the LLM chat-completions endpoint for production HTTP and deterministic testing.
+// Provider abstracts the chat-completions call for production SDK and deterministic tests.
 type Provider interface {
-	Complete(ctx context.Context, model string, messages []Message, tools []map[string]any) (CompletionResponse, error)
+	Complete(ctx context.Context, model string, messages []Message, tools []openai.Tool) (CompletionResponse, error)
 }
 
 type Harness struct {
@@ -95,10 +78,13 @@ type Harness struct {
 func New(cfg Config, provider Provider) (*Harness, error) {
 	cfg.normalize()
 	if provider == nil {
+		sdkCfg := openai.DefaultConfig(cfg.APIKey)
+		if cfg.BaseURL != "" {
+			sdkCfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+		}
 		provider = &openAIProvider{
-			baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-			apiKey:  cfg.APIKey,
-			client:  &http.Client{Timeout: 120 * time.Second},
+			apiKey: cfg.APIKey,
+			client: openai.NewClientWithConfig(sdkCfg),
 		}
 	}
 	h := &Harness{
@@ -129,7 +115,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.history = append(h.history, Message{Role: "user", Content: in.UserPrompt})
+	h.history = append(h.history, Message{Role: openai.ChatMessageRoleUser, Content: in.UserPrompt})
 	var totalIn, totalOut, totalTools int
 	tools := builtinToolsSpec()
 
@@ -140,7 +126,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 
 		reqMsgs := make([]Message, 0, len(h.history)+1)
 		if in.SystemPrompt != "" {
-			reqMsgs = append(reqMsgs, Message{Role: "system", Content: in.SystemPrompt})
+			reqMsgs = append(reqMsgs, Message{Role: openai.ChatMessageRoleSystem, Content: in.SystemPrompt})
 		}
 		reqMsgs = append(reqMsgs, h.history...)
 
@@ -166,7 +152,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 			totalTools++
 			out := executeTool(ctx, tc, in)
 			h.history = append(h.history, Message{
-				Role:       "tool",
+				Role:       openai.ChatMessageRoleTool,
 				ToolCallID: tc.ID,
 				Content:    out,
 			})
@@ -181,7 +167,7 @@ func (h *Harness) RunTurn(ctx context.Context, in driver.TurnInput) (driver.Turn
 	}, fmt.Errorf("builtin harness reached max_steps_per_turn (%d)", h.cfg.MaxStepsPerTurn)
 }
 
-func (h *Harness) completeWithRetry(ctx context.Context, msgs []Message, tools []map[string]any) (CompletionResponse, error) {
+func (h *Harness) completeWithRetry(ctx context.Context, msgs []Message, tools []openai.Tool) (CompletionResponse, error) {
 	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 0; attempt < 3; attempt++ {
@@ -207,8 +193,12 @@ func isRetryableErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.HTTPStatusCode == 429 || apiErr.HTTPStatusCode >= 500
+	}
 	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "429") || strings.Contains(s, "500") || strings.Contains(s, "502") || strings.Contains(s, "503") || strings.Contains(s, "timeout") || strings.Contains(s, "connection reset")
+	return strings.Contains(s, "timeout") || strings.Contains(s, "connection reset")
 }
 
 func (h *Harness) needsCompaction(systemPrompt string) bool {
@@ -224,14 +214,12 @@ func (h *Harness) needsCompaction(systemPrompt string) bool {
 	return estimatedTokens >= threshold && len(h.history) > h.cfg.KeepRecentMessages+2
 }
 
-// compactHistory preserves the most recent messages and summarizes earlier turns into a single bounded digest.
 func (h *Harness) compactHistory() {
 	cut := len(h.history) - h.cfg.KeepRecentMessages
 	if cut <= 1 {
 		return
 	}
-	// Align cut point to a user message boundary to avoid orphaned tool_call/tool pairs.
-	for cut > 1 && h.history[cut].Role != "user" {
+	for cut > 1 && h.history[cut].Role != openai.ChatMessageRoleUser {
 		cut--
 	}
 	if cut <= 1 {
@@ -252,7 +240,7 @@ func (h *Harness) compactHistory() {
 			b.WriteByte('\n')
 		}
 	}
-	summary := Message{Role: "user", Content: b.String()}
+	summary := Message{Role: openai.ChatMessageRoleUser, Content: b.String()}
 	next := make([]Message, 0, 1+len(h.history[cut:]))
 	next = append(next, summary)
 	next = append(next, h.history[cut:]...)
@@ -299,14 +287,14 @@ func (h *Harness) saveSession() error {
 	return os.WriteFile(h.cfg.SessionFile, buf.Bytes(), 0o600)
 }
 
-func builtinToolsSpec() []map[string]any {
-	return []map[string]any{
+func builtinToolsSpec() []openai.Tool {
+	return []openai.Tool{
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "bash",
-				"description": "Execute a shell command inside the agent workspace. Use `sumi` CLI for all Sumi collaboration actions.",
-				"parameters": map[string]any{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "bash",
+				Description: "Execute a shell command inside the agent workspace. Use `sumi` CLI for all Sumi collaboration actions.",
+				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"command": map[string]any{"type": "string"},
@@ -316,11 +304,11 @@ func builtinToolsSpec() []map[string]any {
 			},
 		},
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "read_file",
-				"description": "Read a file inside workspace/ or memory/ (relative to agent home).",
-				"parameters": map[string]any{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "read_file",
+				Description: "Read a file inside workspace/ or memory/ (relative to agent home).",
+				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"path": map[string]any{"type": "string"},
@@ -330,11 +318,11 @@ func builtinToolsSpec() []map[string]any {
 			},
 		},
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "write_file",
-				"description": "Write a file inside workspace/ or memory/ (relative to agent home).",
-				"parameters": map[string]any{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "write_file",
+				Description: "Write a file inside workspace/ or memory/ (relative to agent home).",
+				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"path":    map[string]any{"type": "string"},
@@ -435,62 +423,28 @@ func executeTool(ctx context.Context, tc ToolCall, in driver.TurnInput) string {
 }
 
 type openAIProvider struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	apiKey string
+	client *openai.Client
 }
 
-func (p *openAIProvider) Complete(ctx context.Context, model string, messages []Message, tools []map[string]any) (CompletionResponse, error) {
+func (p *openAIProvider) Complete(ctx context.Context, model string, messages []Message, tools []openai.Tool) (CompletionResponse, error) {
 	if p.apiKey == "" {
 		return CompletionResponse{}, errors.New("missing OPENAI_API_KEY for builtin driver")
 	}
-	payload := map[string]any{
-		"model":    model,
-		"messages": messages,
-		"tools":    tools,
-	}
-	raw, err := json.Marshal(payload)
+	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages,
+		Tools:    tools,
+	})
 	if err != nil {
 		return CompletionResponse{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return CompletionResponse{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return CompletionResponse{}, err
-	}
-	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return CompletionResponse{}, err
-	}
-	if resp.StatusCode >= 400 {
-		return CompletionResponse{}, fmt.Errorf("provider status %d", resp.StatusCode)
-	}
-
-	var parsed struct {
-		Choices []struct {
-			Message Message `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
-		return CompletionResponse{}, err
-	}
-	if len(parsed.Choices) == 0 {
+	if len(resp.Choices) == 0 {
 		return CompletionResponse{}, errors.New("provider returned empty choices")
 	}
 	return CompletionResponse{
-		Message:      parsed.Choices[0].Message,
-		InputTokens:  parsed.Usage.PromptTokens,
-		OutputTokens: parsed.Usage.CompletionTokens,
+		Message:      resp.Choices[0].Message,
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: resp.Usage.CompletionTokens,
 	}, nil
 }

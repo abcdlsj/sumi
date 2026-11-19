@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -233,7 +234,7 @@ func (s *Server) requireComputerAgent(r *http.Request) (domain.Computer, domain.
 	if err != nil {
 		return domain.Computer{}, domain.Member{}, err
 	}
-	agentID := r.PathValue("agentID")
+	agentID := chi.URLParam(r, "agentID")
 	var m domain.Member
 	var kind, access, createdAt string
 	err = s.svc.Store().ReadDB().QueryRowContext(r.Context(),
@@ -296,7 +297,7 @@ func (s *Server) handleAgentReadMessages(w http.ResponseWriter, r *http.Request)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	unreadOnly := r.URL.Query().Get("unread") == "true"
 	msgs, readSeq, err := s.svc.ListMessages(r.Context(), agent, app.ListMessagesInput{
-		ConversationID: r.PathValue("convID"),
+		ConversationID: chi.URLParam(r, "convID"),
 		AfterSeq:       afterSeq,
 		UnreadOnly:     unreadOnly,
 		Limit:          limit,
@@ -324,7 +325,7 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	res, err := s.svc.SendMessage(r.Context(), agent, app.SendMessageInput{
-		ConversationID:   r.PathValue("convID"),
+		ConversationID:   chi.URLParam(r, "convID"),
 		ReplyToMessageID: body.ReplyToMessageID,
 		BodyMarkdown:     body.BodyMarkdown,
 		EnforceFreshness: true,
@@ -353,7 +354,7 @@ func (s *Server) handleAgentSetFollowing(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.SetFollowing(r.Context(), agent, r.PathValue("convID"), body.Following); err != nil {
+	if err := s.svc.SetFollowing(r.Context(), agent, chi.URLParam(r, "convID"), body.Following); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -373,7 +374,7 @@ func (s *Server) handleAgentSetNotifyLevel(w http.ResponseWriter, r *http.Reques
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.SetNotifyLevel(r.Context(), agent, r.PathValue("convID"), body.Level); err != nil {
+	if err := s.svc.SetNotifyLevel(r.Context(), agent, chi.URLParam(r, "convID"), body.Level); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -541,7 +542,7 @@ func (s *Server) handleAgentClaimTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	res, err := s.svc.ClaimTask(r.Context(), agent, r.PathValue("taskID"), true)
+	res, err := s.svc.ClaimTask(r.Context(), agent, chi.URLParam(r, "taskID"), true)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -559,7 +560,7 @@ func (s *Server) handleAgentUnclaimTask(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.UnclaimTask(r.Context(), agent, r.PathValue("taskID"))
+	task, err := s.svc.UnclaimTask(r.Context(), agent, chi.URLParam(r, "taskID"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -583,7 +584,7 @@ func (s *Server) handleAgentAssignTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.svc.AssignTask(r.Context(), agent, app.AssignTaskInput{
-		TaskID:           r.PathValue("taskID"),
+		TaskID:           chi.URLParam(r, "taskID"),
 		AssigneeMemberID: body.AssigneeMemberID,
 		Reason:           body.Reason,
 		ExpectedRevision: body.ExpectedRevision,
@@ -613,7 +614,7 @@ func (s *Server) handleAgentUpdateTaskStatus(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.UpdateTaskStatus(r.Context(), agent, r.PathValue("taskID"), body.Status)
+	task, err := s.svc.UpdateTaskStatus(r.Context(), agent, chi.URLParam(r, "taskID"), body.Status)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -637,7 +638,7 @@ func (s *Server) handleAgentAmendTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task, err := s.svc.AmendTask(r.Context(), agent, app.AmendTaskInput{
-		TaskID:           r.PathValue("taskID"),
+		TaskID:           chi.URLParam(r, "taskID"),
 		Title:            body.Title,
 		Description:      body.Description,
 		ExpectedRevision: body.ExpectedRevision,

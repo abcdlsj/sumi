@@ -12,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/store"
@@ -29,7 +33,7 @@ type Server struct {
 	svc    *app.Service
 	cfg    Config
 	hub    *computerHub
-	mux    *http.ServeMux
+	router *chi.Mux
 	logger *slog.Logger
 }
 
@@ -40,11 +44,22 @@ func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
 	hub := newComputerHub(logger)
 	svc.SetNotifier(hub)
 
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	if cfg.WebOrigin != "" {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   []string{cfg.WebOrigin},
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Content-Type", "Idempotency-Key", "Authorization"},
+			AllowCredentials: true,
+		}))
+	}
+
 	s := &Server{
 		svc:    svc,
 		cfg:    cfg,
 		hub:    hub,
-		mux:    http.NewServeMux(),
+		router: r,
 		logger: logger,
 	}
 	s.registerRoutes()
@@ -52,7 +67,7 @@ func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.withCORS(s.mux)
+	return s.router
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
@@ -60,93 +75,81 @@ func (s *Server) Shutdown(ctx context.Context) {
 }
 
 func (s *Server) registerRoutes() {
-	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	r := s.router
+	r.Get("/api/v1/health", s.handleHealth)
 
 	// Auth
-	s.mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
-	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
-	s.mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	s.mux.HandleFunc("GET /api/v1/auth/me", s.handleMe)
+	r.Post("/api/v1/auth/register", s.handleRegister)
+	r.Post("/api/v1/auth/login", s.handleLogin)
+	r.Post("/api/v1/auth/logout", s.handleLogout)
+	r.Get("/api/v1/auth/me", s.handleMe)
 
 	// Spaces
-	s.mux.HandleFunc("GET /api/v1/spaces", s.handleListSpaces)
-	s.mux.HandleFunc("POST /api/v1/spaces", s.handleCreateSpace)
+	r.Get("/api/v1/spaces", s.handleListSpaces)
+	r.Post("/api/v1/spaces", s.handleCreateSpace)
 
 	// Space-scoped Human APIs
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/bootstrap", s.handleBootstrap)
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/events", s.handleSSE)
+	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
+		r.Get("/bootstrap", s.handleBootstrap)
+		r.Get("/events", s.handleSSE)
 
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/members", s.handleListMembers)
-	s.mux.HandleFunc("PUT /api/v1/spaces/{spaceSlug}/members/{memberID}/permissions/{perm}", s.handleSetPermission)
+		r.Get("/members", s.handleListMembers)
+		r.Put("/members/{memberID}/permissions/{perm}", s.handleSetPermission)
 
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/computers", s.handleListComputers)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/computers/pair", s.handlePairComputer)
+		r.Get("/computers", s.handleListComputers)
+		r.Post("/computers/pair", s.handlePairComputer)
 
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/agents", s.handleCreateAgent)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/agents/{agentID}/control", s.handleControlAgent)
+		r.Post("/agents", s.handleCreateAgent)
+		r.Post("/agents/{agentID}/control", s.handleControlAgent)
 
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/conversations", s.handleListConversations)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/channels", s.handleCreateChannel)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/dm", s.handleCreateDM)
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/conversations/{convID}/messages", s.handleListMessages)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/conversations/{convID}/messages", s.handleSendMessage)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/conversations/{convID}/read", s.handleMarkRead)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/conversations/{convID}/done", s.handleMarkDone)
-	s.mux.HandleFunc("PUT /api/v1/spaces/{spaceSlug}/conversations/{convID}/notify", s.handleSetNotifyLevel)
-	s.mux.HandleFunc("PUT /api/v1/spaces/{spaceSlug}/conversations/{convID}/follow", s.handleSetFollowing)
+		r.Get("/conversations", s.handleListConversations)
+		r.Post("/channels", s.handleCreateChannel)
+		r.Post("/dm", s.handleCreateDM)
+		r.Get("/conversations/{convID}/messages", s.handleListMessages)
+		r.Post("/conversations/{convID}/messages", s.handleSendMessage)
+		r.Post("/conversations/{convID}/read", s.handleMarkRead)
+		r.Post("/conversations/{convID}/done", s.handleMarkDone)
+		r.Put("/conversations/{convID}/notify", s.handleSetNotifyLevel)
+		r.Put("/conversations/{convID}/follow", s.handleSetFollowing)
 
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/inbox", s.handleListInbox)
+		r.Get("/inbox", s.handleListInbox)
 
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/tasks", s.handleListTasks)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/tasks", s.handleCreateTask)
-	s.mux.HandleFunc("GET /api/v1/spaces/{spaceSlug}/tasks/{taskID}", s.handleGetTask)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/tasks/{taskID}/conversation", s.handleEnsureTaskConv)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/tasks/{taskID}/claim", s.handleClaimTask)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/tasks/{taskID}/unclaim", s.handleUnclaimTask)
-	s.mux.HandleFunc("POST /api/v1/spaces/{spaceSlug}/tasks/{taskID}/assign", s.handleAssignTask)
-	s.mux.HandleFunc("PUT /api/v1/spaces/{spaceSlug}/tasks/{taskID}/status", s.handleUpdateTaskStatus)
-	s.mux.HandleFunc("PATCH /api/v1/spaces/{spaceSlug}/tasks/{taskID}", s.handleAmendTask)
+		r.Get("/tasks", s.handleListTasks)
+		r.Post("/tasks", s.handleCreateTask)
+		r.Get("/tasks/{taskID}", s.handleGetTask)
+		r.Post("/tasks/{taskID}/conversation", s.handleEnsureTaskConv)
+		r.Post("/tasks/{taskID}/claim", s.handleClaimTask)
+		r.Post("/tasks/{taskID}/unclaim", s.handleUnclaimTask)
+		r.Post("/tasks/{taskID}/assign", s.handleAssignTask)
+		r.Put("/tasks/{taskID}/status", s.handleUpdateTaskStatus)
+		r.Patch("/tasks/{taskID}", s.handleAmendTask)
+	})
 
 	// Computer WebSocket + Computer-brokered Agent APIs
-	s.mux.HandleFunc("GET /ws/computer", s.handleComputerWS)
-	s.mux.HandleFunc("GET /api/v1/computer/agents/{agentID}/inbox", s.handleAgentInbox)
-	s.mux.HandleFunc("GET /api/v1/computer/agents/{agentID}/conversations", s.handleAgentConversations)
-	s.mux.HandleFunc("GET /api/v1/computer/agents/{agentID}/conversations/{convID}/messages", s.handleAgentReadMessages)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/conversations/{convID}/messages", s.handleAgentSendMessage)
-	s.mux.HandleFunc("PUT /api/v1/computer/agents/{agentID}/conversations/{convID}/follow", s.handleAgentSetFollowing)
-	s.mux.HandleFunc("PUT /api/v1/computer/agents/{agentID}/conversations/{convID}/notify", s.handleAgentSetNotifyLevel)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/dm", s.handleAgentDM)
-	s.mux.HandleFunc("GET /api/v1/computer/agents/{agentID}/members", s.handleAgentMembers)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/agents", s.handleAgentCreateAgent)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/channels", s.handleAgentCreateChannel)
-	s.mux.HandleFunc("GET /api/v1/computer/agents/{agentID}/tasks", s.handleAgentListTasks)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/tasks", s.handleAgentCreateTask)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/tasks/{taskID}/claim", s.handleAgentClaimTask)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/tasks/{taskID}/unclaim", s.handleAgentUnclaimTask)
-	s.mux.HandleFunc("POST /api/v1/computer/agents/{agentID}/tasks/{taskID}/assign", s.handleAgentAssignTask)
-	s.mux.HandleFunc("PUT /api/v1/computer/agents/{agentID}/tasks/{taskID}/status", s.handleAgentUpdateTaskStatus)
-	s.mux.HandleFunc("PATCH /api/v1/computer/agents/{agentID}/tasks/{taskID}", s.handleAgentAmendTask)
+	r.Get("/ws/computer", s.handleComputerWS)
+	r.Route("/api/v1/computer/agents/{agentID}", func(r chi.Router) {
+		r.Get("/inbox", s.handleAgentInbox)
+		r.Get("/conversations", s.handleAgentConversations)
+		r.Get("/conversations/{convID}/messages", s.handleAgentReadMessages)
+		r.Post("/conversations/{convID}/messages", s.handleAgentSendMessage)
+		r.Put("/conversations/{convID}/follow", s.handleAgentSetFollowing)
+		r.Put("/conversations/{convID}/notify", s.handleAgentSetNotifyLevel)
+		r.Post("/dm", s.handleAgentDM)
+		r.Get("/members", s.handleAgentMembers)
+		r.Post("/agents", s.handleAgentCreateAgent)
+		r.Post("/channels", s.handleAgentCreateChannel)
+		r.Get("/tasks", s.handleAgentListTasks)
+		r.Post("/tasks", s.handleAgentCreateTask)
+		r.Post("/tasks/{taskID}/claim", s.handleAgentClaimTask)
+		r.Post("/tasks/{taskID}/unclaim", s.handleAgentUnclaimTask)
+		r.Post("/tasks/{taskID}/assign", s.handleAgentAssignTask)
+		r.Put("/tasks/{taskID}/status", s.handleAgentUpdateTaskStatus)
+		r.Patch("/tasks/{taskID}", s.handleAgentAmendTask)
+	})
 
 	if s.cfg.StaticFS != nil {
-		s.mux.Handle("/", s.cfg.StaticFS)
+		r.Handle("/*", s.cfg.StaticFS)
 	}
-}
-
-func (s *Server) withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && s.cfg.WebOrigin != "" && origin == s.cfg.WebOrigin {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, Authorization")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		}
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -217,7 +220,7 @@ func (s *Server) requireSpaceMember(r *http.Request) (domain.Space, domain.Membe
 	if err != nil {
 		return domain.Space{}, domain.Member{}, err
 	}
-	return s.svc.ResolveHumanMemberInSpace(r.Context(), u.ID, r.PathValue("spaceSlug"))
+	return s.svc.ResolveHumanMemberInSpace(r.Context(), u.ID, chi.URLParam(r, "spaceSlug"))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -460,7 +463,7 @@ func (s *Server) handleSetPermission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	err = s.svc.SetMemberPermission(r.Context(), actor, r.PathValue("memberID"), domain.Permission(r.PathValue("perm")), body.Granted)
+	err = s.svc.SetMemberPermission(r.Context(), actor, chi.URLParam(r, "memberID"), domain.Permission(chi.URLParam(r, "perm")), body.Granted)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -551,7 +554,7 @@ func (s *Server) handleControlAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.ControlAgent(r.Context(), actor, r.PathValue("agentID"), body.Action); err != nil {
+	if err := s.svc.ControlAgent(r.Context(), actor, chi.URLParam(r, "agentID"), body.Action); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -635,7 +638,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	markRead := r.URL.Query().Get("mark_read") == "true"
 	msgs, readSeq, err := s.svc.ListMessages(r.Context(), member, app.ListMessagesInput{
-		ConversationID: r.PathValue("convID"),
+		ConversationID: chi.URLParam(r, "convID"),
 		AfterSeq:       afterSeq,
 		Limit:          limit,
 		MarkRead:       markRead,
@@ -662,7 +665,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.svc.SendMessage(r.Context(), actor, app.SendMessageInput{
-		ConversationID:   r.PathValue("convID"),
+		ConversationID:   chi.URLParam(r, "convID"),
 		ReplyToMessageID: body.ReplyToMessageID,
 		BodyMarkdown:     body.BodyMarkdown,
 	})
@@ -683,7 +686,7 @@ func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		Seq int64 `json:"seq"`
 	}
 	_ = decodeJSON(r, &body)
-	if err := s.svc.MarkRead(r.Context(), actor, r.PathValue("convID"), body.Seq); err != nil {
+	if err := s.svc.MarkRead(r.Context(), actor, chi.URLParam(r, "convID"), body.Seq); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -696,7 +699,7 @@ func (s *Server) handleMarkDone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.MarkDone(r.Context(), actor, r.PathValue("convID")); err != nil {
+	if err := s.svc.MarkDone(r.Context(), actor, chi.URLParam(r, "convID")); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -716,7 +719,7 @@ func (s *Server) handleSetNotifyLevel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.SetNotifyLevel(r.Context(), actor, r.PathValue("convID"), body.Level); err != nil {
+	if err := s.svc.SetNotifyLevel(r.Context(), actor, chi.URLParam(r, "convID"), body.Level); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -736,7 +739,7 @@ func (s *Server) handleSetFollowing(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.svc.SetFollowing(r.Context(), actor, r.PathValue("convID"), body.Following); err != nil {
+	if err := s.svc.SetFollowing(r.Context(), actor, chi.URLParam(r, "convID"), body.Following); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -810,7 +813,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.GetTask(r.Context(), member, r.PathValue("taskID"))
+	task, err := s.svc.GetTask(r.Context(), member, chi.URLParam(r, "taskID"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -824,7 +827,7 @@ func (s *Server) handleEnsureTaskConv(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.EnsureTaskConversation(r.Context(), actor, r.PathValue("taskID"))
+	task, err := s.svc.EnsureTaskConversation(r.Context(), actor, chi.URLParam(r, "taskID"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -838,7 +841,7 @@ func (s *Server) handleClaimTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	res, err := s.svc.ClaimTask(r.Context(), actor, r.PathValue("taskID"), false)
+	res, err := s.svc.ClaimTask(r.Context(), actor, chi.URLParam(r, "taskID"), false)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -852,7 +855,7 @@ func (s *Server) handleUnclaimTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.UnclaimTask(r.Context(), actor, r.PathValue("taskID"))
+	task, err := s.svc.UnclaimTask(r.Context(), actor, chi.URLParam(r, "taskID"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -876,7 +879,7 @@ func (s *Server) handleAssignTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.svc.AssignTask(r.Context(), actor, app.AssignTaskInput{
-		TaskID:           r.PathValue("taskID"),
+		TaskID:           chi.URLParam(r, "taskID"),
 		AssigneeMemberID: body.AssigneeMemberID,
 		Reason:           body.Reason,
 		ExpectedRevision: body.ExpectedRevision,
@@ -901,7 +904,7 @@ func (s *Server) handleUpdateTaskStatus(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	task, err := s.svc.UpdateTaskStatus(r.Context(), actor, r.PathValue("taskID"), body.Status)
+	task, err := s.svc.UpdateTaskStatus(r.Context(), actor, chi.URLParam(r, "taskID"), body.Status)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -925,7 +928,7 @@ func (s *Server) handleAmendTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task, err := s.svc.AmendTask(r.Context(), actor, app.AmendTaskInput{
-		TaskID:           r.PathValue("taskID"),
+		TaskID:           chi.URLParam(r, "taskID"),
 		Title:            body.Title,
 		Description:      body.Description,
 		ExpectedRevision: body.ExpectedRevision,

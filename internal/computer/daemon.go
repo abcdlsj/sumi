@@ -128,6 +128,10 @@ func (d *Daemon) Stop() {
 
 func (d *Daemon) startCapabilitySocket() error {
 	sockPath := filepath.Join(d.cfg.DataDir, "capability.sock")
+	// macOS sockaddr_un.sun_path is limited to 104 bytes; fall back to /tmp when DataDir is deep.
+	if len(sockPath) > 96 {
+		sockPath = filepath.Join(os.TempDir(), "sumi-"+d.daemonSessionID[:8]+".sock")
+	}
 	_ = os.Remove(sockPath)
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {

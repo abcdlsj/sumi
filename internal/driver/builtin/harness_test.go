@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	openai "github.com/sashabaranov/go-openai"
+
 	"github.com/abcdlsj/sumi/internal/driver"
 )
 
@@ -16,7 +18,7 @@ type scriptProvider struct {
 	responses []CompletionResponse
 }
 
-func (p *scriptProvider) Complete(_ context.Context, _ string, messages []Message, _ []map[string]any) (CompletionResponse, error) {
+func (p *scriptProvider) Complete(_ context.Context, _ string, messages []Message, _ []openai.Tool) (CompletionResponse, error) {
 	p.seenLens = append(p.seenLens, len(messages))
 	idx := p.step
 	if idx >= len(p.responses) {
