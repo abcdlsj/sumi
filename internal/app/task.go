@@ -341,6 +341,8 @@ type TaskWriteResult struct {
 	Task           domain.Task      `json:"task,omitempty"`
 	Held           bool             `json:"held,omitempty"`
 	UnreadMessages []domain.Message `json:"unread_messages,omitempty"`
+	// OmittedUnreadCount counts older unread messages not included in UnreadMessages.
+	OmittedUnreadCount int64 `json:"omitted_unread_count,omitempty"`
 }
 
 func (s *Service) ClaimTask(ctx context.Context, actor domain.Member, taskID string, enforceFreshness bool) (TaskWriteResult, error) {
@@ -365,13 +367,12 @@ func (s *Service) ClaimTask(ctx context.Context, actor domain.Member, taskID str
 			return domain.NewError(domain.CodeConflict, "task is already claimed by another member")
 		}
 		if enforceFreshness && t.ConversationID != "" {
-			unread, err := loadUnreadMessagesFromOthersTx(ctx, tx, t.ConversationID, actor.ID, 20)
+			held, err := checkFreshnessTx(ctx, tx, t.ConversationID, actor.ID)
 			if err != nil {
 				return err
 			}
-			if len(unread) > 0 {
-				_ = advanceReadSeqTx(ctx, tx, t.ConversationID, actor.ID, unread[len(unread)-1].Seq)
-				res = TaskWriteResult{Held: true, UnreadMessages: unread}
+			if held != nil {
+				res = TaskWriteResult{Held: true, UnreadMessages: held.Messages, OmittedUnreadCount: held.Omitted}
 				return nil
 			}
 		}
@@ -526,13 +527,12 @@ func (s *Service) AssignTask(ctx context.Context, actor domain.Member, in Assign
 			return domain.NewError(domain.CodeConflict, "task revision changed; reread before assigning")
 		}
 		if in.EnforceFreshness && t.ConversationID != "" {
-			unread, err := loadUnreadMessagesFromOthersTx(ctx, tx, t.ConversationID, actor.ID, 20)
+			held, err := checkFreshnessTx(ctx, tx, t.ConversationID, actor.ID)
 			if err != nil {
 				return err
 			}
-			if len(unread) > 0 {
-				_ = advanceReadSeqTx(ctx, tx, t.ConversationID, actor.ID, unread[len(unread)-1].Seq)
-				res = TaskWriteResult{Held: true, UnreadMessages: unread}
+			if held != nil {
+				res = TaskWriteResult{Held: true, UnreadMessages: held.Messages, OmittedUnreadCount: held.Omitted}
 				return nil
 			}
 		}

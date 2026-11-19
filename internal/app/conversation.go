@@ -373,6 +373,8 @@ type SendMessageResult struct {
 	Message        domain.Message   `json:"message,omitempty"`
 	Held           bool             `json:"held,omitempty"`
 	UnreadMessages []domain.Message `json:"unread_messages,omitempty"`
+	// OmittedUnreadCount counts older unread messages not included in UnreadMessages.
+	OmittedUnreadCount int64 `json:"omitted_unread_count,omitempty"`
 }
 
 func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendMessageInput) (SendMessageResult, error) {
@@ -427,16 +429,12 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 
 		// Freshness Guard: hold Agent writes if unread messages from other members exist.
 		if in.EnforceFreshness {
-			unread, err := loadUnreadMessagesFromOthersTx(ctx, tx, targetMeta.ID, actor.ID, 20)
+			held, err := checkFreshnessTx(ctx, tx, targetMeta.ID, actor.ID)
 			if err != nil {
 				return err
 			}
-			if len(unread) > 0 {
-				lastSeq := unread[len(unread)-1].Seq
-				if err := advanceReadSeqTx(ctx, tx, targetMeta.ID, actor.ID, lastSeq); err != nil {
-					return err
-				}
-				result = SendMessageResult{Held: true, UnreadMessages: unread}
+			if held != nil {
+				result = SendMessageResult{Held: true, UnreadMessages: held.Messages, OmittedUnreadCount: held.Omitted}
 				return nil
 			}
 		}
@@ -726,13 +724,55 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 	return wakes, rows.Err()
 }
 
-func loadUnreadMessagesFromOthersTx(ctx context.Context, tx *sql.Tx, convID, actorID string, limit int) ([]domain.Message, error) {
+// heldUnreadLimit bounds how many unread messages a held write returns; older ones are counted only.
+const heldUnreadLimit = 10
+
+type heldUnread struct {
+	Messages []domain.Message
+	Omitted  int64
+}
+
+// checkFreshnessTx implements the Freshness Guard. If others posted after the actor's read_seq it
+// returns the newest heldUnreadLimit of those messages, counts the rest, and advances read_seq to
+// the newest one so a deliberate retry is not held again by messages the actor was already shown.
+func checkFreshnessTx(ctx context.Context, tx *sql.Tx, convID, actorID string) (*heldUnread, error) {
 	var readSeq int64
 	_ = tx.QueryRowContext(ctx,
 		`SELECT read_seq FROM conversation_states WHERE conversation_id = ? AND member_id = ?`,
 		convID, actorID,
 	).Scan(&readSeq)
-	return queryMessages(ctx, tx, convID, readSeq, limit, actorID)
+	var total, maxSeq int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(MAX(seq), 0) FROM messages
+		 WHERE conversation_id = ? AND seq > ? AND author_member_id <> ? AND deleted_at IS NULL`,
+		convID, readSeq, actorID,
+	).Scan(&total, &maxSeq); err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "count unread", err)
+	}
+	if total == 0 {
+		return nil, nil
+	}
+	fromSeq := readSeq
+	if total > heldUnreadLimit {
+		// Start right before the heldUnreadLimit-th newest unread message from others.
+		if err := tx.QueryRowContext(ctx,
+			`SELECT seq FROM messages
+			 WHERE conversation_id = ? AND seq > ? AND author_member_id <> ? AND deleted_at IS NULL
+			 ORDER BY seq DESC LIMIT 1 OFFSET ?`,
+			convID, readSeq, actorID, heldUnreadLimit-1,
+		).Scan(&fromSeq); err != nil {
+			return nil, domain.WrapError(domain.CodeInternal, "locate unread window", err)
+		}
+		fromSeq--
+	}
+	msgs, err := queryMessages(ctx, tx, convID, fromSeq, heldUnreadLimit, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := advanceReadSeqTx(ctx, tx, convID, actorID, maxSeq); err != nil {
+		return nil, err
+	}
+	return &heldUnread{Messages: msgs, Omitted: total - int64(len(msgs))}, nil
 }
 
 func queryMessages(ctx context.Context, q queryer, convID string, afterSeq int64, limit int, excludeAuthorID string) ([]domain.Message, error) {
