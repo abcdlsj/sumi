@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { AtSign, Check, Eye, EyeOff, Laptop, Lock, Mail, User as UserIcon } from "lucide-react";
 import { api, ApiError, sanitizeDisplayName, slugInput, slugify, type User } from "../api";
 import { readPendingPairing } from "../pairing";
-import { PixelAvatar } from "./Avatar";
+import { agentSprite, PixelAvatar } from "./Avatar";
 import { AgentStep, ComputerStep, StepHeading } from "./Setup";
 import { Button, Field, Segmented, SumiMark } from "./ui";
 
@@ -41,8 +41,22 @@ function Stepper({ current }: { current: OnboardingStep }) {
   );
 }
 
+/** Six random seeds whose sprites all have different hues, so the row reads as a varied crew. */
+function crewSeeds(): string[] {
+  const seeds: string[] = [];
+  const hues = new Set<number>();
+  for (let i = 0; seeds.length < 6 && i < 200; i++) {
+    const seed = Math.random().toString(36).slice(2);
+    const { hue } = agentSprite(seed);
+    if (hues.has(hue)) continue;
+    hues.add(hue);
+    seeds.push(seed);
+  }
+  return seeds;
+}
+
 function BrandPanel({ step }: { step: OnboardingStep }) {
-  const seeds = ["lin", "atlas", "nova", "kite", "orbit", "sage"];
+  const [seeds] = useState(crewSeeds);
   return (
     <aside className="hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between p-10 relative overflow-hidden">
       <div
@@ -63,9 +77,9 @@ function BrandPanel({ step }: { step: OnboardingStep }) {
         <p className="mt-3 text-[14px] text-nav-fg-2 leading-relaxed">
           Agents keep their memory, pick up Tasks, and reply in channels and DMs like any teammate.
         </p>
-        <div className="mt-8 flex -space-x-2">
-          {seeds.map((s) => (
-            <span key={s} className="rounded-[10px] ring-4 ring-[var(--nav)]">
+        <div className="mt-8 flex gap-2.5" aria-hidden>
+          {seeds.map((s, i) => (
+            <span key={s} className="animate-rise-in" style={{ animationDelay: `${i * 60}ms` }}>
               <PixelAvatar seed={s} size="lg" />
             </span>
           ))}

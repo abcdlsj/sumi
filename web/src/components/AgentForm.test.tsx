@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type Computer, type Member } from "../api";
 import { AgentForm } from "./AgentForm";
-import { identicon } from "./Avatar";
+import { agentSprite } from "./Avatar";
 
 const computer: Computer = {
   id: "c1",
@@ -52,13 +52,15 @@ describe("AgentForm", () => {
   });
 });
 
-describe("identicon", () => {
-  it("is deterministic, mirrored, and never empty", () => {
-    for (const seed of ["a", "lin", "4f1c-uuid", ""]) {
-      const a = identicon(seed);
-      expect(identicon(seed)).toEqual(a);
-      expect(a.cells.filter(Boolean).length).toBeGreaterThan(2);
-      for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) expect(a.cells[r * 5 + c]).toBe(a.cells[r * 5 + (4 - c)]);
+describe("agentSprite", () => {
+  it("is deterministic, mirrored, and always has a body with eyes", () => {
+    for (const seed of ["a", "lin", "4f1c-uuid", "", ...Array.from({ length: 200 }, (_, i) => `seed-${i}`)]) {
+      const a = agentSprite(seed);
+      expect(agentSprite(seed)).toEqual(a);
+      const flat = a.cells.flat();
+      expect(flat.filter((v) => v === 1).length).toBeGreaterThan(5);
+      expect(flat).toContain(3);
+      for (const row of a.cells) for (let x = 0; x < 8; x++) expect(row[x]).toBe(row[7 - x]);
     }
   });
 });

@@ -10,26 +10,79 @@ function fnv(seed: string): number {
   return h >>> 0;
 }
 
-/** 5x5 horizontally mirrored grid, GitHub identicon style; hue and pattern derive from the seed. */
-export function identicon(seed: string): { cells: boolean[]; hue: number } {
-  const h = fnv(seed || "?");
-  const h2 = fnv(`${seed}:sumi`);
-  const cells: boolean[] = new Array(25).fill(false);
-  let on = 0;
-  for (let r = 0; r < 5; r++) {
-    for (let c = 0; c < 3; c++) {
-      const bit = ((c < 2 ? h : h2) >>> ((r * 3 + c) % 30)) & 1;
-      if (bit) {
-        cells[r * 5 + c] = true;
-        cells[r * 5 + (4 - c)] = true;
-        on++;
-      }
-    }
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Curated hues; muddy ranges between them are skipped. */
+const HUES = [4, 22, 38, 52, 95, 140, 168, 190, 208, 228, 255, 282, 310, 335];
+
+/** Cell tones: 0 empty, 1 body, 2 highlight, 3 eye, 4 accent. */
+export type SpriteCell = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * 8x8 mirrored sprite: a contiguous body silhouette with eyes, plus optional antenna,
+ * highlight band, arms and legs. Deterministic per seed; the left half is drawn and mirrored.
+ */
+export function agentSprite(seed: string): { cells: SpriteCell[][]; hue: number } {
+  const rnd = mulberry32(fnv(seed || "?"));
+  const pick = <T,>(xs: T[]): T => xs[Math.floor(rnd() * xs.length)];
+  const hue = pick(HUES);
+  const g: SpriteCell[][] = Array.from({ length: 8 }, () => [0, 0, 0, 0]);
+  const top = rnd() < 0.5 ? 1 : 2;
+  const bottom = rnd() < 0.6 ? 6 : 5;
+  const widths: number[] = [];
+  let w = 2 + Math.floor(rnd() * 2) + (rnd() < 0.25 ? 1 : 0);
+  for (let y = top; y <= bottom; y++) {
+    if (y > top) w = Math.max(2, Math.min(4, w + pick([-1, 0, 0, 0, 1])));
+    widths[y] = w;
+    for (let x = 4 - w; x < 4; x++) g[y][x] = 1;
   }
-  // Guarantee a readable glyph: never empty, never solid.
-  if (on < 3) [6, 8, 12, 16, 18].forEach((i) => (cells[i] = true));
-  if (on > 13) [0, 4, 20, 24].forEach((i) => (cells[i] = false));
-  return { cells, hue: h2 % 360 };
+  if (widths[top] === 4 && rnd() < 0.6) g[top][0] = 0;
+  const ey = top + (widths[top] >= 3 && rnd() < 0.5 ? 0 : 1);
+  const we = widths[ey];
+  g[ey][we >= 4 ? pick([1, 2, 2]) : we === 3 ? 2 : 3] = 3;
+  const by = Math.min(bottom, ey + 2);
+  if (rnd() < 0.55) {
+    for (let x = 4 - widths[by] + 1; x < 4; x++) if (g[by][x] === 1) g[by][x] = 2;
+  } else if (rnd() < 0.5) g[by][3] = 2;
+  if (top === 2) {
+    if (rnd() < 0.7) {
+      const ax = pick([2, 3]);
+      g[0][ax] = 4;
+      g[1][ax] = 1;
+    } else g[1][3] = 4;
+  }
+  if (rnd() < 0.4) {
+    const ay = Math.min(bottom, ey + 1 + Math.floor(rnd() * 2));
+    const x = 4 - widths[ay] - 1;
+    if (x >= 0) g[ay][x] = 1;
+  }
+  if (bottom < 7) {
+    const lw = widths[bottom];
+    const lx = pick([4 - lw, 4 - lw + 1].filter((x) => x < 3));
+    if (lx !== undefined && rnd() < 0.75) g[bottom + 1][lx] = 1;
+  }
+  return { cells: g.map((row) => [...row, ...[...row].reverse()]), hue };
+}
+
+function spriteColors(h: number): Record<SpriteCell, string> & { bg: string } {
+  // Yellows and greens read brighter at equal lightness, so darken them.
+  const l = h >= 30 && h <= 110 ? 42 : 52;
+  return {
+    bg: `hsl(${h} 70% 91%)`,
+    0: "transparent",
+    1: `hsl(${h} 55% ${l}%)`,
+    2: `hsl(${h} 65% ${l + 18}%)`,
+    3: `hsl(${h} 45% 16%)`,
+    4: `hsl(${(h + 150) % 360} 75% 58%)`,
+  };
 }
 
 const SIZES = { xs: 20, sm: 24, md: 32, lg: 40, xl: 56 } as const;
@@ -37,30 +90,21 @@ export type AvatarSize = keyof typeof SIZES;
 
 export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?: AvatarSize; label?: string }) {
   const px = SIZES[size];
-  const { cells, hue } = useMemo(() => identicon(seed), [seed]);
-  const pad = 0.6;
+  const { cells, hue } = useMemo(() => agentSprite(seed), [seed]);
+  const c = spriteColors(hue);
   return (
     <svg
       width={px}
       height={px}
-      viewBox={`0 0 ${5 + pad * 2} ${5 + pad * 2}`}
+      viewBox="0 0 10 10"
       role="img"
       aria-label={label}
       className="shrink-0 block"
-      style={{ borderRadius: Math.max(5, px * 0.24), background: "var(--avatar-bg)" }}
+      style={{ borderRadius: Math.max(5, px * 0.24), background: c.bg }}
       shapeRendering="crispEdges"
     >
-      {cells.map((v, i) =>
-        v ? (
-          <rect
-            key={i}
-            x={pad + (i % 5)}
-            y={pad + Math.floor(i / 5)}
-            width={1.02}
-            height={1.02}
-            fill={`hsl(${hue} 62% 52%)`}
-          />
-        ) : null,
+      {cells.flatMap((row, y) =>
+        row.map((v, x) => (v ? <rect key={`${x}-${y}`} x={1 + x} y={1 + y} width={1.02} height={1.02} fill={c[v]} /> : null)),
       )}
     </svg>
   );
