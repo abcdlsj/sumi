@@ -1,39 +1,19 @@
-# Sumi 开发约定
+# Sumi Engineering Guidelines
 
-目标：使 Sumi 成为 Human 与 Agent 协作的平台。
+Sumi is a collaboration platform for humans and persistent AI agents.
 
-## 开始前
+## Core Rules
 
-1. 每个 session、上下文压缩续跑或工作交接后，先读本文件和 `docs/DESIGN.md`；系统或界面任务再读其中对应的部分。
-2. 以当前工作区为基线，保留用户和其他 Agent 的未提交修改；除非用户要求，不用 Git 历史覆盖当前文件。
+- Read `docs/DESIGN.md` before making changes. It is the single source of truth; fix code to match the spec, never add compatibility layers.
+- Update `docs/DESIGN.md` first whenever product behavior, schema, or protocol changes.
+- Keep architecture directional: adapters (`server`, `computer`, `cli`, `web`) -> `app` -> `domain` / `store`.
+- Delete obsolete code and abstractions instead of keeping fallbacks.
+- Keep comments brief and in English; only explain invariants, concurrency, or security constraints.
+- Never log or print message bodies, attachments, memory contents, prompts, or secrets in logs, errors, or tests.
 
-## 文档
+## Verification
 
-- 用户指令优先。文档与代码冲突时先确认预期行为，再修改文档或代码，禁止用兼容层保留两套行为。
-- 每项要求只由一个设计文件定义，其他文档只链接不复制。
-- 行为、协议、数据模型或领域词汇改变时，先更新对应设计文件。
-
-## 写作
-
-- 中文直接写结论及依据；每句都有事实，删除不影响意思的句子；不使用比喻、情绪词或夸大判断。
-- 代码注释、MR 标题与描述、commit message 使用英文；注释只写不变量、并发或安全原因。
-- 测试输出不得包含 Message、Attachment、Memory 或 Secret 正文；日志规则见 `docs/DESIGN.md` 的「运维与诊断」。
-
-## 实现
-
-- 按“检查现状、实现、定向测试、修复”推进；可验证的不确定性继续处理，缺少权限或需要用户决定时暂停说明。
-- 领域规则、流程编排和外部适配各归一个模块；依赖从外部适配器单向指向 application，再指向 domain。
-- 不允许创建低质量单测（纯字符串检测、无意义一次性单测等）。
-- 代码默认私有；只维护当前产品模型和当前 schema。
-- 旧实现、旧入口、旧 schema 和无业务边界价值的抽象必须删除。
-
-## 验证
-
-- 核心流程、并发和安全边界必须有测试；日常改动运行最小相关测试。
-- Go 提交前运行 `gofmt -l .`（输出为空）、`go vet ./...` 和 `go test ./...`。
-- Web 提交前运行 `pnpm --dir web typecheck` 与 `pnpm --dir web test`。
-
-## Handoff
-
-1. 每个实现任务单独提交，下一任务的实现不得混入当前提交。
-2. 当前任务提交后仍有未完成任务时，在 `/tmp/handoff.md` 写非空交接文档：已完成内容、验证结果、当前提交、剩余任务、已知风险。交接文档不写入仓库。
+- Write meaningful tests for domain invariants, concurrency, and security boundaries.
+- Before committing Go changes: `gofmt -l .` (empty), `go vet ./...`, `go test ./...`.
+- Before committing Web changes: `pnpm --dir web typecheck` and `pnpm --dir web test`.
+- Commit each task separately with concise English commit messages.
