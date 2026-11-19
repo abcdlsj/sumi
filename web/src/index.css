@@ -28,14 +28,20 @@
   --danger: #d92d2d;
   --danger-soft: #fdeded;
 
-  --nav: #17171b;
-  --nav-rail: #101013;
-  --nav-text: #ececf1;
-  --nav-text-2: #a3a3b0;
-  --nav-text-3: #73737f;
-  --nav-hover: rgba(255, 255, 255, 0.06);
-  --nav-active: rgba(255, 255, 255, 0.11);
-  --nav-line: rgba(255, 255, 255, 0.08);
+  --nav: #f4f4f7;
+  --nav-rail: #ebebf0;
+  --nav-text-strong: #17171c;
+  --nav-text: #2b2b33;
+  --nav-text-2: #52525e;
+  --nav-text-3: #85858f;
+  --nav-hover: rgba(20, 20, 40, 0.05);
+  --nav-active: rgba(20, 20, 40, 0.09);
+  --nav-fill: rgba(20, 20, 40, 0.05);
+  --nav-fill-2: rgba(20, 20, 40, 0.09);
+  --nav-line: rgba(20, 20, 40, 0.08);
+  --nav-line-strong: rgba(20, 20, 40, 0.2);
+  --nav-work: #0b8a74;
+  --nav-danger: #c62828;
 
   --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.05);
   --shadow-md: 0 2px 8px rgba(20, 20, 30, 0.06), 0 1px 2px rgba(20, 20, 30, 0.04);
@@ -69,9 +75,20 @@
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.13);
 
-  --nav: #0b0b0e;
-  --nav-rail: #070709;
+  --nav: #111114;
+  --nav-rail: #0a0a0c;
+  --nav-text-strong: #ffffff;
+  --nav-text: #ececf1;
+  --nav-text-2: #a3a3b0;
+  --nav-text-3: #73737f;
+  --nav-hover: rgba(255, 255, 255, 0.06);
+  --nav-active: rgba(255, 255, 255, 0.11);
+  --nav-fill: rgba(255, 255, 255, 0.06);
+  --nav-fill-2: rgba(255, 255, 255, 0.11);
   --nav-line: rgba(255, 255, 255, 0.06);
+  --nav-line-strong: rgba(255, 255, 255, 0.2);
+  --nav-work: #5fe0c2;
+  --nav-danger: #ff8a8a;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35);
@@ -106,12 +123,18 @@
   --color-danger-soft: var(--danger-soft);
   --color-nav: var(--nav);
   --color-nav-rail: var(--nav-rail);
+  --color-nav-fg-strong: var(--nav-text-strong);
   --color-nav-fg: var(--nav-text);
   --color-nav-fg-2: var(--nav-text-2);
   --color-nav-fg-3: var(--nav-text-3);
   --color-nav-hover: var(--nav-hover);
   --color-nav-active: var(--nav-active);
   --color-nav-line: var(--nav-line);
+  --color-nav-line-strong: var(--nav-line-strong);
+  --color-nav-fill: var(--nav-fill);
+  --color-nav-fill-2: var(--nav-fill-2);
+  --color-nav-work: var(--nav-work);
+  --color-nav-danger: var(--nav-danger);
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
@@ -191,7 +214,7 @@
   animation: var(--animate-breathe);
 }
 .nav-skeleton {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--nav-fill-2);
   border-radius: 6px;
   animation: var(--animate-breathe);
 }
@@ -212,7 +235,7 @@
 }
 .scroll-nav {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: var(--nav-line-strong) transparent;
 }
 
 /* Markdown body: preflight resets element styles, so restore a readable rhythm. */

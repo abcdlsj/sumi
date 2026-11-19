@@ -25,13 +25,13 @@ function Stepper({ current }: { current: OnboardingStep }) {
           <li key={s.key} className="flex items-center gap-3 py-2" aria-current={active ? "step" : undefined}>
             <span
               className={`size-7 rounded-full text-[12.5px] font-semibold flex items-center justify-center shrink-0 transition-colors duration-200 ${
-                done ? "bg-accent text-white" : active ? "bg-white text-[#17171b]" : "bg-white/8 text-nav-fg-3 border border-white/10"
+                done ? "bg-accent text-accent-fg" : active ? "bg-nav-fg-strong text-nav" : "bg-nav-fill text-nav-fg-3 border border-nav-line"
               }`}
             >
               {done ? <Check className="size-3.5" /> : i + 1}
             </span>
             <span className="min-w-0">
-              <span className={`block text-[14px] leading-5 ${active ? "text-white font-medium" : done ? "text-nav-fg" : "text-nav-fg-3"}`}>{s.label}</span>
+              <span className={`block text-[14px] leading-5 ${active ? "text-nav-fg-strong font-medium" : done ? "text-nav-fg" : "text-nav-fg-3"}`}>{s.label}</span>
               <span className="block text-[12.5px] text-nav-fg-3">{s.hint}</span>
             </span>
           </li>
@@ -61,15 +61,15 @@ function BrandPanel({ step }: { step: OnboardingStep }) {
     <aside className="hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between p-10 relative overflow-hidden">
       <div
         aria-hidden
-        className="absolute -top-32 -right-24 size-[380px] rounded-full opacity-40 blur-3xl"
-        style={{ background: "radial-gradient(circle, #5a5bd8 0%, transparent 65%)" }}
+        className="absolute -top-32 -right-24 size-[380px] rounded-full opacity-25 dark:opacity-40 blur-3xl"
+        style={{ background: "radial-gradient(circle, var(--accent) 0%, transparent 65%)" }}
       />
       <div className="relative">
         <div className="flex items-center gap-3">
           <SumiMark size={36} />
-          <span className="text-[19px] font-semibold tracking-tight text-white">Sumi</span>
+          <span className="text-[19px] font-semibold tracking-tight text-nav-fg-strong">Sumi</span>
         </div>
-        <p className="mt-6 text-[22px] leading-snug font-semibold text-white">
+        <p className="mt-6 text-[22px] leading-snug font-semibold text-nav-fg-strong">
           One workspace for people
           <br />
           and persistent agents.
