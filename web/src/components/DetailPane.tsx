@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -13,11 +13,23 @@ import {
 } from "../api";
 import { MemberAvatar, RuntimeDot } from "./Identity";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
+import { describeAction } from "./ConversationView";
+import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
+import { Button, useAction } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
   | { kind: "agent"; memberID: string };
+
+function useScrollToEnd(dep: unknown) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    el?.scrollTo?.({ top: el.scrollHeight, behavior: "smooth" });
+  }, [dep]);
+  return ref;
+}
 
 const PERMISSIONS: Permission[] = ["agent.create", "channel.create", "channel.manage_members"];
 
@@ -73,6 +85,7 @@ function TaskDetail({
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const draft = useAttachmentDraft(spaceSlug);
+  const act = useAction();
 
   const taskQ = useQuery({
     queryKey: ["task", spaceSlug, taskID],
@@ -85,6 +98,7 @@ function TaskDetail({
     queryFn: () => api.listMessages(spaceSlug, task!.conversation_id!, true),
     enabled: Boolean(task?.conversation_id),
   });
+  const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["task", spaceSlug, taskID] });
@@ -96,19 +110,19 @@ function TaskDetail({
 
   async function handleStatus(status: TaskStatus) {
     if (!task) return;
-    await api.updateTaskStatus(spaceSlug, task.id, status);
+    await act.run(() => api.updateTaskStatus(spaceSlug, task.id, status));
     refresh();
   }
 
   async function handleClaim() {
     if (!task) return;
-    await api.claimTask(spaceSlug, task.id);
+    await act.run(() => api.claimTask(spaceSlug, task.id));
     refresh();
   }
 
   async function handleAssign(memberID: string) {
     if (!task) return;
-    await api.assignTask(spaceSlug, task.id, memberID);
+    await act.run(() => api.assignTask(spaceSlug, task.id, memberID));
     refresh();
   }
 
@@ -143,14 +157,14 @@ function TaskDetail({
 
   if (!task) {
     return (
-      <aside className="bg-[#FAF9F6] border-l border-[#DCD9D0] flex items-center justify-center text-[12.5px] text-[#8A867D]">
-        Loading task…
+      <aside className="h-full bg-paper-2 border-l border-line-strong">
+        <DetailSkeleton />
       </aside>
     );
   }
 
   return (
-    <aside className="bg-[#FAF9F6] border-l border-[#DCD9D0] flex flex-col min-h-0">
+    <aside className="h-full bg-paper-2 border-l border-line-strong flex flex-col min-h-0">
       <header className="h-11 px-3.5 bg-white border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-mono-num text-[13px] font-semibold text-[#161614]">#{task.number}</span>
@@ -199,12 +213,9 @@ function TaskDetail({
               ))}
             </select>
             {task.assignee_member_id !== boot.current_member.id && task.status !== "done" && task.status !== "closed" && (
-              <button
-                onClick={() => void handleClaim()}
-                className="h-6 px-2 rounded bg-[#161614] text-white text-[11.5px] font-medium hover:bg-[#2F2E2B]"
-              >
+              <Button size="xs" loading={act.busy} onClick={() => void handleClaim()}>
                 Claim
-              </button>
+              </Button>
             )}
           </div>
 
@@ -218,8 +229,10 @@ function TaskDetail({
         <span className="font-mono-num">{msgsQ.data?.messages.length ?? task.message_count} messages</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
-        {!task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
+        {task.conversation_id && msgsQ.isLoading ? (
+          <MessageListSkeleton rows={3} compact />
+        ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
           <div className="py-10 text-center text-[12.5px] text-[#8A867D]">
             No messages yet. Replying creates #{task.number}'s conversation.
           </div>
@@ -230,7 +243,7 @@ function TaskDetail({
                 <span className="w-1.5 h-1.5 rounded-full bg-[#0F8B78]" />
                 <span>
                   <strong className="text-[#161614] font-medium">{m.author_display_name}</strong>{" "}
-                  {describeAction(m.action_kind, m.payload_json)}
+                  {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
                 </span>
                 <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
               </div>
@@ -242,7 +255,7 @@ function TaskDetail({
                     <span className="text-[12.5px] font-semibold text-[#161614]">{m.author_display_name}</span>
                     <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
                   </div>
-                  <div className="mt-0.5 text-[13px] leading-relaxed text-[#161614] prose prose-sm max-w-none">
+                  <div className="mt-0.5 text-[13px] leading-relaxed text-[#161614] md break-words">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
                   </div>
                   <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
@@ -263,13 +276,9 @@ function TaskDetail({
             placeholder={`Reply in #${task.number}…`}
             className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
           />
-          <button
-            disabled={sending || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
-            type="submit"
-            className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40"
-          >
+          <Button loading={sending} disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading} type="submit">
             Send
-          </button>
+          </Button>
         </div>
       </form>
     </aside>
@@ -295,6 +304,7 @@ function ThreadDetail({
     queryKey: ["messages", spaceSlug, threadConvID],
     queryFn: () => api.listMessages(spaceSlug, threadConvID, true),
   });
+  const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
 
   async function toggleFollow() {
     const next = !following;
@@ -319,7 +329,7 @@ function ThreadDetail({
   }
 
   return (
-    <aside className="bg-[#FAF9F6] border-l border-[#DCD9D0] flex flex-col min-h-0">
+    <aside className="h-full bg-paper-2 border-l border-line-strong flex flex-col min-h-0">
       <header className="h-11 px-3.5 bg-white border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-[13.5px] font-semibold text-[#161614]">Thread</span>
@@ -339,7 +349,8 @@ function ThreadDetail({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin p-3.5 space-y-3 bg-white">
+        {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
         {(msgsQ.data?.messages ?? []).map((m) => (
           <article key={m.id} className="flex items-start gap-2.5">
             <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} size="sm" />
@@ -348,7 +359,7 @@ function ThreadDetail({
                 <span className="text-[12.5px] font-semibold">{m.author_display_name}</span>
                 <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
               </div>
-              <div className="mt-0.5 text-[13px] text-[#161614] prose prose-sm max-w-none">
+              <div className="mt-0.5 text-[13px] text-[#161614] md break-words">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
               </div>
               <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
@@ -367,13 +378,9 @@ function ThreadDetail({
             placeholder="Reply in thread…"
             className="flex-1 h-7 px-2 text-[13px] outline-none placeholder:text-[#8A867D]"
           />
-          <button
-            disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading}
-            type="submit"
-            className="h-7 px-2.5 rounded-[5px] bg-[#161614] text-white text-[12px] font-medium disabled:opacity-40"
-          >
+          <Button disabled={(!reply.trim() && draft.ids.length === 0) || draft.uploading} type="submit">
             Send
-          </button>
+          </Button>
         </div>
       </form>
     </aside>
@@ -394,6 +401,8 @@ function AgentDetail({
   onSelectTarget: (t: DetailTarget) => void;
 }) {
   const qc = useQueryClient();
+  const act = useAction();
+  const [pending, setPending] = useState<"restart" | "reset_session" | null>(null);
   const member: Member | undefined = boot.members.find((m) => m.id === memberID);
   if (!member || !member.agent) return null;
 
@@ -403,22 +412,24 @@ function AgentDetail({
   const focusTask = boot.tasks.find((t) => t.conversation_id === member.agent?.focus_conversation_id);
 
   async function togglePerm(p: Permission) {
-    await api.setPermission(spaceSlug, member!.id, p, !perms.has(p));
+    await act.run(() => api.setPermission(spaceSlug, member!.id, p, !perms.has(p)));
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
   async function control(action: "restart" | "reset_session") {
-    await api.controlAgent(spaceSlug, member!.id, action);
+    setPending(action);
+    await act.run(() => api.controlAgent(spaceSlug, member!.id, action));
+    setPending(null);
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
   return (
-    <aside className="bg-white border-l border-[#DCD9D0] flex flex-col min-h-0">
+    <aside className="h-full bg-white border-l border-line-strong flex flex-col min-h-0">
       <header className="h-11 px-3.5 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="sm" />
           <span className="text-[13.5px] font-semibold text-[#161614]">{member.display_name}</span>
-          <span className="px-1.5 py-0.2 rounded bg-[#F1EFEA] text-[11px] text-[#5C5A54]">Agent</span>
+          <span className="px-1.5 rounded bg-[#F1EFEA] text-[11px] text-[#5C5A54]">Agent</span>
         </div>
         <button onClick={onClose} className="w-6 h-6 rounded hover:bg-[#F4F2EC] text-[#6E6B64] flex items-center justify-center" aria-label="Close">
           <X className="w-3.5 h-3.5" />
@@ -430,8 +441,10 @@ function AgentDetail({
           <div className="grid grid-cols-[96px_1fr] gap-y-2 items-center">
             <span className="text-[#6E6B64]">State</span>
             <span className="inline-flex items-center gap-1.5 font-medium text-[#161614]">
-              <RuntimeDot state={member.agent.runtime_state} />
-              <span>{member.agent.runtime_state}</span>
+              <span className={member.agent.runtime_state === "working" ? "animate-breathe" : ""}>
+                <RuntimeDot state={member.agent.runtime_state} />
+              </span>
+              <span className="capitalize">{member.agent.runtime_state}</span>
             </span>
             <span className="text-[#6E6B64]">Focus</span>
             <span>
@@ -453,18 +466,17 @@ function AgentDetail({
           </div>
           {canGovern && (
             <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => void control("restart")}
-                className="flex-1 h-7 rounded border border-[#D5D1C7] hover:bg-[#F4F2EC] text-[12px] font-medium"
-              >
+              <Button variant="secondary" className="flex-1" loading={pending === "restart"} onClick={() => void control("restart")}>
                 Restart
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                loading={pending === "reset_session"}
                 onClick={() => void control("reset_session")}
-                className="flex-1 h-7 rounded border border-[#D5D1C7] hover:bg-[#F4F2EC] text-[12px] font-medium"
               >
                 Reset session
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -494,22 +506,4 @@ function AgentDetail({
       </div>
     </aside>
   );
-}
-
-function describeAction(kind?: string, raw?: string): string {
-  try {
-    const p = raw ? JSON.parse(raw) : {};
-    if (kind === "agent_created") return `created agent ${p.display_name ?? ""}`;
-    if (kind === "channel_created") return `created #${p.slug ?? ""}`;
-    if (kind === "task_event") {
-      if (p.op === "claimed") return `claimed #${p.task_number}`;
-      if (p.op === "unclaimed") return `unclaimed #${p.task_number}`;
-      if (p.op === "assigned") return `assigned #${p.task_number} to ${p.assignee_name ?? "nobody"}${p.reason ? `: ${p.reason}` : ""}`;
-      if (p.op === "status_changed") return `moved #${p.task_number} ${p.from} → ${p.to}`;
-      if (p.op === "amended") return `amended #${p.task_number} (rev ${p.revision})`;
-    }
-  } catch {
-    // ignore malformed payload
-  }
-  return kind ?? "event";
 }

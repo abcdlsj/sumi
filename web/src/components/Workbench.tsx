@@ -1,35 +1,111 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Inbox, Monitor, Plus, Settings, Users } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import {
-  api,
-  formatClock,
-  type BootstrapData,
-  type Conversation,
-  type NotifyLevel,
-} from "../api";
+import { CheckCircle2, Hash, Inbox, Lock, Monitor, Plus, Search, Settings, Sparkles, Users } from "lucide-react";
+import { api, slugInput, slugify, type Space } from "../api";
+import { readPendingPairing } from "../pairing";
+import { ConversationView } from "./ConversationView";
 import { DetailPane, type DetailTarget } from "./DetailPane";
-import { MemberAvatar, RuntimeDot, TaskStatusGlyph } from "./Identity";
-import {
-  AttachmentDraftRow,
-  AttachmentPicker,
-  MessageAttachments,
-  useAttachmentDraft,
-} from "./Attachments";
+import { MemberAvatar, RuntimeDot } from "./Identity";
+import { AgentStep, ComputerStep, PairingCard } from "./Setup";
+import { WorkbenchSkeleton } from "./Skeletons";
+import { Button, Field, Modal, Segmented, useAction } from "./ui";
+import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 
 type MainView =
   | { kind: "conversation"; convID: string }
   | { kind: "inbox" }
   | { kind: "tasks" }
-  | { kind: "admin"; tab: "computers" | "members" | "settings" };
+  | { kind: "admin"; tab: AdminTab };
+
+type Dialog = null | "channel" | "space" | "jump" | { setup: "computer" | "agent" } | "pairing";
+
+const SSE_EVENTS = [
+  "message.created",
+  "task.created",
+  "task.updated",
+  "agent.created",
+  "agent.state_changed",
+  "computer.changed",
+  "conversation.created",
+  "member.permissions_changed",
+];
+
+function viewKey(v: MainView) {
+  return v.kind === "conversation" ? `c:${v.convID}` : v.kind === "admin" ? "admin" : v.kind;
+}
+
+function NavRow({
+  active,
+  onClick,
+  children,
+  trailing,
+  dim,
+  bold,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  trailing?: ReactNode;
+  dim?: boolean;
+  bold?: boolean;
+  label?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className={`w-full h-7 px-2 rounded-[5px] flex items-center justify-between gap-2 text-[13px] transition-colors duration-100 ${
+        active
+          ? "bg-active text-ink font-semibold"
+          : dim
+            ? "text-faint hover:bg-hover"
+            : bold
+              ? "text-ink font-semibold hover:bg-hover"
+              : "text-ink-2 hover:bg-hover"
+      }`}
+    >
+      <span className="flex items-center gap-2 min-w-0">{children}</span>
+      {trailing}
+    </button>
+  );
+}
+
+function Count({ n, warm = true }: { n: number; warm?: boolean }) {
+  return (
+    <span
+      className={`min-w-[18px] h-[18px] px-1 rounded-[4px] text-[11px] font-semibold font-mono-num inline-flex items-center justify-center animate-pop-in ${
+        warm ? "bg-warm-bg text-warm" : "text-mute"
+      }`}
+    >
+      {n}
+    </span>
+  );
+}
+
+function SectionLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="px-2 mb-1 h-5 flex items-center justify-between text-[11.5px] font-medium text-mute">
+      <span>{children}</span>
+      {action}
+    </div>
+  );
+}
 
 export function Workbench({
   spaceSlug,
+  spaces = [],
+  onSwitchSpace,
+  onSpaceCreated,
+  initialPeerID,
   onLogout,
 }: {
   spaceSlug: string;
+  spaces?: Space[];
+  onSwitchSpace?: (slug: string) => void;
+  onSpaceCreated?: (slug: string) => void;
+  initialPeerID?: string;
   onLogout: () => void;
 }) {
   const qc = useQueryClient();
@@ -40,21 +116,25 @@ export function Workbench({
 
   const [mainView, setMainView] = useState<MainView>({ kind: "inbox" });
   const [detail, setDetail] = useState<DetailTarget | null>(null);
-  const [inboxFilter, setInboxFilter] = useState<"needs_me" | "unread" | "all">("needs_me");
-  const [taskFilter, setTaskFilter] = useState<"active" | "mine" | "done">("active");
-  const [composer, setComposer] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const draft = useAttachmentDraft(spaceSlug);
+  const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
+  const [dialog, setDialog] = useState<Dialog>(() => (readPendingPairing() ? "pairing" : null));
+  const dm = useAction();
+  const landed = useRef(false);
 
-  // Default to #general once bootstrap arrives.
+  const boot = bootQ.data;
+
+  // First landing: open the agent created during onboarding, else #general when Inbox is empty.
   useEffect(() => {
-    if (!bootQ.data) return;
-    if (mainView.kind === "inbox" && bootQ.data.inbox.length === 0 && bootQ.data.conversations.length > 0) {
-      setMainView({ kind: "conversation", convID: bootQ.data.conversations[0].id });
+    if (!boot || landed.current) return;
+    landed.current = true;
+    if (initialPeerID && boot.members.some((m) => m.id === initialPeerID)) {
+      void openOrCreateDM(initialPeerID);
+      return;
     }
-  }, [bootQ.data?.space.id]);
+    const firstChannel = boot.conversations.find((c) => c.kind === "public" || c.kind === "private");
+    if (boot.inbox.length === 0 && firstChannel) setMainView({ kind: "conversation", convID: firstChannel.id });
+  }, [boot]);
 
   // Single SSE connection per Space for live updates.
   useEffect(() => {
@@ -64,878 +144,574 @@ export function Workbench({
       void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
       void qc.invalidateQueries({ queryKey: ["tasks", spaceSlug] });
       void qc.invalidateQueries({ queryKey: ["messages", spaceSlug] });
+      void qc.invalidateQueries({ queryKey: ["task", spaceSlug] });
     };
-    for (const evName of [
-      "message.created",
-      "task.created",
-      "task.updated",
-      "agent.created",
-      "agent.state_changed",
-      "computer.changed",
-      "conversation.created",
-      "member.permissions_changed",
-    ]) {
-      es.addEventListener(evName, invalidate);
-    }
+    for (const ev of SSE_EVENTS) es.addEventListener(ev, invalidate);
     return () => es.close();
   }, [spaceSlug, qc]);
 
-  const boot = bootQ.data;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setDialog((d) => (d === "jump" ? null : "jump"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const activeConvID = mainView.kind === "conversation" ? mainView.convID : "";
-  const activeConv = useMemo(
-    () => boot?.conversations.find((c) => c.id === activeConvID),
-    [boot, activeConvID],
-  );
+  const activeConv = useMemo(() => boot?.conversations.find((c) => c.id === activeConvID), [boot, activeConvID]);
 
-  const msgsQ = useQuery({
-    queryKey: ["messages", spaceSlug, activeConvID],
-    queryFn: () => api.listMessages(spaceSlug, activeConvID, true),
-    enabled: Boolean(activeConvID),
-  });
-
-  const inboxQ = useQuery({
-    queryKey: ["inbox", spaceSlug, inboxFilter],
-    queryFn: () => api.listInbox(spaceSlug, inboxFilter).then((r) => r.items),
-    enabled: mainView.kind === "inbox",
-  });
-
-  const tasksQ = useQuery({
-    queryKey: ["tasks", spaceSlug, taskFilter],
-    queryFn: () =>
-      api
-        .listTasks(spaceSlug, taskFilter === "done" ? "done" : "active", taskFilter === "mine" ? "mine" : "")
-        .then((r) => r.tasks),
-    enabled: mainView.kind === "tasks",
-  });
-
-  if (!boot) {
-    return (
-      <div className="h-full bg-[#F4F2EC] flex items-center justify-center text-[13px] text-[#6E6B64]">
-        Loading {spaceSlug}…
-      </div>
-    );
+  async function openOrCreateDM(peerMemberID: string) {
+    const existing = boot?.conversations.find((c) => c.kind === "dm" && c.peer_member_id === peerMemberID);
+    if (existing) {
+      setMainView({ kind: "conversation", convID: existing.id });
+      return;
+    }
+    await dm.run(async () => {
+      const res = await api.createDM(spaceSlug, peerMemberID);
+      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      setMainView({ kind: "conversation", convID: res.conversation.id });
+    });
   }
+
+  if (!boot) return <WorkbenchSkeleton />;
 
   const channels = boot.conversations.filter((c) => c.kind === "public" || c.kind === "private");
   const dms = boot.conversations.filter((c) => c.kind === "dm");
   const agents = boot.members.filter((m) => m.kind === "agent");
   const onlineComputers = boot.computers.filter((c) => c.connection_status === "online").length;
-
-  async function handleSendMessage(e: FormEvent) {
-    e.preventDefault();
-    if (!activeConv) return;
-    const body = composer.trim();
-    if (!body && draft.ids.length === 0) return;
-    await api.sendMessage(
-      spaceSlug,
-      activeConv.id,
-      body || (draft.pending.length > 0 ? `Attached ${draft.pending.map((a) => a.name).join(", ")}` : ""),
-      replyingTo ?? undefined,
-      draft.ids,
-    );
-    setComposer("");
-    setReplyingTo(null);
-    draft.clear();
-    void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, activeConv.id] });
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
-  async function handleCreateInlineTask(e: FormEvent, sourceMsgID: string) {
-    e.preventDefault();
-    if (!activeConv || !newTaskTitle.trim()) return;
-    const res = await api.createTask(spaceSlug, {
-      channel_id: activeConv.id,
-      source_message_id: sourceMsgID,
-      title: newTaskTitle.trim(),
-    });
-    setNewTaskTitle("");
-    setCreatingTaskOnMsg(null);
-    setDetail({ kind: "task", taskID: res.task.id });
-    void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, activeConv.id] });
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
-  async function cycleNotify(conv: Conversation) {
-    const order: NotifyLevel[] = ["mentions", "all", "mute"];
-    const next = order[(order.indexOf(conv.notify_level ?? "mentions") + 1) % order.length];
-    await api.setNotifyLevel(spaceSlug, conv.id, next);
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
-  async function openOrCreateDM(peerMemberID: string) {
-    const res = await api.createDM(spaceSlug, peerMemberID);
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-    setMainView({ kind: "conversation", convID: res.conversation.id });
-  }
-
-  const workingAgent = agents.find((a) => a.agent?.runtime_state === "working");
-  const errorAgent = agents.find((a) => a.agent?.runtime_state === "error");
+  const canGovern = boot.current_member.access_level !== "member";
+  const needsSetup = canGovern && (boot.computers.length === 0 || agents.length === 0);
+  const needsMe = boot.inbox.filter((i) => i.needs_attention).length;
+  const peers = boot.members.filter((m) => m.id !== boot.current_member.id);
+  const pairing = readPendingPairing();
 
   return (
     <div
-      className="h-full grid bg-white"
-      style={{
-        gridTemplateColumns: detail ? "44px 228px minmax(0, 1fr) 388px" : "44px 228px minmax(0, 1fr)",
-      }}
+      className="h-full grid bg-white transition-[grid-template-columns] duration-200 ease-out"
+      style={{ gridTemplateColumns: detail ? "44px 228px minmax(0, 1fr) 388px" : "44px 228px minmax(0, 1fr) 0px" }}
     >
-      {/* 0. ANCHOR RAIL (44px) */}
-      <nav className="bg-[#ECEAE3] border-r border-[#DCD9D0] flex flex-col items-center justify-between py-2 select-none">
-        <div className="flex flex-col items-center gap-2">
+      {/* Anchor rail */}
+      <nav aria-label="Spaces" className="bg-rail border-r border-line-strong flex flex-col items-center justify-between py-2 select-none">
+        <div className="flex flex-col items-center gap-1.5">
+          {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
+            const active = sp.slug === spaceSlug;
+            return (
+              <button
+                key={sp.id}
+                onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(sp.slug))}
+                title={sp.name}
+                aria-label={`Space ${sp.name}`}
+                className="relative w-7 h-7 flex items-center justify-center"
+              >
+                {active && <span className="absolute -left-2 w-[3px] h-5 rounded-r bg-ink animate-fade-in" />}
+                <span
+                  className={`w-7 h-7 rounded-[7px] text-[12px] font-semibold flex items-center justify-center transition-colors ${
+                    active ? "bg-ink text-white" : "bg-[#DEDBD2] text-ink-2 hover:bg-[#D3CFC5]"
+                  }`}
+                >
+                  {(sp.name[0] ?? "S").toUpperCase()}
+                </span>
+              </button>
+            );
+          })}
           <button
-            onClick={() => channels[0] && setMainView({ kind: "conversation", convID: channels[0].id })}
-            title={boot.space.name}
-            className="w-7 h-7 rounded-[6px] bg-[#161614] text-white text-[12px] font-semibold flex items-center justify-center"
+            onClick={() => setDialog("space")}
+            title="New space"
+            aria-label="New space"
+            className="w-7 h-7 rounded-[7px] border border-dashed border-[#C9C5BB] text-mute hover:text-ink hover:border-ink flex items-center justify-center transition-colors"
           >
-            {(boot.space.name[0] ?? "S").toUpperCase()}
+            <Plus className="w-3.5 h-3.5" />
           </button>
         </div>
-        <div className="flex flex-col items-center gap-1.5">
-          <button
-            onClick={() => setMainView({ kind: "admin", tab: "computers" })}
-            title={`Computers (${onlineComputers} online)`}
-            className="w-7 h-7 rounded-[5px] hover:bg-[#E0DDD4] text-[#5C5A54] flex items-center justify-center relative"
-          >
-            <Monitor className="w-4 h-4" />
-            <span
-              className={`w-1.5 h-1.5 rounded-full absolute top-1 right-1 ${
-                onlineComputers > 0 ? "bg-[#0F8B78]" : "bg-[#BDB9AE]"
-              }`}
-            />
-          </button>
-          <button
-            onClick={() => setMainView({ kind: "admin", tab: "members" })}
-            title="Members & Permissions"
-            className="w-7 h-7 rounded-[5px] hover:bg-[#E0DDD4] text-[#5C5A54] flex items-center justify-center"
-          >
-            <Users className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setMainView({ kind: "admin", tab: "settings" })}
-            title="Settings"
-            className="w-7 h-7 rounded-[5px] hover:bg-[#E0DDD4] text-[#5C5A54] flex items-center justify-center"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+        <div className="flex flex-col items-center gap-1">
+          {[
+            { tab: "computers" as const, icon: <Monitor className="w-4 h-4" />, title: `Computers (${onlineComputers} online)` },
+            { tab: "members" as const, icon: <Users className="w-4 h-4" />, title: "Members & Permissions" },
+            { tab: "settings" as const, icon: <Settings className="w-4 h-4" />, title: "Space Settings" },
+          ].map((b) => {
+            const active = mainView.kind === "admin" && mainView.tab === b.tab;
+            return (
+              <button
+                key={b.tab}
+                onClick={() => setMainView({ kind: "admin", tab: b.tab })}
+                title={b.title}
+                aria-label={b.title}
+                className={`w-7 h-7 rounded-[6px] flex items-center justify-center relative transition-colors ${
+                  active ? "bg-[#DEDBD2] text-ink" : "text-mute hover:bg-[#E0DDD4] hover:text-ink"
+                }`}
+              >
+                {b.icon}
+                {b.tab === "computers" && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full absolute top-1 right-1 ${onlineComputers > 0 ? "bg-work" : "bg-[#BDB9AE]"}`}
+                  />
+                )}
+              </button>
+            );
+          })}
         </div>
       </nav>
 
-      {/* 1. SIDEBAR (228px — tight 28px rows) */}
-      <aside className="bg-[#F4F2EC] border-r border-[#DCD9D0] flex flex-col justify-between min-h-0 select-none">
-        <div className="flex flex-col min-h-0">
-          <div className="h-11 px-3 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-            <span className="text-[13.5px] font-semibold text-[#161614] truncate">{boot.space.name}</span>
+      {/* Sidebar */}
+      <aside aria-label="Sidebar" className="bg-paper border-r border-line-strong flex flex-col min-h-0 select-none">
+        <div className="h-11 px-3 border-b border-line flex items-center justify-between gap-2 shrink-0">
+          <span className="text-[13.5px] font-semibold text-ink truncate">{boot.space.name}</span>
+          <button
+            onClick={() => setDialog("jump")}
+            title="Jump to… (⌘K)"
+            className="h-6 px-1.5 rounded-[5px] border border-line bg-white/60 text-mute hover:text-ink hover:border-field flex items-center gap-1 transition-colors shrink-0"
+          >
+            <Search className="w-3 h-3" />
+            <span className="font-mono-num text-[10.5px]">⌘K</span>
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 p-2 space-y-4 overflow-y-auto scroll-thin">
+          <div className="space-y-0.5">
+            <NavRow
+              active={mainView.kind === "inbox"}
+              onClick={() => setMainView({ kind: "inbox" })}
+              trailing={needsMe > 0 ? <Count n={needsMe} /> : boot.inbox.length > 0 ? <Count n={boot.inbox.length} warm={false} /> : null}
+            >
+              <Inbox className="w-3.5 h-3.5 text-mute" />
+              <span>Inbox</span>
+            </NavRow>
+            <NavRow
+              active={mainView.kind === "tasks"}
+              onClick={() => setMainView({ kind: "tasks" })}
+              trailing={<span className="text-[11px] font-mono-num text-faint">{boot.tasks.length || ""}</span>}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-mute" />
+              <span>Tasks</span>
+            </NavRow>
           </div>
 
-          <div className="p-2 space-y-4 overflow-y-auto scroll-thin">
-            <div className="space-y-0.5">
-              <button
-                onClick={() => setMainView({ kind: "inbox" })}
-                className={`w-full h-7 px-2 rounded-[5px] flex items-center justify-between text-[13px] ${
-                  mainView.kind === "inbox" ? "bg-[#E4E1D8] text-[#161614] font-semibold" : "text-[#45433E] hover:bg-[#E9E6DE]"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Inbox className="w-3.5 h-3.5 text-[#6E6B64]" />
-                  <span>Inbox</span>
-                </span>
-                {boot.inbox.length > 0 && (
-                  <span className="px-1.5 rounded text-[11px] font-semibold font-mono-num bg-[#F7DFD1] text-[#A84010]">
-                    {boot.inbox.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setMainView({ kind: "tasks" })}
-                className={`w-full h-7 px-2 rounded-[5px] flex items-center justify-between text-[13px] ${
-                  mainView.kind === "tasks" ? "bg-[#E4E1D8] text-[#161614] font-semibold" : "text-[#45433E] hover:bg-[#E9E6DE]"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#6E6B64]" />
-                  <span>Tasks</span>
-                </span>
-                <span className="text-[11px] font-mono-num text-[#6E6B64]">{boot.tasks.length}</span>
-              </button>
-            </div>
-
-            {/* Channels */}
-            <div>
-              <div className="px-2 mb-1 flex items-center justify-between text-[11.5px] font-medium text-[#6E6B64]">
-                <span>Channels</span>
-                <button
-                  onClick={() => {
-                    const slug = window.prompt("Channel slug (lowercase, hyphens):");
-                    if (slug) {
-                      void api.createChannel(spaceSlug, slug.trim(), "public", "").then((r) => {
-                        void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-                        setMainView({ kind: "conversation", convID: r.conversation.id });
-                      });
-                    }
-                  }}
-                  title="New channel"
-                  className="hover:text-[#161614]"
-                >
+          <div>
+            <SectionLabel
+              action={
+                <button onClick={() => setDialog("channel")} title="New channel" aria-label="New channel" className="w-5 h-5 rounded hover:bg-hover hover:text-ink flex items-center justify-center">
                   <Plus className="w-3.5 h-3.5" />
                 </button>
-              </div>
-              <div className="space-y-0.5">
-                {channels.map((c) => {
-                  const isActive = mainView.kind === "conversation" && mainView.convID === c.id;
-                  const muted = c.notify_level === "mute";
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => setMainView({ kind: "conversation", convID: c.id })}
-                      className={`w-full h-7 px-2 rounded-[5px] flex items-center justify-between text-[13px] ${
-                        isActive
-                          ? "bg-[#E4E1D8] text-[#161614] font-semibold"
-                          : muted
-                            ? "text-[#8A867D] hover:bg-[#E9E6DE]"
-                            : c.unread_count > 0
-                              ? "text-[#161614] font-semibold hover:bg-[#E9E6DE]"
-                              : "text-[#45433E] hover:bg-[#E9E6DE]"
-                      }`}
-                    >
-                      <span className="flex items-center gap-1.5 truncate">
-                        <span className="text-[#6E6B64] font-normal">#</span>
-                        <span className="truncate">{c.slug}</span>
-                      </span>
-                      {c.mention_count > 0 && !muted ? (
-                        <span className="px-1.5 rounded text-[11px] font-semibold font-mono-num bg-[#F7DFD1] text-[#A84010]">
-                          {c.mention_count}
-                        </span>
-                      ) : muted ? (
-                        <span className="text-[10.5px] text-[#9A968D]">muted</span>
-                      ) : c.unread_count > 0 ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#161614]" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Direct Messages & Agents */}
-            <div>
-              <div className="px-2 mb-1 text-[11.5px] font-medium text-[#6E6B64]">Direct messages</div>
-              <div className="space-y-0.5">
-                {boot.members
-                  .filter((m) => m.id !== boot.current_member.id)
-                  .map((m) => {
-                    const dm = dms.find((d) => d.peer_member_id === m.id);
-                    const isActive = Boolean(dm && mainView.kind === "conversation" && mainView.convID === dm.id);
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => void openOrCreateDM(m.id)}
-                        className={`w-full h-7 px-2 rounded-[5px] flex items-center justify-between text-[13px] ${
-                          isActive ? "bg-[#E4E1D8] text-[#161614] font-semibold" : "text-[#45433E] hover:bg-[#E9E6DE]"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" />
-                          <span className="truncate">{m.display_name}</span>
-                        </span>
-                        {dm && dm.unread_count > 0 ? (
-                          <span className="px-1.5 rounded text-[11px] font-semibold font-mono-num bg-[#F7DFD1] text-[#A84010]">
-                            {dm.unread_count}
-                          </span>
-                        ) : m.kind === "agent" ? (
-                          <RuntimeDot state={m.agent?.runtime_state} />
-                        ) : null}
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="h-10 px-3 border-t border-[#E4E1D9] flex items-center justify-between text-[12.5px]">
-          <div className="flex items-center gap-2 min-w-0">
-            <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="sm" />
-            <span className="font-medium text-[#161614] truncate">{boot.current_member.display_name}</span>
-          </div>
-          <span className="text-[11px] text-[#8A867D]">{boot.current_member.access_level}</span>
-        </div>
-      </aside>
-
-      {/* 2. MAIN PANE */}
-      <main className="bg-white flex flex-col min-w-0 min-h-0">
-        {mainView.kind === "conversation" && activeConv && (
-          <section className="flex flex-col h-full min-h-0">
-            <header className="h-11 px-4 border-b border-[#E4E1D9] flex items-center justify-between gap-4 shrink-0">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <h1 className="text-[14px] font-semibold text-[#161614] shrink-0">
-                  {activeConv.kind === "dm" ? `@${activeConv.peer_display_name}` : `#${activeConv.slug}`}
-                </h1>
-                {activeConv.topic && (
-                  <>
-                    <span className="text-[#D5D1C7]">|</span>
-                    <span className="text-[12.5px] text-[#6E6B64] truncate">{activeConv.topic}</span>
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {activeConv.kind !== "dm" && (
-                  <button
-                    onClick={() => void cycleNotify(activeConv)}
-                    className="h-7 px-2 rounded border border-[#E4E1D9] hover:bg-[#F4F2EC] text-[12px] text-[#45433E] flex items-center gap-1.5"
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        activeConv.notify_level === "mute"
-                          ? "bg-[#9A968D]"
-                          : activeConv.notify_level === "all"
-                            ? "bg-[#161614]"
-                            : "bg-[#A84010]"
-                      }`}
-                    />
-                    <span>
-                      {activeConv.notify_level === "all"
-                        ? "All messages"
-                        : activeConv.notify_level === "mute"
-                          ? "Muted"
-                          : "Mentions only"}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </header>
-
-            <div className="flex-1 overflow-y-auto scroll-thin py-3">
-              {(msgsQ.data?.messages ?? []).map((m, idx, arr) => {
-                const prevRead = msgsQ.data?.read_seq ?? 0;
-                const showNewDivider =
-                  prevRead > 0 &&
-                  m.seq > prevRead &&
-                  m.author_member_id !== boot.current_member.id &&
-                  (idx === 0 || arr[idx - 1].seq <= prevRead);
+              }
+            >
+              Channels
+            </SectionLabel>
+            <div className="space-y-0.5">
+              {channels.map((c) => {
+                const muted = c.notify_level === "mute";
                 return (
-                  <div key={m.id}>
-                    {showNewDivider && (
-                      <div className="px-5 py-1.5 flex items-center gap-2.5">
-                        <div className="flex-1 h-px bg-[#E3AE91]" />
-                        <span className="text-[10.5px] font-semibold uppercase tracking-wider text-[#A84010]">New</span>
-                        <div className="flex-1 h-px bg-[#E3AE91]" />
-                      </div>
-                    )}
-                    {m.kind === "action" ? (
-                      <div className="px-5 py-1.5 flex items-center gap-3 text-[12px] text-[#6E6B64]">
-                        <span className="w-7 flex justify-end">
-                          <span className="w-4 h-4 rounded bg-[#F1EFEA] border border-[#E4E1D9] flex items-center justify-center text-[10px]">
-                            +
-                          </span>
-                        </span>
-                        <span>
-                          <strong className="font-medium text-[#161614]">{m.author_display_name}</strong>{" "}
-                          {m.action_kind} · <span className="font-mono-num text-[11px]">{formatClock(m.created_at)}</span>
-                        </span>
-                      </div>
-                    ) : (
-                      <article className="px-5 py-2 hover:bg-[#FAF9F6] flex items-start gap-3 group">
-                        <button
-                          onClick={() =>
-                            m.author_kind === "agent" && setDetail({ kind: "agent", memberID: m.author_member_id })
-                          }
-                          className="mt-0.5"
-                        >
-                          <MemberAvatar
-                            id={m.author_member_id}
-                            name={m.author_display_name ?? "?"}
-                            kind={m.author_kind ?? "human"}
-                          />
-                        </button>
-                        <div className="min-w-0 flex-1 max-w-[70ch]">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-baseline gap-2">
-                              <span className="text-[13.5px] font-semibold text-[#161614]">{m.author_display_name}</span>
-                              <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.created_at)}</span>
-                            </div>
-                            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-[11.5px] text-[#6E6B64]">
-                              <button
-                                onClick={() => setReplyingTo(m.id)}
-                                className="px-1.5 py-0.5 rounded hover:bg-[#E9E6DE] hover:text-[#161614]"
-                              >
-                                Reply
-                              </button>
-                              <button
-                                onClick={() => setCreatingTaskOnMsg(m.id)}
-                                className="px-1.5 py-0.5 rounded hover:bg-[#E9E6DE] hover:text-[#161614]"
-                              >
-                                + Task
-                              </button>
-                            </div>
-                          </div>
-                          <div className="mt-0.5 text-[13.5px] leading-[1.52] text-[#161614] prose prose-sm max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
-                          </div>
-
-                          <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
-
-                          {/* Compact 32px Task Table (1:N per root message) */}
-                          {m.attached_tasks && m.attached_tasks.length > 0 && (
-                            <div className="mt-2 border border-[#E4E1D9] rounded-[6px] bg-[#FAF9F6] divide-y divide-[#E4E1D9] overflow-hidden">
-                              {m.attached_tasks.map((tk) => (
-                                <button
-                                  key={tk.id}
-                                  onClick={() => setDetail({ kind: "task", taskID: tk.id })}
-                                  className="w-full h-8 px-2.5 hover:bg-[#F2F0EA] flex items-center justify-between gap-3 text-left"
-                                >
-                                  <span className="flex items-center gap-2 min-w-0">
-                                    <TaskStatusGlyph status={tk.status} />
-                                    <span className="font-mono-num text-[11.5px] text-[#6E6B64] w-7 shrink-0">
-                                      #{tk.number}
-                                    </span>
-                                    <span className="text-[12.5px] font-medium text-[#161614] truncate">{tk.title}</span>
-                                  </span>
-                                  <span className="flex items-center gap-3 shrink-0 text-[11.5px] text-[#6E6B64]">
-                                    <span>{tk.assignee_display_name || "Unassigned"}</span>
-                                    {tk.message_count > 0 && (
-                                      <span className="font-mono-num text-[#8A867D]">{tk.message_count} msgs</span>
-                                    )}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Inline Quick Task Creation */}
-                          {creatingTaskOnMsg === m.id && (
-                            <form
-                              onSubmit={(e) => void handleCreateInlineTask(e, m.id)}
-                              className="mt-2 flex items-center gap-1.5"
-                            >
-                              <input
-                                autoFocus
-                                value={newTaskTitle}
-                                onChange={(e) => setNewTaskTitle(e.target.value)}
-                                placeholder="New task title…"
-                                className="flex-1 h-7 px-2 rounded border border-[#161614] text-[12.5px] outline-none"
-                              />
-                              <button
-                                type="submit"
-                                className="h-7 px-2.5 rounded bg-[#161614] text-white text-[12px] font-medium"
-                              >
-                                Create
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setCreatingTaskOnMsg(null)}
-                                className="h-7 px-2 rounded text-[12px] text-[#6E6B64] hover:bg-[#F4F2EC]"
-                              >
-                                Cancel
-                              </button>
-                            </form>
-                          )}
-
-                          {/* Compact Single-line Thread Indicator */}
-                          {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
-                            <button
-                              onClick={() =>
-                                setDetail({
-                                  kind: "thread",
-                                  threadConvID: m.thread_conversation_id!,
-                                  rootMessageID: m.id,
-                                  parentSlug: activeConv.slug ?? "dm",
-                                })
-                              }
-                              className="mt-1.5 inline-flex items-center gap-2 text-[12px] text-[#45433E] hover:text-[#161614]"
-                            >
-                              <span className="font-medium underline decoration-[#D5D1C7] underline-offset-2">
-                                {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}
-                              </span>
-                              <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(m.last_reply_at)}</span>
-                            </button>
-                          ) : null}
-                        </div>
-                      </article>
-                    )}
-                  </div>
+                  <NavRow
+                    key={c.id}
+                    active={activeConvID === c.id}
+                    onClick={() => setMainView({ kind: "conversation", convID: c.id })}
+                    dim={muted}
+                    bold={c.unread_count > 0 && !muted}
+                    trailing={
+                      c.mention_count > 0 ? (
+                        <Count n={c.mention_count} />
+                      ) : c.unread_count > 0 && !muted ? (
+                        <span className="w-1.5 h-1.5 rounded-full bg-ink shrink-0" />
+                      ) : null
+                    }
+                  >
+                    {c.kind === "private" ? <Lock className="w-3 h-3 text-mute shrink-0" /> : <Hash className="w-3 h-3 text-mute shrink-0" />}
+                    <span className="truncate">{c.slug}</span>
+                  </NavRow>
                 );
               })}
             </div>
+          </div>
 
-            {/* Grounded Docked Footer: 28px Honest Agent Status + Structural Composer */}
-            <div className="border-t border-[#E4E1D9] bg-[#FAF9F6] shrink-0">
-              <div className="h-7 px-4 border-b border-[#ECEAE3] flex items-center justify-between text-[12px]">
-                {workingAgent ? (
-                  <button
-                    onClick={() => setDetail({ kind: "agent", memberID: workingAgent.id })}
-                    className="inline-flex items-center gap-2 text-[#45433E] hover:text-[#161614]"
-                  >
-                    <RuntimeDot state="working" />
-                    <span>
-                      <strong className="font-medium text-[#161614]">{workingAgent.display_name}</strong> working
-                    </span>
-                  </button>
-                ) : errorAgent ? (
-                  <button
-                    onClick={() => setDetail({ kind: "agent", memberID: errorAgent.id })}
-                    className="inline-flex items-center gap-2 text-[#A84010]"
-                  >
-                    <RuntimeDot state="error" />
-                    <span>
-                      <strong>{errorAgent.display_name}</strong> error · {errorAgent.agent?.last_error_code || "needs attention"}
-                    </span>
-                  </button>
-                ) : (
-                  <span className="text-[#8A867D]">
-                    {replyingTo ? "Replying in thread" : "All agents idle"}
-                  </span>
-                )}
-                {replyingTo && (
-                  <button onClick={() => setReplyingTo(null)} className="text-[11.5px] text-[#6E6B64] hover:text-[#161614]">
-                    Cancel thread reply
-                  </button>
-                )}
-              </div>
-
-              <form onSubmit={handleSendMessage} className="bg-white">
-                <textarea
-                  rows={2}
-                  value={composer}
-                  onChange={(e) => setComposer(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      void handleSendMessage(e);
-                    }
-                  }}
-                  placeholder={
-                    replyingTo
-                      ? "Reply in thread…"
-                      : `Message ${activeConv.kind === "dm" ? "@" + activeConv.peer_display_name : "#" + activeConv.slug}`
-                  }
-                  className="w-full px-4 pt-2.5 pb-1 text-[13.5px] bg-transparent outline-none resize-none placeholder:text-[#8A867D]"
-                />
-                <AttachmentDraftRow draft={draft} />
-                <div className="px-3 pb-2 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    <AttachmentPicker draft={draft} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono-num text-[11px] text-[#8A867D]">↵ Send</span>
-                    <button
-                      disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading}
-                      type="submit"
-                      className="h-6 px-2.5 rounded-[5px] bg-[#161614] hover:bg-[#2F2E2B] text-white text-[12px] font-medium disabled:opacity-40"
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </section>
-        )}
-
-        {mainView.kind === "inbox" && (
-          <section className="flex flex-col h-full min-h-0">
-            <header className="h-11 px-4 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <h1 className="text-[14px] font-semibold text-[#161614]">Inbox</h1>
-                <div className="flex items-center gap-1 text-[12px]">
-                  {(["needs_me", "unread", "all"] as const).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setInboxFilter(f)}
-                      className={`px-2 py-0.5 rounded ${
-                        inboxFilter === f ? "bg-[#E9E6DE] text-[#161614] font-medium" : "text-[#6E6B64] hover:bg-[#F4F2EC]"
-                      }`}
-                    >
-                      {f === "needs_me" ? "Needs me" : f === "unread" ? "Unread" : "All"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </header>
-            <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-[#E4E1D9]">
-              {(inboxQ.data ?? []).length === 0 ? (
-                <div className="p-10 text-center text-[12.5px] text-[#8A867D]">Inbox zero.</div>
-              ) : (
-                (inboxQ.data ?? []).map((it) => (
-                  <div
-                    key={it.conversation_id}
-                    className={`px-4 py-2.5 flex items-center justify-between gap-4 ${
-                      it.needs_attention ? "bg-[#FFF9F5] hover:bg-[#FDF2EA]" : "hover:bg-[#FAF9F6]"
-                    }`}
-                  >
-                    <div
-                      className="min-w-0 flex-1 cursor-pointer"
-                      onClick={() => {
-                        if (it.kind === "task" && it.task_id) {
-                          setDetail({ kind: "task", taskID: it.task_id });
-                        } else if (it.kind === "thread") {
-                          setDetail({
-                            kind: "thread",
-                            threadConvID: it.conversation_id,
-                            rootMessageID: "",
-                            parentSlug: it.parent_slug ?? "",
-                          });
-                        } else {
-                          setMainView({ kind: "conversation", convID: it.conversation_id });
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-2 text-[12px]">
-                        <span className={`font-semibold ${it.needs_attention ? "text-[#A84010]" : "text-[#45433E]"}`}>
-                          {it.reason}
+          <div>
+            <SectionLabel>Direct messages</SectionLabel>
+            <div className="space-y-0.5">
+              {peers.map((m) => {
+                const conv = dms.find((d) => d.peer_member_id === m.id);
+                return (
+                  <NavRow
+                    key={m.id}
+                    active={Boolean(conv && activeConvID === conv.id)}
+                    onClick={() => void openOrCreateDM(m.id)}
+                    bold={Boolean(conv && conv.unread_count > 0)}
+                    trailing={
+                      conv && conv.unread_count > 0 ? (
+                        <Count n={conv.unread_count} />
+                      ) : m.kind === "agent" ? (
+                        <span className={m.agent?.runtime_state === "working" ? "animate-breathe" : ""}>
+                          <RuntimeDot state={m.agent?.runtime_state} />
                         </span>
-                        <span className="text-[#6E6B64]">{it.title}</span>
-                        <span className="font-mono-num text-[11px] text-[#8A867D]">{formatClock(it.latest_at)}</span>
-                      </div>
-                      <p className="mt-0.5 text-[13px] text-[#161614] truncate">
-                        <strong>{it.latest_author_name}:</strong> {it.latest_preview}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() =>
-                          void api.markDone(spaceSlug, it.conversation_id).then(() => {
-                            void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
-                            void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-                          })
-                        }
-                        className="h-6 px-2 rounded border border-[#D5D1C7] bg-white hover:border-[#161614] text-[11.5px] font-medium"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
+                      ) : null
+                    }
+                  >
+                    <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" />
+                    <span className="truncate">{m.display_name}</span>
+                  </NavRow>
+                );
+              })}
+              {peers.length === 0 && <p className="px-2 py-1 text-[12px] text-faint">Create an agent to start a DM.</p>}
             </div>
-          </section>
-        )}
+          </div>
+        </div>
 
-        {mainView.kind === "tasks" && (
-          <section className="flex flex-col h-full min-h-0">
-            <header className="h-11 px-4 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <h1 className="text-[14px] font-semibold text-[#161614]">Tasks</h1>
-                <div className="flex items-center gap-1 text-[12px]">
-                  {(["active", "mine", "done"] as const).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setTaskFilter(f)}
-                      className={`px-2 py-0.5 rounded capitalize ${
-                        taskFilter === f ? "bg-[#E9E6DE] text-[#161614] font-medium" : "text-[#6E6B64] hover:bg-[#F4F2EC]"
-                      }`}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
+        {needsSetup && (
+          <div className="px-2 pb-2 shrink-0 animate-fade-in">
+            <button
+              onClick={() => setDialog({ setup: boot.computers.length === 0 ? "computer" : "agent" })}
+              className="w-full p-2.5 rounded-[7px] border border-line bg-white hover:border-field text-left transition-colors"
+            >
+              <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+                <Sparkles className="w-3.5 h-3.5" /> Finish setup
               </div>
-            </header>
-            <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-[#E4E1D9]">
-              {(tasksQ.data ?? []).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDetail({ kind: "task", taskID: t.id })}
-                  className="w-full h-9 px-4 hover:bg-[#FAF9F6] flex items-center justify-between gap-4 text-left"
-                >
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <TaskStatusGlyph status={t.status} />
-                    <span className="font-mono-num text-[12px] text-[#6E6B64] w-7 shrink-0">#{t.number}</span>
-                    <span className="text-[13px] font-medium text-[#161614] truncate">{t.title}</span>
-                  </span>
-                  <span className="flex items-center gap-4 text-[12px] text-[#6E6B64] shrink-0">
-                    <span className="w-20 text-right truncate">{t.assignee_display_name || "—"}</span>
-                    <span className="w-24 text-right text-[#8A867D] truncate">
-                      {t.channel_slug ? `#${t.channel_slug}` : "DM"}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
+              <div className="mt-1.5 space-y-1 text-[11.5px]">
+                <SetupLine done={boot.computers.length > 0}>Connect a computer</SetupLine>
+                <SetupLine done={agents.length > 0}>Create an agent</SetupLine>
+              </div>
+            </button>
+          </div>
         )}
 
-        {mainView.kind === "admin" && (
-          <AdminPanel
-            spaceSlug={spaceSlug}
-            boot={boot}
-            tab={mainView.tab}
-            onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
-            onLogout={onLogout}
-          />
-        )}
+        <div className="h-10 px-3 border-t border-line flex items-center justify-between text-[12.5px] shrink-0">
+          <button
+            onClick={() => setMainView({ kind: "admin", tab: "settings" })}
+            className="flex items-center gap-2 min-w-0 hover:text-ink"
+          >
+            <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="sm" />
+            <span className="font-medium text-ink truncate">{boot.current_member.display_name}</span>
+          </button>
+          <span className="text-[11px] text-faint capitalize">{boot.current_member.access_level}</span>
+        </div>
+      </aside>
+
+      {/* Main pane */}
+      <main className="bg-white flex flex-col min-w-0 min-h-0">
+        <div key={viewKey(mainView)} className="h-full min-h-0 animate-fade-in">
+          {mainView.kind === "conversation" && activeConv && (
+            <ConversationView spaceSlug={spaceSlug} boot={boot} conv={activeConv} onOpenDetail={setDetail} />
+          )}
+          {mainView.kind === "inbox" && (
+            <InboxView
+              spaceSlug={spaceSlug}
+              filter={inboxFilter}
+              onFilter={setInboxFilter}
+              onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+              onOpenDetail={setDetail}
+            />
+          )}
+          {mainView.kind === "tasks" && (
+            <TasksView spaceSlug={spaceSlug} filter={taskFilter} onFilter={setTaskFilter} onOpenDetail={setDetail} />
+          )}
+          {mainView.kind === "admin" && (
+            <AdminPanel
+              spaceSlug={spaceSlug}
+              boot={boot}
+              tab={mainView.tab}
+              onTab={(tab) => setMainView({ kind: "admin", tab })}
+              onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
+              onOpenSetup={(step) => setDialog({ setup: step })}
+              onLogout={onLogout}
+            />
+          )}
+        </div>
       </main>
 
-      {/* 3. RIGHT DETAIL PANE */}
-      {detail && (
-        <DetailPane
-          spaceSlug={spaceSlug}
-          boot={boot}
-          target={detail}
-          onClose={() => setDetail(null)}
-          onSelectTarget={setDetail}
-        />
-      )}
+      {/* Right detail pane */}
+      <div className="min-w-0 min-h-0 overflow-hidden">
+        {detail && (
+          <div key={JSON.stringify(detail)} className="h-full w-[388px] animate-slide-in">
+            <DetailPane spaceSlug={spaceSlug} boot={boot} target={detail} onClose={() => setDetail(null)} onSelectTarget={setDetail} />
+          </div>
+        )}
+      </div>
+
+      <NewChannelDialog
+        open={dialog === "channel"}
+        spaceSlug={spaceSlug}
+        onClose={() => setDialog(null)}
+        onCreated={(id) => {
+          setDialog(null);
+          setMainView({ kind: "conversation", convID: id });
+        }}
+      />
+      <NewSpaceDialog
+        open={dialog === "space"}
+        onClose={() => setDialog(null)}
+        onCreated={(slug) => {
+          setDialog(null);
+          onSpaceCreated?.(slug);
+        }}
+      />
+      <Modal open={typeof dialog === "object" && dialog !== null} onClose={() => setDialog(null)} label="Finish setup" width={460}>
+        <div className="p-6">
+          {typeof dialog === "object" && dialog?.setup === "computer" && (
+            <ComputerStep spaceSlug={spaceSlug} onNext={() => setDialog(agents.length === 0 ? { setup: "agent" } : null)} />
+          )}
+          {typeof dialog === "object" && dialog?.setup === "agent" && (
+            <AgentStep
+              spaceSlug={spaceSlug}
+              onSkip={() => setDialog(null)}
+              onDone={(id) => {
+                setDialog(null);
+                void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }).then(() => openOrCreateDM(id));
+              }}
+            />
+          )}
+        </div>
+      </Modal>
+      <Modal open={dialog === "pairing" && Boolean(pairing)} onClose={() => setDialog(null)} label="Connect this computer">
+        <div className="p-6 space-y-4">
+          <div>
+            <h2 className="text-[15px] font-semibold">Connect this computer to {boot.space.name}?</h2>
+            <p className="mt-0.5 text-[12.5px] text-mute">The Sumi desktop app on this machine asked to join.</p>
+          </div>
+          {pairing && canGovern ? (
+            <PairingCard spaceSlug={spaceSlug} pairing={pairing} onConfirmed={() => setDialog(null)} onDismiss={() => setDialog(null)} />
+          ) : (
+            <p className="text-[12.5px] text-mute">Only owners and admins can connect computers.</p>
+          )}
+        </div>
+      </Modal>
+      <JumpDialog
+        open={dialog === "jump"}
+        onClose={() => setDialog(null)}
+        items={[
+          { key: "inbox", label: "Inbox", icon: <Inbox className="w-3.5 h-3.5" />, run: () => setMainView({ kind: "inbox" }) },
+          { key: "tasks", label: "Tasks", icon: <CheckCircle2 className="w-3.5 h-3.5" />, run: () => setMainView({ kind: "tasks" }) },
+          ...channels.map((c) => ({
+            key: c.id,
+            label: `#${c.slug}`,
+            icon: <Hash className="w-3.5 h-3.5" />,
+            run: () => setMainView({ kind: "conversation", convID: c.id }),
+          })),
+          ...peers.map((m) => ({
+            key: m.id,
+            label: m.display_name,
+            icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" />,
+            run: () => void openOrCreateDM(m.id),
+          })),
+          ...boot.tasks.map((t) => ({
+            key: t.id,
+            label: `#${t.number} ${t.title}`,
+            icon: <CheckCircle2 className="w-3.5 h-3.5" />,
+            run: () => setDetail({ kind: "task", taskID: t.id }),
+          })),
+        ]}
+      />
     </div>
   );
 }
 
-function AdminPanel({
+function SetupLine({ done, children }: { done: boolean; children: ReactNode }) {
+  return (
+    <div className={`flex items-center gap-1.5 ${done ? "text-faint line-through" : "text-ink-2"}`}>
+      <span className={`w-3 h-3 rounded-full flex items-center justify-center ${done ? "bg-ink text-white" : "border border-field"}`}>
+        {done && <span className="text-[8px]">✓</span>}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function NewChannelDialog({
+  open,
   spaceSlug,
-  boot,
-  tab,
-  onInspectAgent,
-  onLogout,
+  onClose,
+  onCreated,
 }: {
+  open: boolean;
   spaceSlug: string;
-  boot: BootstrapData;
-  tab: "computers" | "members" | "settings";
-  onInspectAgent: (memberID: string) => void;
-  onLogout: () => void;
+  onClose: () => void;
+  onCreated: (convID: string) => void;
 }) {
   const qc = useQueryClient();
-  const [compName, setCompName] = useState("mac-local");
-  const [pairedToken, setPairedToken] = useState("");
-  const [agName, setAgName] = useState("");
-  const [agRole, setAgRole] = useState("");
-  const [agDriver, setAgDriver] = useState<"builtin" | "acp">("builtin");
+  const [slug, setSlug] = useState("");
+  const [topic, setTopic] = useState("");
+  const [kind, setKind] = useState<"public" | "private">("public");
+  const { busy, run } = useAction();
+  useEffect(() => {
+    if (open) {
+      setSlug("");
+      setTopic("");
+      setKind("public");
+    }
+  }, [open]);
 
-  async function handlePair(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
-    const res = await api.pairComputer(spaceSlug, compName, compName, "macos");
-    setPairedToken(res.token);
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
-
-  async function handleCreateAgent(e: FormEvent) {
-    e.preventDefault();
-    const comp = boot.computers[0];
-    if (!comp || !agName.trim()) return;
-    await api.createAgent(spaceSlug, {
-      display_name: agName.trim(),
-      role_text: agRole.trim(),
-      computer_id: comp.id,
-      driver_kind: agDriver,
+    await run(async () => {
+      const r = await api.createChannel(spaceSlug, slugify(slug), kind, topic.trim());
+      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      onCreated(r.conversation.id);
     });
-    setAgName("");
-    setAgRole("");
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
   return (
-    <section className="flex flex-col h-full min-h-0">
-      <header className="h-11 px-4 border-b border-[#E4E1D9] flex items-center justify-between shrink-0">
-        <h1 className="text-[14px] font-semibold text-[#161614] capitalize">{tab}</h1>
-      </header>
-      <div className="flex-1 overflow-y-auto scroll-thin p-5 max-w-2xl space-y-6">
-        {tab === "computers" && (
-          <>
-            <form onSubmit={handlePair} className="flex items-center gap-2">
-              <input
-                value={compName}
-                onChange={(e) => setCompName(e.target.value)}
-                placeholder="Computer name"
-                className="h-8 px-2.5 rounded border border-[#D5D1C7] text-[13px] outline-none"
-              />
-              <button type="submit" className="h-8 px-3 rounded bg-[#161614] text-white text-[12.5px] font-medium">
-                Pair Computer
-              </button>
-            </form>
-            {pairedToken && (
-              <div className="p-3 rounded border border-[#E4E1D9] bg-[#FAF9F6] text-[12px] space-y-1">
-                <div className="font-medium text-[#161614]">Run on your machine:</div>
-                <code className="block font-mono-num break-all text-[#45433E]">
-                  sumi computer --server {window.location.origin} --token {pairedToken}
-                </code>
-              </div>
-            )}
-            <div className="border border-[#E4E1D9] rounded-[6px] divide-y divide-[#E4E1D9]">
-              {boot.computers.map((c) => (
-                <div key={c.id} className="h-10 px-3 flex items-center justify-between text-[13px]">
-                  <span className="font-medium">{c.name}</span>
-                  <span className={c.connection_status === "online" ? "text-[#0F8B78]" : "text-[#8A867D]"}>
-                    {c.connection_status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+    <Modal open={open} onClose={onClose} label="New channel">
+      <form onSubmit={submit} className="p-6 space-y-4">
+        <h2 className="text-[15px] font-semibold">New channel</h2>
+        <Field
+          label="Name"
+          autoFocus
+          value={slug}
+          onChange={(e) => setSlug(slugInput(e.target.value))}
+          placeholder="design-review"
+          hint="Lowercase letters, digits and hyphens."
+          required
+        />
+        <Field label="Topic" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Optional" />
+        <Segmented
+          size="md"
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: "public", label: "Public" },
+            { value: "private", label: "Private" },
+          ]}
+        />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={busy} disabled={!slug}>
+            Create channel
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
-        {tab === "members" && (
-          <>
-            {boot.computers.length > 0 && (
-              <form onSubmit={handleCreateAgent} className="p-3.5 border border-[#E4E1D9] rounded-[6px] space-y-2.5">
-                <div className="text-[12.5px] font-semibold">Create Agent</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    value={agName}
-                    onChange={(e) => setAgName(e.target.value)}
-                    placeholder="Display name (e.g. Lin)"
-                    className="h-8 px-2.5 rounded border border-[#D5D1C7] text-[13px] outline-none"
-                    required
-                  />
-                  <select
-                    value={agDriver}
-                    onChange={(e) => setAgDriver(e.target.value as "builtin" | "acp")}
-                    className="h-8 px-2 rounded border border-[#D5D1C7] text-[13px] bg-white"
-                  >
-                    <option value="builtin">Builtin (Go Harness)</option>
-                    <option value="acp">ACP Driver</option>
-                  </select>
-                </div>
-                <input
-                  value={agRole}
-                  onChange={(e) => setAgRole(e.target.value)}
-                  placeholder="Role description"
-                  className="w-full h-8 px-2.5 rounded border border-[#D5D1C7] text-[13px] outline-none"
-                />
-                <button type="submit" className="h-7 px-3 rounded bg-[#161614] text-white text-[12px] font-medium">
-                  Create Agent
-                </button>
-              </form>
-            )}
-            <div className="border border-[#E4E1D9] rounded-[6px] divide-y divide-[#E4E1D9]">
-              {boot.members.map((m) => (
-                <div key={m.id} className="h-10 px-3 flex items-center justify-between text-[13px]">
-                  <span className="flex items-center gap-2">
-                    <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" />
-                    <span className="font-medium">{m.display_name}</span>
-                    <span className="text-[11.5px] text-[#8A867D]">{m.kind}</span>
-                  </span>
-                  {m.kind === "agent" ? (
-                    <button
-                      onClick={() => onInspectAgent(m.id)}
-                      className="text-[12px] text-[#45433E] hover:text-[#161614] underline decoration-[#D5D1C7]"
-                    >
-                      Inspect
-                    </button>
-                  ) : (
-                    <span className="text-[12px] text-[#8A867D]">{m.access_level}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+function NewSpaceDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (slug: string) => void }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [touched, setTouched] = useState(false);
+  const { busy, run } = useAction();
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setSlug("");
+      setTouched(false);
+    }
+  }, [open]);
+  return (
+    <Modal open={open} onClose={onClose} label="New space">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(async () => {
+            const r = await api.createSpace(slugify(slug), name.trim());
+            onCreated(r.space.slug);
+          });
+        }}
+        className="p-6 space-y-4"
+      >
+        <h2 className="text-[15px] font-semibold">New space</h2>
+        <Field
+          label="Name"
+          autoFocus
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (!touched) setSlug(slugify(e.target.value));
+          }}
+          required
+        />
+        <Field
+          label="Address"
+          value={slug}
+          className="font-mono-num"
+          onChange={(e) => {
+            setTouched(true);
+            setSlug(slugInput(e.target.value));
+          }}
+          required
+        />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={busy} disabled={!slug || !name.trim()}>
+            Create space
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
-        {tab === "settings" && (
-          <div className="space-y-4 text-[13px]">
-            <div className="grid grid-cols-[120px_1fr] gap-y-2 border border-[#E4E1D9] rounded-[6px] p-3.5">
-              <span className="text-[#6E6B64]">Space</span>
-              <span className="font-medium">{boot.space.name}</span>
-              <span className="text-[#6E6B64]">Slug</span>
-              <span className="font-mono-num">{boot.space.slug}</span>
-              <span className="text-[#6E6B64]">Account</span>
-              <span>{boot.current_member.display_name} ({boot.current_member.access_level})</span>
-            </div>
+function JumpDialog({
+  open,
+  onClose,
+  items,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: { key: string; label: string; icon: ReactNode; run: () => void }[];
+}) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  useEffect(() => {
+    if (open) {
+      setQ("");
+      setSel(0);
+    }
+  }, [open]);
+  const filtered = items.filter((i) => i.label.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 12);
+  const pick = (i: number) => {
+    const it = filtered[i];
+    if (!it) return;
+    onClose();
+    it.run();
+  };
+  return (
+    <Modal open={open} onClose={onClose} label="Jump to" width={480}>
+      <div className="border-b border-line flex items-center gap-2 px-3.5 h-11">
+        <Search className="w-4 h-4 text-mute" />
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setSel(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setSel((s) => Math.min(s + 1, filtered.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setSel((s) => Math.max(s - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              pick(sel);
+            }
+          }}
+          placeholder="Jump to a channel, person or task…"
+          className="flex-1 h-full text-[13.5px] outline-none placeholder:text-faint pr-6"
+        />
+      </div>
+      <div className="max-h-[320px] overflow-y-auto scroll-thin p-1">
+        {filtered.length === 0 ? (
+          <div className="py-8 text-center text-[12.5px] text-faint">No matches</div>
+        ) : (
+          filtered.map((it, i) => (
             <button
-              onClick={onLogout}
-              className="h-8 px-3 rounded border border-[#D5D1C7] hover:bg-[#FDF1EE] hover:text-[#A83224] text-[12.5px] font-medium"
+              key={it.key}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => pick(i)}
+              className={`w-full h-8 px-2.5 rounded-[6px] flex items-center gap-2.5 text-[13px] text-left ${
+                i === sel ? "bg-paper text-ink" : "text-ink-2"
+              }`}
             >
-              Sign out
+              <span className="w-4 flex justify-center text-mute">{it.icon}</span>
+              <span className="truncate">{it.label}</span>
             </button>
-          </div>
+          ))
         )}
       </div>
-    </section>
+    </Modal>
   );
 }

@@ -1,5 +1,53 @@
 @import "tailwindcss";
 
+@theme {
+  --color-paper: #f4f2ec;
+  --color-paper-2: #faf9f6;
+  --color-rail: #eceae3;
+  --color-line: #e4e1d9;
+  --color-line-strong: #dcd9d0;
+  --color-field: #d5d1c7;
+  --color-ink: #161614;
+  --color-ink-2: #45433e;
+  --color-mute: #6e6b64;
+  --color-faint: #8a867d;
+  --color-hover: #e9e6de;
+  --color-active: #e4e1d8;
+  --color-warm: #a84010;
+  --color-warm-bg: #f7dfd1;
+  --color-warm-soft: #fff9f5;
+  --color-work: #0f8b78;
+  --color-danger: #a83224;
+  --color-danger-bg: #fdf1ee;
+
+  --animate-fade-in: fade-in 180ms ease-out both;
+  --animate-rise-in: rise-in 200ms ease-out both;
+  --animate-slide-in: slide-in 220ms ease-out both;
+  --animate-pop-in: pop-in 160ms ease-out both;
+  --animate-breathe: breathe 1.4s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(12px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.97) translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+}
+
 @layer base {
   html,
   body,
@@ -14,11 +62,27 @@
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
   }
+  button:not(:disabled),
+  [role="button"],
+  label[for] {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid #161614;
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
 }
 
 .font-mono-num {
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.skeleton {
+  background: #ebe8e1;
+  border-radius: 4px;
+  animation: var(--animate-breathe);
 }
 
 .scroll-thin::-webkit-scrollbar {
@@ -31,4 +95,82 @@
 }
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Markdown body: Tailwind preflight resets element styles, so restore a compact reading rhythm. */
+.md > * + * {
+  margin-top: 0.4em;
+}
+.md a {
+  color: #161614;
+  text-decoration: underline;
+  text-decoration-color: #d5d1c7;
+  text-underline-offset: 2px;
+}
+.md a:hover {
+  text-decoration-color: #161614;
+}
+.md ul {
+  list-style: disc;
+  padding-left: 1.25em;
+}
+.md ol {
+  list-style: decimal;
+  padding-left: 1.25em;
+}
+.md li + li {
+  margin-top: 0.15em;
+}
+.md code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: #f1efea;
+  border: 1px solid #e4e1d9;
+}
+.md pre {
+  padding: 0.6em 0.75em;
+  border-radius: 6px;
+  background: #faf9f6;
+  border: 1px solid #e4e1d9;
+  overflow-x: auto;
+}
+.md pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.md blockquote {
+  padding-left: 0.75em;
+  border-left: 2px solid #d5d1c7;
+  color: #45433e;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-weight: 600;
+  font-size: 1.05em;
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.md th,
+.md td {
+  border: 1px solid #e4e1d9;
+  padding: 0.25em 0.6em;
+}
+.md hr {
+  border-color: #e4e1d9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

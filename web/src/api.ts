@@ -150,6 +150,14 @@ export interface InboxItem {
   notify_level: NotifyLevel;
 }
 
+export interface PairingInfo {
+  id: string;
+  hostname: string;
+  os: string;
+  status: "pending" | "confirmed" | "expired";
+  expires_at: string;
+}
+
 export interface BootstrapData {
   space: Space;
   current_member: Member;
@@ -170,7 +178,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {  const resp = await fetch(path, {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(path, {
     credentials: "include",
     ...init,
     headers: {
@@ -294,6 +303,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, hostname, os }),
     }),
+  getPairing: (pairingID: string, code: string) =>
+    request<{ pairing: PairingInfo }>(
+      `/api/v1/pairings/${encodeURIComponent(pairingID)}?code=${encodeURIComponent(code)}`,
+    ),
+  confirmPairing: (spaceSlug: string, pairingID: string, code: string, name: string) =>
+    request<{ computer: Computer }>(
+      `/api/v1/spaces/${spaceSlug}/computers/pairings/${encodeURIComponent(pairingID)}/confirm`,
+      { method: "POST", body: JSON.stringify({ code, name }) },
+    ),
   createAgent: (
     spaceSlug: string,
     payload: { display_name: string; role_text: string; computer_id: string; driver_kind: DriverKind },
@@ -319,4 +337,43 @@ export function formatClock(iso?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+export function formatDay(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** Display names are letters, digits and underscores only. */
+export function sanitizeDisplayName(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+}
+
+/** Live-typing variant: keeps a trailing hyphen so users can type "design-review". */
+export function slugInput(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 32);
+}
+
+export function nameInput(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_]+/g, "").slice(0, 32);
+}
+
+export function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
 }
