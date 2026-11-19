@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+
 	"os"
 	"os/signal"
 	"syscall"
@@ -51,7 +52,7 @@ func runServer(args []string) {
 
 	var staticFS http.Handler
 	if *webDir != "" {
-		staticFS = http.FileServer(http.Dir(*webDir))
+		staticFS = server.DirSPAHandler(*webDir)
 	}
 	svc := app.NewService(st, app.NewEventHub(), nil)
 	srv := server.New(svc, server.Config{WebOrigin: *webOrigin, StaticFS: staticFS}, logger)

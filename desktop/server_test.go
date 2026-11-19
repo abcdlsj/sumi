@@ -2,12 +2,9 @@ package main
 
 import (
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
-	"testing/fstest"
 )
 
 func TestLoadConfigDefaultsAndOverrides(t *testing.T) {
@@ -60,35 +57,6 @@ func TestIsLoopbackHost(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "api.sumi.dev", "192.168.1.4", ""} {
 		if isLoopbackHost(host) {
 			t.Fatalf("%q must not be treated as loopback", host)
-		}
-	}
-}
-
-func TestSPAHandlerServesIndexAndAssets(t *testing.T) {
-	assets := fstest.MapFS{
-		"index.html":    {Data: []byte("<html>app</html>")},
-		"assets/app.js": {Data: []byte("console.log(1)")},
-	}
-	handler := spaHandler(assets)
-
-	cases := []struct {
-		path     string
-		wantCode int
-		wantBody string
-	}{
-		{"/", http.StatusOK, "<html>app</html>"},
-		{"/assets/app.js", http.StatusOK, "console.log(1)"},
-		{"/some/client/route", http.StatusOK, "<html>app</html>"},
-		{"/api/v1/health", http.StatusNotFound, ""},
-	}
-	for _, tc := range cases {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
-		if rec.Code != tc.wantCode {
-			t.Fatalf("%s: status %d, want %d", tc.path, rec.Code, tc.wantCode)
-		}
-		if tc.wantBody != "" && rec.Body.String() != tc.wantBody {
-			t.Fatalf("%s: body %q, want %q", tc.path, rec.Body.String(), tc.wantBody)
 		}
 	}
 }

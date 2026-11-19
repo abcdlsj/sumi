@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -66,7 +64,7 @@ func (r *runtime) ensureServer(ctx context.Context) error {
 	}
 
 	svc := app.NewService(st, app.NewEventHub(), nil)
-	srv := server.New(svc, server.Config{StaticFS: spaHandler(assets)}, r.logger)
+	srv := server.New(svc, server.Config{StaticFS: server.SPAHandler(assets)}, r.logger)
 	httpSrv := &http.Server{
 		Addr:              parsed.Host,
 		Handler:           srv.Handler(),
@@ -206,20 +204,4 @@ func isLoopbackHost(host string) bool {
 	default:
 		return false
 	}
-}
-
-// spaHandler serves the embedded build and falls back to index.html for client routes.
-func spaHandler(assets fs.FS) http.Handler {
-	files := http.FileServerFS(assets)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-			http.NotFound(w, r)
-			return
-		}
-		if _, err := fs.Stat(assets, strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")); err == nil {
-			files.ServeHTTP(w, r)
-			return
-		}
-		http.ServeFileFS(w, r, assets, "index.html")
-	})
 }
