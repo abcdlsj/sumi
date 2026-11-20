@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -67,6 +68,8 @@ type hostedAgent struct {
 	paused     bool
 	probeDelay time.Duration
 	probeTimer *time.Timer
+	// retryTimer re-runs the loop after a failed turn; wakes during the backoff only set dirty.
+	retryTimer *time.Timer
 }
 
 // resetBreakerLocked clears the failure breaker; caller holds ag.mu.
@@ -75,6 +78,10 @@ func (ag *hostedAgent) resetBreakerLocked() {
 	if ag.probeTimer != nil {
 		ag.probeTimer.Stop()
 		ag.probeTimer = nil
+	}
+	if ag.retryTimer != nil {
+		ag.retryTimer.Stop()
+		ag.retryTimer = nil
 	}
 }
 
@@ -103,9 +110,15 @@ type breakerPolicy struct {
 	threshold  int
 	firstProbe time.Duration
 	maxProbe   time.Duration
+	// firstRetry/maxRetry back off re-running a failed turn below the threshold.
+	firstRetry time.Duration
+	maxRetry   time.Duration
 }
 
-var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Minute, maxProbe: 2 * time.Hour}
+var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Minute, maxProbe: 2 * time.Hour, firstRetry: 10 * time.Second, maxRetry: 5 * time.Minute}
+
+// errTurnStalled is the cancel cause when a silent turn is cut so queued work can run.
+var errTurnStalled = errors.New("turn produced no runtime events while new work was waiting")
 
 func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 	if logger == nil {
@@ -738,7 +751,7 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 	if convID != "" {
 		ag.lastConvID = convID
 	}
-	if ag.busy {
+	if ag.busy || (ag.retryTimer != nil && reason != "retry") {
 		ag.dirty = true
 		ag.mu.Unlock()
 		return
@@ -779,10 +792,14 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		focus := items[0]
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
-		tracker := newTurnActivity(d.activity, func(a *domain.AgentActivity) {
+		turnCtx, cancel := context.WithCancelCause(ctx)
+		tracker := newWatchedTurnActivity(d.activity, func(a *domain.AgentActivity) {
 			d.reportAgentStateWith(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "", a)
-		})
-		turnCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		}, func() bool {
+			ag.mu.Lock()
+			defer ag.mu.Unlock()
+			return ag.dirty
+		}, func() { cancel(errTurnStalled) })
 		_, runErr := drv.RunTurn(turnCtx, driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
 			StartupContext: buildStartupContext(spec, ag.memoryDir),
@@ -792,7 +809,10 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			Env:            d.agentEnv(ag, spec.DriverKind),
 			OnActivity:     tracker.Observe,
 		})
-		cancel()
+		if errors.Is(context.Cause(turnCtx), errTurnStalled) {
+			runErr = driver.Fail(domain.AgentErrTurnStalled, errTurnStalled)
+		}
+		cancel(nil)
 		tracker.Close()
 
 		ag.mu.Lock()
@@ -808,6 +828,9 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			if delay, paused := d.recordFailure(ctx, ag); paused {
 				d.logger.Warn("Agent paused after consecutive failures", "agent_id", spec.MemberID, "error_code", code, "probe_in", delay.String())
 				detail = domain.BoundErrorDetail(fmt.Sprintf("paused after %d failed turns, retry in %s: %s", d.breaker.threshold, delay.Round(time.Second), detail))
+			} else {
+				delay := d.armRetry(ctx, ag)
+				detail = domain.BoundErrorDetail(fmt.Sprintf("retrying in %s: %s", delay.Round(time.Second), detail))
 			}
 			d.reportAgentState(spec.MemberID, domain.RuntimeError, focus.ConversationID, code, detail)
 			return
@@ -861,6 +884,37 @@ func (d *Daemon) recordFailure(ctx context.Context, ag *hostedAgent) (time.Durat
 	})
 	ag.probeTimer = timer
 	return delay, true
+}
+
+// armRetry schedules one re-run of the loop after a failed turn below the breaker threshold, so
+// triggers queued during the failed turn are redelivered without waiting for another wake.
+func (d *Daemon) armRetry(ctx context.Context, ag *hostedAgent) time.Duration {
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	delay := d.breaker.firstRetry
+	for i := 1; i < ag.failStreak && delay < d.breaker.maxRetry; i++ {
+		delay *= 2
+	}
+	delay = min(delay, d.breaker.maxRetry)
+	// ±20% jitter keeps many Agents failing on the same provider from retrying in lockstep.
+	delay += time.Duration((mrand.Float64()*0.4 - 0.2) * float64(delay))
+	if ag.retryTimer != nil {
+		ag.retryTimer.Stop()
+	}
+	agentID := ag.spec.MemberID
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		ag.mu.Lock()
+		if ag.retryTimer != timer {
+			ag.mu.Unlock()
+			return
+		}
+		ag.retryTimer = nil
+		ag.mu.Unlock()
+		d.scheduleWake(ctx, agentID, "", "retry")
+	})
+	ag.retryTimer = timer
+	return delay
 }
 
 func (d *Daemon) fetchAgentInbox(ctx context.Context, agentID string) ([]domain.InboxItem, error) {

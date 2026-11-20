@@ -32,6 +32,7 @@ const (
 	AgentErrModelAuthFailed     = "model_auth_failed"
 	AgentErrModelUnreachable    = "model_unreachable"
 	AgentErrTurnFailed          = "turn_failed"
+	AgentErrTurnStalled         = "turn_stalled"
 	AgentErrInboxUnreachable    = "inbox_unreachable"
 )
 

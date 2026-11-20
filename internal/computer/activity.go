@@ -14,10 +14,20 @@ type activityPolicy struct {
 	// stallAfter is how long an open tool call may go without any runtime event before it is
 	// reported as stalled. Stall detection only observes; it never cancels the turn.
 	stallAfter time.Duration
-	checkEvery time.Duration
+	// cancelIdle / cancelIdleOpenTool bound how long a turn may stay silent (no runtime event)
+	// once new work is waiting for the Agent; there is no wall-clock cap on an active turn.
+	cancelIdle         time.Duration
+	cancelIdleOpenTool time.Duration
+	checkEvery         time.Duration
 }
 
-var defaultActivityPolicy = activityPolicy{minInterval: 5 * time.Second, stallAfter: 10 * time.Minute, checkEvery: 30 * time.Second}
+var defaultActivityPolicy = activityPolicy{
+	minInterval:        5 * time.Second,
+	stallAfter:         10 * time.Minute,
+	cancelIdle:         15 * time.Minute,
+	cancelIdleOpenTool: 60 * time.Minute,
+	checkEvery:         30 * time.Second,
+}
 
 type openCall struct {
 	tool    string
@@ -29,6 +39,9 @@ type openCall struct {
 type turnActivity struct {
 	policy activityPolicy
 	report func(*domain.AgentActivity)
+	// pending reports whether new work is queued; cancel ends the turn. Both may be nil.
+	hasPending func() bool
+	cancel     func()
 
 	mu        sync.Mutex
 	open      map[string]openCall
@@ -42,9 +55,23 @@ type turnActivity struct {
 }
 
 func newTurnActivity(policy activityPolicy, report func(*domain.AgentActivity)) *turnActivity {
-	t := &turnActivity{policy: policy, report: report, open: make(map[string]openCall), lastEvent: time.Now(), stop: make(chan struct{})}
+	return newWatchedTurnActivity(policy, report, nil, nil)
+}
+
+// newWatchedTurnActivity also cancels the turn via cancel when it has been silent past the
+// policy's idle bound while hasPending reports queued work.
+func newWatchedTurnActivity(policy activityPolicy, report func(*domain.AgentActivity), hasPending func() bool, cancel func()) *turnActivity {
+	t := &turnActivity{policy: policy, report: report, hasPending: hasPending, cancel: cancel, open: make(map[string]openCall), lastEvent: time.Now(), stop: make(chan struct{})}
 	go t.watch()
 	return t
+}
+
+// idleBoundLocked is the silence after which a turn with queued work is cancelled.
+func (t *turnActivity) idleBoundLocked() time.Duration {
+	if len(t.open) > 0 {
+		return t.policy.cancelIdleOpenTool
+	}
+	return t.policy.cancelIdle
 }
 
 func (t *turnActivity) Observe(a driver.Activity) {
@@ -147,7 +174,13 @@ func (t *turnActivity) watch() {
 				t.stalled = true
 				t.scheduleLocked(t.stallLocked(), true)
 			}
+			idle, bound := time.Since(t.lastEvent), t.idleBoundLocked()
 			t.mu.Unlock()
+			// hasPending takes the Agent lock, so it is called without holding t.mu.
+			if t.cancel != nil && bound > 0 && idle >= bound && t.hasPending != nil && t.hasPending() {
+				t.cancel()
+				return
+			}
 		}
 	}
 }
