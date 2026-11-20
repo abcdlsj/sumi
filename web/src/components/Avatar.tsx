@@ -110,28 +110,23 @@ export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?:
   );
 }
 
-function initials(name: string): string {
-  const parts = name.split(/[_\s.-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (name.slice(0, 2) || "?").toUpperCase();
+function initial(name: string): string {
+  const first = Array.from(name.trim())[0];
+  return first ? first.toUpperCase() : "?";
 }
 
+/** One letter on a solid tone; the tone is seeded by the member id, not the name. */
 export function HumanAvatar({ seed, name, size = "md" }: { seed: string; name: string; size?: AvatarSize }) {
   const px = SIZES[size];
-  const hue = fnv(seed || name) % 360;
+  const tone = (fnv(seed || name) % 8) + 1;
   return (
     <span
+      role="img"
       aria-label={name}
-      className="shrink-0 rounded-full inline-flex items-center justify-center font-semibold select-none"
-      style={{
-        width: px,
-        height: px,
-        fontSize: Math.max(10, Math.round(px * 0.38)),
-        background: `hsl(${hue} 60% 92%)`,
-        color: `hsl(${hue} 45% 32%)`,
-      }}
+      className={`human-avatar avatar-tone-${tone}`}
+      style={{ width: px, height: px, fontSize: Math.max(9, Math.round(px * 0.45)) }}
     >
-      {initials(name)}
+      {initial(name)}
     </span>
   );
 }
