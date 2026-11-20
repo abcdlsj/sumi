@@ -173,3 +173,28 @@ func TestResolveTargetErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestNotifySetsLevelAndRejectsUnknown(t *testing.T) {
+	var level string
+	serveSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/conversations":
+			writeFakeJSON(t, w, map[string]any{"conversations": []map[string]any{{"id": "c-game", "kind": "public", "slug": "game"}}})
+		case "/conversations/c-game/notify":
+			var body struct {
+				Level string `json:"level"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			level = body.Level
+			writeFakeJSON(t, w, map[string]any{"ok": true})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	if env, _ := runCLI(t, "notify", "#game", "all"); !env.OK || level != "all" {
+		t.Fatalf("notify all: ok=%v level=%q err=%+v", env.OK, level, env.Error)
+	}
+	if env, code := runCLI(t, "notify", "#game", "loud"); env.OK || code == 0 || env.Error.Code != "invalid_argument" {
+		t.Fatalf("unknown level must be rejected: %+v", env.Error)
+	}
+}

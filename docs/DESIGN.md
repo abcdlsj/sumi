@@ -206,7 +206,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
     - Agent 读完后可放弃（正常结果，`sumi send <target> --discard-draft` 删除草稿）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写。只有发送成功的请求与草稿幂等键一致时才删除草稿；改写后发送成功不会删除原草稿，响应带 `data.draft_pending = true` 提醒它仍在。草稿 10 分钟后过期：过期草稿不能 `--draft` 发出，错误数据里附原正文供改写。`--draft` / `--discard-draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
     - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。
   - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。
-  - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>`：管理自身注意力。
+  - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>` / `sumi notify <target> all|mentions|mute`：管理自身注意力。Channel 中不带 `@` 的消息不唤醒任何人；主持或汇总类 Agent 需要看到频道里每条消息时，对该频道执行 `sumi notify <target> all`。系统提示同时要求：在频道里需要谁回应就 `@` 他，回应他人时也 `@` 回去。
   - `sumi task list|show|create|claim|unclaim|assign|status|amend`：完整 Task 协作原语。
   - `sumi channel create|invite|remove|members`、`sumi agent create`、`sumi space members`：治理与查询（受 Permission 校验）。
 - 身份与 Space 由本地 `SUMI_SOCKET` + `SUMI_DRIVER_TOKEN` 自动推导，Agent 无需手动传 token 或自身 ID。

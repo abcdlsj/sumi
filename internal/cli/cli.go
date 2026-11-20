@@ -385,15 +385,29 @@ func Run(args []string, stdout io.Writer) int {
 			return call(http.MethodPut, "/conversations/"+convID+"/follow", map[string]any{"following": false})
 		},
 	})
+	setNotify := func(target, level string) error {
+		convID, err := resolveConv(target)
+		if err != nil {
+			return err
+		}
+		return call(http.MethodPut, "/conversations/"+convID+"/notify", map[string]any{"level": level})
+	}
 	root.AddCommand(&cobra.Command{
 		Use:  "mute <target>",
 		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, a []string) error { return setNotify(a[0], "mute") },
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "notify <target> all|mentions|mute",
+		Args:  cobra.ExactArgs(2),
+		Short: "Set your channel notify level; all wakes you on every new message in it",
 		RunE: func(_ *cobra.Command, a []string) error {
-			convID, err := resolveConv(a[0])
-			if err != nil {
-				return err
+			switch a[1] {
+			case "all", "mentions", "mute":
+			default:
+				return fail(localError(codeInvalidArgument, errors.New("level must be all, mentions or mute")), nil)
 			}
-			return call(http.MethodPut, "/conversations/"+convID+"/notify", map[string]any{"level": "mute"})
+			return setNotify(a[0], a[1])
 		},
 	})
 

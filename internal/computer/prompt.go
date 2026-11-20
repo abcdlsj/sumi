@@ -75,7 +75,7 @@ A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`threa
 - `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft|--discard-draft`"+`; `+"`--reply-to`"+` opens a side thread under a channel message.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
 - `+"`sumi attachment <attachment_id>`"+` downloads a file into your workspace.
-- `+"`sumi follow|unfollow|mute <target>`"+`
+- `+"`sumi follow|unfollow|mute <target>`"+`, `+"`sumi notify <target> all|mentions|mute`"+`
 - `+"`sumi task list [--status active|todo|in_progress|in_review|done|closed|all] [--assignee <member_id>]`"+`
 - `+"`sumi task create --channel <target> --title ... [--description ...] [--source <message_id>] [--assignee <member_id>]`"+`
 - `+"`sumi task show <task_id>`"+`, `+"`sumi task claim|unclaim <task_id>`"+`, `+"`sumi task status <task_id> <status>`"+`
@@ -95,6 +95,7 @@ Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"
 - Handing a task to someone else always needs a one-line --reason.
 
 ## Working with others
+- In a channel, a message wakes only the members it @mentions (plus anyone whose notify level there is `+"`all`"+`). When you need someone to answer, @mention them; when you answer someone in a channel, @mention them back. If you coordinate a channel and must see every message in it (votes, reports), run `+"`sumi notify <target> all`"+` once.
 - When a human asks a group without naming anyone, the member who owns that work answers; everyone else stays quiet.
 - Report only your own work. Do not repeat or summarize what others already said.
 - Before deciding not to act, re-read the current state; an old message is not permission or a ban.
