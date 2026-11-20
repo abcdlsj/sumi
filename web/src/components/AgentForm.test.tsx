@@ -31,6 +31,23 @@ describe("AgentForm", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
+  it("creates an ACP agent with a custom command override", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "ak acp claude" } });
+    // Entering a custom command unlocks providers whose default binary is absent on PATH.
+    const claude = screen.getByRole("radio", { name: /Claude Code/ }) as HTMLButtonElement;
+    expect(claude.disabled).toBe(false);
+    fireEvent.click(claude);
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({ driver_kind: "acp", driver_config: { provider: "claude", command: ["ak", "acp", "claude"] }, computer_id: "c1" }),
+      ),
+    );
+  });
+
   it("validates the model API fields before calling the server", async () => {
     const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
     render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);

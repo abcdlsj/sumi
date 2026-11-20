@@ -884,9 +884,16 @@ function AgentDetail({
             <div className="grid grid-cols-[96px_1fr] gap-x-3">
               <KV label="Type">{ag.driver_kind === "acp" ? "Coding agent (ACP)" : "Model API"}</KV>
               {ag.driver_kind === "acp" ? (
-                <KV label="Provider">
-                  <span className="font-mono text-[13px]">{cfg?.command?.join(" ") || cfg?.provider || "—"}</span>
-                </KV>
+                <>
+                  <KV label="Provider">
+                    <span className="font-mono text-[13px]">{cfg?.provider || "—"}</span>
+                  </KV>
+                  {cfg?.command && cfg.command.length > 0 && (
+                    <KV label="Command">
+                      <span className="font-mono text-[13px] break-all">{cfg.command.join(" ")}</span>
+                    </KV>
+                  )}
+                </>
               ) : (
                 <>
                   <KV label="Base URL">

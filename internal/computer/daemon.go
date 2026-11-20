@@ -575,6 +575,11 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 			return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
 		}
 	}
+	if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
+		if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig.Provider); err != nil {
+			return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
+		}
+	}
 	memFile := filepath.Join(ag.memoryDir, "MEMORY.md")
 	if _, err := os.Stat(memFile); os.IsNotExist(err) {
 		_ = os.WriteFile(memFile, []byte(memoryTemplate), 0o600)
@@ -649,10 +654,10 @@ func failureOf(err error, spec protocol.AssignedAgentSpec) (string, string) {
 }
 
 // agentEnv builds the child environment: `sumi` first on PATH, capability socket credentials,
-// and HOME pointed at the Agent Home for builtin only (ACP CLIs need the user's own HOME).
+// HOME pointed at Agent Home for builtin, and per-agent isolated provider config dirs for ACP.
 // Inherited SUMI_* variables and anything carrying the Computer token are dropped so an
 // Agent can only reach the Server through its own driver token.
-func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind) []string {
+func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind, provider string) []string {
 	d.mu.RLock()
 	binDir := d.binDir
 	d.mu.RUnlock()
@@ -675,8 +680,22 @@ func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind) []string {
 	env = setEnv(env, "SUMI_DRIVER_TOKEN", ag.driverToken)
 	env = setEnv(env, "SUMI_ATTACHMENT_DIR", filepath.Join(ag.workDir, "attachments"))
 	env = setEnv(env, "SUMI_DRAFT_DIR", filepath.Join(ag.homeDir, "drafts"))
-	if kind == domain.DriverBuiltin {
+	switch kind {
+	case domain.DriverBuiltin:
 		env = setEnv(env, "HOME", ag.homeDir)
+	case domain.DriverACP:
+		if runtimeDir := acpRuntimeDir(ag.homeDir, provider); runtimeDir != "" {
+			switch provider {
+			case domain.ACPProviderPi:
+				env = setEnv(env, "PI_CODING_AGENT_DIR", runtimeDir)
+			case domain.ACPProviderCodex:
+				env = setEnv(env, "CODEX_HOME", runtimeDir)
+			case domain.ACPProviderClaude:
+				env = unsetEnv(env, "CLAUDECODE")
+				env = setEnv(env, "CLAUDE_CONFIG_DIR", runtimeDir)
+				env = setEnv(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
+			}
+		}
 	}
 	return env
 }
@@ -690,6 +709,17 @@ func setEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(out, prefix+value)
+}
+
+func unsetEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := env[:0:0]
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFrame) {
@@ -802,13 +832,18 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			defer ag.mu.Unlock()
 			return ag.dirty
 		}, func() { cancel(errTurnStalled) })
+		if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
+			if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig.Provider); err != nil {
+				d.logger.Warn("Refresh ACP runtime dir failed", "agent_id", spec.MemberID, "error", err.Error())
+			}
+		}
 		_, runErr := drv.RunTurn(turnCtx, driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
 			StartupContext: buildStartupContext(spec, ag.memoryDir),
 			UserPrompt:     buildWakePrompt(items),
 			WorkDir:        ag.workDir,
 			MemoryDir:      ag.memoryDir,
-			Env:            d.agentEnv(ag, spec.DriverKind),
+			Env:            d.agentEnv(ag, spec.DriverKind, spec.DriverConfig.Provider),
 			OnActivity:     tracker.Observe,
 		})
 		if errors.Is(context.Cause(turnCtx), errTurnStalled) {

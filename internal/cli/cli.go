@@ -538,6 +538,7 @@ func Run(args []string, stdout io.Writer) int {
 	// Agent subcommands
 	agentCmd := &cobra.Command{Use: "agent", Short: "Manage agents"}
 	var agName, agRole, agDriver, agSrcConv, agProvider, agBaseURL, agModel string
+	var agCommand []string
 	agentCreateCmd := &cobra.Command{
 		Use: "create",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -545,7 +546,12 @@ func Run(args []string, stdout io.Writer) int {
 			cfg := map[string]any{}
 			switch agDriver {
 			case "acp":
-				cfg["provider"] = agProvider
+				if agProvider != "" {
+					cfg["provider"] = agProvider
+				}
+				if cmd := parseCLIArgv(agCommand); len(cmd) > 0 {
+					cfg["command"] = cmd
+				}
 			default:
 				cfg["base_url"] = agBaseURL
 				cfg["model"] = agModel
@@ -571,6 +577,7 @@ func Run(args []string, stdout io.Writer) int {
 	agentCreateCmd.Flags().StringVar(&agRole, "role", "", "role text")
 	agentCreateCmd.Flags().StringVar(&agDriver, "driver", "builtin", "builtin|acp")
 	agentCreateCmd.Flags().StringVar(&agProvider, "provider", "", "acp provider: pi|codex|claude")
+	agentCreateCmd.Flags().StringArrayVar(&agCommand, "command", nil, "acp launch command (repeatable or space-separated)")
 	agentCreateCmd.Flags().StringVar(&agBaseURL, "base-url", "", "builtin OpenAI-compatible base URL")
 	agentCreateCmd.Flags().StringVar(&agModel, "model", "", "builtin model")
 	agentCreateCmd.Flags().StringVar(&agSrcConv, "source-conversation", "", "optional conversation id")
@@ -689,6 +696,16 @@ func Run(args []string, stdout io.Writer) int {
 		writeEnvelope(stdout, false, nil, localError(codeInvalidArgument, err))
 	}
 	return exitCode
+}
+
+func parseCLIArgv(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	if len(raw) > 1 {
+		return raw
+	}
+	return strings.Fields(raw[0])
 }
 
 func writeEnvelope(w io.Writer, ok bool, data any, e *EnvelopeError) {

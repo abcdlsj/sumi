@@ -39,7 +39,7 @@ export interface DriverConfigView {
 
 export type DriverConfigInput =
   | { base_url: string; model: string; api_key?: string }
-  | { provider: ACPProvider; command?: string[] };
+  | { provider?: ACPProvider; command?: string[] };
 
 export interface AgentInfo {
   computer_id?: string;

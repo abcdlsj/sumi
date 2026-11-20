@@ -28,9 +28,46 @@ export const ROLE_PRESETS = [
 export interface DriverDraft {
   kind: DriverKind;
   provider: ACPProvider;
+  command: string;
   baseURL: string;
   model: string;
   apiKey: string;
+}
+
+export function splitCommandArgs(raw: string): { args: string[]; error?: string } {
+  const args: string[] = [];
+  let cur = "";
+  let quote: "'" | '"' | null = null;
+  let inToken = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (quote) {
+      if (ch === "\\" && quote === '"' && i + 1 < raw.length) {
+        cur += raw[++i];
+      } else if (ch === quote) {
+        quote = null;
+      } else {
+        cur += ch;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      inToken = true;
+    } else if (/\s/.test(ch)) {
+      if (inToken) {
+        args.push(cur);
+        cur = "";
+        inToken = false;
+      }
+    } else {
+      cur += ch;
+      inToken = true;
+    }
+  }
+  if (quote) return { args: [], error: "Unclosed quote in command" };
+  if (inToken) args.push(cur);
+  return { args };
 }
 
 export function draftFromAgent(m?: Member): DriverDraft {
@@ -38,14 +75,18 @@ export function draftFromAgent(m?: Member): DriverDraft {
   return {
     kind: m?.agent?.driver_kind ?? "acp",
     provider: cfg?.provider ?? "pi",
+    command: cfg?.command?.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ") ?? "",
     baseURL: cfg?.base_url ?? "",
     model: cfg?.model ?? "",
     apiKey: "",
   };
 }
 
-export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "model" | "provider", string>> {
-  if (d.kind === "acp") return {};
+export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "model" | "provider" | "command", string>> {
+  if (d.kind === "acp") {
+    const parsed = splitCommandArgs(d.command);
+    return parsed.error ? { command: parsed.error } : {};
+  }
   const errs: Partial<Record<"baseURL" | "model", string>> = {};
   if (!/^https?:\/\/[^\s]+$/i.test(d.baseURL.trim())) errs.baseURL = "Enter an http(s) URL, e.g. http://127.0.0.1:4000/v1";
   if (!d.model.trim()) errs.model = "Model is required";
@@ -53,7 +94,10 @@ export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "mode
 }
 
 export function driverInput(d: DriverDraft): DriverConfigInput {
-  if (d.kind === "acp") return { provider: d.provider };
+  if (d.kind === "acp") {
+    const { args } = splitCommandArgs(d.command);
+    return args.length > 0 ? { provider: d.provider, command: args } : { provider: d.provider };
+  }
   const cfg: { base_url: string; model: string; api_key?: string } = { base_url: d.baseURL.trim(), model: d.model.trim() };
   if (d.apiKey) cfg.api_key = d.apiKey;
   return cfg;
@@ -103,11 +147,12 @@ export function DriverFields({
   draft: DriverDraft;
   onChange: (d: DriverDraft) => void;
   computer?: Computer;
-  errors?: Partial<Record<"baseURL" | "model" | "provider", string>>;
+  errors?: Partial<Record<"baseURL" | "model" | "provider" | "command", string>>;
   apiKeySet?: boolean;
 }) {
   const [showKey, setShowKey] = useState(false);
   const available = computer?.acp_providers;
+  const hasCustomCommand = draft.command.trim().length > 0;
   const set = (p: Partial<DriverDraft>) => onChange({ ...draft, ...p });
 
   return (
@@ -130,32 +175,46 @@ export function DriverFields({
       </div>
 
       {draft.kind === "acp" ? (
-        <div className="space-y-2 animate-fade-in" role="radiogroup" aria-label="ACP provider">
-          {PROVIDERS.map((p) => {
-            const ok = !available || available.includes(p.id);
-            const active = draft.provider === p.id;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                disabled={!ok}
-                onClick={() => set({ provider: p.id })}
-                className={`w-full px-3.5 py-2.5 rounded-[10px] border flex items-center gap-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  active ? "border-accent bg-accent-soft" : "border-line-strong bg-card hover:border-fg-4"
-                }`}
-              >
-                <span className={`size-4 rounded-full border-2 shrink-0 flex items-center justify-center ${active ? "border-accent" : "border-fg-4"}`}>
-                  {active && <span className="size-2 rounded-full bg-accent" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[14px] font-medium text-fg">{p.name}</span>
-                  <span className="block text-[12.5px] text-fg-3">{ok ? p.desc : `Not found on ${computer?.name ?? "this computer"}`}</span>
-                </span>
-              </button>
-            );
-          })}
+        <div className="space-y-3.5 animate-fade-in">
+          <div className="space-y-2" role="radiogroup" aria-label="ACP provider">
+            {PROVIDERS.map((p) => {
+              const ok = hasCustomCommand || !available || available.includes(p.id);
+              const active = draft.provider === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={!ok}
+                  onClick={() => set({ provider: p.id })}
+                  className={`w-full px-3.5 py-2.5 rounded-[10px] border flex items-center gap-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    active ? "border-accent bg-accent-soft" : "border-line-strong bg-card hover:border-fg-4"
+                  }`}
+                >
+                  <span className={`size-4 rounded-full border-2 shrink-0 flex items-center justify-center ${active ? "border-accent" : "border-fg-4"}`}>
+                    {active && <span className="size-2 rounded-full bg-accent" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-medium text-fg">{p.name}</span>
+                    <span className="block text-[12.5px] text-fg-3">{ok ? p.desc : `Not found on ${computer?.name ?? "this computer"}`}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <Field
+            label="Custom command"
+            optional
+            leading={<Terminal />}
+            value={draft.command}
+            onChange={(e) => set({ command: e.target.value })}
+            placeholder="ak acp claude"
+            hint="Overrides the default ACP launcher (e.g. ak acp claude). Leave empty for the provider default."
+            error={errors.command}
+            autoComplete="off"
+            spellCheck={false}
+          />
         </div>
       ) : (
         <div className="space-y-3.5 animate-fade-in">

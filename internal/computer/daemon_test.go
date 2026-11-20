@@ -141,13 +141,31 @@ func TestAgentEnvAndCLIInstall(t *testing.T) {
 		}
 		return vals
 	}
-	builtinEnv := d.agentEnv(ag, domain.DriverBuiltin)
+	builtinEnv := d.agentEnv(ag, domain.DriverBuiltin, "")
 	if h := get(builtinEnv, "HOME"); len(h) != 1 || h[0] != "/agents/a" {
 		t.Fatalf("builtin HOME=%v", h)
 	}
-	acpEnv := d.agentEnv(ag, domain.DriverACP)
+	acpEnv := d.agentEnv(ag, domain.DriverACP, domain.ACPProviderPi)
 	if h := get(acpEnv, "HOME"); len(h) != 1 || h[0] != userHome {
 		t.Fatalf("acp HOME=%v want user home %q", h, userHome)
+	}
+	if dir := get(acpEnv, "PI_CODING_AGENT_DIR"); len(dir) != 1 || dir[0] != "/agents/a/runtime/pi" {
+		t.Fatalf("pi agent dir=%v", dir)
+	}
+	codexEnv := d.agentEnv(ag, domain.DriverACP, domain.ACPProviderCodex)
+	if dir := get(codexEnv, "CODEX_HOME"); len(dir) != 1 || dir[0] != "/agents/a/runtime/codex" {
+		t.Fatalf("codex home=%v", dir)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	claudeEnv := d.agentEnv(ag, domain.DriverACP, domain.ACPProviderClaude)
+	if dir := get(claudeEnv, "CLAUDE_CONFIG_DIR"); len(dir) != 1 || dir[0] != "/agents/a/runtime/claude" {
+		t.Fatalf("claude config dir=%v", dir)
+	}
+	if mem := get(claudeEnv, "CLAUDE_CODE_DISABLE_AUTO_MEMORY"); len(mem) != 1 || mem[0] != "1" {
+		t.Fatalf("claude auto memory env=%v", mem)
+	}
+	if cc := get(claudeEnv, "CLAUDECODE"); len(cc) != 0 {
+		t.Fatalf("CLAUDECODE must be unset, got %v", cc)
 	}
 	p := get(acpEnv, "PATH")
 	if len(p) != 1 || !strings.HasPrefix(p[0], filepath.Join(dataDir, "bin")+string(os.PathListSeparator)) {
@@ -186,7 +204,7 @@ func TestAgentEnvDropsComputerCredentials(t *testing.T) {
 	d := NewDaemon(Config{DataDir: t.TempDir(), ComputerToken: "computer-secret"}, nil)
 	ag := &hostedAgent{homeDir: "/agents/a", workDir: "/agents/a/workspace", driverToken: "tok"}
 	for _, kind := range []domain.DriverKind{domain.DriverBuiltin, domain.DriverACP} {
-		env := d.agentEnv(ag, kind)
+		env := d.agentEnv(ag, kind, domain.ACPProviderPi)
 		keep := false
 		for _, kv := range env {
 			if strings.Contains(kv, "computer-secret") || strings.HasPrefix(kv, "SUMI_DESKTOP_CONFIG=") {
