@@ -29,6 +29,10 @@ func serveSocket(t *testing.T, h http.HandlerFunc) {
 	t.Cleanup(func() { _ = srv.Close() })
 	t.Setenv("SUMI_SOCKET", sock)
 	t.Setenv("SUMI_DRIVER_TOKEN", "tok")
+	// Held sends write drafts; keep them out of the package directory.
+	if os.Getenv("SUMI_DRAFT_DIR") == "" {
+		t.Setenv("SUMI_DRAFT_DIR", t.TempDir())
+	}
 }
 
 type envelope struct {
