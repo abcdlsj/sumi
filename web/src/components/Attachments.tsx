@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { FileText, Loader2, Paperclip, X } from "lucide-react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { createPortal } from "react-dom";
+import { Download, FileText, Loader2, Paperclip, X } from "lucide-react";
 import { api, type Attachment } from "../api";
 
 export function isImage(mediaType: string): boolean {
@@ -12,19 +13,21 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Picker + chip row shared by every composer that can attach files. */
+/** Picker + paste/drop + chip row shared by every composer that can attach files. */
 export function useAttachmentDraft(spaceSlug: string) {
   const [pending, setPending] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  async function addFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function addFiles(files: FileList | File[] | null) {
+    const list = files ? Array.from(files) : [];
+    if (list.length === 0) return;
     setError("");
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
+      for (const file of list) {
         const uploaded = await api.uploadAttachment(spaceSlug, file);
         setPending((prev) => [...prev, uploaded]);
       }
@@ -35,6 +38,32 @@ export function useAttachmentDraft(spaceSlug: string) {
       if (inputRef.current) inputRef.current.value = "";
     }
   }
+
+  function handlePaste(e: ClipboardEvent) {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void addFiles(files);
+  }
+
+  const dropProps = {
+    onDragOver: (e: DragEvent) => {
+      if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+      e.preventDefault();
+      setDragging(true);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setDragging(false);
+    },
+    onDrop: (e: DragEvent) => {
+      setDragging(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void addFiles(files);
+    },
+  };
 
   function remove(id: string) {
     setPending((prev) => prev.filter((a) => a.id !== id));
@@ -48,10 +77,13 @@ export function useAttachmentDraft(spaceSlug: string) {
   return {
     pending,
     uploading,
+    dragging,
     error,
     inputRef,
     ids: pending.map((a) => a.id),
     addFiles,
+    handlePaste,
+    dropProps,
     remove,
     clear,
   };
@@ -116,7 +148,68 @@ export function AttachmentDraftRow({
   );
 }
 
-/** Renders already-sent attachments: inline images, everything else a download row. */
+function ImageLightbox({
+  spaceSlug,
+  attachment,
+  onClose,
+}: {
+  spaceSlug: string;
+  attachment: Attachment;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const url = api.attachmentURL(spaceSlug, attachment.id);
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={attachment.name}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center p-6 animate-fade-in"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="max-w-[92vw] max-h-[88vh] flex flex-col items-center gap-3"
+      >
+        <img
+          src={url}
+          alt={attachment.name}
+          className="max-w-full max-h-[78vh] object-contain rounded-[10px] shadow-lg bg-card"
+        />
+        <div className="px-3.5 py-2 rounded-[10px] bg-card border border-line shadow-md flex items-center gap-3 text-[13px]">
+          <span className="font-medium text-fg truncate max-w-[320px]">{attachment.name}</span>
+          <span className="tabular text-fg-3 shrink-0">{formatBytes(attachment.size_bytes)}</span>
+          <a
+            href={url}
+            download={attachment.name}
+            className="h-7 px-2.5 rounded-[7px] bg-subtle hover:bg-hover text-fg inline-flex items-center gap-1.5 font-medium transition-colors"
+          >
+            <Download className="size-3.5" />
+            Download
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close preview"
+            className="size-7 rounded-[7px] hover:bg-hover text-fg-3 hover:text-fg inline-flex items-center justify-center"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Renders already-sent attachments: inline images with lightbox preview, other files as download rows. */
 export function MessageAttachments({
   spaceSlug,
   attachments,
@@ -124,6 +217,7 @@ export function MessageAttachments({
   spaceSlug: string;
   attachments?: Attachment[];
 }) {
+  const [preview, setPreview] = useState<Attachment | null>(null);
   if (!attachments || attachments.length === 0) return null;
   const images = attachments.filter((a) => isImage(a.media_type));
   const files = attachments.filter((a) => !isImage(a.media_type));
@@ -133,10 +227,11 @@ export function MessageAttachments({
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {images.map((a) => (
-            <a
+            <button
               key={a.id}
-              href={api.attachmentURL(spaceSlug, a.id)}
-              download={a.name}
+              type="button"
+              onClick={() => setPreview(a)}
+              aria-label={`Preview ${a.name}`}
               className="block border border-line rounded-[10px] overflow-hidden bg-subtle hover:shadow-md transition-shadow"
             >
               <img
@@ -145,7 +240,7 @@ export function MessageAttachments({
                 loading="lazy"
                 className="max-h-[280px] max-w-[360px] object-contain block"
               />
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -167,6 +262,7 @@ export function MessageAttachments({
           ))}
         </div>
       )}
+      {preview && <ImageLightbox spaceSlug={spaceSlug} attachment={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }

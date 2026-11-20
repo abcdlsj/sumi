@@ -523,7 +523,12 @@ export function ConversationView({
       <div className="shrink-0 bg-bg/60 border-t border-line">
         <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
         <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
-          <div className="relative bg-card border border-line-strong rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+          <div
+            {...draft.dropProps}
+            className={`relative bg-card border rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+              draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
+            }`}
+          >
             <MentionPopup picker={mentions} />
             {replyTarget && (
               <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
@@ -546,6 +551,7 @@ export function ConversationView({
                 mentions.detect();
               }}
               onClick={mentions.detect}
+              onPaste={draft.handlePaste}
               onBlur={mentions.close}
               onKeyDown={(e) => {
                 if (mentions.handleKeyDown(e)) return;

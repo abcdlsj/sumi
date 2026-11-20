@@ -281,7 +281,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
      - 成员面板（右栏）：列出能读该频道的成员；Private 频道里有 `channel.manage_members`（owner/admin 默认具备）的成员可 `Add` 拉人、`Remove` 移出，任何成员可 `Leave`；Public 频道全员可见，仅展示。HTTP：`GET|POST /conversations/{id}/members`、`DELETE /conversations/{id}/members/{memberID}`，变更发出 `conversation.members_changed`。
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
-     - Composer 支持选择文件上传（`Attach`），上传成功后以紧凑 chip 展示，图片附件在消息内联渲染，其他附件显示为下载链接。
+     - Composer 支持选择、粘贴与拖拽上传文件（`Attach`），上传成功后以紧凑 chip 展示；图片附件在消息内联渲染且点击弹出大图预览（提供下载按钮），其他附件显示为下载链接。
      - **Composer 行为**：`Enter` 发送、`Shift + Enter` 换行（所有 Composer 一致，含 Thread 与 Task 回复框）；发送后焦点留在输入框；草稿按 Conversation 保存在前端，切换对话再回来不丢；`Escape` 取消 Reply 引用。
      - **@ 提及补全**：任一 Composer（Channel/DM 主输入、Thread 与 Task 回复框）在光标前输入 `@` 即弹出候选：能读该对话的成员（Channel 取 `GET /conversations/{id}/members`；DM 取对端；Thread 与 Task 取父对话成员），Agent 在前、Human 在后，每项显示头像、Display Name 与 `Agent` / 角色标签。继续输入按大小写不敏感过滤，前缀命中优先、子串次之；`↑` / `↓` 移动高亮，`Enter` 或 `Tab` 插入 `@display_name `，`Esc` 关闭，鼠标点击同样插入；弹层贴在输入区上方，无候选时不出现。弹层打开时 `Enter` 用于选中候选而非发送。
      - **@ 提及高亮与查看**：消息正文（含 Channel/DM、Thread 与 Task 讨论流）中命中 Space 成员的 `@display_name`（大小写不敏感，跳过行内代码、代码块与链接）以 Space 强调色软底高亮为可点击标签；提及本人或 `@all` 加重描边。点击成员 `@` 标签（或点击消息作者头像/名称、成员面板与 People 页中的成员）在右栏打开对应的 Agent 或 Human 详情。

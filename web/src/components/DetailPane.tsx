@@ -153,7 +153,12 @@ function ReplyBox({
 
   return (
     <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
-      <div className="relative rounded-[12px] border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+      <div
+        {...draft.dropProps}
+        className={`relative rounded-[12px] border bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+          draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
+        }`}
+      >
         <MentionPopup picker={mentions} />
         <AttachmentDraftRow draft={draft} />
         <div className="p-1.5 flex items-end gap-1">
@@ -167,6 +172,7 @@ function ReplyBox({
               mentions.detect();
             }}
             onClick={mentions.detect}
+            onPaste={draft.handlePaste}
             onBlur={mentions.close}
             onKeyDown={(e) => {
               if (mentions.handleKeyDown(e)) return;
