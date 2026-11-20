@@ -72,7 +72,6 @@ type HelloFrame struct {
 type HelloAckFrame struct {
 	ProtocolVersion int                 `json:"protocol_version"`
 	ComputerID      string              `json:"computer_id"`
-	SpaceID         string              `json:"space_id"`
 	Agents          []AssignedAgentSpec `json:"agents"`
 	Capabilities    []string            `json:"capabilities,omitempty"`
 }

@@ -397,10 +397,10 @@ func (s *Service) SetMemberPermission(ctx context.Context, actor domain.Member, 
 	return nil
 }
 
-// PairComputerDirect registers a Computer directly in a Space (used by CLI/tests and confirmed pairing).
-func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, name, hostname, osName string) (domain.Computer, string, error) {
-	if actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin {
-		return domain.Computer{}, "", domain.NewError(domain.CodePermissionDenied, "only owner or admin can pair a computer")
+// PairComputerDirect registers a Computer owned by the user's account and returns its token once.
+func (s *Service) PairComputerDirect(ctx context.Context, ownerUserID, name, hostname, osName string) (domain.Computer, string, error) {
+	if ownerUserID == "" {
+		return domain.Computer{}, "", domain.NewError(domain.CodeUnauthenticated, "sign in to pair a computer")
 	}
 	if osName != "macos" && osName != "linux" {
 		return domain.Computer{}, "", domain.NewError(domain.CodeInvalidArgument, "os must be macos or linux")
@@ -416,7 +416,7 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 	now := time.Now().UTC()
 	comp := domain.Computer{
 		ID:               uuid.NewString(),
-		SpaceID:          actor.SpaceID,
+		OwnerUserID:      ownerUserID,
 		Name:             name,
 		Hostname:         hostname,
 		OS:               osName,
@@ -426,11 +426,11 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 	}
 	var events []domain.SpaceEvent
 	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		ev, err := insertComputerTx(ctx, tx, comp, hashToken(rawToken))
+		evs, err := insertComputerTx(ctx, tx, comp, hashToken(rawToken))
 		if err != nil {
 			return err
 		}
-		events = append(events, ev)
+		events = append(events, evs...)
 		return nil
 	})
 	if err != nil {
@@ -440,18 +440,53 @@ func (s *Service) PairComputerDirect(ctx context.Context, actor domain.Member, n
 	return comp, rawToken, nil
 }
 
-func insertComputerTx(ctx context.Context, tx *sql.Tx, comp domain.Computer, tokenHash string) (domain.SpaceEvent, error) {
+func insertComputerTx(ctx context.Context, tx *sql.Tx, comp domain.Computer, tokenHash string) ([]domain.SpaceEvent, error) {
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO computers (id, space_id, name, hostname, os, token_hash, connection_status, created_at)
+		`INSERT INTO computers (id, owner_user_id, name, hostname, os, token_hash, connection_status, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, 'offline', ?)`,
-		comp.ID, comp.SpaceID, comp.Name, comp.Hostname, comp.OS, tokenHash, store.FormatTime(comp.CreatedAt),
+		comp.ID, comp.OwnerUserID, comp.Name, comp.Hostname, comp.OS, tokenHash, store.FormatTime(comp.CreatedAt),
 	); err != nil {
-		return domain.SpaceEvent{}, domain.WrapError(domain.CodeInternal, "insert computer", err)
+		return nil, domain.WrapError(domain.CodeInternal, "insert computer", err)
 	}
-	return store.AppendEvent(ctx, tx, comp.SpaceID, "computer.changed", map[string]any{
-		"computer_id": comp.ID,
-		"status":      "offline",
-	})
+	return computerChangedTx(ctx, tx, comp.ID, "offline")
+}
+
+// computerVisibleSpacesSQL selects the Spaces a Computer appears in: those where its owner is an
+// active member, plus those with an active Agent hosted on it. Bind the computer id twice.
+const computerVisibleSpacesSQL = `
+	SELECT m.space_id FROM members m JOIN computers c ON c.owner_user_id = m.user_id
+	 WHERE c.id = ? AND m.retired_at IS NULL
+	UNION
+	SELECT a.space_id FROM agents a JOIN members m ON m.id = a.member_id
+	 WHERE a.computer_id = ? AND m.retired_at IS NULL`
+
+// computerChangedTx appends computer.changed to every Space the Computer is visible in.
+func computerChangedTx(ctx context.Context, tx *sql.Tx, computerID, status string) ([]domain.SpaceEvent, error) {
+	rows, err := tx.QueryContext(ctx, computerVisibleSpacesSQL, computerID, computerID)
+	if err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list computer spaces", err)
+	}
+	var spaces []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, domain.WrapError(domain.CodeInternal, "scan computer space", err)
+		}
+		spaces = append(spaces, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list computer spaces", err)
+	}
+	events := make([]domain.SpaceEvent, 0, len(spaces))
+	for _, sp := range spaces {
+		ev, err := store.AppendEvent(ctx, tx, sp, "computer.changed", map[string]any{"computer_id": computerID, "status": status})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	return events, nil
 }
 
 func (s *Service) AuthenticateComputer(ctx context.Context, rawToken string) (domain.Computer, error) {
@@ -471,7 +506,7 @@ func (s *Service) AuthenticateComputer(ctx context.Context, rawToken string) (do
 	return c, nil
 }
 
-const computerColumns = `id, space_id, name, hostname, os, connection_status, daemon_version, capabilities_json, last_seen_at, created_at`
+const computerColumns = `id, owner_user_id, name, hostname, os, connection_status, daemon_version, capabilities_json, last_seen_at, created_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -486,7 +521,7 @@ func scanComputer(row rowScanner) (domain.Computer, error) {
 	var c domain.Computer
 	var capsJSON, createdAt string
 	var lastSeen sql.NullString
-	if err := row.Scan(&c.ID, &c.SpaceID, &c.Name, &c.Hostname, &c.OS, &c.ConnectionStatus, &c.DaemonVersion, &capsJSON, &lastSeen, &createdAt); err != nil {
+	if err := row.Scan(&c.ID, &c.OwnerUserID, &c.Name, &c.Hostname, &c.OS, &c.ConnectionStatus, &c.DaemonVersion, &capsJSON, &lastSeen, &createdAt); err != nil {
 		return domain.Computer{}, err
 	}
 	var caps computerCapabilities
@@ -514,10 +549,19 @@ func sanitizeACPProviders(in []string) []string {
 	return out
 }
 
+// ListComputers returns the Computers visible in a Space (owner is an active member, or it hosts
+// one of the Space's Agents), each with the owner's member id in this Space when present.
 func (s *Service) ListComputers(ctx context.Context, spaceID string) ([]domain.Computer, error) {
 	rows, err := s.store.ReadDB().QueryContext(ctx,
-		`SELECT `+computerColumns+` FROM computers WHERE space_id = ? AND deleted_at IS NULL ORDER BY created_at ASC`,
-		spaceID,
+		`SELECT `+prefixed("c.", computerColumns)+`, COALESCE(om.id, '')
+		 FROM computers c
+		 LEFT JOIN members om ON om.space_id = ? AND om.user_id = c.owner_user_id AND om.retired_at IS NULL
+		 WHERE c.deleted_at IS NULL
+		   AND (om.id IS NOT NULL OR EXISTS (
+		       SELECT 1 FROM agents a JOIN members am ON am.id = a.member_id
+		        WHERE a.computer_id = c.id AND a.space_id = ? AND am.retired_at IS NULL))
+		 ORDER BY c.created_at ASC`,
+		spaceID, spaceID,
 	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "list computers", err)
@@ -525,13 +569,31 @@ func (s *Service) ListComputers(ctx context.Context, spaceID string) ([]domain.C
 	defer rows.Close()
 	out := make([]domain.Computer, 0)
 	for rows.Next() {
-		c, err := scanComputer(rows)
+		var ownerMember string
+		c, err := scanComputer(scanWithTail{rows, &ownerMember})
 		if err != nil {
 			return nil, err
 		}
+		c.OwnerMemberID = ownerMember
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// scanWithTail scans computerColumns followed by extra trailing columns.
+type scanWithTail struct {
+	row  rowScanner
+	tail any
+}
+
+func (s scanWithTail) Scan(dest ...any) error { return s.row.Scan(append(dest, s.tail)...) }
+
+func prefixed(prefix, cols string) string {
+	parts := strings.Split(cols, ",")
+	for i, p := range parts {
+		parts[i] = prefix + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ComputerHello carries the capability fields a Computer reports when it connects.
@@ -546,8 +608,8 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status stri
 	var events []domain.SpaceEvent
 	var specs []protocol.AssignedAgentSpec
 	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		var spaceID, currentStatus string
-		if err := tx.QueryRowContext(ctx, `SELECT space_id, connection_status FROM computers WHERE id = ?`, computerID).Scan(&spaceID, &currentStatus); err != nil {
+		var currentStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT connection_status FROM computers WHERE id = ?`, computerID).Scan(&currentStatus); err != nil {
 			return domain.WrapError(domain.CodeNotFound, "computer not found", err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -574,14 +636,11 @@ func (s *Service) SetComputerStatus(ctx context.Context, computerID, status stri
 			}
 		}
 		if status != currentStatus || hello != nil {
-			ev, err := store.AppendEvent(ctx, tx, spaceID, "computer.changed", map[string]any{
-				"computer_id": computerID,
-				"status":      status,
-			})
+			evs, err := computerChangedTx(ctx, tx, computerID, status)
 			if err != nil {
 				return err
 			}
-			events = append(events, ev)
+			events = append(events, evs...)
 		}
 		if status == "online" {
 			rows, err := tx.QueryContext(ctx,
@@ -663,15 +722,9 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 	var compOnline bool
 
 	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		var compStatus string
-		if err := tx.QueryRowContext(ctx,
-			`SELECT connection_status FROM computers WHERE id = ? AND space_id = ? AND deleted_at IS NULL`,
-			in.ComputerID, actor.SpaceID,
-		).Scan(&compStatus); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.NewError(domain.CodeNotFound, "computer not found in space")
-			}
-			return domain.WrapError(domain.CodeInternal, "query computer", err)
+		compStatus, err := placeableComputerStatusTx(ctx, tx, actor, in.ComputerID)
+		if err != nil {
+			return err
 		}
 		compOnline = compStatus == "online"
 		rtState := domain.RuntimeOffline
@@ -979,4 +1032,38 @@ func (s *Service) UpdateSpace(ctx context.Context, actor domain.Member, name, ac
 	}
 	s.dispatchPostCommit(events, nil)
 	return sp, nil
+}
+
+// placeableComputerStatusTx enforces who may place an Agent on a Computer: a Human only on a
+// Computer their own account owns; an Agent only on the Computer that hosts it.
+func placeableComputerStatusTx(ctx context.Context, tx *sql.Tx, actor domain.Member, computerID string) (string, error) {
+	var status, ownerUserID string
+	err := tx.QueryRowContext(ctx,
+		`SELECT connection_status, owner_user_id FROM computers WHERE id = ? AND deleted_at IS NULL`, computerID,
+	).Scan(&status, &ownerUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.NewError(domain.CodeNotFound, "computer not found")
+	}
+	if err != nil {
+		return "", domain.WrapError(domain.CodeInternal, "query computer", err)
+	}
+	var allowed bool
+	switch actor.Kind {
+	case domain.MemberKindHuman:
+		var userID string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(user_id, '') FROM members WHERE id = ?`, actor.ID).Scan(&userID); err != nil {
+			return "", domain.WrapError(domain.CodeInternal, "query actor account", err)
+		}
+		allowed = userID != "" && userID == ownerUserID
+	case domain.MemberKindAgent:
+		var hostID string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(computer_id, '') FROM agents WHERE member_id = ?`, actor.ID).Scan(&hostID); err != nil {
+			return "", domain.WrapError(domain.CodeInternal, "query actor computer", err)
+		}
+		allowed = hostID != "" && hostID == computerID
+	}
+	if !allowed {
+		return "", domain.NewError(domain.CodePermissionDenied, "only the computer's owner can place agents on it")
+	}
+	return status, nil
 }

@@ -79,7 +79,7 @@ func TestEndToEndHTTPComputerWSAndSSE(t *testing.T) {
 		t.Fatalf("create space status=%d", resp.StatusCode)
 	}
 
-	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces/studio/computers/pair", map[string]any{
+	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/computers/pair", map[string]any{
 		"name":     "mac-studio",
 		"hostname": "mac.local",
 		"os":       "macos",

@@ -49,7 +49,7 @@ func setupTestService(t *testing.T) (*Service, *spyNotifier, domain.Space, domai
 	if err != nil {
 		t.Fatalf("create space: %v", err)
 	}
-	comp, _, err := svc.PairComputerDirect(ctx, owner, "mac-studio", "mac.local", "macos")
+	comp, _, err := svc.PairComputerDirect(ctx, auth.User.ID, "mac-studio", "mac.local", "macos")
 	if err != nil {
 		t.Fatalf("pair computer: %v", err)
 	}

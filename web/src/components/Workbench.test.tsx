@@ -80,7 +80,7 @@ const sampleBoot: BootstrapData = {
     },
   ],
   computers: [
-    { id: "c-1", space_id: "sp-1", name: "mac-studio", hostname: "mac.local", os: "macos", connection_status: "online", created_at: "2026-11-19T10:00:00Z" },
+    { id: "c-1", owner_member_id: "m-owner", name: "mac-studio", hostname: "mac.local", os: "macos", connection_status: "online", created_at: "2026-11-19T10:00:00Z" },
   ],
 };
 

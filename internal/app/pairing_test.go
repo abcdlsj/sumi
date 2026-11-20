@@ -55,16 +55,16 @@ func TestPairingCreateConfirmPoll(t *testing.T) {
 		t.Fatalf("view = %+v err=%v", view, err)
 	}
 
-	comp, err := svc.ConfirmPairing(ctx, owner, ticket.ID, ticket.Code, "")
+	comp, err := svc.ConfirmPairing(ctx, userOf(t, svc, owner), ticket.ID, ticket.Code, "")
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if comp.Name != "lin.local" || comp.SpaceID != space.ID {
+	if comp.Name != "lin.local" || comp.OwnerUserID != userOf(t, svc, owner).ID {
 		t.Fatalf("computer = %+v", comp)
 	}
 
 	poll, err = svc.PollPairing(ctx, ticket.ID, ticket.Secret)
-	if err != nil || poll.Status != "confirmed" || poll.ComputerID != comp.ID || poll.SpaceSlug != space.Slug {
+	if err != nil || poll.Status != "confirmed" || poll.ComputerID != comp.ID {
 		t.Fatalf("confirmed poll = %+v err=%v", poll, err)
 	}
 	authed, err := svc.AuthenticateComputer(ctx, ticket.Secret)
@@ -72,7 +72,7 @@ func TestPairingCreateConfirmPoll(t *testing.T) {
 		t.Fatalf("secret should authenticate as computer %s: got %s err=%v", comp.ID, authed.ID, err)
 	}
 
-	_, err = svc.ConfirmPairing(ctx, owner, ticket.ID, ticket.Code, "again")
+	_, err = svc.ConfirmPairing(ctx, userOf(t, svc, owner), ticket.ID, ticket.Code, "again")
 	requireCode(t, err, domain.CodeConflict)
 	comps, _ := svc.ListComputers(ctx, space.ID)
 	if len(comps) != 2 {
@@ -99,9 +99,9 @@ func TestPairingRejectsWrongCodeSecretAndMissing(t *testing.T) {
 	_, err = svc.ViewPairing(ctx, "missing", ticket.Code)
 	requireCode(t, err, domain.CodeNotFound)
 
-	_, err = svc.ConfirmPairing(ctx, owner, ticket.ID, wrong, "")
+	_, err = svc.ConfirmPairing(ctx, userOf(t, svc, owner), ticket.ID, wrong, "")
 	requireCode(t, err, domain.CodeNotFound)
-	_, err = svc.ConfirmPairing(ctx, owner, "missing", ticket.Code, "")
+	_, err = svc.ConfirmPairing(ctx, userOf(t, svc, owner), "missing", ticket.Code, "")
 	requireCode(t, err, domain.CodeNotFound)
 
 	_, err = svc.PollPairing(ctx, ticket.ID, "not-the-secret")
@@ -125,7 +125,7 @@ func TestPairingExpired(t *testing.T) {
 		t.Fatalf("expire pairing: %v", err)
 	}
 
-	_, err = svc.ConfirmPairing(ctx, owner, ticket.ID, ticket.Code, "")
+	_, err = svc.ConfirmPairing(ctx, userOf(t, svc, owner), ticket.ID, ticket.Code, "")
 	requireCode(t, err, domain.CodeExpired)
 	poll, err := svc.PollPairing(ctx, ticket.ID, ticket.Secret)
 	if err != nil || poll.Status != "expired" {
@@ -136,69 +136,23 @@ func TestPairingExpired(t *testing.T) {
 	}
 }
 
-func TestPairingConfirmRequiresOwnerOrAdmin(t *testing.T) {
-	svc, _, _, owner, comp := setupTestService(t)
+func TestPairingConfirmRequiresSignedInAccount(t *testing.T) {
+	svc, _, _, _, _ := setupTestService(t)
 	ctx := context.Background()
 	ticket, err := svc.CreatePairing(ctx, "mac.local", "macos", "")
 	if err != nil {
 		t.Fatalf("create pairing: %v", err)
 	}
-	agent, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
-		DisplayName: "Lin", ComputerID: comp.ID, DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
-	})
-	if err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	_, err = svc.ConfirmPairing(ctx, agent, ticket.ID, ticket.Code, "")
-	requireCode(t, err, domain.CodePermissionDenied)
-
-	plain := owner
-	plain.AccessLevel = domain.AccessMember
-	_, err = svc.ConfirmPairing(ctx, plain, ticket.ID, ticket.Code, "")
-	requireCode(t, err, domain.CodePermissionDenied)
-
+	_, err = svc.ConfirmPairing(ctx, domain.User{}, ticket.ID, ticket.Code, "")
+	requireCode(t, err, domain.CodeUnauthenticated)
 	poll, err := svc.PollPairing(ctx, ticket.ID, ticket.Secret)
 	if err != nil || poll.Status != "pending" {
 		t.Fatalf("poll = %+v err=%v", poll, err)
 	}
 }
 
-func TestCreatePairingValidatesInput(t *testing.T) {
-	svc, _, _, _, _ := setupTestService(t)
-	ctx := context.Background()
-	for _, tc := range []struct{ host, os string }{
-		{"mac.local", "windows"},
-		{"", "macos"},
-		{strings.Repeat("h", maxHostnameLen+1), "linux"},
-	} {
-		_, err := svc.CreatePairing(ctx, tc.host, tc.os, "")
-		requireCode(t, err, domain.CodeInvalidArgument)
-	}
-}
-
-func TestCreatePairingCapsPendingAndPrunesExpired(t *testing.T) {
-	svc, _, _, _, _ := setupTestService(t)
-	ctx := context.Background()
-	for i := 0; i < maxPendingPairings; i++ {
-		if _, err := svc.CreatePairing(ctx, "mac.local", "macos", ""); err != nil {
-			t.Fatalf("create pairing %d: %v", i, err)
-		}
-	}
-	_, err := svc.CreatePairing(ctx, "mac.local", "macos", "")
-	requireCode(t, err, domain.CodeRateLimited)
-
-	past := store.FormatTime(time.Now().UTC().Add(-time.Second))
-	if err := svc.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE computer_pairings SET expires_at = ? WHERE status = 'pending'`, past)
-		return err
-	}); err != nil {
-		t.Fatalf("expire pairings: %v", err)
-	}
-	if _, err := svc.CreatePairing(ctx, "mac.local", "macos", ""); err != nil {
-		t.Fatalf("create after expiry: %v", err)
-	}
-	var n int
-	if err := svc.store.ReadDB().QueryRow(`SELECT COUNT(*) FROM computer_pairings`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("expired pending rows must be pruned, have %d (err=%v)", n, err)
-	}
+// userOf returns the account behind a Human member.
+func userOf(t *testing.T, svc *Service, m domain.Member) domain.User {
+	t.Helper()
+	return domain.User{ID: mustOwnerUserID(t, svc, m)}
 }

@@ -28,7 +28,6 @@ type pairingTicket struct {
 
 type pairingPoll struct {
 	Status     string `json:"status"`
-	SpaceSlug  string `json:"space_slug,omitempty"`
 	ComputerID string `json:"computer_id,omitempty"`
 }
 

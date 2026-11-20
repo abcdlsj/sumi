@@ -81,7 +81,8 @@ export interface Member {
 
 export interface Computer {
   id: string;
-  space_id: string;
+  /** The owner's member id in this Space; absent when the owner has left it. */
+  owner_member_id?: string;
   name: string;
   hostname: string;
   os: string;
@@ -344,8 +345,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ status }),
     }),
-  pairComputer: (spaceSlug: string, name: string, hostname: string, os: "macos" | "linux") =>
-    request<{ computer: Computer; token: string }>(`/api/v1/spaces/${spaceSlug}/computers/pair`, {
+  pairComputer: (name: string, hostname: string, os: "macos" | "linux") =>
+    request<{ computer: Computer; token: string }>(`/api/v1/computers/pair`, {
       method: "POST",
       body: JSON.stringify({ name, hostname, os }),
     }),
@@ -353,9 +354,9 @@ export const api = {
     request<{ pairing: PairingInfo }>(
       `/api/v1/pairings/${encodeURIComponent(pairingID)}?code=${encodeURIComponent(code)}`,
     ),
-  confirmPairing: (spaceSlug: string, pairingID: string, code: string, name: string) =>
+  confirmPairing: (pairingID: string, code: string, name: string) =>
     request<{ computer: Computer }>(
-      `/api/v1/spaces/${spaceSlug}/computers/pairings/${encodeURIComponent(pairingID)}/confirm`,
+      `/api/v1/computers/pairings/${encodeURIComponent(pairingID)}/confirm`,
       { method: "POST", body: JSON.stringify({ code, name }) },
     ),
   createAgent: (
@@ -388,6 +389,11 @@ export const api = {
       body: JSON.stringify({ granted }),
     }),
 };
+
+/** Computers the viewer may place Agents on: only the ones their own account owns. */
+export function ownComputers(boot: BootstrapData): Computer[] {
+  return boot.computers.filter((c) => c.owner_member_id === boot.current_member.id);
+}
 
 export function formatClock(iso?: string): string {
   if (!iso) return "";

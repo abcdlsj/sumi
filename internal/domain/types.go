@@ -161,8 +161,10 @@ func SanitizeActivity(a *AgentActivity) *AgentActivity {
 }
 
 type Computer struct {
-	ID               string     `json:"id"`
-	SpaceID          string     `json:"space_id"`
+	ID string `json:"id"`
+	// OwnerUserID is never sent to browsers; OwnerMemberID is the owner's member id in the viewing Space.
+	OwnerUserID      string     `json:"-"`
+	OwnerMemberID    string     `json:"owner_member_id,omitempty"`
 	Name             string     `json:"name"`
 	Hostname         string     `json:"hostname"`
 	OS               string     `json:"os"`

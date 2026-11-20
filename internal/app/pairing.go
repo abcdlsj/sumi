@@ -44,14 +44,13 @@ type PairingView struct {
 
 type PairingPoll struct {
 	Status     string `json:"status"`
-	SpaceSlug  string `json:"space_slug,omitempty"`
 	ComputerID string `json:"computer_id,omitempty"`
 }
 
 type pairingRow struct {
 	id, codeHash, tokenHash, hostname, os, daemonVersion, status string
 	expiresAt                                                    time.Time
-	computerID, spaceID                                          sql.NullString
+	computerID, ownerUserID                                      sql.NullString
 }
 
 func (p pairingRow) effectiveStatus(now time.Time) string {
@@ -69,9 +68,9 @@ func loadPairing(ctx context.Context, q rowQuerier, id string) (pairingRow, erro
 	var p pairingRow
 	var expiresAt string
 	err := q.QueryRowContext(ctx,
-		`SELECT id, code_hash, token_hash, hostname, os, daemon_version, status, expires_at, computer_id, space_id
+		`SELECT id, code_hash, token_hash, hostname, os, daemon_version, status, expires_at, computer_id, owner_user_id
 		 FROM computer_pairings WHERE id = ?`, id,
-	).Scan(&p.id, &p.codeHash, &p.tokenHash, &p.hostname, &p.os, &p.daemonVersion, &p.status, &expiresAt, &p.computerID, &p.spaceID)
+	).Scan(&p.id, &p.codeHash, &p.tokenHash, &p.hostname, &p.os, &p.daemonVersion, &p.status, &expiresAt, &p.computerID, &p.ownerUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return pairingRow{}, pairingNotFound()
 	}
@@ -180,11 +179,11 @@ func (s *Service) ViewPairing(ctx context.Context, id, code string) (PairingView
 	}, nil
 }
 
-// ConfirmPairing binds a pending pairing to the actor's Space. The new Computer reuses the
+// ConfirmPairing makes the confirming account the owner of a new Computer. It reuses the
 // pairing's token_hash so the Secret held by the requester becomes its Computer token.
-func (s *Service) ConfirmPairing(ctx context.Context, actor domain.Member, id, code, name string) (domain.Computer, error) {
-	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
-		return domain.Computer{}, domain.NewError(domain.CodePermissionDenied, "only owner or admin can confirm a pairing")
+func (s *Service) ConfirmPairing(ctx context.Context, user domain.User, id, code, name string) (domain.Computer, error) {
+	if user.ID == "" {
+		return domain.Computer{}, domain.NewError(domain.CodeUnauthenticated, "sign in to confirm a pairing")
 	}
 	code = normalizePairingCode(code)
 	var comp domain.Computer
@@ -211,7 +210,7 @@ func (s *Service) ConfirmPairing(ctx context.Context, actor domain.Member, id, c
 		}
 		comp = domain.Computer{
 			ID:               uuid.NewString(),
-			SpaceID:          actor.SpaceID,
+			OwnerUserID:      user.ID,
 			Name:             compName,
 			Hostname:         p.hostname,
 			OS:               p.os,
@@ -220,14 +219,14 @@ func (s *Service) ConfirmPairing(ctx context.Context, actor domain.Member, id, c
 			ACPProviders:     []string{},
 			CreatedAt:        now,
 		}
-		ev, err := insertComputerTx(ctx, tx, comp, p.tokenHash)
+		evs, err := insertComputerTx(ctx, tx, comp, p.tokenHash)
 		if err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(ctx,
-			`UPDATE computer_pairings SET status = 'confirmed', computer_id = ?, space_id = ?, confirmed_at = ?
+			`UPDATE computer_pairings SET status = 'confirmed', computer_id = ?, owner_user_id = ?, confirmed_at = ?
 			 WHERE id = ? AND status = 'pending'`,
-			comp.ID, actor.SpaceID, store.FormatTime(now), p.id,
+			comp.ID, user.ID, store.FormatTime(now), p.id,
 		)
 		if err != nil {
 			return domain.WrapError(domain.CodeInternal, "confirm pairing", err)
@@ -235,7 +234,7 @@ func (s *Service) ConfirmPairing(ctx context.Context, actor domain.Member, id, c
 		if n, _ := res.RowsAffected(); n != 1 {
 			return domain.NewError(domain.CodeConflict, "pairing already confirmed")
 		}
-		events = append(events, ev)
+		events = append(events, evs...)
 		return nil
 	})
 	if err != nil {
@@ -257,11 +256,6 @@ func (s *Service) PollPairing(ctx context.Context, id, secret string) (PairingPo
 	out := PairingPoll{Status: p.effectiveStatus(time.Now().UTC())}
 	if out.Status == "confirmed" {
 		out.ComputerID = p.computerID.String
-		if err := s.store.ReadDB().QueryRowContext(ctx,
-			`SELECT slug FROM spaces WHERE id = ?`, p.spaceID.String,
-		).Scan(&out.SpaceSlug); err != nil {
-			return PairingPoll{}, domain.WrapError(domain.CodeInternal, "query pairing space", err)
-		}
 	}
 	return out, nil
 }

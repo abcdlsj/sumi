@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, Hash, Inbox, Lock, Monitor, Moon, Plus, Search, Settings, Sparkles, Sun, Users } from "lucide-react";
-import { api, slugInput, slugify, type Member, type Space } from "../api";
+import { api, ownComputers, slugInput, slugify, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
 import { useTheme } from "../theme";
@@ -191,7 +191,8 @@ export function Workbench({
   const people = boot.members.filter((m) => m.kind === "human" && m.id !== boot.current_member.id);
   const onlineComputers = boot.computers.filter((c) => c.connection_status === "online").length;
   const canGovern = boot.current_member.access_level !== "member";
-  const needsSetup = canGovern && (boot.computers.length === 0 || agents.length === 0);
+  const myComputers = ownComputers(boot);
+  const needsSetup = canGovern && (myComputers.length === 0 || agents.length === 0);
   const needsMe = boot.inbox.filter((i) => i.needs_attention).length;
   const pairing = readPendingPairing();
   const dark = theme === "dark" || (theme === "system" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -359,14 +360,14 @@ export function Workbench({
           </div>
 
           <div>
-            <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => setDialog(boot.computers.length ? "agent" : "computer")} /> : undefined}>
+            <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => setDialog(myComputers.length ? "agent" : "computer")} /> : undefined}>
               Agents
             </SectionLabel>
             <div className="space-y-0.5">
               {agents.map(memberRow)}
               {agents.length === 0 && (
                 <button
-                  onClick={() => setDialog(boot.computers.length ? "agent" : "computer")}
+                  onClick={() => setDialog(myComputers.length ? "agent" : "computer")}
                   className="w-full h-9 px-2 rounded-[8px] flex items-center gap-2.5 text-[13.5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg"
                 >
                   <span className="size-6 rounded-[6px] border border-dashed border-nav-line-strong flex items-center justify-center">
@@ -389,14 +390,14 @@ export function Workbench({
         {needsSetup && (
           <div className="px-3 pb-3 shrink-0 animate-fade-in">
             <button
-              onClick={() => setDialog(boot.computers.length === 0 ? "computer" : "agent")}
+              onClick={() => setDialog(myComputers.length === 0 ? "computer" : "agent")}
               className="w-full p-3 rounded-[12px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
             >
               <div className="flex items-center gap-2 text-[14px] font-semibold text-nav-fg-strong">
                 <Sparkles className="size-4" /> Finish setup
               </div>
               <div className="mt-2 space-y-1.5 text-[13px]">
-                <SetupLine done={boot.computers.length > 0}>Connect a computer</SetupLine>
+                <SetupLine done={myComputers.length > 0}>Connect a computer</SetupLine>
                 <SetupLine done={agents.length > 0}>Create an agent</SetupLine>
               </div>
             </button>
@@ -443,7 +444,7 @@ export function Workbench({
               onTab={(tab) => setMainView({ kind: "admin", tab })}
               onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
               selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
-              onNewAgent={() => setDialog(boot.computers.length ? "agent" : "computer")}
+              onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
               onConnectComputer={() => setDialog("computer")}
               theme={theme}
               onTheme={setTheme}
@@ -506,7 +507,7 @@ export function Workbench({
         <div className="px-6 pb-6 pt-4">
           <AgentForm
             spaceSlug={spaceSlug}
-            computers={boot.computers}
+            computers={myComputers}
             onCreated={(agent) => {
               setDialog(null);
               void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }).then(() => openOrCreateDM(agent.id));
@@ -526,16 +527,12 @@ export function Workbench({
         open={dialog === "pairing" && Boolean(pairing)}
         onClose={() => setDialog(null)}
         label="Connect this computer"
-        title={`Connect this computer to ${boot.space.name}?`}
-        description="The Sumi desktop app on this machine asked to join."
+        title="Connect this computer to your account?"
+        description="The Sumi desktop app on this machine asked to join. You can run agents from any of your spaces on it."
         width={500}
       >
         <div className="px-6 pb-6 pt-4">
-          {pairing && canGovern ? (
-            <PairingCard spaceSlug={spaceSlug} pairing={pairing} onConfirmed={() => setDialog(null)} onDismiss={() => setDialog(null)} />
-          ) : (
-            <p className="text-[14px] text-fg-3">Only owners and admins can connect computers.</p>
-          )}
+          {pairing && <PairingCard spaceSlug={spaceSlug} pairing={pairing} onConfirmed={() => setDialog(null)} onDismiss={() => setDialog(null)} />}
         </div>
       </Modal>
       <JumpDialog

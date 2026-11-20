@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Apple, Bot, Laptop, Monitor, Terminal } from "lucide-react";
-import { api, ApiError, type Computer, type Member } from "../api";
+import { api, ApiError, ownComputers, type Computer, type Member } from "../api";
 import { clearPendingPairing, readPendingPairing, type PendingPairing } from "../pairing";
 import { AgentForm } from "./AgentForm";
 import { Button, CopyButton, Field, Segmented, Skeleton, useAction } from "./ui";
@@ -110,7 +110,7 @@ export function PairingCard({
       onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {
-          await api.confirmPairing(spaceSlug, pairing.id, pairing.code, name.trim() || info.hostname);
+          await api.confirmPairing(pairing.id, pairing.code, name.trim() || info.hostname);
           clearPendingPairing();
           void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
           onConfirmed();
@@ -137,7 +137,7 @@ export function PairingCard({
       <div className="p-5 space-y-4">
         <Field label="Computer name" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
         <p className="text-[13px] text-fg-3 leading-relaxed">
-          Confirm only if this code matches the one in the Sumi app on your computer. Agents you create here will run on it.
+          Confirm only if this code matches the one in the Sumi app on your computer. It joins your account, and agents you create in any of your spaces can run on it.
         </p>
         <div className="flex items-center gap-2">
           <Button type="submit" size="lg" loading={busy} className="flex-1">
@@ -163,7 +163,7 @@ export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { sp
   const [manual, setManual] = useState(false);
   const { busy, run } = useAction();
   const bootQ = useSpaceBoot(spaceSlug, true);
-  const computers = bootQ.data?.computers ?? [];
+  const computers = bootQ.data ? ownComputers(bootQ.data) : [];
   const anyOnline = computers.some((c) => c.connection_status === "online");
   const command = issued ? `sumi computer --server ${window.location.origin} --token ${issued}` : "";
 
@@ -199,7 +199,7 @@ export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { sp
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               void run(async () => {
-                const res = await api.pairComputer(spaceSlug, compName.trim(), compName.trim(), osName);
+                const res = await api.pairComputer(compName.trim(), compName.trim(), osName);
                 setIssued(res.token);
                 void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
               });
@@ -263,7 +263,7 @@ export function AgentStep({
 }) {
   const qc = useQueryClient();
   const bootQ = useSpaceBoot(spaceSlug, false);
-  const computers = bootQ.data?.computers ?? [];
+  const computers = bootQ.data ? ownComputers(bootQ.data) : [];
 
   return (
     <div className="space-y-6">

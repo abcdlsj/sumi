@@ -94,6 +94,10 @@ func (s *Server) registerRoutes() {
 	// Confirm-based Computer pairing
 	r.Get("/api/v1/pairings/{pairingID}", s.handleViewPairing)
 
+	// Account-owned Computers
+	r.Post("/api/v1/computers/pair", s.handlePairComputer)
+	r.Post("/api/v1/computers/pairings/{pairingID}/confirm", s.handleConfirmPairing)
+
 	// Space-scoped Human APIs
 	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
 		r.Get("/bootstrap", s.handleBootstrap)
@@ -104,8 +108,6 @@ func (s *Server) registerRoutes() {
 		r.Put("/members/{memberID}/permissions/{perm}", s.handleSetPermission)
 
 		r.Get("/computers", s.handleListComputers)
-		r.Post("/computers/pair", s.handlePairComputer)
-		r.Post("/computers/pairings/{pairingID}/confirm", s.handleConfirmPairing)
 
 		r.Post("/agents", s.handleCreateAgent)
 		r.Post("/agents/{agentID}/control", s.handleControlAgent)
@@ -591,7 +593,7 @@ func (s *Server) handleListComputers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePairComputer(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
+	user, err := s.requireUser(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -605,7 +607,7 @@ func (s *Server) handlePairComputer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	comp, token, err := s.svc.PairComputerDirect(r.Context(), actor, body.Name, body.Hostname, body.OS)
+	comp, token, err := s.svc.PairComputerDirect(r.Context(), user.ID, body.Name, body.Hostname, body.OS)
 	if err != nil {
 		writeError(w, err)
 		return

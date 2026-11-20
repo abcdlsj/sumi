@@ -37,7 +37,7 @@ func TestAgentChannelMembersAndTaskShow(t *testing.T) {
 	}, ""); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create space status=%d", resp.StatusCode)
 	}
-	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces/studio/computers/pair", map[string]any{
+	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/computers/pair", map[string]any{
 		"name": "node", "hostname": "node.local", "os": "macos",
 	}, "")
 	if resp.StatusCode != http.StatusCreated {

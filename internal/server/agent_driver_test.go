@@ -51,7 +51,7 @@ func TestAgentDriverConfigAPIRedactsSecrets(t *testing.T) {
 	mustStatus(resp, http.StatusCreated, "register")
 	resp, _ = doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces", map[string]any{"slug": "studio", "name": "Studio"}, "")
 	mustStatus(resp, http.StatusCreated, "create space")
-	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces/studio/computers/pair", map[string]any{
+	resp, pairOut := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/computers/pair", map[string]any{
 		"name": "mac", "hostname": "mac.local", "os": "macos",
 	}, "")
 	mustStatus(resp, http.StatusCreated, "pair")

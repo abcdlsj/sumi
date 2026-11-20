@@ -59,7 +59,7 @@ func (s *Server) handleViewPairing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfirmPairing(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
+	user, err := s.requireUser(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -72,7 +72,7 @@ func (s *Server) handleConfirmPairing(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	comp, err := s.svc.ConfirmPairing(r.Context(), actor, chi.URLParam(r, "pairingID"), body.Code, body.Name)
+	comp, err := s.svc.ConfirmPairing(r.Context(), user, chi.URLParam(r, "pairingID"), body.Code, body.Name)
 	if err != nil {
 		writeError(w, err)
 		return

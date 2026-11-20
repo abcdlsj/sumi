@@ -511,7 +511,10 @@ export function AdminPanel({
                         <div className="min-w-0 flex-1">
                           <div className="text-[14.5px] font-semibold text-fg truncate">{c.name}</div>
                           <div className="text-[13px] text-fg-3 truncate">
-                            {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
+                            {c.owner_member_id === boot.current_member.id
+                              ? "Yours"
+                              : `${boot.members.find((m) => m.id === c.owner_member_id)?.display_name ?? "Former member"}'s`}{" "}
+                            · {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
                             {c.acp_providers && c.acp_providers.length > 0 && ` · ACP: ${c.acp_providers.join(", ")}`}
                           </div>
                         </div>

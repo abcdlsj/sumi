@@ -70,7 +70,7 @@ func startScenarioEnv(t *testing.T, factory func(spec protocol.AssignedAgentSpec
 	if err != nil {
 		t.Fatalf("create space: %v", err)
 	}
-	comp, token, err := svc.PairComputerDirect(ctx, owner, "test-node", "test.local", "macos")
+	comp, token, err := svc.PairComputerDirect(ctx, auth.User.ID, "test-node", "test.local", "macos")
 	if err != nil {
 		t.Fatalf("pair computer: %v", err)
 	}

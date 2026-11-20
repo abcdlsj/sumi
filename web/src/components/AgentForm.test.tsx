@@ -6,7 +6,7 @@ import { agentSprite } from "./Avatar";
 
 const computer: Computer = {
   id: "c1",
-  space_id: "sp",
+  owner_member_id: "m",
   name: "studio",
   hostname: "studio.local",
   os: "macos",

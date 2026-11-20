@@ -53,7 +53,7 @@ func TestPairerConfirmsAndRenewsExpiredPairing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	_, owner, err := svc.CreateSpace(ctx, auth.User, "studio", "Studio")
+	_, _, err = svc.CreateSpace(ctx, auth.User, "studio", "Studio")
 	if err != nil {
 		t.Fatalf("create space: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPairerConfirmsAndRenewsExpiredPairing(t *testing.T) {
 	if secondID == firstID {
 		t.Fatal("expired pairing must be replaced")
 	}
-	comp, err := svc.ConfirmPairing(ctx, owner, secondID, code, "")
+	comp, err := svc.ConfirmPairing(ctx, auth.User, secondID, code, "")
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}

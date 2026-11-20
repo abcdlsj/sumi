@@ -124,7 +124,7 @@ func Run(opts Options) (Result, error) {
 		} `json:"computer"`
 		Token string `json:"token"`
 	}
-	if err := post(client, base+"/api/v1/spaces/"+opts.SpaceSlug+"/computers/pair", map[string]any{
+	if err := post(client, base+"/api/v1/computers/pair", map[string]any{
 		"name": name, "hostname": hostname, "os": detectOS(),
 	}, &pairOut); err != nil {
 		return Result{}, fmt.Errorf("pair computer: %w", err)

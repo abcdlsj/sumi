@@ -167,7 +167,6 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		HelloAck: &protocol.HelloAckFrame{
 			ProtocolVersion: protocol.Version,
 			ComputerID:      comp.ID,
-			SpaceID:         comp.SpaceID,
 			Agents:          specs,
 			Capabilities:    protocol.Supported,
 		},

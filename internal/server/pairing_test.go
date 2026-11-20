@@ -78,7 +78,7 @@ func TestPairingRoutes(t *testing.T) {
 		t.Fatalf("wrong code view status=%d", resp.StatusCode)
 	}
 
-	confirmURL := ts.URL + "/api/v1/spaces/studio/computers/pairings/" + id + "/confirm"
+	confirmURL := ts.URL + "/api/v1/computers/pairings/" + id + "/confirm"
 	resp, out = doJSON(t, human, http.MethodPost, confirmURL, map[string]any{"code": code, "name": "Studio Mac"}, "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("confirm status=%d", resp.StatusCode)
@@ -90,7 +90,7 @@ func TestPairingRoutes(t *testing.T) {
 	}
 
 	resp, out = doJSON(t, anon, http.MethodGet, pollURL, nil, secret)
-	if resp.StatusCode != http.StatusOK || out["status"] != "confirmed" || out["computer_id"] != compID || out["space_slug"] != "studio" {
+	if resp.StatusCode != http.StatusOK || out["status"] != "confirmed" || out["computer_id"] != compID || out["space_slug"] != nil {
 		t.Fatalf("confirmed poll status=%d body=%v", resp.StatusCode, out)
 	}
 }

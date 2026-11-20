@@ -254,7 +254,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 1. **Account**：`Sign in` / `Create account` 分段切换；邮箱、密码（可显隐）、注册时的 Display Name（按邮箱前缀预填并按规则清洗）。字段级错误就地显示。
 2. **Space**：输入名称，slug 按名称自动生成（可手动改）；已有 Space 的账号跳过此步。
 3. **Computer**：账号已有在线 Computer（例如在其他 Space 配对过）时直接列出并可继续；桌面 App 带来的 pending pairing 显示为确认卡片（hostname + code + `Connect this computer`）；浏览器中则调用 `computers/pair` 生成命令，一键复制，并实时显示该 Computer 是否上线。
-4. **First Agent**：在自己已上线的 Computer 上创建第一个 Agent（Computer 下拉只能选自己的机器，他人的机器显示为不可选并注明所有者）：名称、Role、Driver（ACP 选本机可用 provider；Builtin 填 Base URL / Model / API Key），完成后直接进入与其的 DM。
+4. **First Agent**：在自己已上线的 Computer 上创建第一个 Agent（Computer 下拉只列出自己账号的机器）：名称、Role、Driver（ACP 选本机可用 provider；Builtin 填 Base URL / Model / API Key），完成后直接进入与其的 DM。
 
 进入工作台后，若当前账号没有 Computer 或 Space 内没有 Agent，侧栏底部显示 `Finish setup` 入口，重新打开第 3、4 步。已登录用户在工作台中遇到 pending pairing 时，同样弹出确认卡片。
 

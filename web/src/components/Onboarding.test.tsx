@@ -79,7 +79,7 @@ describe("Onboarding", () => {
       pairing: { id: "p-1", hostname: "studio.local", os: "macos", status: "pending", expires_at: "" },
     });
     const confirm = vi.spyOn(api, "confirmPairing").mockResolvedValue({
-      computer: { id: "c1", space_id: "sp", name: "studio", hostname: "studio.local", os: "macos", connection_status: "offline", created_at: "" },
+      computer: { id: "c1", owner_member_id: "m", name: "studio", hostname: "studio.local", os: "macos", connection_status: "offline", created_at: "" },
     });
     wrap(
       <Onboarding step="computer" user={user} spaceSlug="li-si-studio" onAuthenticated={noop} onSpaceCreated={noop} onComputerDone={noop} onFinish={noop} onLogout={noop} />,
@@ -88,7 +88,7 @@ describe("Onboarding", () => {
     expect(screen.getByText("K7QX4M")).toBeTruthy();
     expect(confirm).not.toHaveBeenCalled();
     fireEvent.click(btn);
-    await waitFor(() => expect(confirm).toHaveBeenCalledWith("li-si-studio", "p-1", "K7QX4M", "studio"));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith("p-1", "K7QX4M", "studio"));
     expect(readPendingPairing()).toBeNull();
   });
 });

@@ -1,11 +1,11 @@
--- Sumi v2 SQLite baseline schema (version 3).
+-- Sumi v2 SQLite baseline schema (version 4).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TEXT NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO schema_meta (version, applied_at) VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -63,7 +63,7 @@ CREATE TABLE member_permissions (
 
 CREATE TABLE computers (
     id TEXT PRIMARY KEY,
-    space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE RESTRICT,
+    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
     hostname TEXT NOT NULL,
     os TEXT NOT NULL CHECK (os IN ('macos', 'linux')),
@@ -75,7 +75,7 @@ CREATE TABLE computers (
     created_at TEXT NOT NULL,
     deleted_at TEXT
 );
-CREATE INDEX idx_computers_space ON computers(space_id);
+CREATE INDEX idx_computers_owner ON computers(owner_user_id);
 
 CREATE TABLE computer_pairings (
     id TEXT PRIMARY KEY,
@@ -87,7 +87,7 @@ CREATE TABLE computer_pairings (
     status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'expired')),
     expires_at TEXT NOT NULL,
     computer_id TEXT UNIQUE REFERENCES computers(id) ON DELETE RESTRICT,
-    space_id TEXT REFERENCES spaces(id) ON DELETE RESTRICT,
+    owner_user_id TEXT REFERENCES users(id) ON DELETE RESTRICT,
     created_at TEXT NOT NULL,
     confirmed_at TEXT
 );
