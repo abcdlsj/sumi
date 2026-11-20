@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { Member } from "../api";
+import type { Member, Task } from "../api";
 import { MessageBody } from "./MessageBody";
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
@@ -59,12 +59,12 @@ describe("MessageBody @mentions", () => {
       "Chinese boundary: 请@lin看一下。",
     ].join("\n\n");
 
-    render(<MessageBody body={md} members={members} selfID={lisi.id} onSelectMember={onSelect} />);
+    const { container } = render(<MessageBody body={md} members={members} selfID={lisi.id} onSelectMember={onSelect} />);
 
-    const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toBe("@lin");
-    fireEvent.click(buttons[0]);
+    const mentions = container.querySelectorAll("[data-mention]");
+    expect(mentions).toHaveLength(1);
+    expect(mentions[0].textContent).toBe("@lin");
+    fireEvent.click(mentions[0]);
     expect(onSelect).toHaveBeenCalledWith(lin);
   });
 
@@ -76,5 +76,37 @@ describe("MessageBody @mentions", () => {
     const allChip = container.querySelector('[data-mention="all"]');
     expect(allChip?.textContent).toBe("@all");
     expect(allChip?.className).toContain("bg-accent-soft");
+  });
+
+  it("highlights known #N task refs, skips code/unknown refs, and copies fenced code blocks", async () => {
+    const task14: Task = {
+      id: "t-14",
+      space_id: "s",
+      number: 14,
+      channel_id: "c1",
+      title: "Fix pagination",
+      description: "",
+      status: "in_progress",
+      creator_member_id: lisi.id,
+      revision: 1,
+      message_count: 0,
+      created_at: "2026-11-19T10:00:00Z",
+      updated_at: "2026-11-19T10:00:00Z",
+    };
+    const onSelectTask = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    const md = "See #14 and ignore #999 and `#14`.\n\n```sh\nsumi task show t-14\n```";
+    render(<MessageBody body={md} members={members} tasks={[task14]} selfID={lisi.id} onSelectTask={onSelectTask} />);
+
+    const taskBtn = screen.getByRole("button", { name: "#14" });
+    expect(taskBtn.getAttribute("title")).toBe("#14 Fix pagination");
+    fireEvent.click(taskBtn);
+    expect(onSelectTask).toHaveBeenCalledWith(task14);
+
+    const copyBtn = screen.getByRole("button", { name: "Copy code" });
+    fireEvent.click(copyBtn);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("sumi task show t-14\n"));
   });
 });

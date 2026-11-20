@@ -421,8 +421,10 @@ export function ConversationView({
                             <MessageBody
                               body={m.body_markdown}
                               members={boot.members}
+                              tasks={boot.tasks}
                               selfID={boot.current_member.id}
                               onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
+                              onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
                             />
                           </div>
 

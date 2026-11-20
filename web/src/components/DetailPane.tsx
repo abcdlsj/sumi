@@ -101,8 +101,10 @@ function CompactMessage({
           <MessageBody
             body={m.body_markdown}
             members={boot.members}
+            tasks={boot.tasks}
             selfID={boot.current_member.id}
             onSelectMember={(member) => onSelectTarget(memberDetailTarget(member))}
+            onSelectTask={(tk) => onSelectTarget({ kind: "task", taskID: tk.id })}
           />
         </div>
         <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />

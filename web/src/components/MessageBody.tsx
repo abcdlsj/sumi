@@ -1,7 +1,8 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Member } from "../api";
+import type { Member, Task } from "../api";
 
 interface MdastNode {
   type: string;
@@ -20,12 +21,18 @@ function escapeRegex(s: string): string {
 }
 
 /**
- * Remark plugin that turns `@display_name` (and `@all`) inside plain text nodes into
- * mention spans while leaving code blocks, inline code, links and unknown handles alone.
+ * Remark plugin that turns `@display_name` (plus `@all`) and `#<task_number>` inside plain text
+ * nodes into interactive chips while leaving code blocks, inline code, links and unknown tokens alone.
  */
-function createRemarkMentions(names: string[]) {
-  const unique = Array.from(new Set(["all", ...names.map((n) => n.toLowerCase())])).sort((a, b) => b.length - a.length);
-  const pattern = new RegExp(`(^|[^A-Za-z0-9_])@(${unique.map(escapeRegex).join("|")})(?![A-Za-z0-9_])`, "giu");
+function createRemarkRefs(names: string[], taskNumbers: number[]) {
+  const uniqueNames = Array.from(new Set(["all", ...names.map((n) => n.toLowerCase())])).sort((a, b) => b.length - a.length);
+  const nameAlt = uniqueNames.map(escapeRegex).join("|");
+  const numAlt = taskNumbers.length > 0 ? Array.from(new Set(taskNumbers)).sort((a, b) => b - a).join("|") : "";
+
+  // Group 1: boundary prefix; Group 2: @mention name; Group 3: #task number.
+  const branches = [`@(${nameAlt})(?![A-Za-z0-9_])`];
+  if (numAlt) branches.push(`#(${numAlt})(?![0-9A-Za-z_])`);
+  const pattern = new RegExp(`(^|[^A-Za-z0-9_#])(?:${branches.join("|")})`, "giu");
 
   function transformText(value: string): MdastNode[] | null {
     pattern.lastIndex = 0;
@@ -36,20 +43,33 @@ function createRemarkMentions(names: string[]) {
     let cursor = 0;
     while (match) {
       const prefix = match[1];
-      const name = match[2];
-      const atIndex = match.index + prefix.length;
-      if (atIndex > cursor) {
-        out.push({ type: "text", value: value.slice(cursor, atIndex) });
+      const mention = match[2];
+      const taskNum = match[3];
+      const start = match.index + prefix.length;
+      if (start > cursor) {
+        out.push({ type: "text", value: value.slice(cursor, start) });
       }
-      out.push({
-        type: "sumiMention",
-        data: {
-          hName: "span",
-          hProperties: { "data-mention": name.toLowerCase() },
-        },
-        children: [{ type: "text", value: `@${name}` }],
-      });
-      cursor = atIndex + 1 + name.length;
+      if (mention) {
+        out.push({
+          type: "sumiMention",
+          data: {
+            hName: "span",
+            hProperties: { "data-mention": mention.toLowerCase() },
+          },
+          children: [{ type: "text", value: `@${mention}` }],
+        });
+        cursor = start + 1 + mention.length;
+      } else if (taskNum) {
+        out.push({
+          type: "sumiTaskRef",
+          data: {
+            hName: "span",
+            hProperties: { "data-task-ref": taskNum },
+          },
+          children: [{ type: "text", value: `#${taskNum}` }],
+        });
+        cursor = start + 1 + taskNum.length;
+      }
       match = pattern.exec(value);
     }
     if (cursor < value.length) {
@@ -83,16 +103,50 @@ function createRemarkMentions(names: string[]) {
   };
 }
 
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    const text = preRef.current?.textContent ?? "";
+    if (!text) return;
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <div className="relative group/code my-1.5">
+      <pre ref={preRef}>{children}</pre>
+      <button
+        type="button"
+        onClick={copy}
+        aria-label={copied ? "Copied code" : "Copy code"}
+        title={copied ? "Copied" : "Copy"}
+        className="absolute top-2 right-2 h-7 px-2 rounded-[7px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
+      >
+        {copied ? <Check className="size-3.5 text-work" /> : <Copy className="size-3.5" />}
+        <span>{copied ? "Copied" : "Copy"}</span>
+      </button>
+    </div>
+  );
+}
+
 export function MessageBody({
   body,
   members,
+  tasks = [],
   selfID,
   onSelectMember,
+  onSelectTask,
 }: {
   body: string;
   members: Member[];
+  tasks?: Task[];
   selfID?: string;
   onSelectMember?: (member: Member) => void;
+  onSelectTask?: (task: Task) => void;
 }) {
   const memberByKey = useMemo(() => {
     const map = new Map<string, Member>();
@@ -100,19 +154,59 @@ export function MessageBody({
     return map;
   }, [members]);
 
+  const taskByNum = useMemo(() => {
+    const map = new Map<string, Task>();
+    for (const t of tasks) map.set(String(t.number), t);
+    return map;
+  }, [tasks]);
+
   const plugins = useMemo(() => {
     const names = members.map((m) => m.display_name);
-    return [remarkGfm, createRemarkMentions(names)];
-  }, [members]);
+    const nums = tasks.map((t) => t.number);
+    return [remarkGfm, createRemarkRefs(names, nums)];
+  }, [members, tasks]);
 
-  const onSelectRef = useRef(onSelectMember);
-  onSelectRef.current = onSelectMember;
-  const clickable = Boolean(onSelectMember);
+  const onSelectMemberRef = useRef(onSelectMember);
+  onSelectMemberRef.current = onSelectMember;
+  const onSelectTaskRef = useRef(onSelectTask);
+  onSelectTaskRef.current = onSelectTask;
+  const clickableMember = Boolean(onSelectMember);
+  const clickableTask = Boolean(onSelectTask);
 
   const components = useMemo<Components>(
     () => ({
+      pre({ children }) {
+        return <CodeBlock>{children}</CodeBlock>;
+      },
       span({ node: _node, children, ...props }) {
-        const key = (props as Record<string, unknown>)["data-mention"];
+        const record = props as Record<string, unknown>;
+        const taskKey = record["data-task-ref"];
+        if (typeof taskKey === "string") {
+          const task = taskByNum.get(taskKey);
+          if (!task) return <span {...props}>{children}</span>;
+          const cls =
+            "inline-flex items-baseline px-1.5 py-[0.5px] -my-[0.5px] rounded-[5px] font-mono text-[0.88em] font-medium bg-subtle text-fg border border-line transition-colors";
+          if (!clickableTask) {
+            return (
+              <span data-task-ref={task.number} className={cls}>
+                {children}
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              data-task-ref={task.number}
+              title={`#${task.number} ${task.title}`}
+              onClick={() => onSelectTaskRef.current?.(task)}
+              className={`${cls} hover:border-accent hover:text-accent-text`}
+            >
+              {children}
+            </button>
+          );
+        }
+
+        const key = record["data-mention"];
         if (typeof key !== "string") return <span {...props}>{children}</span>;
 
         if (key === "all") {
@@ -134,7 +228,7 @@ export function MessageBody({
           "inline-flex items-baseline px-1 py-[0.5px] -my-[0.5px] rounded-[5px] font-medium bg-accent-soft text-accent-text transition-colors";
         const emphasis = isSelf ? " ring-1 ring-inset ring-accent/30" : "";
 
-        if (!clickable) {
+        if (!clickableMember) {
           return (
             <span data-mention={member.display_name} className={base + emphasis}>
               {children}
@@ -147,7 +241,7 @@ export function MessageBody({
             type="button"
             data-mention={member.display_name}
             title={member.kind === "agent" ? `Inspect agent ${member.display_name}` : `View ${member.display_name}`}
-            onClick={() => onSelectRef.current?.(member)}
+            onClick={() => onSelectMemberRef.current?.(member)}
             className={`${base}${emphasis} hover:underline underline-offset-2`}
           >
             {children}
@@ -155,7 +249,7 @@ export function MessageBody({
         );
       },
     }),
-    [memberByKey, selfID, clickable],
+    [memberByKey, taskByNum, selfID, clickableMember, clickableTask],
   );
 
   return (
