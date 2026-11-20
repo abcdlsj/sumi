@@ -21,6 +21,7 @@ import { api, formatClock, formatDay, type BootstrapData, type Conversation, typ
 import type { DetailTarget } from "./DetailPane";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
+import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
 
@@ -35,23 +36,8 @@ function sameDay(a: string, b: string) {
   return new Date(a).toDateString() === new Date(b).toDateString();
 }
 
-/** Keeps the stream pinned to the bottom unless the reader scrolled up. */
-function useStickToBottom(dep: unknown, resetKey: string) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const pinned = useRef(true);
-  useLayoutEffect(() => {
-    pinned.current = true;
-  }, [resetKey]);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [dep, resetKey]);
-  const onScroll = () => {
-    const el = ref.current;
-    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
-  };
-  return { ref, onScroll };
-}
+/** Composer drafts survive conversation switches; the view is remounted per conversation. */
+const drafts = new Map<string, { text: string; replyTo: string | null }>();
 
 /** IDs present on first render are not animated; later arrivals rise in. */
 function useArrivals(convID: string, messages: Message[] | undefined) {
@@ -141,8 +127,8 @@ export function ConversationView({
   onOpenDetail: (t: DetailTarget) => void;
 }) {
   const qc = useQueryClient();
-  const [composer, setComposer] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [composer, setComposer] = useState(() => drafts.get(conv.id)?.text ?? "");
+  const [replyingTo, setReplyingTo] = useState<string | null>(() => drafts.get(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const draft = useAttachmentDraft(spaceSlug);
@@ -157,10 +143,19 @@ export function ConversationView({
   });
   const messages = msgsQ.data?.messages;
   const isNew = useArrivals(conv.id, messages);
-  const { ref: scrollRef, onScroll } = useStickToBottom(messages?.length, conv.id);
+  // Place the stream once the fresh page is here, not on a cached page that is about to change.
+  const settled = msgsQ.isFetchedAfterMount || msgsQ.isError;
+  const { ref: scrollRef, onScroll, newCount, jumpToEnd } = useStickToBottom({
+    streamKey: conv.id,
+    count: settled ? messages?.length ?? 0 : 0,
+    anchorId: "new",
+  });
 
   useEffect(() => {
-    setReplyingTo(null);
+    drafts.set(conv.id, { text: composer, replyTo: replyingTo });
+  }, [conv.id, composer, replyingTo]);
+
+  useEffect(() => {
     setCreatingTaskOnMsg(null);
     textRef.current?.focus();
   }, [conv.id]);
@@ -177,6 +172,16 @@ export function ConversationView({
   const replyTarget = messages?.find((m) => m.id === replyingTo);
   const level = conv.notify_level ?? "mentions";
   const readSeq = msgsQ.data?.read_seq ?? 0;
+  // The unread boundary of this visit: later fetches advance the watermark, the divider stays put.
+  const [unreadBase, setUnreadBase] = useState<number | null>(null);
+  const boundary = unreadBase ?? readSeq;
+
+  useEffect(() => {
+    setUnreadBase(null);
+  }, [conv.id]);
+  useEffect(() => {
+    if (settled && unreadBase === null && msgsQ.data) setUnreadBase(msgsQ.data.read_seq);
+  }, [settled, msgsQ.data, unreadBase]);
   const membersQ = useQuery({
     queryKey: ["conv-members", spaceSlug, conv.id],
     queryFn: () => api.listConversationMembers(spaceSlug, conv.id),
@@ -196,6 +201,8 @@ export function ConversationView({
     setComposer("");
     setReplyingTo(null);
     draft.clear();
+    jumpToEnd();
+    textRef.current?.focus();
     void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
@@ -304,192 +311,195 @@ export function ConversationView({
         </div>
       </header>
 
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto scroll-thin">
-        {msgsQ.isLoading ? (
-          <MessageListSkeleton />
-        ) : !messages || messages.length === 0 ? (
-          peer?.kind === "agent" ? (
-            <EmptyState
-              icon={<Sparkles />}
-              title={`Say hi to ${title}`}
-              body={`${title} replies in this DM. Describe what you need in one message — it reads the context it needs on its own.`}
-            />
+      <div className="relative flex-1 min-h-0">
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto scroll-thin">
+          {msgsQ.isLoading ? (
+            <MessageListSkeleton />
+          ) : !messages || messages.length === 0 ? (
+            peer?.kind === "agent" ? (
+              <EmptyState
+                icon={<Sparkles />}
+                title={`Say hi to ${title}`}
+                body={`${title} replies in this DM. Describe what you need in one message — it reads the context it needs on its own.`}
+              />
+            ) : (
+              <EmptyState
+                icon={conv.kind === "dm" ? <MessageSquare /> : <Hash />}
+                title={conv.kind === "dm" ? `Start a conversation with ${title}` : `Welcome to #${title}`}
+                body={
+                  conv.kind === "dm"
+                    ? "Direct messages always notify the other person."
+                    : `${memberCount} members. @mention an agent to get it working, or turn any message into a Task.`
+                }
+              />
+            )
           ) : (
-            <EmptyState
-              icon={conv.kind === "dm" ? <MessageSquare /> : <Hash />}
-              title={conv.kind === "dm" ? `Start a conversation with ${title}` : `Welcome to #${title}`}
-              body={
-                conv.kind === "dm"
-                  ? "Direct messages always notify the other person."
-                  : `${memberCount} members. @mention an agent to get it working, or turn any message into a Task.`
-              }
-            />
-          )
-        ) : (
-          <div className="pb-4 animate-fade-in">
-            {messages.map((m, idx) => {
-              const prev = messages[idx - 1];
-              const showDay = !prev || !sameDay(prev.created_at, m.created_at);
-              const showNew = readSeq > 0 && m.seq > readSeq && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= readSeq);
-              const grouped =
-                !showDay &&
-                !showNew &&
-                prev &&
-                prev.kind === "text" &&
-                m.kind === "text" &&
-                prev.author_member_id === m.author_member_id &&
-                new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
-              const author = boot.members.find((x) => x.id === m.author_member_id);
-              return (
-                <div key={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
-                  {showDay && <DayDivider iso={m.created_at} />}
-                  {showNew && (
-                    <div className="px-6 py-2 flex items-center gap-3 animate-fade-in">
-                      <div className="flex-1 h-px bg-warm/40" />
-                      <span className="text-[12px] font-semibold text-warm">New messages</span>
-                      <div className="flex-1 h-px bg-warm/40" />
-                    </div>
-                  )}
-                  {m.kind !== "text" ? (
-                    <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
-                      <span className="w-8 flex justify-center">
-                        <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
-                          <Sparkles className="size-3 text-fg-3" />
-                        </span>
-                      </span>
-                      <span className="min-w-0">
-                        <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-                        <span className="ml-2 tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
-                      </span>
-                    </div>
-                  ) : (
-                    <article
-                      className={`relative px-6 ${grouped ? "py-0.5" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
-                        replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/70"
-                      }`}
-                    >
-                      <div className="w-8 shrink-0">
-                        {grouped ? (
-                          <span className="block pt-[3px] text-right tabular text-[11.5px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {formatClock(m.created_at)}
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => m.author_kind === "agent" && onOpenDetail({ kind: "agent", memberID: m.author_member_id })}
-                            className={`block mt-0.5 ${m.author_kind === "agent" ? "" : "cursor-default"}`}
-                            tabIndex={m.author_kind === "agent" ? 0 : -1}
-                            aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : undefined}
-                          >
-                            <MemberAvatar
-                              id={m.author_member_id}
-                              name={m.author_display_name ?? "?"}
-                              kind={m.author_kind ?? "human"}
-                              size="md"
-                              state={author?.agent?.runtime_state}
-                            />
-                          </button>
-                        )}
+            <div className="pb-4 animate-fade-in">
+              {messages.map((m, idx) => {
+                const prev = messages[idx - 1];
+                const showDay = !prev || !sameDay(prev.created_at, m.created_at);
+                const showNew = boundary > 0 && m.seq > boundary && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= boundary);
+                const grouped =
+                  !showDay &&
+                  !showNew &&
+                  prev &&
+                  prev.kind === "text" &&
+                  m.kind === "text" &&
+                  prev.author_member_id === m.author_member_id &&
+                  new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
+                const author = boot.members.find((x) => x.id === m.author_member_id);
+                return (
+                  <div key={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
+                    {showDay && <DayDivider iso={m.created_at} />}
+                    {showNew && (
+                      <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-3 animate-fade-in">
+                        <div className="flex-1 h-px bg-warm/40" />
+                        <span className="text-[12px] font-semibold text-warm">New messages</span>
+                        <div className="flex-1 h-px bg-warm/40" />
                       </div>
-                      <div className="min-w-0 flex-1 max-w-[760px]">
-                        {!grouped && (
-                          <div className="flex items-center gap-2 h-5">
-                            <span className="text-[14px] font-semibold text-fg">{m.author_display_name}</span>
-                            {m.author_kind === "agent" && <Badge tone="accent" className="!h-[18px] !px-1.5 !text-[11px]">Agent</Badge>}
-                            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                    )}
+                    {m.kind !== "text" ? (
+                      <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
+                        <span className="w-8 flex justify-center">
+                          <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
+                            <Sparkles className="size-3 text-fg-3" />
+                          </span>
+                        </span>
+                        <span className="min-w-0">
+                          <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
+                          <span className="ml-2 tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <article
+                        className={`relative px-6 ${grouped ? "py-0.5" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
+                          replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/70"
+                        }`}
+                      >
+                        <div className="w-8 shrink-0">
+                          {grouped ? (
+                            <span className="block pt-[3px] text-right tabular text-[11.5px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {formatClock(m.created_at)}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => m.author_kind === "agent" && onOpenDetail({ kind: "agent", memberID: m.author_member_id })}
+                              className={`block mt-0.5 ${m.author_kind === "agent" ? "" : "cursor-default"}`}
+                              tabIndex={m.author_kind === "agent" ? 0 : -1}
+                              aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : undefined}
+                            >
+                              <MemberAvatar
+                                id={m.author_member_id}
+                                name={m.author_display_name ?? "?"}
+                                kind={m.author_kind ?? "human"}
+                                size="md"
+                                state={author?.agent?.runtime_state}
+                              />
+                            </button>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1 max-w-[760px]">
+                          {!grouped && (
+                            <div className="flex items-center gap-2 h-5">
+                              <span className="text-[14px] font-semibold text-fg">{m.author_display_name}</span>
+                              {m.author_kind === "agent" && <Badge tone="accent" className="!h-[18px] !px-1.5 !text-[11px]">Agent</Badge>}
+                              <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                            </div>
+                          )}
+                          <div className={`${grouped ? "" : "mt-1"} text-[14px] leading-[1.6] text-fg md`}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
                           </div>
-                        )}
-                        <div className={`${grouped ? "" : "mt-1"} text-[14px] leading-[1.6] text-fg md`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
+
+                          <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
+
+                          {m.attached_tasks && m.attached_tasks.length > 0 && (
+                            <div className="mt-2.5 rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
+                              {m.attached_tasks.map((tk) => (
+                                <button
+                                  key={tk.id}
+                                  onClick={() => onOpenDetail({ kind: "task", taskID: tk.id })}
+                                  className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left transition-colors"
+                                >
+                                  <TaskStatusIcon status={tk.status} />
+                                  <span className="tabular text-[13px] text-fg-3 shrink-0">#{tk.number}</span>
+                                  <span className="text-[14px] font-medium text-fg truncate flex-1">{tk.title}</span>
+                                  {tk.assignee_member_id ? (
+                                    <span className="flex items-center gap-1.5 text-[13px] text-fg-2 shrink-0">
+                                      <MemberAvatar id={tk.assignee_member_id} name={tk.assignee_display_name ?? "?"} kind={tk.assignee_kind ?? "human"} size="xs" />
+                                      {tk.assignee_display_name}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[13px] text-fg-4 shrink-0">Unassigned</span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {creatingTaskOnMsg === m.id && (
+                            <form onSubmit={(e) => void handleCreateTask(e, m.id)} className="mt-2.5 flex items-center gap-2 max-w-[560px] animate-rise-in">
+                              <input
+                                autoFocus
+                                value={newTaskTitle}
+                                onChange={(e) => setNewTaskTitle(e.target.value)}
+                                onKeyDown={(e) => e.key === "Escape" && setCreatingTaskOnMsg(null)}
+                                placeholder="Task title"
+                                className="flex-1 h-9 px-3 rounded-[9px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
+                              />
+                              <Button type="submit" size="sm" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
+                                Create task
+                              </Button>
+                              <Button type="button" size="sm" variant="ghost" onClick={() => setCreatingTaskOnMsg(null)}>
+                                Cancel
+                              </Button>
+                            </form>
+                          )}
+
+                          {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
+                            <button
+                              onClick={() =>
+                                onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: conv.slug ?? "dm" })
+                              }
+                              className="mt-1.5 h-8 pl-2 pr-3 -ml-2 rounded-[8px] inline-flex items-center gap-2 text-[13px] text-accent-text hover:bg-accent-soft transition-colors"
+                            >
+                              <MessageSquare className="size-4" />
+                              <span className="font-medium">
+                                {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}
+                              </span>
+                              <span className="tabular text-[12px] text-fg-3">Last {formatClock(m.last_reply_at)}</span>
+                            </button>
+                          ) : null}
                         </div>
 
-                        <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
-
-                        {m.attached_tasks && m.attached_tasks.length > 0 && (
-                          <div className="mt-2.5 rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
-                            {m.attached_tasks.map((tk) => (
-                              <button
-                                key={tk.id}
-                                onClick={() => onOpenDetail({ kind: "task", taskID: tk.id })}
-                                className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left transition-colors"
-                              >
-                                <TaskStatusIcon status={tk.status} />
-                                <span className="tabular text-[13px] text-fg-3 shrink-0">#{tk.number}</span>
-                                <span className="text-[14px] font-medium text-fg truncate flex-1">{tk.title}</span>
-                                {tk.assignee_member_id ? (
-                                  <span className="flex items-center gap-1.5 text-[13px] text-fg-2 shrink-0">
-                                    <MemberAvatar id={tk.assignee_member_id} name={tk.assignee_display_name ?? "?"} kind={tk.assignee_kind ?? "human"} size="xs" />
-                                    {tk.assignee_display_name}
-                                  </span>
-                                ) : (
-                                  <span className="text-[13px] text-fg-4 shrink-0">Unassigned</span>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        {creatingTaskOnMsg === m.id && (
-                          <form onSubmit={(e) => void handleCreateTask(e, m.id)} className="mt-2.5 flex items-center gap-2 max-w-[560px] animate-rise-in">
-                            <input
-                              autoFocus
-                              value={newTaskTitle}
-                              onChange={(e) => setNewTaskTitle(e.target.value)}
-                              onKeyDown={(e) => e.key === "Escape" && setCreatingTaskOnMsg(null)}
-                              placeholder="Task title"
-                              className="flex-1 h-9 px-3 rounded-[9px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
-                            />
-                            <Button type="submit" size="sm" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
-                              Create task
-                            </Button>
-                            <Button type="button" size="sm" variant="ghost" onClick={() => setCreatingTaskOnMsg(null)}>
-                              Cancel
-                            </Button>
-                          </form>
-                        )}
-
-                        {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
+                        <div className="absolute right-5 -top-3.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md">
                           <button
-                            onClick={() =>
-                              onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: conv.slug ?? "dm" })
-                            }
-                            className="mt-1.5 h-8 pl-2 pr-3 -ml-2 rounded-[8px] inline-flex items-center gap-2 text-[13px] text-accent-text hover:bg-accent-soft transition-colors"
+                            onClick={() => {
+                              setReplyingTo(m.id);
+                              textRef.current?.focus();
+                            }}
+                            className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                           >
-                            <MessageSquare className="size-4" />
-                            <span className="font-medium">
-                              {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}
-                            </span>
-                            <span className="tabular text-[12px] text-fg-3">Last {formatClock(m.last_reply_at)}</span>
+                            <CornerUpLeft className="size-3.5" /> Reply
                           </button>
-                        ) : null}
-                      </div>
-
-                      <div className="absolute right-5 -top-3.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md">
-                        <button
-                          onClick={() => {
-                            setReplyingTo(m.id);
-                            textRef.current?.focus();
-                          }}
-                          className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
-                        >
-                          <CornerUpLeft className="size-3.5" /> Reply
-                        </button>
-                        <button
-                          onClick={() => {
-                            setNewTaskTitle("");
-                            setCreatingTaskOnMsg(m.id);
-                          }}
-                          className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
-                        >
-                          <ListPlus className="size-3.5" /> Task
-                        </button>
-                      </div>
-                    </article>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                          <button
+                            onClick={() => {
+                              setNewTaskTitle("");
+                              setCreatingTaskOnMsg(m.id);
+                            }}
+                            className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                          >
+                            <ListPlus className="size-3.5" /> Task
+                          </button>
+                        </div>
+                      </article>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <NewMessagesPill count={newCount} onClick={jumpToEnd} />
       </div>
 
       <div className="shrink-0 bg-bg/60 border-t border-line">
@@ -521,6 +531,7 @@ export function ConversationView({
                 if (e.key === "Escape" && replyingTo) setReplyingTo(null);
               }}
               placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
+              aria-label={replyingTo ? "Reply in thread" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
               className="block w-full px-4 pt-3 pb-1 min-h-[48px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
             />
             <AttachmentDraftRow draft={draft} />

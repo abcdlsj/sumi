@@ -272,6 +272,8 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
      - Composer 支持选择文件上传（`Attach`），上传成功后以紧凑 chip 展示，图片附件在消息内联渲染，其他附件显示为下载链接。
+     - **Composer 行为**：`Enter` 发送、`Shift + Enter` 换行（所有 Composer 一致，含 Thread 与 Task 回复框）；发送后焦点留在输入框；草稿按 Conversation 保存在前端，切换对话再回来不丢；`Escape` 取消 Reply 引用。
+     - **消息流跟随**：阅读者仍在底部（距底 ≤80px）时，新消息到达（SSE 刷新或自己发送）保持贴底；向上翻看历史时不打断，改为在 Composer 上方显示 `N new messages ↓` 药丸，点击回到底部并消失，任何方式到底后药丸清除。自己发送的消息始终回到底部。打开对话时落在底部；有未读时落在服务端持久化的 `New` 分隔线，其余新消息再用药丸提示。图片等附件延迟加载造成的高度变化不得破坏贴底（监听尺寸变化）。
      - 服务端持久化 `New` 未读分隔线；底部贴合 28px 固定高度的诚实 Agent 状态条（`Lin working on #14` / `Lin busy elsewhere · message queued` / `Lin offline` / `Lin error`）+ 贴底结构化 Composer，不漂浮不跳动。
    - **Inbox Triage 视图**：
      - 紧凑待处理列表（筛选：`Needs me` / `Unread` / `All`），每行提供一键 `Done`、`Unfollow`、`Mute`，点击原地打开对应对话或右侧面板。
@@ -281,6 +283,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 4. **Right Detail Pane（按需展开的结构化聚焦面板；默认以最大宽度展开，即主区保留 440px、上限 880px；可拖拽左缘调整，最小 340px，拖拽后记住宽度，双击复位）**
    - 点 Thread → 展开该 Thread 完整对话与 `Following / Follow` 开关；开关初值取服务端 `conversation_states.following`（消息列表响应附带 `following` 字段），不在前端假设。
    - 点 Task → 上半部为固定列宽的 2 列 Key-Value 属性表（Status / Assignee / Source / Revision，原地 Claim / Assign / 改状态 / 编辑），下半部为 `Discussion` 分区头 + 该 Task 自己的独立讨论流与贴底回复框。
+   - 右栏讨论流（Thread 与 Task）与主消息流采用同一套贴底跟随与 `N new messages ↓` 药丸规则。
    - Agents 管理页：可搜索、可按 Computer 分组的紧凑表格行（头像 + 名称 + Role 一行；右侧对齐 Status / Runtime / Computer 三列，窄宽度时折叠为一行 mono 元信息），选中行高亮并在右栏打开详情。
    - 点 Agent → 头部大头像 + 运行态；Key-Value 运行态表（State / Focus / Computer / Driver / Model）；最近错误（code + detail）；`Restart` / `Reset session`；Driver 配置可原地编辑；Role；原子 Permission 开关。
 

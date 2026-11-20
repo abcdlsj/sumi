@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -8,6 +8,7 @@ import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
 import { describeAction } from "./ConversationView";
+import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
 
@@ -23,15 +24,6 @@ const PERMISSIONS: { code: Permission; label: string; hint: string }[] = [
   { code: "channel.manage_members", label: "Manage channel members", hint: "Invite and remove members" },
 ];
 const STATUSES: TaskStatus[] = ["todo", "in_progress", "in_review", "done", "closed"];
-
-function useScrollToEnd(dep: unknown) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = ref.current;
-    el?.scrollTo?.({ top: el.scrollHeight, behavior: "smooth" });
-  }, [dep]);
-  return ref;
-}
 
 function PaneHeader({ children, onClose, actions }: { children: ReactNode; onClose: () => void; actions?: ReactNode }) {
   return (
@@ -97,32 +89,52 @@ function ReplyBox({
   const [reply, setReply] = useState("");
   const draft = useAttachmentDraft(spaceSlug);
   const { busy, run } = useAction();
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if ((!reply.trim() && draft.ids.length === 0) || draft.uploading) return;
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [reply]);
+
+  async function submit(e?: FormEvent) {
+    e?.preventDefault();
+    if ((!reply.trim() && draft.ids.length === 0) || draft.uploading || busy) return;
     const ok = await run(() => onSend(reply.trim() || `Attached ${draft.pending.map((a) => a.name).join(", ")}`, draft.ids));
     if (ok) {
       setReply("");
       draft.clear();
+      textRef.current?.focus();
     }
   }
+
   return (
     <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
       <div className="rounded-[12px] border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
         <AttachmentDraftRow draft={draft} />
-        <div className="p-1.5 flex items-center gap-1">
+        <div className="p-1.5 flex items-end gap-1">
           <AttachmentPicker draft={draft} />
-          <input
+          <textarea
+            ref={textRef}
+            rows={1}
             value={reply}
             onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
             placeholder={placeholder}
-            className="flex-1 h-8 px-1.5 text-[14px] bg-transparent outline-none placeholder:text-fg-4"
+            aria-label={placeholder}
+            className="flex-1 min-h-8 px-1.5 py-1.5 text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
           />
           <button
             type="submit"
             aria-label="Send"
             disabled={busy || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
-            className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors"
+            className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
           >
             <ArrowUp className="size-4" />
           </button>
@@ -319,7 +331,7 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
     queryFn: () => api.listMessages(spaceSlug, task!.conversation_id!, true),
     enabled: Boolean(task?.conversation_id),
   });
-  const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
+  const stream = useStickToBottom({ streamKey: task?.conversation_id ?? taskID, count: msgsQ.data?.messages.length ?? 0 });
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["task", spaceSlug, taskID] });
@@ -397,14 +409,17 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
         <span className="tabular">{msgsQ.data?.messages.length ?? task.message_count} messages</span>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
-        {task.conversation_id && msgsQ.isLoading ? (
-          <MessageListSkeleton rows={3} compact />
-        ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
-          <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
-        ) : (
-          msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} />)
-        )}
+      <div className="relative flex-1 min-h-0">
+        <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin px-5 py-4 space-y-4">
+          {task.conversation_id && msgsQ.isLoading ? (
+            <MessageListSkeleton rows={3} compact />
+          ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
+            <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
+          ) : (
+            msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} />)
+          )}
+        </div>
+        <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
       </div>
 
       <ReplyBox
@@ -414,6 +429,7 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
           let convID = task.conversation_id;
           if (!convID) convID = (await api.ensureTaskConv(spaceSlug, task.id)).task.conversation_id;
           if (convID) await api.sendMessage(spaceSlug, convID, body, undefined, ids);
+          stream.jumpToEnd();
           refresh();
         }}
       />
@@ -426,7 +442,7 @@ function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceS
   const act = useAction();
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
   const following = msgsQ.data?.following;
-  const scrollRef = useScrollToEnd(msgsQ.data?.messages.length);
+  const stream = useStickToBottom({ streamKey: threadConvID, count: msgsQ.data?.messages.length ?? 0 });
 
   return (
     <>
@@ -461,25 +477,29 @@ function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceS
           </span>
         )}
       </PaneHeader>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
-        {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
-        {(msgsQ.data?.messages ?? []).map((m, i) => (
-          <div key={m.id}>
-            <CompactMessage m={m} spaceSlug={spaceSlug} />
-            {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
-              <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
-                <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
-                <span className="flex-1 h-px bg-line" />
-              </div>
-            )}
-          </div>
-        ))}
+      <div className="relative flex-1 min-h-0">
+        <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin px-5 py-4 space-y-4">
+          {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
+          {(msgsQ.data?.messages ?? []).map((m, i) => (
+            <div key={m.id}>
+              <CompactMessage m={m} spaceSlug={spaceSlug} />
+              {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
+                <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
+                  <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
+                  <span className="flex-1 h-px bg-line" />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
       </div>
       <ReplyBox
         spaceSlug={spaceSlug}
         placeholder="Reply in thread…"
         onSend={async (body, ids) => {
           await api.sendMessage(spaceSlug, threadConvID, body, undefined, ids);
+          stream.jumpToEnd();
           void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
           void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
         }}
