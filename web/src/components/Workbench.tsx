@@ -8,6 +8,7 @@ import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
+import { DesktopServerTrigger } from "./DesktopServer";
 import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
@@ -311,6 +312,7 @@ export function Workbench({
           {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, onlineComputers > 0)}
           {railBtn("people", <Users />, "People")}
           {railBtn("settings", <Settings />, "Settings")}
+          <DesktopServerTrigger variant="rail" />
         </div>
       </nav>
 

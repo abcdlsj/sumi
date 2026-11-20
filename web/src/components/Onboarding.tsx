@@ -3,6 +3,7 @@ import { AtSign, Check, Eye, EyeOff, Laptop, Lock, Mail, User as UserIcon } from
 import { api, ApiError, sanitizeDisplayName, slugInput, slugify, type User } from "../api";
 import { readPendingPairing } from "../pairing";
 import { agentSprite, PixelAvatar } from "./Avatar";
+import { DesktopServerTrigger } from "./DesktopServer";
 import { AgentStep, ComputerStep, StepHeading } from "./Setup";
 import { Button, Field, Segmented, SumiMark } from "./ui";
 
@@ -85,8 +86,9 @@ function BrandPanel({ step }: { step: OnboardingStep }) {
           ))}
         </div>
       </div>
-      <div className="relative">
+      <div className="relative space-y-4">
         <Stepper current={step} />
+        <DesktopServerTrigger variant="pill" />
       </div>
     </aside>
   );

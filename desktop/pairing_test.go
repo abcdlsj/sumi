@@ -171,7 +171,7 @@ func TestWriteConfigAtomic(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(path)
 	var got Config
-	if err := json.Unmarshal(raw, &got); err != nil || got != want {
+	if err := json.Unmarshal(raw, &got); err != nil || got.ServerURL != want.ServerURL || got.ComputerToken != want.ComputerToken || got.DataDir != want.DataDir {
 		t.Fatal("config round-trip mismatch")
 	}
 	entries, _ := os.ReadDir(filepath.Dir(path))

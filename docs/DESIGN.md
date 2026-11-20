@@ -82,8 +82,9 @@ internal/
   driver/              # Driver 接口：ACP Driver + Go Builtin Harness
   cli/                 # Agent CLI（--json 稳定信封输出）
   protocol/            # Server ↔ Computer 版本化消息定义
+  webui/               # 内嵌 Web UI 静态资源（go:embed，供 sumi server 与 desktop 复用）
 web/                   # React + TypeScript + Vite Web UI
-desktop/               # Wails v3 薄壳（托盘 + 托管本机 Computer Daemon + 嵌 Web UI）
+desktop/               # Wails v3 薄壳（托盘 + 托管本机 Computer Daemon + 按需内嵌本机 Server）
 test/scenarios/        # 活体协作验收测试（Werewolf、Brain-in-a-Vat）
 Makefile               # 唯一开发/构建/运行入口（make help 列出全部目标）
 ```
@@ -117,9 +118,10 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 
 ### 桌面薄壳（Wails v3）
 
-- `desktop/` 是独立 main 包：托盘 + 单个窗口 + 进程内托管本机 Computer Daemon（必要时兼起本机 Server）；窗口直接打开 Server 源（`http://127.0.0.1:<port>`），由 Server 的 `-web-dir` 提供内嵌的 `web/dist`，因此 Browser Session Cookie、SSE 与上传都在真实 HTTP 源上工作，不引入反向代理。
-- 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`，0600），字段 `server_url`、`computer_token`、`data_dir`；由桌面确认式配对或 `sumi pair` 写出。
-- 启动顺序：探活 `server_url` → 若不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 有 token 则启动 Computer Daemon → 开窗。缺 token 时走「确认式配对」：开窗地址附带 `?pair=<id>&code=<code>`，托盘显示 `Computer: waiting for confirmation`；确认后写入配置并启动 Daemon，托盘变为 `Computer: online`，无需重启 App。
+- `desktop/` 是独立 main 包：托盘 + 单个窗口 + 进程内托管本机 Computer Daemon（必要时兼起本机 Server）；窗口直接打开当前 `server_url`（默认 `http://127.0.0.1:8087`，亦可指向远端 Server），静态前端由 `internal/webui` 内嵌进 `sumi server`（`--web-dir` 仅作磁盘目录覆盖），因此 Browser Session Cookie、SSE 与上传都在真实 HTTP/HTTPS 源上工作，不引入反向代理。
+- 配置来自 `$SUMI_DESKTOP_CONFIG`（默认 `~/.sumi/desktop.json`，0600），字段 `server_url`、`computer_token`、`data_dir` 及可选 `servers`（按 `server_url` 保存各端已配对的 `computer_token`，切换服务器时保留凭据，切回无需重新配对）；由桌面确认式配对、服务器切换或 `sumi pair` 写出。
+- 启动顺序：探活 `server_url`（800ms）→ 若本机地址不可达则在进程内启动 Server（同一端口与同一 SQLite 文件）→ 有 token 则启动 Computer Daemon → 开窗。缺 token 时走「确认式配对」：开窗地址附带 `?pair=<id>&code=<code>`，托盘显示 `Computer: waiting for confirmation`；确认后写入配置并启动 Daemon，托盘变为 `Computer: online`，无需重启 App。
+- **服务器切换**：薄壳启动仅监听 `127.0.0.1:0` 的本机控制端点（`GET|POST /desktop/server`），使用每次启动生成的随机 32 字节 Bearer token（通过 URL fragment 传给 Web 并转存 `sessionStorage` 后清除，不随 HTTP 请求发往远端），并校验请求 `Origin` 与当前 `server_url` 一致。切换远端前先探活 `/api/v1/health`（不可达则拒绝切换且不中断当前连接）；切换时停止旧配对与旧 Daemon、按需启停内嵌 Server、原子写入配置、启动新 Daemon 或配对并导航窗口。
 - 薄壳启动时以用户登录 shell（`$SHELL -l`）的 `PATH` 为准，保证从 Finder 启动时 Daemon 也能找到 Homebrew 安装的 `pi` / `codex` / `claude`。
 - 托盘菜单固定四项：`Open Sumi`、`Computer` 状态（只读）、`Restart Computer Daemon`、`Quit`。关闭窗口只隐藏，Server/Daemon/托盘继续运行；Quit 才停止它们并退出。
 - 薄壳不含业务逻辑：鉴权、Space、Agent、附件全部由 Server 与 Daemon 承担。
@@ -154,7 +156,7 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 ### 本地开发与运行（Makefile）
 
 - `make dev`：Server（`:8087`，`.sumi/sumi.db`）+ Vite 开发服务器并行；Web 走 Vite 代理。
-- `make build`：构建 `web/dist` 与 `bin/sumi`；`make desktop`：把 `web/dist` 同步进 `desktop/assets/dist` 并构建桌面二进制。
+- `make build`：构建 `web/dist`、同步进 `internal/webui/assets/dist` 并编译内嵌前端的 `bin/sumi`；`make desktop`：复用同一内嵌前端构建桌面二进制。
 - `make pair EMAIL=... PASSWORD=...`：调用 `sumi pair`，配对本机并写出桌面配置。
 - `make app`：构建并启动 Server，随后打开桌面薄壳；`make stop` 停止后台 Server。
 - `make test` / `make lint` 对应 AGENTS.md 的验证要求，不改动其他行为。
@@ -268,7 +270,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 1. **Left Anchor Rail（56px）**
    - 顶部：Space 切换标识（以各自强调色填充）与新建 Space 入口。
-   - 底部：Space 管理入口（Computers 带在线状态点、Members & Permissions、Space Settings），不占主侧栏一级导航。
+   - 底部：Space 管理入口（Computers 带在线状态点、Members & Permissions、Space Settings），不占主侧栏一级导航；桌面薄壳下最底部附一个轻量服务器标识（区分 `Local` 与远端 host，Onboarding 左侧底部同理），点击打开极简切换弹层。
 
 2. **Sidebar（默认 260px，可拖拽右缘在 200–420px 间调整，双击复位，宽度存 `localStorage`；32px 行高，只留高频沟通与工作）**
    - 顶部（44px）：Space 名称 + `⌘K` 快速跳转。

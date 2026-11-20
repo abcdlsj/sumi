@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -36,23 +37,127 @@ func main() {
 	}
 	rt.startDaemon(bootCtx)
 
-	// shell=desktop tells the Web UI to reserve the hidden title bar strip.
-	startURL := cfg.ServerURL + "/?shell=desktop"
-	var pr *pairer
-	var firstTicket *pairingTicket
-	if !rt.hasComputerToken() {
-		pr = newPairer(cfg.ServerURL, logger)
+	var (
+		window     *application.WebviewWindow
+		statusItem *application.MenuItem
+		ctrl       *controlServer
+		pairMu     sync.Mutex
+		pairCancel context.CancelFunc
+	)
+
+	stopPairing := func() {
+		pairMu.Lock()
+		cancel := pairCancel
+		pairCancel = nil
+		pairMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+	}
+
+	refreshStatus := func() {
+		if statusItem == nil {
+			return
+		}
+		label := "Computer: " + rt.status()
+		application.InvokeAsync(func() { statusItem.SetLabel(label) })
+	}
+
+	buildStartURL := func(serverURL string, ticket *pairingTicket) string {
+		if ticket != nil {
+			return ctrl.attachBridge(pairURL(serverURL, *ticket))
+		}
+		return ctrl.attachBridge(serverURL + "/?shell=desktop")
+	}
+
+	// preparePairing creates an initial pairing ticket for serverURL when unpaired
+	// and returns the pairer + initial ticket to run in the background.
+	preparePairing := func(serverURL string) (*pairer, *pairingTicket) {
+		pr := newPairer(serverURL, logger)
 		createCtx, cancel := context.WithTimeout(bootCtx, 10*time.Second)
 		t, err := pr.client.create(createCtx, pr.hostname, pr.osName)
 		cancel()
+		var ticket *pairingTicket
 		if err != nil {
 			logger.Warn("Cannot create pairing", "error", err.Error())
 		} else {
-			firstTicket = &t
-			startURL = pairURL(cfg.ServerURL, t)
+			ticket = &t
 		}
 		rt.setStatus("waiting for confirmation")
+		return pr, ticket
 	}
+
+	startPairingLoop := func(serverURL string, pr *pairer, initial *pairingTicket) {
+		stopPairing()
+		ctx, cancel := context.WithCancel(bootCtx)
+		pairMu.Lock()
+		pairCancel = cancel
+		pairMu.Unlock()
+
+		pr.onURL = func(u string) {
+			if window != nil {
+				target := ctrl.attachBridge(u)
+				application.InvokeAsync(func() { window.SetURL(target) })
+			}
+		}
+		go func() {
+			secret, err := pr.run(ctx, initial)
+			if err != nil {
+				return
+			}
+			next := rt.setComputerToken(serverURL, secret)
+			if err := writeConfigAtomic(configPath(), next); err != nil {
+				logger.Error("Cannot write desktop config", "error", err.Error())
+				rt.setStatus("error")
+				refreshStatus()
+				return
+			}
+			rt.startDaemon(bootCtx)
+			refreshStatus()
+		}()
+	}
+
+	onSwitch := func(ctx context.Context, rawURL string) (desktopServerState, error) {
+		nextCfg, err := rt.switchServer(ctx, rawURL)
+		if err != nil {
+			return desktopServerState{}, err
+		}
+		stopPairing()
+		if err := writeConfigAtomic(configPath(), nextCfg); err != nil {
+			logger.Error("Cannot write desktop config", "error", err.Error())
+		}
+		var nextURL string
+		if rt.hasComputerToken() {
+			rt.startDaemon(bootCtx)
+			nextURL = buildStartURL(nextCfg.ServerURL, nil)
+		} else {
+			pr, ticket := preparePairing(nextCfg.ServerURL)
+			nextURL = buildStartURL(nextCfg.ServerURL, ticket)
+			startPairingLoop(nextCfg.ServerURL, pr, ticket)
+		}
+		refreshStatus()
+		state := ctrl.currentState()
+		// Defer navigation slightly so the HTTP response flushes before the WebView unloads.
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			if window != nil {
+				application.InvokeAsync(func() { window.SetURL(nextURL) })
+			}
+		}()
+		return state, nil
+	}
+
+	ctrl, err = startControlServer(rt, onSwitch, logger)
+	if err != nil {
+		logger.Warn("Desktop control server unavailable", "error", err.Error())
+	}
+
+	var initPairer *pairer
+	var initTicket *pairingTicket
+	if !rt.hasComputerToken() {
+		initPairer, initTicket = preparePairing(cfg.ServerURL)
+	}
+	startURL := buildStartURL(cfg.ServerURL, initTicket)
 
 	app := application.New(application.Options{
 		Name:        "Sumi",
@@ -63,7 +168,7 @@ func main() {
 		},
 	})
 
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "Sumi",
 		Width:            1360,
@@ -93,45 +198,24 @@ func main() {
 		window.Show()
 		window.Focus()
 	})
-	statusItem := menu.Add("Computer: " + rt.status())
+	statusItem = menu.Add("Computer: " + rt.status())
 	statusItem.SetEnabled(false)
 	menu.Add("Restart Computer Daemon").OnClick(func(*application.Context) {
 		rt.restartDaemon(bootCtx)
 		statusItem.SetLabel("Computer: " + rt.status())
 	})
 	menu.AddSeparator()
-	pairCtx, stopPairing := context.WithCancel(bootCtx)
 	menu.Add("Quit").OnClick(func(*application.Context) {
 		stopPairing()
+		ctrl.shutdown()
 		rt.shutdown()
 		app.Quit()
 	})
 	tray.SetMenu(menu)
 
-	if pr != nil {
-		// Menu and window updates from the pairing goroutine must run on the main thread.
-		refreshStatus := func() {
-			label := "Computer: " + rt.status()
-			application.InvokeAsync(func() { statusItem.SetLabel(label) })
-		}
-		pr.onURL = func(u string) { window.SetURL(u) }
+	if initPairer != nil {
 		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-			go func() {
-				secret, err := pr.run(pairCtx, firstTicket)
-				if err != nil {
-					return
-				}
-				next := Config{ServerURL: cfg.ServerURL, DataDir: cfg.DataDir, ComputerToken: secret}
-				if err := writeConfigAtomic(configPath(), next); err != nil {
-					logger.Error("Cannot write desktop config", "error", err.Error())
-					rt.setStatus("error")
-					refreshStatus()
-					return
-				}
-				rt.setComputerToken(secret)
-				rt.startDaemon(bootCtx)
-				refreshStatus()
-			}()
+			startPairingLoop(cfg.ServerURL, initPairer, initTicket)
 		})
 	}
 
@@ -141,6 +225,7 @@ func main() {
 		code = 1
 	}
 	stopPairing()
+	ctrl.shutdown()
 	rt.shutdown()
 	os.Exit(code)
 }

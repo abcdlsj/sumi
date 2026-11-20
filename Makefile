@@ -10,9 +10,10 @@ WEB_PORT    ?= 5173
 DATA_DIR    ?= $(HOME)/.sumi/v2
 DB          ?= $(DATA_DIR)/sumi.db
 SERVE_URL   ?= http://127.0.0.1:$(PORT)
-BIN         ?= bin/sumi
-DESKTOP_BIN ?= bin/Sumi.app
-GO          ?= go
+BIN             ?= bin/sumi
+DESKTOP_BIN     ?= bin/Sumi.app
+INSTALL_APP_DIR ?= $(HOME)/Applications
+GO              ?= go
 NODE_PKG    ?= pnpm
 
 # Pairing inputs for `make pair`: EMAIL=... PASSWORD=... [SPACE=studio] [DESKTOP_CONFIG=...]
@@ -57,28 +58,48 @@ web: ## Build the Web UI into web/dist
 web-dev: ## Run the Vite dev server (proxies /api to SERVE_URL)
 	$(NODE_PKG) --dir web dev
 
+.PHONY: web-assets
+web-assets: web ## Copy the built Web UI into internal/webui for go:embed
+	@rm -rf internal/webui/assets/dist
+	@mkdir -p internal/webui/assets
+	@cp -R web/dist internal/webui/assets/dist
+
 .PHONY: bin
 bin: ## Build the sumi binary into bin/sumi
 	@mkdir -p bin
 	$(GO) build -o $(BIN) ./cmd/sumi
 
 .PHONY: build
-build: web bin ## Build Web UI and the sumi binary
+build: web-assets bin ## Build Web UI and the sumi binary with embedded UI
 
-.PHONY: desktop-assets
-desktop-assets: web ## Copy the built Web UI into the desktop shell
-	@rm -rf desktop/assets/dist
-	@mkdir -p desktop/assets
-	@cp -R web/dist desktop/assets/dist
 .PHONY: desktop
 # Wails keeps its own module under desktop/, so the shell builds independently of the server module.
+# Stage into a fresh bundle and ad-hoc sign before swapping so running instances never hit
+# macOS Taskgated Invalid Signature from in-place Mach-O overwrites.
 SHELL_BUILD := cd desktop && CGO_LDFLAGS="-framework UniformTypeIdentifiers" $(GO) build -tags production -trimpath
-desktop: desktop-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
-	@mkdir -p bin $(DESKTOP_BIN)/Contents/MacOS $(DESKTOP_BIN)/Contents/Resources
+desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
+	@mkdir -p bin
 	$(SHELL_BUILD) -o ../bin/sumi-desktop .
-	@cp bin/sumi-desktop $(DESKTOP_BIN)/Contents/MacOS/Sumi
-	@cp desktop/Info.plist $(DESKTOP_BIN)/Contents/Info.plist
+	@staging="$(DESKTOP_BIN).staging"; \
+		rm -rf "$$staging"; \
+		mkdir -p "$$staging/Contents/MacOS" "$$staging/Contents/Resources"; \
+		cp bin/sumi-desktop "$$staging/Contents/MacOS/Sumi"; \
+		cp desktop/Info.plist "$$staging/Contents/Info.plist"; \
+		codesign --force --deep --sign - "$$staging"; \
+		rm -rf "$(DESKTOP_BIN)"; \
+		mv "$$staging" "$(DESKTOP_BIN)"
 	@echo "desktop app: $(DESKTOP_BIN)"
+
+.PHONY: install-app
+install-app: desktop ## Install Sumi.app into INSTALL_APP_DIR (default ~/Applications)
+	@mkdir -p "$(INSTALL_APP_DIR)"
+	@target="$(INSTALL_APP_DIR)/Sumi.app"; \
+		staging="$$target.staging"; \
+		rm -rf "$$staging"; \
+		ditto "$(DESKTOP_BIN)" "$$staging"; \
+		rm -rf "$$target"; \
+		mv "$$staging" "$$target"
+	@echo "installed: $(INSTALL_APP_DIR)/Sumi.app"
 
 .PHONY: all
 all: build desktop ## Build everything
@@ -110,7 +131,7 @@ computer: bin ## Run the local Computer daemon standalone (TOKEN=...)
 start: bin ## Start the Server in the background (logs in .sumi/server.log)
 	@mkdir -p $(DATA_DIR)
 	@pgrep -f "$(BIN) server --addr 127.0.0.1:$(PORT)" >/dev/null 2>&1 && { echo "server already running on :$(PORT)"; exit 0; } || true
-	@nohup $(BIN) server --addr 127.0.0.1:$(PORT) --db $(DB) --web-dir web/dist \
+	@nohup $(BIN) server --addr 127.0.0.1:$(PORT) --db $(DB) \
 		> $(DATA_DIR)/server.log 2>&1 & echo $$! > $(DATA_DIR)/server.pid
 	@printf 'server starting on %s (log: %s/server.log)\n' '$(SERVE_URL)' '$(DATA_DIR)'
 	@for i in $$(seq 1 60); do \
@@ -149,7 +170,7 @@ fmt: ## Format Go sources
 
 .PHONY: lint
 lint: ## Run the repo's required static checks
-	@test -z "$$(gofmt -l . | grep -v '^desktop/assets/')" || { gofmt -l .; exit 1; }
+	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	$(GO) vet ./...
 	cd desktop && $(GO) vet ./...
 	$(NODE_PKG) --dir web typecheck
@@ -167,7 +188,7 @@ verify: lint test ## Run every required check
 
 .PHONY: clean
 clean: ## Remove build output
-	rm -rf bin web/dist desktop/assets/dist $(DESKTOP_BIN)
+	rm -rf bin web/dist internal/webui/assets/dist $(DESKTOP_BIN)
 
 .PHONY: clean-data
 clean-data: ## Remove local SQLite + objects (destructive)

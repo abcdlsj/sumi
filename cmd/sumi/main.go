@@ -17,6 +17,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/computer"
 	"github.com/abcdlsj/sumi/internal/server"
 	"github.com/abcdlsj/sumi/internal/store"
+	"github.com/abcdlsj/sumi/internal/webui"
 )
 
 func main() {
@@ -39,7 +40,7 @@ func runServer(args []string) {
 	addr := fs.String("addr", "127.0.0.1:8087", "HTTP listen address")
 	dbPath := fs.String("db", "sumi.db", "SQLite database file path")
 	webOrigin := fs.String("web-origin", "http://localhost:5173", "Allowed Web UI origin for CORS")
-	webDir := fs.String("web-dir", "", "Optional static Web UI dist directory")
+	webDir := fs.String("web-dir", "", "Optional static Web UI directory overriding the embedded UI")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -50,7 +51,7 @@ func runServer(args []string) {
 	}
 	defer st.Close()
 
-	var staticFS http.Handler
+	staticFS := server.SPAHandler(webui.FS())
 	if *webDir != "" {
 		staticFS = server.DirSPAHandler(*webDir)
 	}
