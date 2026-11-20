@@ -452,6 +452,8 @@ export function Workbench({
               onTab={(tab) => setMainView({ kind: "admin", tab })}
               onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
               selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
+              onInspectHuman={(id) => setDetail({ kind: "human", memberID: id })}
+              selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
               onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
               onConnectComputer={() => setDialog("computer")}
               theme={theme}

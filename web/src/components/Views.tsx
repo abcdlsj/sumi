@@ -422,6 +422,8 @@ export function AdminPanel({
   onTab,
   onInspectAgent,
   selectedAgentID,
+  onInspectHuman,
+  selectedHumanID,
   onNewAgent,
   onConnectComputer,
   theme,
@@ -433,6 +435,8 @@ export function AdminPanel({
   onTab: (t: AdminTab) => void;
   onInspectAgent: (memberID: string) => void;
   selectedAgentID?: string;
+  onInspectHuman?: (memberID: string) => void;
+  selectedHumanID?: string;
   onNewAgent: () => void;
   onConnectComputer: () => void;
   theme: ThemePref;
@@ -542,15 +546,25 @@ export function AdminPanel({
             <>
               <SectionTitle title="People" body="Humans in this space." />
               <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
-                {humans.map((m) => (
-                  <div key={m.id} className="px-4 h-14 flex items-center gap-3">
-                    <MemberAvatar id={m.id} name={m.display_name} kind="human" size="md" />
-                    <span className="text-[14.5px] font-medium text-fg">{m.display_name}</span>
-                    {m.id === boot.current_member.id && <Badge>You</Badge>}
-                    <span className="flex-1" />
-                    <span className="text-[13px] text-fg-3 capitalize">{m.access_level}</span>
-                  </div>
-                ))}
+                {humans.map((m) => {
+                  const selected = m.id === selectedHumanID;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onInspectHuman?.(m.id)}
+                      aria-current={selected || undefined}
+                      className={`group w-full px-4 h-14 flex items-center gap-3 text-left transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
+                    >
+                      <MemberAvatar id={m.id} name={m.display_name} kind="human" size="md" />
+                      <span className="text-[14.5px] font-medium text-fg">{m.display_name}</span>
+                      {m.id === boot.current_member.id && <Badge>You</Badge>}
+                      <span className="flex-1" />
+                      <span className="text-[13px] text-fg-3 capitalize">{m.access_level}</span>
+                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}

@@ -170,6 +170,28 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(box.value).toBe(""));
     expect(document.activeElement).toBe(box);
   });
+
+  it("edits title and description inline via amendTask", async () => {
+    vi.spyOn(api, "getTask").mockResolvedValue({ task });
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [], read_seq: 0, following: true });
+    const amend = vi.spyOn(api, "amendTask").mockResolvedValue({
+      task: { ...task, title: "Updated title", description: "More context", revision: 2 },
+    });
+    renderPane({ kind: "task", taskID: task.id });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Task title" }), { target: { value: "Updated title" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task description" }), { target: { value: "More context" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(amend).toHaveBeenCalledWith("s", task.id, {
+        title: "Updated title",
+        description: "More context",
+        expected_revision: 1,
+      }),
+    );
+  });
 });
 
 describe("AgentDetail activity", () => {

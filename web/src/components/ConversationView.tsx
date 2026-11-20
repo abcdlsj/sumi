@@ -412,7 +412,13 @@ export function ConversationView({
                         <div className="min-w-0 flex-1 max-w-[760px]">
                           {!grouped && (
                             <div className="flex items-center gap-2 h-5">
-                              <span className="text-[14px] font-semibold text-fg">{m.author_display_name}</span>
+                              <button
+                                type="button"
+                                onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                                className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                              >
+                                {m.author_display_name}
+                              </button>
                               {m.author_kind === "agent" && <Badge tone="accent" className="!h-[18px] !px-1.5 !text-[11px]">Agent</Badge>}
                               <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>

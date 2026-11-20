@@ -94,7 +94,13 @@ function CompactMessage({
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 h-5">
-          <span className="text-[13.5px] font-semibold text-fg">{m.author_display_name}</span>
+          <button
+            type="button"
+            onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+            className="text-[13.5px] font-semibold text-fg hover:underline underline-offset-2"
+          >
+            {m.author_display_name}
+          </button>
           <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
         </div>
         <div className="mt-0.5 text-[14px] leading-relaxed text-fg md">
@@ -231,6 +237,7 @@ export function DetailPane({
           onClose={onClose}
           onSelectTarget={onSelectTarget}
           onOpenConversation={onOpenConversation}
+          onOpenDM={onOpenDM}
         />
       )}
       {target.kind === "human" && (
@@ -404,6 +411,9 @@ function TaskDetail({
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
   const taskQ = useQuery({ queryKey: ["task", spaceSlug, taskID], queryFn: () => api.getTask(spaceSlug, taskID).then((r) => r.task) });
   const task = taskQ.data ?? boot.tasks.find((t) => t.id === taskID);
   const msgsQ = useQuery({
@@ -424,9 +434,41 @@ function TaskDetail({
   if (!task) return <DetailSkeleton />;
   const open = task.status !== "done" && task.status !== "closed";
 
+  function startEdit() {
+    if (!task) return;
+    setEditTitle(task.title);
+    setEditDesc(task.description ?? "");
+    setEditing(true);
+  }
+
+  async function saveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!task || !editTitle.trim()) return;
+    const ok = await act.run(() =>
+      api.amendTask(spaceSlug, task.id, {
+        title: editTitle.trim(),
+        description: editDesc,
+        expected_revision: task.revision,
+      }),
+    );
+    if (ok) {
+      setEditing(false);
+      refresh();
+    }
+  }
+
   return (
     <>
-      <PaneHeader onClose={onClose}>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          !editing ? (
+            <Button size="sm" variant="ghost" icon={<Pencil />} onClick={startEdit}>
+              Edit
+            </Button>
+          ) : undefined
+        }
+      >
         <TaskStatusIcon status={task.status} />
         <span className="tabular font-semibold text-fg">#{task.number}</span>
         <span className="text-fg-4">in</span>
@@ -434,8 +476,39 @@ function TaskDetail({
       </PaneHeader>
 
       <div className="px-5 pt-4 pb-4 border-b border-line space-y-3 shrink-0">
-        <h2 className="font-display text-[20px] font-semibold text-fg leading-snug">{task.title}</h2>
-        {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
+        {editing ? (
+          <form onSubmit={(e) => void saveEdit(e)} className="space-y-2.5 animate-fade-in">
+            <input
+              autoFocus
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              aria-label="Task title"
+              placeholder="Task title"
+              className="w-full h-9 px-3 rounded-[9px] border border-line-strong bg-card text-[15px] font-semibold text-fg outline-none focus:border-accent focus:shadow-[var(--ring)]"
+            />
+            <textarea
+              rows={3}
+              value={editDesc}
+              onChange={(e) => setEditDesc(e.target.value)}
+              aria-label="Task description"
+              placeholder="Add details…"
+              className="w-full px-3 py-2 rounded-[9px] border border-line-strong bg-card text-[14px] text-fg leading-relaxed outline-none resize-none focus:border-accent focus:shadow-[var(--ring)]"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" loading={act.busy} disabled={!editTitle.trim()}>
+                Save
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <h2 className="font-display text-[20px] font-semibold text-fg leading-snug">{task.title}</h2>
+            {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
+          </>
+        )}
         <div className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-1 pt-1">
           <KV label="Status">
             <div className="relative">
@@ -669,6 +742,7 @@ function AgentDetail({
   onClose,
   onSelectTarget,
   onOpenConversation,
+  onOpenDM,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -676,6 +750,7 @@ function AgentDetail({
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
+  onOpenDM?: (memberID: string) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
@@ -702,7 +777,16 @@ function AgentDetail({
 
   return (
     <>
-      <PaneHeader onClose={onClose}>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          onOpenDM ? (
+            <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
+              Message
+            </Button>
+          ) : undefined
+        }
+      >
         <span className="font-semibold text-fg">Agent</span>
       </PaneHeader>
       <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">

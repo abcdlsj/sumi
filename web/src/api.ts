@@ -355,6 +355,15 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ status }),
     }),
+  amendTask: (
+    spaceSlug: string,
+    taskID: string,
+    payload: { title?: string; description?: string; expected_revision: number },
+  ) =>
+    request<{ task: Task }>(`/api/v1/spaces/${spaceSlug}/tasks/${taskID}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   pairComputer: (name: string, hostname: string, os: "macos" | "linux") =>
     request<{ computer: Computer; token: string }>(`/api/v1/computers/pair`, {
       method: "POST",
