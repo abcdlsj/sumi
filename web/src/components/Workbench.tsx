@@ -133,6 +133,7 @@ export function Workbench({
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
   const [dialog, setDialog] = useState<Dialog>(() => (readPendingPairing() ? "pairing" : null));
+  const [reconnecting, setReconnecting] = useState(false);
   const dm = useAction();
   const landed = useRef(false);
   const boot = bootQ.data;
@@ -154,12 +155,27 @@ export function Workbench({
 
   useEffect(() => {
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });
+    let dropped = false;
     const invalidate = () => {
       for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
     };
+    es.onopen = () => {
+      if (dropped) {
+        dropped = false;
+        setReconnecting(false);
+        invalidate();
+      }
+    };
+    es.onerror = () => {
+      dropped = true;
+      setReconnecting(true);
+    };
     for (const ev of SSE_EVENTS) es.addEventListener(ev, invalidate);
     es.addEventListener("space.updated", () => void qc.invalidateQueries({ queryKey: ["me"] }));
-    return () => es.close();
+    return () => {
+      setReconnecting(false);
+      es.close();
+    };
   }, [spaceSlug, qc]);
 
   useEffect(() => {
@@ -409,6 +425,13 @@ export function Workbench({
                 <SetupLine done={agents.length > 0}>Create an agent</SetupLine>
               </div>
             </button>
+          </div>
+        )}
+
+        {reconnecting && (
+          <div role="status" className="mx-3 mb-2 px-2.5 h-8 rounded-[8px] bg-busy-soft text-nav-busy flex items-center gap-2 text-[12.5px] font-medium shrink-0 animate-fade-in">
+            <span className="size-2 rounded-full bg-busy animate-breathe shrink-0" />
+            <span>Reconnecting…</span>
           </div>
         )}
 

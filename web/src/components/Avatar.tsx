@@ -72,18 +72,13 @@ export function agentSprite(seed: string): { cells: SpriteCell[][]; hue: number 
   return { cells: g.map((row) => [...row, ...[...row].reverse()]), hue };
 }
 
-function spriteColors(h: number): Record<SpriteCell, string> & { bg: string } {
-  // Yellows and greens read brighter at equal lightness, so darken them.
-  const l = h >= 30 && h <= 110 ? 42 : 52;
-  return {
-    bg: `hsl(${h} 70% 91%)`,
-    0: "transparent",
-    1: `hsl(${h} 55% ${l}%)`,
-    2: `hsl(${h} 65% ${l + 18}%)`,
-    3: `hsl(${h} 45% 16%)`,
-    4: `hsl(${(h + 150) % 360} 75% 58%)`,
-  };
-}
+const SPRITE_FILLS: Record<SpriteCell, string> = {
+  0: "transparent",
+  1: "var(--sprite-body)",
+  2: "var(--sprite-hi)",
+  3: "var(--sprite-eye)",
+  4: "var(--sprite-accent)",
+};
 
 const SIZES = { xs: 20, sm: 24, md: 32, lg: 40, xl: 56 } as const;
 export type AvatarSize = keyof typeof SIZES;
@@ -91,7 +86,8 @@ export type AvatarSize = keyof typeof SIZES;
 export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?: AvatarSize; label?: string }) {
   const px = SIZES[size];
   const { cells, hue } = useMemo(() => agentSprite(seed), [seed]);
-  const c = spriteColors(hue);
+  // Yellows and greens read brighter at equal lightness, so darken them in light mode.
+  const l = hue >= 30 && hue <= 110 ? "42%" : "52%";
   return (
     <svg
       width={px}
@@ -99,12 +95,16 @@ export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?:
       viewBox="0 0 10 10"
       role="img"
       aria-label={label}
-      className="shrink-0 block"
-      style={{ borderRadius: Math.max(5, px * 0.24), background: c.bg }}
+      className="agent-sprite shrink-0 block"
+      style={{
+        borderRadius: Math.max(5, px * 0.24),
+        ["--sprite-h" as string]: hue,
+        ["--sprite-l" as string]: l,
+      }}
       shapeRendering="crispEdges"
     >
       {cells.flatMap((row, y) =>
-        row.map((v, x) => (v ? <rect key={`${x}-${y}`} x={1 + x} y={1 + y} width={1.02} height={1.02} fill={c[v]} /> : null)),
+        row.map((v, x) => (v ? <rect key={`${x}-${y}`} x={1 + x} y={1 + y} width={1.02} height={1.02} fill={SPRITE_FILLS[v]} /> : null)),
       )}
     </svg>
   );

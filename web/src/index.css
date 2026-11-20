@@ -370,6 +370,22 @@ html.desktop {
 .avatar-tone-7 { --avatar-tone: #2f6d84; }
 .avatar-tone-8 { --avatar-tone: #3a6ea5; }
 
+/* Agent pixel sprites: light uses pastel tiles, dark lowers tile lightness so they sit calmly on dark surfaces. */
+.agent-sprite {
+  background: hsl(var(--sprite-h) 70% 91%);
+  --sprite-body: hsl(var(--sprite-h) 55% var(--sprite-l));
+  --sprite-hi: hsl(var(--sprite-h) 65% calc(var(--sprite-l) + 18%));
+  --sprite-eye: hsl(var(--sprite-h) 45% 16%);
+  --sprite-accent: hsl(calc(var(--sprite-h) + 150) 75% 58%);
+}
+.dark .agent-sprite {
+  background: hsl(var(--sprite-h) 34% 20%);
+  --sprite-body: hsl(var(--sprite-h) 58% 60%);
+  --sprite-hi: hsl(var(--sprite-h) 68% 76%);
+  --sprite-eye: hsl(var(--sprite-h) 40% 12%);
+  --sprite-accent: hsl(calc(var(--sprite-h) + 150) 78% 68%);
+}
+
 .skeleton {
   background: var(--subtle);
   border-radius: 6px;

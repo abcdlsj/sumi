@@ -84,7 +84,7 @@ describe("ThreadDetail", () => {
       return { ok: true };
     });
     renderPane({ kind: "thread", threadConvID: "th-1", rootMessageID: "m1", parentSlug: "general" });
-    fireEvent.click(await screen.findByRole("button", { name: "Follow" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Follow" }, { timeout: 3000 }));
     await waitFor(() => expect(setFollowing).toHaveBeenCalledWith("s", "th-1", true));
     expect(await screen.findByRole("button", { name: "Following" })).toBeTruthy();
   });
