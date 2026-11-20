@@ -33,6 +33,19 @@ func TestNormalizeDriverConfig(t *testing.T) {
 		{"acp unknown provider", DriverACP, DriverConfig{Provider: "gemini"}, "driver_config.provider", DriverConfig{}},
 		{"acp empty", DriverACP, DriverConfig{}, "driver_config.provider", DriverConfig{}},
 		{"acp blank argv", DriverACP, DriverConfig{Command: []string{"x", " "}}, "driver_config.command", DriverConfig{}},
+		{"acp pi provider override", DriverACP,
+			DriverConfig{Provider: "pi", PiProvider: " ak-opendesign-pi ", PiModel: " deepseek-v4.1-flash ", PiPackages: []string{" npm:pi-commandcode-provider "}}, "",
+			DriverConfig{Provider: "pi", PiProvider: "ak-opendesign-pi", PiModel: "deepseek-v4.1-flash", PiPackages: []string{"npm:pi-commandcode-provider"}}},
+		{"acp pi override needs pi provider", DriverACP,
+			DriverConfig{Provider: "claude", PiProvider: "ak-opendesign-pi"}, "require provider pi", DriverConfig{}},
+		{"acp pi override needs provider", DriverACP,
+			DriverConfig{Command: []string{"my-acp"}, PiModel: "m"}, "require provider pi", DriverConfig{}},
+		{"acp pi provider charset", DriverACP,
+			DriverConfig{Provider: "pi", PiProvider: "bad name"}, "driver_config.pi_provider", DriverConfig{}},
+		{"acp pi model whitespace", DriverACP,
+			DriverConfig{Provider: "pi", PiModel: "two words"}, "driver_config.pi_model", DriverConfig{}},
+		{"acp pi package spec", DriverACP,
+			DriverConfig{Provider: "pi", PiPackages: []string{"some-plugin"}}, "driver_config.pi_packages", DriverConfig{}},
 		{"unknown kind", DriverKind("mcp"), DriverConfig{}, "driver_kind", DriverConfig{}},
 	}
 	for _, tc := range cases {
@@ -73,6 +86,10 @@ func TestDriverConfigRedactShapes(t *testing.T) {
 	raw, _ = json.Marshal(DriverConfig{Provider: "pi", Command: []string{"a"}}.Redact(DriverACP))
 	if string(raw) != `{"provider":"pi","command":["a"]}` {
 		t.Fatalf("acp command view = %s", raw)
+	}
+	raw, _ = json.Marshal(DriverConfig{Provider: "pi", PiProvider: "ak-opendesign-pi", PiModel: "deepseek-v4.1-flash", PiPackages: []string{"npm:p"}}.Redact(DriverACP))
+	if string(raw) != `{"provider":"pi","pi_provider":"ak-opendesign-pi","pi_model":"deepseek-v4.1-flash","pi_packages":["npm:p"]}` {
+		t.Fatalf("acp pi override view = %s", raw)
 	}
 }
 

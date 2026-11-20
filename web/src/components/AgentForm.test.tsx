@@ -67,6 +67,28 @@ describe("AgentForm", () => {
       ),
     );
   });
+
+  it("pins an agent to a pi provider and forwards only requested packages", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/pi provider/), { target: { value: " ak-opendesign-pi " } });
+    fireEvent.change(screen.getByLabelText(/pi model/), { target: { value: "deepseek-v4.1-flash" } });
+    fireEvent.change(screen.getByLabelText(/pi packages/), { target: { value: "npm:pi-commandcode-provider , ," } });
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({
+          driver_config: {
+            provider: "pi",
+            pi_provider: "ak-opendesign-pi",
+            pi_model: "deepseek-v4.1-flash",
+            pi_packages: ["npm:pi-commandcode-provider"],
+          },
+        }),
+      ),
+    );
+  });
 });
 
 describe("agentSprite", () => {

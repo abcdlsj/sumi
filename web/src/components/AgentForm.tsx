@@ -29,6 +29,9 @@ export interface DriverDraft {
   kind: DriverKind;
   provider: ACPProvider;
   command: string;
+  piProvider: string;
+  piModel: string;
+  piPackages: string;
   baseURL: string;
   model: string;
   apiKey: string;
@@ -76,6 +79,9 @@ export function draftFromAgent(m?: Member): DriverDraft {
     kind: m?.agent?.driver_kind ?? "acp",
     provider: cfg?.provider ?? "pi",
     command: cfg?.command?.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ") ?? "",
+    piProvider: cfg?.pi_provider ?? "",
+    piModel: cfg?.pi_model ?? "",
+    piPackages: cfg?.pi_packages?.join(", ") ?? "",
     baseURL: cfg?.base_url ?? "",
     model: cfg?.model ?? "",
     apiKey: "",
@@ -96,7 +102,17 @@ export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "mode
 export function driverInput(d: DriverDraft): DriverConfigInput {
   if (d.kind === "acp") {
     const { args } = splitCommandArgs(d.command);
-    return args.length > 0 ? { provider: d.provider, command: args } : { provider: d.provider };
+    const cfg: { provider?: ACPProvider; command?: string[]; pi_provider?: string; pi_model?: string; pi_packages?: string[] } = {
+      provider: d.provider,
+    };
+    if (args.length > 0) cfg.command = args;
+    if (d.provider === "pi") {
+      const packages = d.piPackages.split(",").map((p) => p.trim()).filter(Boolean);
+      if (d.piProvider.trim()) cfg.pi_provider = d.piProvider.trim();
+      if (d.piModel.trim()) cfg.pi_model = d.piModel.trim();
+      if (packages.length > 0) cfg.pi_packages = packages;
+    }
+    return cfg;
   }
   const cfg: { base_url: string; model: string; api_key?: string } = { base_url: d.baseURL.trim(), model: d.model.trim() };
   if (d.apiKey) cfg.api_key = d.apiKey;
@@ -215,6 +231,46 @@ export function DriverFields({
             autoComplete="off"
             spellCheck={false}
           />
+          {draft.provider === "pi" ? (
+            <div className="space-y-3.5 rounded-[10px] border border-line-strong bg-card p-3.5">
+              <p className="text-[12.5px] text-fg-3 leading-snug">
+                Isolate this agent onto a specific pi provider. Leave empty to follow the host pi settings.
+              </p>
+              <Field
+                label="pi provider"
+                optional
+                leading={<Bot />}
+                value={draft.piProvider}
+                onChange={(e) => set({ piProvider: e.target.value })}
+                placeholder="ak-opendesign-pi"
+                hint="Written as defaultProvider in this agent's isolated pi settings."
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Field
+                label="pi model"
+                optional
+                leading={<Cpu />}
+                value={draft.piModel}
+                onChange={(e) => set({ piModel: e.target.value })}
+                placeholder="deepseek-v4.1-flash"
+                hint="Written as defaultModel."
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Field
+                label="pi packages"
+                optional
+                leading={<Terminal />}
+                value={draft.piPackages}
+                onChange={(e) => set({ piPackages: e.target.value })}
+                placeholder="npm:pi-commandcode-provider"
+                hint="Comma-separated npm: specs. Only these provider plugins load in the isolated dir; host npm is linked from the host pi dir."
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-3.5 animate-fade-in">

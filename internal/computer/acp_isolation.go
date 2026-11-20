@@ -22,8 +22,8 @@ func acpRuntimeDir(agentHome, provider string) string {
 
 // prepareACPRuntimeDir creates the provider's isolated runtime directory under Agent Home and
 // syncs only auth/model config from the host so host skills, hooks, plugins and sessions do not leak.
-func prepareACPRuntimeDir(agentHome, provider string) error {
-	runtimeDir := acpRuntimeDir(agentHome, provider)
+func prepareACPRuntimeDir(agentHome string, cfg domain.DriverConfig) error {
+	runtimeDir := acpRuntimeDir(agentHome, cfg.Provider)
 	if runtimeDir == "" {
 		return nil
 	}
@@ -31,10 +31,10 @@ func prepareACPRuntimeDir(agentHome, provider string) error {
 		return fmt.Errorf("create acp runtime dir: %w", err)
 	}
 	userHome, _ := os.UserHomeDir()
-	switch provider {
+	switch cfg.Provider {
 	case domain.ACPProviderPi:
 		hostDir := resolveHostDir("PI_CODING_AGENT_DIR", filepath.Join(userHome, ".pi", "agent"))
-		return syncPiRuntimeDir(hostDir, runtimeDir)
+		return syncPiRuntimeDir(hostDir, runtimeDir, cfg)
 	case domain.ACPProviderCodex:
 		hostDir := resolveHostDir("CODEX_HOME", filepath.Join(userHome, ".codex"))
 		return syncCodexRuntimeDir(hostDir, runtimeDir)
@@ -62,9 +62,9 @@ func sameDir(a, b string) bool {
 	return ca == cb
 }
 
-// syncPiRuntimeDir symlinks host auth/models and writes a minimal settings.json with only model
-// and transport preferences, omitting packages, extensions, skills and prompts.
-func syncPiRuntimeDir(hostDir, runtimeDir string) error {
+// syncPiRuntimeDir symlinks host auth/models and writes a minimal settings.json with only model,
+// transport and explicitly requested package preferences, omitting skills, hooks and prompts.
+func syncPiRuntimeDir(hostDir, runtimeDir string, cfg domain.DriverConfig) error {
 	if hostDir == "" || sameDir(hostDir, runtimeDir) {
 		return nil
 	}
@@ -73,7 +73,13 @@ func syncPiRuntimeDir(hostDir, runtimeDir string) error {
 			return err
 		}
 	}
-	return syncPiSettings(filepath.Join(hostDir, "settings.json"), filepath.Join(runtimeDir, "settings.json"))
+	// Provider plugins requested per agent must be loadable from the isolated dir.
+	if len(cfg.PiPackages) > 0 {
+		if err := syncDirSymlink(filepath.Join(hostDir, "npm"), filepath.Join(runtimeDir, "npm")); err != nil {
+			return err
+		}
+	}
+	return syncPiSettings(filepath.Join(hostDir, "settings.json"), filepath.Join(runtimeDir, "settings.json"), cfg)
 }
 
 var piAllowedSettingsKeys = []string{
@@ -84,24 +90,31 @@ var piAllowedSettingsKeys = []string{
 	"compaction",
 }
 
-func syncPiSettings(srcPath, dstPath string) error {
+func syncPiSettings(srcPath, dstPath string, cfg domain.DriverConfig) error {
+	filtered := map[string]any{}
 	raw, err := os.ReadFile(srcPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return removeIfExists(dstPath)
+	switch {
+	case err == nil:
+		var src map[string]any
+		if json.Unmarshal(raw, &src) == nil {
+			for _, k := range piAllowedSettingsKeys {
+				if v, ok := src[k]; ok {
+					filtered[k] = v
+				}
+			}
 		}
+	case os.IsNotExist(err):
+	default:
 		return err
 	}
-	var src map[string]any
-	if err := json.Unmarshal(raw, &src); err != nil {
-		// Ignore malformed host settings rather than blocking agent startup.
-		return removeIfExists(dstPath)
+	if cfg.PiProvider != "" {
+		filtered["defaultProvider"] = cfg.PiProvider
 	}
-	filtered := make(map[string]any, len(piAllowedSettingsKeys))
-	for _, k := range piAllowedSettingsKeys {
-		if v, ok := src[k]; ok {
-			filtered[k] = v
-		}
+	if cfg.PiModel != "" {
+		filtered["defaultModel"] = cfg.PiModel
+	}
+	if len(cfg.PiPackages) > 0 {
+		filtered["packages"] = cfg.PiPackages
 	}
 	if len(filtered) == 0 {
 		return removeIfExists(dstPath)
@@ -272,6 +285,26 @@ func syncFileSymlink(srcPath, dstPath string) error {
 	}
 	if target, err := os.Readlink(dstPath); err == nil && target == srcPath {
 		return nil
+	}
+	tmp := dstPath + ".tmp"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(srcPath, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dstPath)
+}
+
+// syncDirSymlink points dst at the host directory so requested provider packages resolve.
+func syncDirSymlink(srcPath, dstPath string) error {
+	info, err := os.Stat(srcPath)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	if target, err := os.Readlink(dstPath); err == nil && target == srcPath {
+		return nil
+	}
+	if err := removeIfExists(dstPath); err != nil {
+		return err
 	}
 	tmp := dstPath + ".tmp"
 	_ = os.Remove(tmp)

@@ -576,7 +576,7 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 		}
 	}
 	if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
-		if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig.Provider); err != nil {
+		if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig); err != nil {
 			return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
 		}
 	}
@@ -833,7 +833,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			return ag.dirty
 		}, func() { cancel(errTurnStalled) })
 		if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
-			if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig.Provider); err != nil {
+			if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig); err != nil {
 				d.logger.Warn("Refresh ACP runtime dir failed", "agent_id", spec.MemberID, "error", err.Error())
 			}
 		}

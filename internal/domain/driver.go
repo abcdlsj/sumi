@@ -59,6 +59,10 @@ type DriverConfig struct {
 	// acp
 	Provider string   `json:"provider,omitempty"`
 	Command  []string `json:"command,omitempty"`
+	// acp/pi: per-agent overrides written into the isolated pi runtime settings.
+	PiProvider string   `json:"pi_provider,omitempty"`
+	PiModel    string   `json:"pi_model,omitempty"`
+	PiPackages []string `json:"pi_packages,omitempty"`
 }
 
 // NormalizeDriverConfig validates cfg for kind and returns a copy holding only the fields of that kind.
@@ -92,10 +96,41 @@ func NormalizeDriverConfig(kind DriverKind, cfg DriverConfig) (DriverConfig, err
 		if out.Provider == "" && len(out.Command) == 0 {
 			return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.provider or driver_config.command is required")
 		}
+		out.PiProvider = strings.TrimSpace(cfg.PiProvider)
+		out.PiModel = strings.TrimSpace(cfg.PiModel)
+		for _, pkg := range cfg.PiPackages {
+			trimmed := strings.TrimSpace(pkg)
+			if !strings.HasPrefix(trimmed, "npm:") || len(trimmed) <= len("npm:") {
+				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.pi_packages entries must look like npm:<package>")
+			}
+			out.PiPackages = append(out.PiPackages, trimmed)
+		}
+		if out.PiProvider != "" || out.PiModel != "" || len(out.PiPackages) > 0 {
+			if out.Provider != ACPProviderPi {
+				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.pi_provider, pi_model and pi_packages require provider pi")
+			}
+			if !validPiProviderName(out.PiProvider) {
+				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.pi_provider must be letters, digits, dot, dash or underscore")
+			}
+			if strings.ContainsAny(out.PiModel, " \t\n") {
+				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.pi_model must not contain whitespace")
+			}
+		}
 		return out, nil
 	default:
 		return DriverConfig{}, NewError(CodeInvalidArgument, "driver_kind must be acp or builtin")
 	}
+}
+
+// validPiProviderName accepts an empty name (no override) or a pi provider identifier.
+func validPiProviderName(name string) bool {
+	for _, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseDriverConfig decodes a stored driver_config_json value.
@@ -114,6 +149,7 @@ func (c DriverConfig) Redact(kind DriverKind) DriverConfigView {
 		v.BaseURL, v.Model, v.APIKeySet = c.BaseURL, c.Model, &set
 	case DriverACP:
 		v.Provider, v.Command = c.Provider, c.Command
+		v.PiProvider, v.PiModel, v.PiPackages = c.PiProvider, c.PiModel, c.PiPackages
 	}
 	return v
 }
@@ -126,6 +162,10 @@ type DriverConfigView struct {
 	APIKeySet *bool      `json:"api_key_set,omitempty"`
 	Provider  string     `json:"provider,omitempty"`
 	Command   []string   `json:"command,omitempty"`
+
+	PiProvider string   `json:"pi_provider,omitempty"`
+	PiModel    string   `json:"pi_model,omitempty"`
+	PiPackages []string `json:"pi_packages,omitempty"`
 }
 
 // MarshalJSON emits the exact per-kind shape: builtin {base_url, model, api_key_set}, acp {provider, command?}.
@@ -139,9 +179,12 @@ func (v DriverConfigView) MarshalJSON() ([]byte, error) {
 		}{v.BaseURL, v.Model, v.APIKeySet != nil && *v.APIKeySet})
 	case DriverACP:
 		return json.Marshal(struct {
-			Provider string   `json:"provider"`
-			Command  []string `json:"command,omitempty"`
-		}{v.Provider, v.Command})
+			Provider   string   `json:"provider"`
+			Command    []string `json:"command,omitempty"`
+			PiProvider string   `json:"pi_provider,omitempty"`
+			PiModel    string   `json:"pi_model,omitempty"`
+			PiPackages []string `json:"pi_packages,omitempty"`
+		}{v.Provider, v.Command, v.PiProvider, v.PiModel, v.PiPackages})
 	default:
 		type plain DriverConfigView
 		return json.Marshal(plain(v))

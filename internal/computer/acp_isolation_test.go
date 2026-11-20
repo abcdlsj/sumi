@@ -33,7 +33,7 @@ func TestPreparePiRuntimeDirIsolatesHostExtensionsAndSkills(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", hostPi)
 
 	agentHome := filepath.Join(t.TempDir(), "agent-1")
-	if err := prepareACPRuntimeDir(agentHome, domain.ACPProviderPi); err != nil {
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderPi}); err != nil {
 		t.Fatalf("prepare pi runtime dir: %v", err)
 	}
 
@@ -71,12 +71,90 @@ func TestPreparePiRuntimeDirIsolatesHostExtensionsAndSkills(t *testing.T) {
 	if err := os.Remove(filepath.Join(hostPi, "auth.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareACPRuntimeDir(agentHome, domain.ACPProviderPi); err != nil {
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderPi}); err != nil {
 		t.Fatalf("refresh pi runtime dir: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(rtDir, "auth.json")); !os.IsNotExist(err) {
 		t.Fatalf("stale auth.json symlink was not removed")
 	}
+}
+
+func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
+	hostPi := filepath.Join(t.TempDir(), "host-pi")
+	if err := os.MkdirAll(hostPi, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(hostPi, "auth.json"), `{}`)
+	mustWrite(t, filepath.Join(hostPi, "models.json"), `{"providers":{}}`)
+	mustWrite(t, filepath.Join(hostPi, "settings.json"), `{
+		"defaultProvider": "deepseek",
+		"defaultModel": "deepseek-chat",
+		"packages": ["npm:host-only-plugin"],
+		"extensions": ["/tmp/ext.ts"]
+	}`)
+	if err := os.MkdirAll(filepath.Join(hostPi, "npm", "node_modules", "pi-commandcode-provider"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(hostPi, "npm", "node_modules", "pi-commandcode-provider", "index.js"), "module.exports = 1")
+	t.Setenv("PI_CODING_AGENT_DIR", hostPi)
+
+	agentHome := filepath.Join(t.TempDir(), "agent-override")
+	cfg := domain.DriverConfig{
+		Provider:   domain.ACPProviderPi,
+		PiProvider: "ak-opendesign-pi",
+		PiModel:    "deepseek-v4.1-flash",
+	}
+	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
+		t.Fatalf("prepare pi runtime dir: %v", err)
+	}
+	rtDir := acpRuntimeDir(agentHome, domain.ACPProviderPi)
+	got := readPiSettings(t, rtDir)
+	if got["defaultProvider"] != "ak-opendesign-pi" || got["defaultModel"] != "deepseek-v4.1-flash" {
+		t.Fatalf("override not applied: %v", got)
+	}
+	if _, ok := got["packages"]; ok {
+		t.Fatalf("host packages must stay out unless requested: %v", got)
+	}
+	if _, err := os.Lstat(filepath.Join(rtDir, "npm")); !os.IsNotExist(err) {
+		t.Fatal("host npm dir must not be linked without requested packages")
+	}
+
+	// Requesting a provider plugin links host npm and forwards exactly that package list.
+	cfg.PiPackages = []string{"npm:pi-commandcode-provider"}
+	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
+		t.Fatalf("prepare pi runtime dir with packages: %v", err)
+	}
+	target, err := os.Readlink(filepath.Join(rtDir, "npm"))
+	if err != nil || target != filepath.Join(hostPi, "npm") {
+		t.Fatalf("npm symlink=%q err=%v", target, err)
+	}
+	got = readPiSettings(t, rtDir)
+	pkgs, _ := got["packages"].([]any)
+	if len(pkgs) != 1 || pkgs[0] != "npm:pi-commandcode-provider" {
+		t.Fatalf("packages = %v, want only the requested plugin", got["packages"])
+	}
+
+	// Dropping the override restores the host defaults and removes the npm link.
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderPi}); err != nil {
+		t.Fatalf("prepare pi runtime dir without override: %v", err)
+	}
+	got = readPiSettings(t, rtDir)
+	if got["defaultProvider"] != "deepseek" || got["defaultModel"] != "deepseek-chat" {
+		t.Fatalf("host defaults must return: %v", got)
+	}
+}
+
+func readPiSettings(t *testing.T, rtDir string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(rtDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	return out
 }
 
 func TestPrepareCodexRuntimeDirFiltersConfigAndIsolatesHostState(t *testing.T) {
@@ -122,7 +200,7 @@ model = "gpt-5.4-mini"
 	t.Setenv("CODEX_HOME", hostCodex)
 
 	agentHome := filepath.Join(t.TempDir(), "agent-2")
-	if err := prepareACPRuntimeDir(agentHome, domain.ACPProviderCodex); err != nil {
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderCodex}); err != nil {
 		t.Fatalf("prepare codex runtime dir: %v", err)
 	}
 
@@ -176,7 +254,7 @@ model = "gpt-5.4-mini"
 
 func TestPrepareClaudeRuntimeDirIsClean(t *testing.T) {
 	agentHome := filepath.Join(t.TempDir(), "agent-3")
-	if err := prepareACPRuntimeDir(agentHome, domain.ACPProviderClaude); err != nil {
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderClaude}); err != nil {
 		t.Fatalf("prepare claude runtime dir: %v", err)
 	}
 	rtDir := acpRuntimeDir(agentHome, domain.ACPProviderClaude)

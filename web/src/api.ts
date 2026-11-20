@@ -36,11 +36,15 @@ export interface DriverConfigView {
   api_key_set?: boolean;
   provider?: ACPProvider;
   command?: string[];
+  /** pi only: per-agent provider override written into the isolated pi settings. */
+  pi_provider?: string;
+  pi_model?: string;
+  pi_packages?: string[];
 }
 
 export type DriverConfigInput =
   | { base_url: string; model: string; api_key?: string }
-  | { provider?: ACPProvider; command?: string[] };
+  | { provider?: ACPProvider; command?: string[]; pi_provider?: string; pi_model?: string; pi_packages?: string[] };
 
 export interface AgentInfo {
   computer_id?: string;
