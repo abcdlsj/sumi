@@ -214,6 +214,20 @@ func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 	if id := other.loadSavedSession([]string{"other-agent"}); id != "" {
 		t.Fatalf("session leaked across commands: %q", id)
 	}
+
+	// A provider or model change behind the same command never resumes the old session.
+	raw, _ := json.Marshal(savedSession{SessionID: "sess-1", Command: cfg.Command, Fingerprint: "provider=pi;pi_provider=ak-a;pi_model=m"})
+	if err := os.WriteFile(cfg.SessionFile, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed := New(Config{SessionFile: cfg.SessionFile, Command: cfg.Command, Fingerprint: "provider=pi;pi_provider=ak-b;pi_model=m"})
+	if id := changed.loadSavedSession(cfg.Command); id != "" {
+		t.Fatalf("session resumed across a provider change: %q", id)
+	}
+	same := New(Config{SessionFile: cfg.SessionFile, Command: cfg.Command, Fingerprint: "provider=pi;pi_provider=ak-a;pi_model=m"})
+	if id := same.loadSavedSession(cfg.Command); id != "sess-1" {
+		t.Fatalf("same fingerprint must resume the saved session, got %q", id)
+	}
 }
 
 func TestActivityOfKeepsOnlyToolLifecycle(t *testing.T) {

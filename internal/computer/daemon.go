@@ -569,6 +569,14 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	return ag
 }
 
+func acpFingerprint(cfg domain.DriverConfig) string {
+	return strings.Join([]string{
+		"provider=" + cfg.Provider,
+		"pi_provider=" + cfg.PiProvider,
+		"pi_model=" + cfg.PiModel,
+	}, ";")
+}
+
 func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSpec) (driver.SessionDriver, string, string) {
 	for _, dir := range []string{ag.workDir, ag.memoryDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -619,7 +627,12 @@ func buildDriver(spec protocol.AssignedAgentSpec, homeDir string) (driver.Sessio
 			SessionFile: filepath.Join(homeDir, "session.jsonl"),
 		}, nil)
 	case domain.DriverACP:
-		acfg := acp.Config{Provider: cfg.Provider, Command: cfg.Command, SessionFile: filepath.Join(homeDir, "acp-session.json")}
+		acfg := acp.Config{
+			Provider:    cfg.Provider,
+			Command:     cfg.Command,
+			SessionFile: filepath.Join(homeDir, "acp-session.json"),
+			Fingerprint: acpFingerprint(cfg),
+		}
 		argv, err := acfg.ResolvedCommand()
 		if err != nil {
 			return nil, driver.Fail(domain.AgentErrDriverConfigInvalid, err)

@@ -33,6 +33,9 @@ type Config struct {
 	Command  []string `json:"command,omitempty"`
 	// SessionFile persists the active sessionId so a restarted daemon resumes it via session/load.
 	SessionFile string `json:"-"`
+	// Fingerprint names the credentials and model behind the command, so a session is never
+	// resumed across a provider or model change that the argv alone cannot show.
+	Fingerprint string `json:"-"`
 }
 
 // ResolvedCommand returns the argv to launch; Command overrides the provider default.
@@ -89,11 +92,12 @@ func (d *Driver) ResetSession() error {
 	return d.forgetSession()
 }
 
-// savedSession is the on-disk record; Command fingerprints the agent so a session is only
-// resumed by the same provider command that created it.
+// savedSession is the on-disk record. Command and Fingerprint pin the credentials and model so
+// a session is only resumed by the same provider that created it.
 type savedSession struct {
-	SessionID string   `json:"session_id"`
-	Command   []string `json:"command"`
+	SessionID   string   `json:"session_id"`
+	Command     []string `json:"command"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
 }
 
 func (d *Driver) loadSavedSession(argv []string) string {
@@ -105,7 +109,7 @@ func (d *Driver) loadSavedSession(argv []string) string {
 		return ""
 	}
 	var s savedSession
-	if json.Unmarshal(raw, &s) != nil || !slices.Equal(s.Command, argv) {
+	if json.Unmarshal(raw, &s) != nil || !slices.Equal(s.Command, argv) || s.Fingerprint != d.cfg.Fingerprint {
 		return ""
 	}
 	return s.SessionID
@@ -115,7 +119,7 @@ func (d *Driver) saveSession(argv []string) error {
 	if d.cfg.SessionFile == "" {
 		return nil
 	}
-	raw, _ := json.Marshal(savedSession{SessionID: d.sessionID, Command: argv})
+	raw, _ := json.Marshal(savedSession{SessionID: d.sessionID, Command: argv, Fingerprint: d.cfg.Fingerprint})
 	tmp := d.cfg.SessionFile + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(d.cfg.SessionFile), 0o700); err != nil {
 		return err
