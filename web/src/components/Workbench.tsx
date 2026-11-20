@@ -214,7 +214,7 @@ export function Workbench({
         <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" state={m.kind === "agent" ? st : undefined} ring="var(--nav)" />
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[14px] leading-5 ${active || (conv && conv.unread_count > 0) ? "text-nav-fg-strong font-semibold" : "text-nav-fg-2"}`}>{m.display_name}</span>
-          {sub && <span className={`block truncate text-[12px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-work"}`}>{sub}</span>}
+          {sub && <span className={`block truncate text-[12px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{sub}</span>}
         </span>
         {conv && conv.unread_count > 0 && <Count n={conv.unread_count} />}
       </button>
@@ -235,7 +235,7 @@ export function Workbench({
       >
         {icon}
         {dot !== undefined && (
-          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dot ? "bg-work" : "bg-nav-fg-3"}`} />
+          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dot ? "bg-online" : "bg-nav-fg-3"}`} />
         )}
       </button>
     );

@@ -100,7 +100,7 @@ function AgentStatusLine({
   const focus = agentFocus(boot, subject);
   const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
 
-  const tone = st === "error" ? "text-danger" : st === "working" ? "text-work" : "text-fg-3";
+  const tone = st === "error" ? "text-danger" : st === "working" ? "text-busy" : "text-fg-3";
   let text = agentStatusText(boot, subject);
   if (st === "working" && !elsewhere) text = "is working on a reply…";
   else if (elsewhere) text = `is busy in ${focus?.label ?? "another conversation"} · your message is queued`;

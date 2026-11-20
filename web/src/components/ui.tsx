@@ -260,7 +260,7 @@ export function Badge({
   children,
   className = "",
 }: {
-  tone?: "neutral" | "accent" | "warm" | "work" | "danger";
+  tone?: "neutral" | "accent" | "warm" | "work" | "online" | "busy" | "danger";
   children: ReactNode;
   className?: string;
 }) {
@@ -269,6 +269,8 @@ export function Badge({
     accent: "bg-accent-soft text-accent-text border-transparent",
     warm: "bg-warm-soft text-warm border-transparent",
     work: "bg-work-soft text-work border-transparent",
+    online: "bg-online-soft text-online border-transparent",
+    busy: "bg-busy-soft text-busy border-transparent",
     danger: "bg-danger-soft text-danger border-transparent",
   };
   return (

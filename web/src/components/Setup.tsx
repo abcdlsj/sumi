@@ -39,8 +39,8 @@ export function ComputerRow({ c }: { c: Computer }) {
           {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
         </span>
       </span>
-      <span className={`inline-flex items-center gap-2 text-[13px] font-medium ${online ? "text-work" : "text-fg-3"}`}>
-        <span className={`size-2 rounded-full ${online ? "bg-work" : "bg-fg-4 animate-breathe"}`} />
+      <span className={`inline-flex items-center gap-2 text-[13px] font-medium ${online ? "text-online" : "text-fg-3"}`}>
+        <span className={`size-2 rounded-full ${online ? "bg-online" : "bg-fg-4 animate-breathe"}`} />
         {online ? "Online" : "Waiting for connection"}
       </span>
     </div>

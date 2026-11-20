@@ -6,6 +6,9 @@ import { ToastProvider } from "./components/ui";
 import { capturePairingFromURL } from "./pairing";
 import { captureShellFromURL } from "./shell";
 import { applyTheme } from "./theme";
+import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 
 const queryClient = new QueryClient({

@@ -578,7 +578,7 @@ function AgentDetail({
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
-  const stateTone = st === "working" ? "work" : st === "error" ? "danger" : "neutral";
+  const stateTone = st === "working" ? "busy" : st === "error" ? "danger" : "neutral";
 
   return (
     <>
@@ -601,8 +601,8 @@ function AgentDetail({
         </div>
 
         {st === "working" && (
-          <div className="px-5 py-3.5 bg-work-soft/60 flex items-center gap-3 animate-fade-in">
-            <span className="size-8 rounded-[9px] bg-work-soft text-work flex items-center justify-center shrink-0">
+          <div className="px-5 py-3.5 bg-busy-soft/60 flex items-center gap-3 animate-fade-in">
+            <span className="size-8 rounded-[9px] bg-busy-soft text-busy flex items-center justify-center shrink-0">
               <RefreshCw className="size-4 animate-spin [animation-duration:2.4s]" />
             </span>
             <div className="min-w-0 flex-1">
@@ -644,7 +644,7 @@ function AgentDetail({
                 <span className="flex items-center gap-2 min-w-0">
                   <Monitor className="size-4 text-fg-3 shrink-0" />
                   <span className="truncate">{comp.name}</span>
-                  <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-work" : "bg-fg-4"}`} />
+                  <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
                 </span>
               ) : (
                 <span className="text-fg-3">Unassigned</span>

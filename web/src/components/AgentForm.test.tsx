@@ -63,4 +63,14 @@ describe("agentSprite", () => {
       for (const row of a.cells) for (let x = 0; x < 8; x++) expect(row[x]).toBe(row[7 - x]);
     }
   });
+
+  it("never paints a violet or magenta sprite", () => {
+    const hues = new Set<number>();
+    for (let i = 0; i < 500; i++) {
+      const { hue } = agentSprite(`seed-${i}`);
+      expect(hue >= 340 || hue < 235).toBe(true);
+      hues.add(hue);
+    }
+    expect(hues.size).toBeGreaterThanOrEqual(10);
+  });
 });
