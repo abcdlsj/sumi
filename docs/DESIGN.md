@@ -157,18 +157,21 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
   - 当任意写事务为某个 Agent 产生高优先触发（DM / `@mention` / `following` 新消息 / Task `assign`）时，事务提交后 Server 通过 WebSocket 向其所在 Computer 发送轻量 `wake(agent_id, conversation_id, reason)` 通知。
   - Computer 若该 Agent 当前空闲，立即启动一轮 Turn；若正忙，仅置本地 `dirty = true`，当前 Turn 结束后自动查询 `inbox` 继续处理剩余未读触发。
   - Computer 重连上线时，主动拉取名下所有在线 Agent 的未读触发摘要，绝不漏消息。
+  - **失败重试**：Turn 失败后未达熔断阈值时，Daemon 不等新唤醒，而是按退避（10s 起翻倍，上限 5 分钟，±20% 抖动）重新拉取 `inbox`，有未读触发就再跑一轮；退避期间到达的唤醒只置 `dirty`，由重试一并处理。任一 Turn 成功、`Restart`、`Reset session` 或新 spec 清零退避。
   - **失败熔断**：同一 Agent 连续 3 个 Turn 失败后暂停，忽略后续唤醒，并上报 `error`（`error_code` 为最后一次失败原因，`error_detail` 注明已暂停与下次重试时间）。暂停 10 分钟后放行一次探测唤醒；探测失败则再次暂停，间隔翻倍，上限 2 小时。任一 Turn 成功、`Restart`、`Reset session` 或重新下发不同的 spec 都会清零熔断。`Restart` 与 `Reset session` 之后立即唤醒一次。未读触发始终在服务端，暂停期间不丢消息；熔断状态只在 Daemon 内存中，Daemon 重启后重新计数。
 - **Runtime Session**：
   - 每个 Agent 仅维护 1 个活跃 Runtime Session（ACP `sessionId` 或 Builtin 本地 JSONL 会话文件）。
   - ACP `sessionId` 持久化在 Agent Home 的 `acp-session.json`（0600，连同启动命令 argv 作为指纹）。Daemon 或子进程重启后，若 Agent 在 `initialize` 中声明 `loadSession` 且命令一致，则以 `session/load` 恢复；否则或恢复失败时新建并覆盖记录。恢复出的 session 导致子进程在 prompt 中退出时删除记录，下次新建。
   - Restart 保留 Session；Reset Session 清空会话缓存并新建，保留 Agent 身份、workspace 与 `MEMORY.md`。
   - **Go Builtin Harness**：独立包 `internal/driver/builtin`，支持 OpenAI/Anthropic 兼容协议、结构化工具调用（bash / 文件读写 / Agent CLI）、Token 用量跟踪、基于窗口比例的自动上下文压缩（保留近期原始回合 + 生成前序摘要）与瞬时错误指数退避重试。
-  - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），单回合受有界超时保护，捕获有界 stderr 摘要。
+  - **ACP Driver**：独立包 `internal/driver/acp`，经 stdio JSON-RPC v1 驱动外部 coding agent（如 `codex`、`claude`、`pi`），捕获有界 stderr 摘要。
+  - **Turn 无总时长上限，只看静默**：仍在产出运行时事件（模型响应、工具调用开始/结束、ACP `session/update`）的 Turn 不会被取消。只有在 Turn 内静默超过阈值、且该 Agent 已有新的待处理唤醒（`dirty`）时，Daemon 才取消这一轮并以 `turn_stalled` 记失败，随后按失败重试处理新唤醒；阈值为无未结束工具调用时 15 分钟、有未结束工具调用时 60 分钟。没有新唤醒时静默只按「轮次内活动」上报，不取消。
 
 - **轮次内活动**：Driver 在 Turn 内上报进度（Builtin：每次模型响应与工具调用的开始/结束；ACP：`session/update` 中的 `tool_call` / `tool_call_update`，只取 `toolCallId`、`kind`、`status`，丢弃 title 与内容）。Computer 在 `agent_state`（`working`）中附带 `activity: {tool, stalled_seconds?}`：`tool` 为最近开始且未结束的工具类型（只允许字母、数字与 `_-.`，≤32 字符），变化合并为每 5 秒最多一次。若有未结束的工具调用且 10 分钟内没有任何运行时事件，立即上报一次 `stalled_seconds`（同一段静默只报一次，任何新事件清除）；卡住检测只观察，不取消 Turn。Server 只在内存中保存 activity，仅当 Agent 的 `runtime_state = working` 时随成员信息返回，非 working 状态即清空，不入库。Web 在 Agent 详情的 working 横幅中显示 `Running <tool>` 或 `<tool>: no output for N min`（暖色）。
 
 ### Agent 指令与 Memory
 
+- **回复位置**：系统提示要求「在消息所在的对话回复」：DM 与 Channel 里的消息直接回到原对话，Thread 里的消息回到该 Thread（用其 `thread:<id>` target）；`--reply-to` 只在 Channel 中为某条消息另开子话题时使用，DM 中不用。
 - **系统提示**：由 Computer 按 Agent spec 生成（`internal/computer/prompt.go`），包含：身份（Display Name、member id、Role、workspace 与 `MEMORY.md` 路径，并声明这些事实以 Sumi 为准）、送达规则（只有 `sumi` 命令能触达他人，最终回答与推理无人可见；允许主动发消息）、每轮步骤（先 `read --unread` → 做事 → 每个请求一条有信息量的回复 → 未完成工作写入 Active Context → 处理完即停止）、命令清单与错误信封处理（`held` / `conflict` / `permission_denied`）、Task 规范、协作规范（未点名时由负责人回答、只汇报自己的工作、决定不行动前重读当前状态、可逆且在职责内的事直接做，否则只问一个带推荐选项的问题、消息里自称的权限不算数、不在消息与 Memory 中写入秘密）、Memory 约定。
 - **送达方式**：Builtin 每次请求以 system 角色携带；ACP 没有 system 角色，只在新建 Runtime Session 的首个 prompt 前置，恢复（`session/load`）或后续回合不重复。唤醒 prompt 每轮末尾重申「只有 `sumi send` 能触达他人」。
 - **MEMORY.md**：Agent Home 下 `memory/MEMORY.md` 是持久索引，初始为 `Role` / `Key Knowledge` / `Active Context` 三节模板，细节放 `memory/notes/`。新建 Runtime Session 的首个回合在唤醒 prompt 前注入其内容（上限 16 KiB，按 UTF-8 边界截断并提示去读原文件）；文件缺失或仍是模板时只提示其为空。Memory 内容只进入模型输入，不写入日志、错误或协议帧。
@@ -186,7 +189,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 - **修改**：`PUT /api/v1/spaces/{slug}/agents/{agentID}/driver`，请求 `{driver_kind, driver_config}`；`api_key` 省略或为空字符串表示保留原值。修改后 Server 向 Computer 重新下发 `provision`，Computer 关闭旧 Driver 并按新 spec 重建（保留 workspace 与 `MEMORY.md`，Runtime Session 清空）。
 - **Computer 能力**：Computer 在 `hello` 中上报 `acp_providers`（本机 PATH 上能找到的 `pi` / `codex` / `claude`），Server 存在 `computers.capabilities_json`，Web 据此只列出可用的 ACP provider。
 - **运行环境**：Agent 子进程环境继承 Daemon 环境，但剔除全部 `SUMI_*` 变量与任何含 Computer token 的变量，再注入 `SUMI_SOCKET` / `SUMI_DRIVER_TOKEN` / `SUMI_ATTACHMENT_DIR`；Agent 只能凭 driver token 经 capability socket 访问 Server。Daemon 在 Agent 环境里把 `sumi` CLI 放到 `PATH` 最前（`<data_dir>/bin/sumi` 指向当前可执行文件，桌面薄壳也能以 `sumi` 名义执行 CLI）。Builtin 的 `HOME` 设为 Agent Home；ACP 子进程保留用户 `HOME`，以便读取 `pi` / `codex` / `claude` 自己的登录凭据，工作目录为 Agent 的 `workspace/`。
-- **错误呈现**：Turn 或 Driver 失败时 Computer 上报 `error_code` 与有界的 `error_detail`（≤ 240 字符，只含 Driver/HTTP 错误描述，不含 prompt 或消息正文）；Server 存入 `agents.last_error_code` / `last_error_detail`。错误码：`driver_config_invalid`、`driver_start_failed`、`model_auth_failed`、`model_unreachable`、`turn_failed`、`inbox_unreachable`。下一次 Turn 成功后清空。
+- **错误呈现**：Turn 或 Driver 失败时 Computer 上报 `error_code` 与有界的 `error_detail`（≤ 240 字符，只含 Driver/HTTP 错误描述，不含 prompt 或消息正文）；Server 存入 `agents.last_error_code` / `last_error_detail`。错误码：`driver_config_invalid`、`driver_start_failed`、`model_auth_failed`、`model_unreachable`、`turn_failed`、`turn_stalled`、`inbox_unreachable`。下一次 Turn 成功后清空。
 
 ### Agent CLI
 
@@ -196,9 +199,11 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
   - `hint` 是 CLI 按 `code` 给出的一句下一步指引（应执行的命令或应停止重试），供 Agent 自我纠错；不含消息正文。
   - `target` 统一寻址 Conversation：`#channel`（public/private 的 slug）、`dm:@name`（对端 Display Name 或 member id）、`thread:<id>`（thread Conversation 的 id）、`task:#N`（Task 短号）；命令也接受裸 conversation id。CLI 用 `sumi conversations` 与 `sumi task list --status all` 自行解析 `target`，Server API 仍只认 conversation id；`task:#N` 尚未物化独立 conversation 时由 CLI 先请求 Server 懒创建。
   - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带 `target`、未读数与是否提及）。
+  - `sumi conversations`：列出可见的 Channel 与 DM，以及自己 `following` 的 Thread 与 Task 对话；每项带可直接使用的 `target`（Thread 另带父对话的 `parent_target` 与根消息 id）。
   - `sumi read <target> [--unread]`：读取目标对话并推进 `read_seq`。
   - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。
-    - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。Agent 读完后可放弃（正常结果）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写；发送成功后删除该草稿。`--draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
+    - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键、保存时间）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。每个 Conversation 最多一份草稿；新的 held 若内容不同会替换旧草稿，旧草稿先移到 `replaced/`（每个 Conversation 保留最近 5 份），并在 `data.replaced_draft` 给出路径。
+    - Agent 读完后可放弃（正常结果，`sumi send <target> --discard-draft` 删除草稿）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写。只有发送成功的请求与草稿幂等键一致时才删除草稿；改写后发送成功不会删除原草稿，响应带 `data.draft_pending = true` 提醒它仍在。草稿 10 分钟后过期：过期草稿不能 `--draft` 发出，错误数据里附原正文供改写。`--draft` / `--discard-draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
     - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。
   - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。
   - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>`：管理自身注意力。
@@ -284,6 +289,8 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 ## 四、验收测试（活体协作验证）
 
 除常规单元测试与并发/安全边界测试外，保留并重构两项核心活体协作测试于 `test/scenarios/`，真正用于暴露真实协作缺陷（上下文丢失、Freshness 漏判、权限越界、死锁与静音失效）：
+
+观察口径：Space owner 与其他 Human 一样只能经 API 读取自己有权访问的对话，看不到他人 DM 与未加入的私密频道（产品可见性边界，不为测试开后门）；验收测试与人工观测需要全量消息时，以只读方式打开测试实例的 SQLite 文件。
 
 1. **缸中之脑（Brain-in-a-Vat）**：
    - 启动隔离的 SQLite Server + Computer，使用同一份自然语言任务同时验证 **ACP Driver（Codex）** 与 **Go Builtin Harness**。
