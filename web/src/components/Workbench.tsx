@@ -21,6 +21,7 @@ type Dialog = null | "channel" | "space" | "jump" | "computer" | "agent" | "pair
 
 const SSE_EVENTS = [
   "message.created",
+  "message.reaction_changed",
   "task.created",
   "task.updated",
   "agent.created",

@@ -205,7 +205,11 @@ export function useOlderMessages({
     }
   }, [spaceSlug, convID, loading, hasMore, messages, scrollRef]);
 
-  return { messages, hasMore, loading, loadEarlier };
+  const patchMessage = useCallback((messageID: string, patch: (m: Message) => Message) => {
+    setOlder((prev) => (prev.some((m) => m.id === messageID) ? prev.map((m) => (m.id === messageID ? patch(m) : m)) : prev));
+  }, []);
+
+  return { messages, hasMore, loading, loadEarlier, patchMessage };
 }
 
 export function LoadEarlierButton({ hasMore, loading, onClick }: { hasMore: boolean; loading: boolean; onClick: () => void }) {

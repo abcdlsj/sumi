@@ -8,6 +8,7 @@ import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverD
 import { describeAction } from "./ConversationView";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
+import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
@@ -58,11 +59,17 @@ function CompactMessage({
   spaceSlug,
   boot,
   onSelectTarget,
+  pickerOpen,
+  onPickerOpenChange,
+  onToggleReaction,
 }: {
   m: Message;
   spaceSlug: string;
   boot: BootstrapData;
   onSelectTarget: (t: DetailTarget) => void;
+  pickerOpen: boolean;
+  onPickerOpenChange: (open: boolean) => void;
+  onToggleReaction: (messageID: string, emoji: Parameters<typeof api.addReaction>[2], reacted: boolean) => void;
 }) {
   if (m.kind !== "text") {
     return (
@@ -77,7 +84,7 @@ function CompactMessage({
   }
   const author = boot.members.find((x) => x.id === m.author_member_id);
   return (
-    <article className="flex items-start gap-2.5 animate-fade-in">
+    <article className="relative group flex items-start gap-2.5 animate-fade-in">
       <button
         type="button"
         onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
@@ -114,6 +121,24 @@ function CompactMessage({
           />
         </div>
         <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
+        <MessageReactions
+          reactions={m.reactions}
+          members={boot.members}
+          onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
+        />
+      </div>
+      <div
+        className={`absolute right-0 -top-2 ${
+          pickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+        } transition-opacity duration-100 bg-card border border-line rounded-[8px] p-0.5 shadow-sm z-20`}
+      >
+        <ReactionPickerButton
+          reactions={m.reactions}
+          open={pickerOpen}
+          onOpenChange={onPickerOpenChange}
+          onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
+          compact
+        />
       </div>
     </article>
   );
@@ -414,6 +439,7 @@ function TaskDetail({
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [pickerMsgID, setPickerMsgID] = useState<string | null>(null);
   const taskQ = useQuery({ queryKey: ["task", spaceSlug, taskID], queryFn: () => api.getTask(spaceSlug, taskID).then((r) => r.task) });
   const task = taskQ.data ?? boot.tasks.find((t) => t.id === taskID);
   const msgsQ = useQuery({
@@ -421,6 +447,7 @@ function TaskDetail({
     queryFn: () => api.listMessages(spaceSlug, task!.conversation_id!, true),
     enabled: Boolean(task?.conversation_id),
   });
+  const reactions = useReactionToggle(spaceSlug, task?.conversation_id);
   const stream = useStickToBottom({ streamKey: task?.conversation_id ?? taskID, count: msgsQ.data?.messages.length ?? 0 });
   const members = useMentionMembers(spaceSlug, boot, task?.conversation_id ?? task?.channel_id);
 
@@ -570,7 +597,18 @@ function TaskDetail({
           ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
             <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
           ) : (
-            msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} boot={boot} onSelectTarget={onSelectTarget} />)
+            msgsQ.data!.messages.map((m) => (
+              <CompactMessage
+                key={m.id}
+                m={m}
+                spaceSlug={spaceSlug}
+                boot={boot}
+                onSelectTarget={onSelectTarget}
+                pickerOpen={pickerMsgID === m.id}
+                onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
+                onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
+              />
+            ))
           )}
         </div>
         <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
@@ -610,7 +648,9 @@ function ThreadDetail({
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const [pickerMsgID, setPickerMsgID] = useState<string | null>(null);
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
+  const reactions = useReactionToggle(spaceSlug, threadConvID);
   const following = msgsQ.data?.following;
   const stream = useStickToBottom({ streamKey: threadConvID, count: msgsQ.data?.messages.length ?? 0 });
   const members = useMentionMembers(spaceSlug, boot, threadConvID);
@@ -653,7 +693,15 @@ function ThreadDetail({
           {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
           {(msgsQ.data?.messages ?? []).map((m, i) => (
             <div key={m.id}>
-              <CompactMessage m={m} spaceSlug={spaceSlug} boot={boot} onSelectTarget={onSelectTarget} />
+              <CompactMessage
+                m={m}
+                spaceSlug={spaceSlug}
+                boot={boot}
+                onSelectTarget={onSelectTarget}
+                pickerOpen={pickerMsgID === m.id}
+                onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
+                onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
+              />
               {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
                 <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
                   <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>

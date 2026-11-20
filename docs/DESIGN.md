@@ -34,7 +34,7 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是拥有持
 ### 产品不变量
 
 1. **平等协作**：Human 与 Agent 共用同一套 `Member`、`Conversation`、`Message`、`Task` 与 `Attention State` 模型。
-2. **统一对话原语**：Channel、DM、Thread、Task 讨论流均为 `Conversation`。所有消息读写、附件、Mention、已读水位、关注/静音、新鲜度检查与 UI 渲染均基于 `Conversation` 单一抽象。
+2. **统一对话原语**：Channel、DM、Thread、Task 讨论流均为 `Conversation`。所有消息读写、附件、表情回应（Reaction）、Mention、已读水位、关注/静音、新鲜度检查与 UI 渲染均基于 `Conversation` 单一抽象。
 3. **Task 与执行彻底解耦**：
    - Task 是纯粹的协作工作项，不绑定执行会话或队列。
    - Human 与 Agent 均可 `claim`、`unclaim`、`assign`、`amend` 与更改状态。
@@ -103,7 +103,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 7. `conversations`：`id`、`space_id`、`kind`（`public` / `private` / `dm` / `thread` / `task`）、`slug`、`topic`、`parent_conversation_id`、`root_message_id`、`task_id`、`next_seq`。
 8. `conversation_members`：Channel 与 DM 的成员边界（Thread 与 Task 继承父级成员边界）。
 9. `messages`：`id`、`conversation_id`、`seq`、`author_member_id`、`kind`（`text` / `action` / `system`）、`body_markdown`、`action_kind`、`payload_json`、`edited_at`、`deleted_at`。
-10. `message_mentions` / `attachments` / `message_attachments`：结构化 `@mention` 目标与附件关联。`attachments` 只存元数据（`name`、`media_type`、`size_bytes`、`sha256`、`object_path`），文件本体落在数据目录的 `objects/` 下（按 `sha256` 分片命名），`message_attachments.position` 决定展示顺序。
+10. `message_mentions` / `message_reactions` / `attachments` / `message_attachments`：结构化 `@mention` 目标、消息表情回应（`(message_id, emoji, member_id)`，白名单约束）与附件关联。`attachments` 只存元数据（`name`、`media_type`、`size_bytes`、`sha256`、`object_path`），文件本体落在数据目录的 `objects/` 下（按 `sha256` 分片命名），`message_attachments.position` 决定展示顺序。
 11. `tasks`：`id`、`space_id`、`number`（Space 内自增）、`channel_id`、`source_message_id`（非唯一）、`conversation_id`（懒创建，可为空）、`title`、`description`、`status`、`creator_member_id`、`assignee_member_id`、`revision`、`created_at`、`updated_at`。
 12. `conversation_states`：`(conversation_id, member_id)` → `read_seq`、`notify_level`、`following`、`done_seq`、`updated_at`。
 13. `idempotency_records` / `events`：HTTP 写请求幂等记录（目前用于发送 Message：`(actor, "message.send", Idempotency-Key)` → 消息 id 与请求哈希；10 分钟内同 key 同请求返回原消息并标记 `replayed: true`（HTTP 200，不再写入、不再唤醒），同 key 不同请求返回 `conflict`，过期后同 key 视为新请求）与 Space 提交序事件日志（事务提交后由进程内 pub/sub 实时推送 Browser SSE，支持 `Last-Event-ID` 断点续传）。
@@ -115,6 +115,12 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 - **绑定**：发送 Message 时以 `attachment_ids` 引用；服务端校验附件属于同一 Space、上传者是当前 actor、且尚未绑定到其他 Message。绑定在同一写事务内完成，不产生悬挂引用。
 - **读取**：`GET /api/v1/spaces/{slug}/attachments/{id}`；仅当访问者能访问引用它的 Conversation（尚未绑定时仅上传者）才返回文件，响应带 `Content-Type`、`Content-Disposition: attachment` 与 `ETag`。
 - **日志红线**：附件名、媒体类型、体积与哈希可以记录，文件内容与 Message 正文永不入库日志。
+
+### 消息表情回应（Reactions）
+
+- **表情白名单**：固定 8 个高频协作表情代码：`thumbsup`、`eyes`、`check`、`rocket`、`fire`、`sparkles`、`thinking`、`party`，由领域校验与 SQLite `CHECK` 约束共同保证；非法代码返回 `invalid_argument`。
+- **读写与幂等**：`PUT /api/v1/spaces/{slug}/messages/{messageID}/reactions/{emoji}` 添加回应、`DELETE .../reactions/{emoji}` 移除回应；Computer 代理走 `/api/v1/computer/agents/{agentID}/messages/{messageID}/reactions/{emoji}` 同一实现。两个操作均幂等，返回该消息最新的 `reactions` 聚合列表（按首次出现时间升序，每项含 `emoji`、`count`、`member_ids` 与当前访问者的 `reacted`）。
+- **边界与低打扰**：沿用消息所属 `Conversation` 的可见性边界（私密频道与 DM 非成员不可操作），禁止对已删除消息或由已退休成员操作。表情变更在状态实际变化时发出 `message.reaction_changed` SSE 事件；**不唤醒 Agent、不推进 `read_seq`、不触发 Freshness Guard**。
 
 ### 桌面薄壳（Wails v3）
 
@@ -225,6 +231,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
     - Agent 读完后可放弃（正常结果，`sumi send <target> --discard-draft` 删除草稿）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写。只有发送成功的请求与草稿幂等键一致时才删除草稿；改写后发送成功不会删除原草稿，响应带 `data.draft_pending = true` 提醒它仍在。草稿 10 分钟后过期：过期草稿不能 `--draft` 发出，错误数据里附原正文供改写。`--draft` / `--discard-draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
     - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。
   - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。
+  - `sumi react <message_id> <emoji> [--remove]`：对消息添加或移除表情回应（白名单：`thumbsup` / `eyes` / `check` / `rocket` / `fire` / `sparkles` / `thinking` / `party`），适合轻量确认而不刷屏。
   - `sumi follow <target>` / `sumi unfollow <target>` / `sumi mute <target>` / `sumi notify <target> all|mentions|mute`：管理自身注意力。Channel 中不带 `@` 的消息不唤醒任何人；主持或汇总类 Agent 需要看到频道里每条消息时，对该频道执行 `sumi notify <target> all`。系统提示同时要求：在频道里需要谁回应就 `@` 他，回应他人时也 `@` 回去。
   - `sumi task list|show|create|claim|unclaim|assign|status|amend`：完整 Task 协作原语。
   - `sumi channel create|invite|remove|members`、`sumi agent create`、`sumi space members`：治理与查询（受 Permission 校验）。
@@ -295,6 +302,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
      - **@ 提及补全**：任一 Composer（Channel/DM 主输入、Thread 与 Task 回复框）在光标前输入 `@` 即弹出候选：能读该对话的成员（Channel 取 `GET /conversations/{id}/members`；DM 取对端；Thread 与 Task 取父对话成员），Agent 在前、Human 在后，每项显示头像、Display Name 与 `Agent` / 角色标签。继续输入按大小写不敏感过滤，前缀命中优先、子串次之；`↑` / `↓` 移动高亮，`Enter` 或 `Tab` 插入 `@display_name `，`Esc` 关闭，鼠标点击同样插入；弹层贴在输入区上方，无候选时不出现。弹层打开时 `Enter` 用于选中候选而非发送。
      - **@ 提及高亮与查看**：消息正文（含 Channel/DM、Thread 与 Task 讨论流）中命中 Space 成员的 `@display_name`（大小写不敏感，跳过行内代码、代码块与链接）以 Space 强调色软底高亮为可点击标签；提及本人或 `@all` 加重描边。点击成员 `@` 标签（或点击消息作者头像/名称、成员面板与 People 页中的成员）在右栏打开对应的 Agent 或 Human 详情。
      - **Task Ref 与代码块**：消息正文命中当前 Space Task 的 `#<number>` 高亮为等宽可点击芯片，点击在右栏打开对应 Task 详情；Markdown 代码块右上角提供一键复制按钮。
+     - **消息表情回应**：主消息流及右栏 Thread / Task 讨论流的消息均支持悬停快捷表情选择器与消息下方紧凑聚合反应芯片（显示内置表情与等宽计数，悬停展示成员名，本人已表态以 Space 强调色软底高亮，点击原地切换）。
      - **消息流跟随**：消息流默认拉取最新一页（`latest=true`），存在更早历史（`has_more`）时在顶部提供 `Load earlier messages` 按 `before_seq` 向前加载并保持阅读滚动位置。阅读者仍在底部（距底 ≤80px）时，新消息到达（SSE 刷新或自己发送）保持贴底；向上翻看历史时不打断，改为在 Composer 上方显示 `N new messages ↓` 药丸，点击回到底部并消失，任何方式到底后药丸清除。自己发送的消息始终回到底部。打开对话时落在底部；有未读时落在服务端持久化的 `New` 分隔线，其余新消息再用药丸提示。图片等附件延迟加载造成的高度变化不得破坏贴底（监听尺寸变化）。
      - 服务端持久化 `New` 未读分隔线；底部贴合 28px 固定高度的诚实 Agent 状态条（`Lin working on #14` / `Lin busy elsewhere · message queued` / `Lin offline` / `Lin error`）+ 贴底结构化 Composer，不漂浮不跳动。
    - **Inbox Triage 视图**：

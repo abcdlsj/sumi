@@ -120,6 +120,8 @@ func (s *Server) registerRoutes() {
 		r.Post("/dm", s.handleCreateDM)
 		r.Get("/conversations/{convID}/messages", s.handleListMessages)
 		r.Post("/conversations/{convID}/messages", s.handleSendMessage)
+		r.Put("/messages/{messageID}/reactions/{emoji}", s.handleAddReaction)
+		r.Delete("/messages/{messageID}/reactions/{emoji}", s.handleRemoveReaction)
 		r.Post("/conversations/{convID}/read", s.handleMarkRead)
 		r.Post("/conversations/{convID}/done", s.handleMarkDone)
 		r.Put("/conversations/{convID}/notify", s.handleSetNotifyLevel)
@@ -152,6 +154,8 @@ func (s *Server) registerRoutes() {
 		r.Get("/conversations", s.handleAgentConversations)
 		r.Get("/conversations/{convID}/messages", s.handleAgentReadMessages)
 		r.Post("/conversations/{convID}/messages", s.handleAgentSendMessage)
+		r.Put("/messages/{messageID}/reactions/{emoji}", s.handleAgentAddReaction)
+		r.Delete("/messages/{messageID}/reactions/{emoji}", s.handleAgentRemoveReaction)
 		r.Get("/conversations/{convID}/members", s.handleAgentListConversationMembers)
 		r.Post("/conversations/{convID}/members", s.handleAgentInviteToChannel)
 		r.Delete("/conversations/{convID}/members/{memberID}", s.handleAgentRemoveFromChannel)
@@ -810,6 +814,34 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSendResult(w, res)
+}
+
+func (s *Server) handleAddReaction(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	reactions, err := s.svc.AddReaction(r.Context(), actor, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
+}
+
+func (s *Server) handleRemoveReaction(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	reactions, err := s.svc.RemoveReaction(r.Context(), actor, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
 }
 
 func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {

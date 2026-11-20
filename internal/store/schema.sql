@@ -1,11 +1,11 @@
--- Sumi v2 SQLite baseline schema (version 4).
+-- Sumi v2 SQLite baseline schema (version 5).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TEXT NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO schema_meta (version, applied_at) VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -163,6 +163,15 @@ CREATE TABLE message_mentions (
     PRIMARY KEY (message_id, member_id)
 );
 CREATE INDEX idx_message_mentions_member_conv ON message_mentions(member_id, conversation_id, seq);
+
+CREATE TABLE message_reactions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL CHECK (emoji IN ('thumbsup', 'eyes', 'check', 'rocket', 'fire', 'sparkles', 'thinking', 'party')),
+    member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, emoji, member_id)
+);
+CREATE INDEX idx_message_reactions_msg ON message_reactions(message_id, created_at);
 
 CREATE TABLE attachments (
     id TEXT PRIMARY KEY,

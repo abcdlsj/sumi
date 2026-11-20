@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/pair"
 )
 
@@ -355,6 +357,25 @@ func Run(args []string, stdout io.Writer) int {
 	sendCmd.Flags().BoolVar(&sendDraft, "draft", false, "resend the draft saved when the last send was held")
 	sendCmd.Flags().BoolVar(&sendDiscard, "discard-draft", false, "delete the saved draft for this conversation without sending")
 	root.AddCommand(sendCmd)
+
+	var reactRemove bool
+	reactCmd := &cobra.Command{
+		Use:   "react <message_id> <emoji>",
+		Args:  cobra.ExactArgs(2),
+		Short: "Add or remove an emoji reaction on a message (" + strings.Join(domain.ReactionEmojis, ", ") + ")",
+		RunE: func(_ *cobra.Command, a []string) error {
+			if err := domain.ValidateReactionEmoji(a[1]); err != nil {
+				return fail(localError(codeInvalidArgument, err), nil)
+			}
+			method := http.MethodPut
+			if reactRemove {
+				method = http.MethodDelete
+			}
+			return call(method, "/messages/"+url.PathEscape(a[0])+"/reactions/"+url.PathEscape(a[1]), nil)
+		},
+	}
+	reactCmd.Flags().BoolVar(&reactRemove, "remove", false, "remove your reaction instead of adding it")
+	root.AddCommand(reactCmd)
 
 	root.AddCommand(&cobra.Command{
 		Use:  "dm <peer_member_id>",

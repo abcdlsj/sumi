@@ -212,28 +212,36 @@ type Attachment struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+type ReactionGroup struct {
+	Emoji     string   `json:"emoji"`
+	Count     int      `json:"count"`
+	MemberIDs []string `json:"member_ids"`
+	Reacted   bool     `json:"reacted"`
+}
+
 type Message struct {
-	ID               string       `json:"id"`
-	SpaceID          string       `json:"space_id"`
-	ConversationID   string       `json:"conversation_id"`
-	Seq              int64        `json:"seq"`
-	AuthorMemberID   string       `json:"author_member_id"`
-	AuthorName       string       `json:"author_display_name,omitempty"`
-	AuthorKind       MemberKind   `json:"author_kind,omitempty"`
-	Kind             MessageKind  `json:"kind"`
-	BodyMarkdown     string       `json:"body_markdown"`
-	ActionKind       ActionKind   `json:"action_kind,omitempty"`
-	PayloadJSON      string       `json:"payload_json,omitempty"`
-	MentionAll       bool         `json:"mention_all,omitempty"`
-	MentionMemberIDs []string     `json:"mention_member_ids,omitempty"`
-	ReplyCount       int64        `json:"reply_count,omitempty"`
-	ThreadConvID     string       `json:"thread_conversation_id,omitempty"`
-	LastReplyAt      *time.Time   `json:"last_reply_at,omitempty"`
-	AttachedTasks    []Task       `json:"attached_tasks,omitempty"`
-	Attachments      []Attachment `json:"attachments,omitempty"`
-	CreatedAt        time.Time    `json:"created_at"`
-	EditedAt         *time.Time   `json:"edited_at,omitempty"`
-	DeletedAt        *time.Time   `json:"deleted_at,omitempty"`
+	ID               string          `json:"id"`
+	SpaceID          string          `json:"space_id"`
+	ConversationID   string          `json:"conversation_id"`
+	Seq              int64           `json:"seq"`
+	AuthorMemberID   string          `json:"author_member_id"`
+	AuthorName       string          `json:"author_display_name,omitempty"`
+	AuthorKind       MemberKind      `json:"author_kind,omitempty"`
+	Kind             MessageKind     `json:"kind"`
+	BodyMarkdown     string          `json:"body_markdown"`
+	ActionKind       ActionKind      `json:"action_kind,omitempty"`
+	PayloadJSON      string          `json:"payload_json,omitempty"`
+	MentionAll       bool            `json:"mention_all,omitempty"`
+	MentionMemberIDs []string        `json:"mention_member_ids,omitempty"`
+	ReplyCount       int64           `json:"reply_count,omitempty"`
+	ThreadConvID     string          `json:"thread_conversation_id,omitempty"`
+	LastReplyAt      *time.Time      `json:"last_reply_at,omitempty"`
+	AttachedTasks    []Task          `json:"attached_tasks,omitempty"`
+	Attachments      []Attachment    `json:"attachments,omitempty"`
+	Reactions        []ReactionGroup `json:"reactions,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	EditedAt         *time.Time      `json:"edited_at,omitempty"`
+	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
 }
 
 type Task struct {
@@ -305,6 +313,18 @@ func ValidateDisplayName(name string) error {
 		return NewError(CodeInvalidArgument, "display_name must be 1-32 alphanumeric/underscore characters and not 'all'")
 	}
 	return nil
+}
+
+// ReactionEmojis is the fixed allowlist of curated reaction emoji codes.
+var ReactionEmojis = []string{"thumbsup", "eyes", "check", "rocket", "fire", "sparkles", "thinking", "party"}
+
+func ValidateReactionEmoji(emoji string) error {
+	for _, e := range ReactionEmojis {
+		if e == emoji {
+			return nil
+		}
+	}
+	return NewError(CodeInvalidArgument, "emoji must be one of "+strings.Join(ReactionEmojis, ", "))
 }
 
 // SpaceAccents is the allowlist of Space accent names; the Web UI maps each to its palette.

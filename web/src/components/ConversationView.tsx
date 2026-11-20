@@ -22,6 +22,7 @@ import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
+import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
@@ -132,6 +133,7 @@ export function ConversationView({
   const [replyingTo, setReplyingTo] = useState<string | null>(() => drafts.get(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
   const draft = useAttachmentDraft(spaceSlug);
   const send = useAction();
   const taskAction = useAction();
@@ -159,6 +161,9 @@ export function ConversationView({
     scrollRef,
   });
   const messages = history.messages;
+  const reactions = useReactionToggle(spaceSlug, conv.id, (messageID, next) => {
+    history.patchMessage(messageID, (m) => ({ ...m, reactions: next }));
+  });
 
   useEffect(() => {
     drafts.set(conv.id, { text: composer, replyTo: replyingTo });
@@ -166,6 +171,7 @@ export function ConversationView({
 
   useEffect(() => {
     setCreatingTaskOnMsg(null);
+    setReactionPickerMsgID(null);
     textRef.current?.focus();
   }, [conv.id]);
 
@@ -437,6 +443,12 @@ export function ConversationView({
 
                           <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
 
+                          <MessageReactions
+                            reactions={m.reactions}
+                            members={boot.members}
+                            onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
+                          />
+
                           {m.attached_tasks && m.attached_tasks.length > 0 && (
                             <div className="mt-2.5 rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
                               {m.attached_tasks.map((tk) => (
@@ -496,7 +508,17 @@ export function ConversationView({
                           ) : null}
                         </div>
 
-                        <div className="absolute right-5 -top-3.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md">
+                        <div
+                          className={`absolute right-5 -top-3.5 ${
+                            reactionPickerMsgID === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                          } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md z-20`}
+                        >
+                          <ReactionPickerButton
+                            reactions={m.reactions}
+                            open={reactionPickerMsgID === m.id}
+                            onOpenChange={(open) => setReactionPickerMsgID(open ? m.id : null)}
+                            onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
+                          />
                           <button
                             onClick={() => {
                               setReplyingTo(m.id);

@@ -349,6 +349,34 @@ func (s *Server) handleAgentSendMessage(w http.ResponseWriter, r *http.Request) 
 	writeSendResult(w, res)
 }
 
+func (s *Server) handleAgentAddReaction(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	reactions, err := s.svc.AddReaction(r.Context(), agent, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
+}
+
+func (s *Server) handleAgentRemoveReaction(w http.ResponseWriter, r *http.Request) {
+	_, agent, err := s.requireComputerAgent(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	reactions, err := s.svc.RemoveReaction(r.Context(), agent, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
+}
+
 func (s *Server) handleAgentListConversationMembers(w http.ResponseWriter, r *http.Request) {
 	_, agent, err := s.requireComputerAgent(r)
 	if err != nil {

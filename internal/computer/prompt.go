@@ -73,6 +73,7 @@ A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`threa
 - `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+` (channels, DMs, and threads/tasks you follow, each with its target), `+"`sumi space members`"+`
 - `+"`sumi read <target> [--unread] [--limit N]`"+`
 - `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft|--discard-draft`"+`; `+"`--reply-to`"+` opens a side thread under a channel message.
+- `+"`sumi react <message_id> <emoji> [--remove]`"+` adds or removes an emoji reaction (`+"`thumbsup`"+`, `+"`eyes`"+`, `+"`check`"+`, `+"`rocket`"+`, `+"`fire`"+`, `+"`sparkles`"+`, `+"`thinking`"+`, `+"`party`"+`) — use this for lightweight acknowledgement instead of filler replies.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
 - `+"`sumi attachment <attachment_id>`"+` downloads a file into your workspace.
 - `+"`sumi follow|unfollow|mute <target>`"+`, `+"`sumi notify <target> all|mentions|mute`"+`

@@ -1,4 +1,5 @@
 import type { SpaceAccent } from "./accent";
+import type { ReactionEmoji } from "./emojis";
 
 export type MemberKind = "human" | "agent";
 export type AccessLevel = "owner" | "admin" | "member";
@@ -146,6 +147,13 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface ReactionGroup {
+  emoji: ReactionEmoji;
+  count: number;
+  member_ids: string[];
+  reacted: boolean;
+}
+
 export interface Message {
   id: string;
   space_id: string;
@@ -164,6 +172,7 @@ export interface Message {
   last_reply_at?: string;
   attached_tasks?: Task[];
   attachments?: Attachment[];
+  reactions?: ReactionGroup[];
   created_at: string;
 }
 
@@ -286,6 +295,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ body_markdown, reply_to_message_id, attachment_ids }),
     }),
+  addReaction: (spaceSlug: string, messageID: string, emoji: ReactionEmoji) =>
+    request<{ reactions: ReactionGroup[] }>(
+      `/api/v1/spaces/${spaceSlug}/messages/${encodeURIComponent(messageID)}/reactions/${encodeURIComponent(emoji)}`,
+      { method: "PUT" },
+    ),
+  removeReaction: (spaceSlug: string, messageID: string, emoji: ReactionEmoji) =>
+    request<{ reactions: ReactionGroup[] }>(
+      `/api/v1/spaces/${spaceSlug}/messages/${encodeURIComponent(messageID)}/reactions/${encodeURIComponent(emoji)}`,
+      { method: "DELETE" },
+    ),
   uploadAttachment: async (spaceSlug: string, file: File): Promise<Attachment> => {
     const form = new FormData();
     form.append("file", file, file.name);

@@ -13,7 +13,7 @@ import (
 func TestSystemPromptCarriesIdentityAndPaths(t *testing.T) {
 	spec := protocol.AssignedAgentSpec{MemberID: "m-1", DisplayName: "Lin", RoleText: "Backend owner", DriverKind: domain.DriverACP}
 	p := buildSystemPrompt(spec, "/home/a/workspace", "/home/a/memory")
-	for _, want := range []string{"@Lin", "m-1", "Backend owner", "/home/a/workspace", "/home/a/memory/MEMORY.md", "error.hint", "held", "task:#N", "dm:@name"} {
+	for _, want := range []string{"@Lin", "m-1", "Backend owner", "/home/a/workspace", "/home/a/memory/MEMORY.md", "error.hint", "held", "task:#N", "dm:@name", "sumi react"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("system prompt missing %q", want)
 		}

@@ -1097,6 +1097,7 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 		return MessagePage{}, err
 	}
 	s.loadMessageAttachments(ctx, msgs)
+	s.loadMessageReactions(ctx, viewer.ID, msgs)
 
 	// Enrich channel/DM root messages with compact thread reply counts and attached tasks.
 	if c.Kind != domain.ConversationThread && c.Kind != domain.ConversationTask && len(msgs) > 0 {
