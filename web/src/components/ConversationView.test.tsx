@@ -254,3 +254,16 @@ describe("@mention autocomplete", () => {
     fireEvent.keyDown(box, { key: "Escape" });
   });
 });
+
+describe("channel header", () => {
+  it("keeps a compact members entry with the channel size", async () => {
+    const { onOpenDetail } = renderView();
+    await screen.findByText("message 2");
+    const entry = await screen.findByRole("button", { name: "Members" });
+    expect(entry.getAttribute("title")).toBe("Members");
+    expect(within(entry).getByText("2")).toBeTruthy();
+    expect(entry.querySelectorAll("svg")).toHaveLength(1);
+    fireEvent.click(entry);
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "members", convID: conv.id });
+  });
+});

@@ -13,6 +13,7 @@ import {
   MessageSquare,
   PanelRight,
   Sparkles,
+  Users,
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -189,7 +190,6 @@ export function ConversationView({
     enabled: conv.kind === "public" || conv.kind === "private",
   });
   const memberCount = membersQ.data?.members.length ?? boot.members.length;
-  const headerFaces = (membersQ.data?.members ?? []).slice(0, 3);
   const mentionMembers = useMentionMembers(spaceSlug, boot, conv.id, conv.kind === "dm" ? conv.peer_member_id : undefined);
   const mentions = useMentionPicker({
     members: mentionMembers,
@@ -299,17 +299,11 @@ export function ConversationView({
           {(conv.kind === "public" || conv.kind === "private") && (
             <button
               onClick={() => onOpenDetail({ kind: "members", convID: conv.id })}
-              aria-label="Channel members"
+              aria-label="Members"
               title="Members"
-              className="h-8 pl-1.5 pr-2 rounded-[8px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
+              className="h-8 pl-2 pr-2.5 rounded-[8px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
             >
-              <span className="flex -space-x-1.5">
-                {headerFaces.map((m) => (
-                  <span key={m.id} className="rounded-full ring-2 ring-[var(--panel)] inline-flex">
-                    <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" />
-                  </span>
-                ))}
-              </span>
+              <Users className="size-4 text-fg-3" />
               <span className="tabular">{memberCount}</span>
             </button>
           )}

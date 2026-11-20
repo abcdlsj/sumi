@@ -267,7 +267,7 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 3. **Main Pane（主工作区）**
    - **Channel / DM 视图**：
-     - 52px 顶栏：频道名、主题、通知级别切换器（按钮只显示短标签 `Mentions` / `All` / `Muted`，展开菜单显示完整选项与说明）与成员入口（前 3 个头像 + 人数）。
+     - 52px 顶栏：频道名、主题、通知级别切换器（按钮只显示短标签 `Mentions` / `All` / `Muted`，展开菜单显示完整选项与说明）与成员入口（`Users` 图标 + 人数，tooltip `Members`，点击打开成员面板）。
      - 成员面板（右栏）：列出能读该频道的成员；Private 频道里有 `channel.manage_members`（owner/admin 默认具备）的成员可 `Add` 拉人、`Remove` 移出，任何成员可 `Leave`；Public 频道全员可见，仅展示。HTTP：`GET|POST /conversations/{id}/members`、`DELETE /conversations/{id}/members/{memberID}`，变更发出 `conversation.members_changed`。
      - 干净的根消息流，**不在主时间线内联展开多条 Reply 预览**，仅展示紧凑单行回复条（参与者头像 + `N replies` + 等宽时间）。
      - 消息下挂载的 Task 合并为紧凑的 `32px` 分隔表格（状态图标 + `#N` + 标题 + 负责人 + 消息数）；一条消息可挂多个 Task。
