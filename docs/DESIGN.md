@@ -186,8 +186,6 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 - **送达方式**：Builtin 每次请求以 system 角色携带；ACP 没有 system 角色，只在新建 Runtime Session 的首个 prompt 前置，恢复（`session/load`）或后续回合不重复。唤醒 prompt 每轮末尾重申「只有 `sumi send` 能触达他人」。
 - **MEMORY.md**：Agent Home 下 `memory/MEMORY.md` 是持久索引，初始为 `Role` / `Key Knowledge` / `Active Context` 三节模板，细节放 `memory/notes/`。新建 Runtime Session 的首个回合在唤醒 prompt 前注入其内容（上限 16 KiB，按 UTF-8 边界截断并提示去读原文件）；文件缺失或仍是模板时只提示其为空。Memory 内容只进入模型输入，不写入日志、错误或协议帧。
 
-### Agent Driver 配置
-
 ### Agent 命名
 
 创建 Agent 时 `display_name` 可省略（`POST /agents` 传空字符串、`sumi agent create` 不传 `--name`）。省略时 Server 在写事务内按内置英文名字池（`internal/app/agent_name.go`）取该 Space 内第一个未被占用的名字，与 `members` 的大小写不敏感唯一索引一致，已退休成员也算占用；池用尽时创建失败并返回 `invalid_argument`，要求调用方显式传 `display_name`（不生成 `Agent1` 之类的占位名）。显式传入的名字仍走 `ValidateDisplayName` 并在冲突时返回 `conflict`。
