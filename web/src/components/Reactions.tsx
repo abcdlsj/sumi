@@ -8,14 +8,15 @@ import { useAction } from "./ui";
 export function EmojiIcon({ emoji, size = 16, className = "" }: { emoji: string; size?: number; className?: string }) {
   const meta = getReactionEmoji(emoji);
   return (
-    <span
-      role="img"
-      aria-label={meta.label}
-      style={{ fontSize: size, lineHeight: 1 }}
-      className={`inline-flex items-center justify-center shrink-0 select-none ${className}`}
-    >
-      {meta.glyph}
-    </span>
+    <img
+      src={meta.src}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      draggable={false}
+      className={`inline-block shrink-0 select-none ${className}`}
+    />
   );
 }
 
@@ -106,11 +107,11 @@ function ReactionPopover({
               onPick(item.code);
               onClose();
             }}
-            className={`size-8 rounded-[8px] flex items-center justify-center transition-colors ${
-              active ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-hover"
+            className={`size-8 rounded-[9px] flex items-center justify-center transition-colors ${
+              active ? "bg-accent-soft shadow-[var(--ring)]" : "hover:bg-hover"
             }`}
           >
-            <EmojiIcon emoji={item.code} size={18} />
+            <EmojiIcon emoji={item.code} size={20} />
           </button>
         );
       })}
@@ -193,14 +194,14 @@ export function MessageReactions({
           aria-label={`${g.emoji} reaction, ${g.count}`}
           aria-pressed={g.reacted}
           onClick={() => onToggle(g.emoji, g.reacted)}
-          className={`h-7 px-2 rounded-full border inline-flex items-center gap-1.5 text-[12px] transition-colors ${
+          className={`h-7 pl-1.5 pr-2 rounded-full border inline-flex items-center gap-1 text-[12px] transition-colors ${
             g.reacted
               ? "bg-accent-soft border-accent/40 text-accent-text font-medium"
               : "bg-subtle border-line text-fg-2 hover:bg-hover hover:border-line-strong"
           }`}
         >
-          <EmojiIcon emoji={g.emoji} size={15} />
-          <span className="font-mono text-[12px] leading-none">{g.count}</span>
+          <EmojiIcon emoji={g.emoji} size={16} />
+          <span className="tabular text-[11.5px] leading-none">{g.count}</span>
         </button>
       ))}
       <div className="relative">
