@@ -567,7 +567,7 @@ func Run(args []string, stdout io.Writer) int {
 			})
 		},
 	}
-	agentCreateCmd.Flags().StringVar(&agName, "name", "", "display_name")
+	agentCreateCmd.Flags().StringVar(&agName, "name", "", "display_name (auto-assigned from the name pool when omitted)")
 	agentCreateCmd.Flags().StringVar(&agRole, "role", "", "role text")
 	agentCreateCmd.Flags().StringVar(&agDriver, "driver", "builtin", "builtin|acp")
 	agentCreateCmd.Flags().StringVar(&agProvider, "provider", "", "acp provider: pi|codex|claude")

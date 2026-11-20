@@ -188,6 +188,10 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 
 ### Agent Driver 配置
 
+### Agent 命名
+
+创建 Agent 时 `display_name` 可省略（`POST /agents` 传空字符串、`sumi agent create` 不传 `--name`）。省略时 Server 在写事务内按内置英文名字池（`internal/app/agent_name.go`）取该 Space 内第一个未被占用的名字，与 `members` 的大小写不敏感唯一索引一致，已退休成员也算占用；池用尽后退回 `Agent<N>`（`N` 取最小可用值）。显式传入的名字仍走 `ValidateDisplayName` 并在冲突时返回 `conflict`。
+
 Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `driver_kind` 校验后存入 `agents.driver_config_json`：
 
 | driver_kind | 字段 | 校验 |

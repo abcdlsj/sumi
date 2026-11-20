@@ -687,7 +687,7 @@ func scanAgentSpec(row rowScanner) (protocol.AssignedAgentSpec, error) {
 }
 
 type CreateAgentInput struct {
-	DisplayName          string
+	DisplayName          string // Empty means auto-assign from the Agent name pool.
 	RoleText             string
 	ComputerID           string
 	DriverKind           domain.DriverKind
@@ -703,8 +703,12 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 	if !ok {
 		return domain.Member{}, domain.NewError(domain.CodePermissionDenied, "missing agent.create permission")
 	}
-	if err := domain.ValidateDisplayName(in.DisplayName); err != nil {
-		return domain.Member{}, err
+	// An empty display name is auto-assigned inside the write transaction so the
+	// pick sees every member of the Space.
+	if in.DisplayName != "" {
+		if err := domain.ValidateDisplayName(in.DisplayName); err != nil {
+			return domain.Member{}, err
+		}
 	}
 	cfg, err := domain.NormalizeDriverConfig(in.DriverKind, in.DriverConfig)
 	if err != nil {
@@ -722,6 +726,13 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 	var compOnline bool
 
 	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		if in.DisplayName == "" {
+			name, err := pickAgentDisplayNameTx(ctx, tx, actor.SpaceID)
+			if err != nil {
+				return err
+			}
+			in.DisplayName = name
+		}
 		compStatus, err := placeableComputerStatusTx(ctx, tx, actor, in.ComputerID)
 		if err != nil {
 			return err
