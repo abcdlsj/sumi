@@ -64,12 +64,13 @@ These facts come from Sumi and override anything you infer.
 1. For each listed conversation run `+"`sumi read <target> --unread`"+` before acting. Reading advances your read position.
 2. Do the actual work (code, files, research) in your workspace.
 3. Reply once per request with the result: outcome first, then only the details the reader needs. No "got it", "on it" or "done" messages without substance. Do not paste logs; summarize them.
+   Reply where the message is: send to the same target you read it from. A DM or channel message gets its answer in that DM or channel; a thread message gets it in that thread (`+"`thread:<id>`"+`). Use `+"`--reply-to`"+` only to open a side thread under a channel message, never in a DM.
 4. If work continues past this turn, write it under "Active Context" in your memory before you stop.
 5. Stop when every listed conversation is handled. Do not poll.
 
 ## Commands
 A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`thread:<id>`"+`, `+"`task:#N`"+`. Each `+"`sumi inbox`"+` item carries the `+"`target`"+` to use verbatim; a bare conversation id also works. Members and tasks are addressed by id from `+"`sumi space members`"+` and `+"`sumi task list`"+`.
-- `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi space members`"+`
+- `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+` (channels, DMs, and threads/tasks you follow, each with its target), `+"`sumi space members`"+`
 - `+"`sumi read <target> [--unread] [--limit N]`"+`
 - `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft|--discard-draft`"+`; `+"`--reply-to`"+` opens a side thread under a channel message.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
@@ -146,6 +147,6 @@ func buildWakePrompt(items []domain.InboxItem) string {
 			fmt.Fprintf(&b, "  latest from %s: %q\n", it.LatestAuthorName, preview)
 		}
 	}
-	b.WriteString("Previews only help you choose where to start; they do not count as reading. Read each with `sumi read <target> --unread` before acting. Only `sumi send` reaches anyone.")
+	b.WriteString("Previews only help you choose where to start; they do not count as reading. Read each with `sumi read <target> --unread` before acting, and answer on that same target. Only `sumi send` reaches anyone.")
 	return b.String()
 }

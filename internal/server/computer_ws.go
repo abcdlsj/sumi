@@ -289,7 +289,7 @@ func (s *Server) handleAgentConversations(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	convs, err := s.svc.ListConversations(r.Context(), agent)
+	convs, err := s.svc.ListAgentConversations(r.Context(), agent)
 	if err != nil {
 		writeError(w, err)
 		return

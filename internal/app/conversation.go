@@ -400,6 +400,66 @@ func (s *Service) ListConversations(ctx context.Context, viewer domain.Member) (
 	return out, rows.Err()
 }
 
+// ListAgentConversations is the Agent view of `sumi conversations`: visible channels and DMs plus
+// the threads and task conversations the agent follows, each carrying its CLI target.
+func (s *Service) ListAgentConversations(ctx context.Context, viewer domain.Member) ([]domain.Conversation, error) {
+	convs, err := s.ListConversations(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	targets := make(map[string]string, len(convs))
+	for i := range convs {
+		c := &convs[i]
+		c.Target = inboxTarget(c.Kind, c.ID, c.Slug, c.PeerDisplayName, 0)
+		targets[c.ID] = c.Target
+	}
+	rows, err := s.store.ReadDB().QueryContext(ctx,
+		`SELECT c.id, c.space_id, c.kind, COALESCE(c.topic, ''), COALESCE(c.parent_conversation_id, ''), COALESCE(c.root_message_id, ''),
+		        COALESCE(c.task_id, ''), COALESCE(t.number, 0), c.next_seq, c.created_at, cs.read_seq, cs.notify_level,
+		        COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.seq > cs.read_seq AND m.author_member_id <> ? AND m.deleted_at IS NULL), 0),
+		        COALESCE((SELECT COUNT(*) FROM message_mentions mm WHERE mm.conversation_id = c.id AND mm.member_id = ? AND mm.seq > cs.read_seq), 0)
+		 FROM conversation_states cs
+		 JOIN conversations c ON c.id = cs.conversation_id
+		 LEFT JOIN tasks t ON t.id = c.task_id
+		 WHERE cs.member_id = ? AND cs.following = 1 AND c.space_id = ? AND c.kind IN ('thread', 'task') AND c.archived_at IS NULL
+		 ORDER BY c.created_at ASC`,
+		viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID,
+	)
+	if err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list followed conversations", err)
+	}
+	var followed []domain.Conversation
+	for rows.Next() {
+		var c domain.Conversation
+		var kind, createdAt, notify string
+		var taskNumber int64
+		if err := rows.Scan(&c.ID, &c.SpaceID, &kind, &c.Topic, &c.ParentConversationID, &c.RootMessageID, &c.TaskID, &taskNumber,
+			&c.NextSeq, &createdAt, &c.ReadSeq, &notify, &c.UnreadCount, &c.MentionCount); err != nil {
+			_ = rows.Close()
+			return nil, domain.WrapError(domain.CodeInternal, "scan followed conversation", err)
+		}
+		c.Kind = domain.ConversationKind(kind)
+		c.CreatedAt = store.ParseTime(createdAt)
+		c.NotifyLevel = domain.NotifyLevel(notify)
+		c.Following = true
+		c.Target = inboxTarget(c.Kind, c.ID, "", "", taskNumber)
+		followed = append(followed, c)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list followed conversations", err)
+	}
+	for _, c := range followed {
+		// Following survives losing access (e.g. removed from a private channel); re-check visibility.
+		parent, ok := targets[c.ParentConversationID]
+		if !ok {
+			continue
+		}
+		c.ParentTarget = parent
+		convs = append(convs, c)
+	}
+	return convs, nil
+}
+
 type SendMessageInput struct {
 	ConversationID   string
 	ReplyToMessageID string // If set on a channel/dm message, routes into (or lazily creates) that message's thread conversation.

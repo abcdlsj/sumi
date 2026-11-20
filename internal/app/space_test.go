@@ -54,3 +54,64 @@ func mustOwnerUserID(t *testing.T, svc *Service, owner domain.Member) string {
 	}
 	return userID
 }
+
+func TestAgentConversationsListFollowedThreadsWithTargets(t *testing.T) {
+	svc, _, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	lin, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Lin", RoleText: "Helper", ComputerID: comp.ID,
+		DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	dm, err := svc.GetOrCreateDM(ctx, owner, lin.ID)
+	if err != nil {
+		t.Fatalf("dm: %v", err)
+	}
+	root, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: dm.ID, BodyMarkdown: "your role is seer"})
+	if err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	if _, err := svc.ListMessages(ctx, lin, ListMessagesInput{ConversationID: dm.ID}); err != nil {
+		t.Fatalf("lin reads dm: %v", err)
+	}
+	reply, err := svc.SendMessage(ctx, lin, SendMessageInput{ConversationID: dm.ID, ReplyToMessageID: root.Message.ID, BodyMarkdown: "check bram", EnforceFreshness: true})
+	if err != nil {
+		t.Fatalf("thread reply: %v", err)
+	}
+	threadID := reply.Message.ConversationID
+
+	byID := func(m domain.Member) map[string]domain.Conversation {
+		convs, err := svc.ListAgentConversations(ctx, m)
+		if err != nil {
+			t.Fatalf("list agent conversations: %v", err)
+		}
+		out := map[string]domain.Conversation{}
+		for _, c := range convs {
+			out[c.ID] = c
+		}
+		return out
+	}
+	// The root author follows the thread too, so both sides can find it without the Inbox.
+	for _, m := range []domain.Member{lin, owner} {
+		got := byID(m)
+		th, ok := got[threadID]
+		if !ok {
+			t.Fatalf("%s: followed thread missing from listing", m.DisplayName)
+		}
+		if th.Target != "thread:"+threadID || th.ParentTarget != got[dm.ID].Target || th.RootMessageID != root.Message.ID {
+			t.Fatalf("%s: thread entry %+v, dm target %q", m.DisplayName, th, got[dm.ID].Target)
+		}
+	}
+	if got := byID(lin); got[dm.ID].Target != "dm:@"+owner.DisplayName {
+		t.Fatalf("dm target = %q", got[dm.ID].Target)
+	}
+
+	if err := svc.SetFollowing(ctx, lin, threadID, false); err != nil {
+		t.Fatalf("unfollow: %v", err)
+	}
+	if _, ok := byID(lin)[threadID]; ok {
+		t.Fatal("unfollowed thread must drop out of the listing")
+	}
+}

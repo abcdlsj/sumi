@@ -194,6 +194,9 @@ type Conversation struct {
 	PeerDisplayName string       `json:"peer_display_name,omitempty"`
 	PeerKind        MemberKind   `json:"peer_kind,omitempty"`
 	PeerRuntime     RuntimeState `json:"peer_runtime_state,omitempty"`
+	// Target and ParentTarget are CLI addresses, set on Agent-facing listings only.
+	Target       string `json:"target,omitempty"`
+	ParentTarget string `json:"parent_target,omitempty"`
 }
 
 type Attachment struct {
