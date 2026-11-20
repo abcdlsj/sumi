@@ -34,7 +34,15 @@ const SSE_EVENTS = [
 
 /** Remount (and replay the slide-in) only when the panel shows a different object. */
 function detailKey(d: DetailTarget) {
-  return d.kind === "task" ? `t:${d.taskID}` : d.kind === "thread" ? `th:${d.threadConvID}` : d.kind === "agent" ? `a:${d.memberID}` : `m:${d.convID}`;
+  return d.kind === "task"
+    ? `t:${d.taskID}`
+    : d.kind === "thread"
+      ? `th:${d.threadConvID}`
+      : d.kind === "agent"
+        ? `a:${d.memberID}`
+        : d.kind === "human"
+          ? `h:${d.memberID}`
+          : `m:${d.convID}`;
 }
 
 function viewKey(v: MainView) {
@@ -476,6 +484,7 @@ export function Workbench({
               onClose={() => setDetail(null)}
               onSelectTarget={setDetail}
               onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+              onOpenDM={(memberID) => void openOrCreateDM(memberID)}
             />
           </div>
         )}

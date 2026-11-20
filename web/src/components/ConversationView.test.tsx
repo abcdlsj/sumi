@@ -267,3 +267,18 @@ describe("channel header", () => {
     expect(onOpenDetail).toHaveBeenCalledWith({ kind: "members", convID: conv.id });
   });
 });
+
+describe("@mention highlights in messages", () => {
+  it("opens agent or human detail when clicking a highlighted @mention", async () => {
+    messages = [msg(1, lisi, "cc @Lin and @Sam for review")];
+    const { onOpenDetail } = renderView();
+
+    const agentMention = await screen.findByRole("button", { name: "@Lin" });
+    fireEvent.click(agentMention);
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "agent", memberID: lin.id });
+
+    const humanMention = screen.getByRole("button", { name: "@Sam" });
+    fireEvent.click(humanMention);
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "human", memberID: sam.id });
+  });
+});

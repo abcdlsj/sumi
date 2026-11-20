@@ -199,3 +199,56 @@ describe("AgentDetail activity", () => {
     expect(screen.getByText("execute: no output for 12 min")).toBeTruthy();
   });
 });
+
+describe("HumanDetail and thread @mentions", () => {
+  it("shows human profile, computers, tasks, and starts a DM", () => {
+    const onSelectTarget = vi.fn();
+    const onOpenDM = vi.fn();
+    const data = {
+      ...roster,
+      computers: [
+        { id: "c1", owner_member_id: sam.id, name: "Sam MacBook", hostname: "sam.local", os: "macos", connection_status: "online", created_at: "2026-11-19T10:00:00Z" },
+      ],
+      tasks: [{ ...task, assignee_member_id: sam.id }],
+    } as unknown as BootstrapData;
+    const qc = new QueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <DetailPane spaceSlug="s" boot={data} target={{ kind: "human", memberID: sam.id }} onClose={() => {}} onSelectTarget={onSelectTarget} onOpenDM={onOpenDM} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("Person")).toBeTruthy();
+    expect(screen.getByText("@Sam")).toBeTruthy();
+    expect(screen.getByText("Sam MacBook")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Message" }));
+    expect(onOpenDM).toHaveBeenCalledWith(sam.id);
+
+    fireEvent.click(screen.getByRole("button", { name: /Unified read watermark/ }));
+    expect(onSelectTarget).toHaveBeenCalledWith({ kind: "task", taskID: task.id });
+  });
+
+  it("opens mentioned member detail when clicking @mention in a thread reply", async () => {
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [reply(1, lisi, "ask @Lin and @Sam")], read_seq: 0, following: true });
+    const onSelectTarget = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <DetailPane
+          spaceSlug="s"
+          boot={roster}
+          target={{ kind: "thread", threadConvID: "th-1", rootMessageID: "m1", parentSlug: "general" }}
+          onClose={() => {}}
+          onSelectTarget={onSelectTarget}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "@Lin" }));
+    expect(onSelectTarget).toHaveBeenCalledWith({ kind: "agent", memberID: lin.id });
+
+    fireEvent.click(screen.getByRole("button", { name: "@Sam" }));
+    expect(onSelectTarget).toHaveBeenCalledWith({ kind: "human", memberID: sam.id });
+  });
+});

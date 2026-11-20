@@ -16,13 +16,12 @@ import {
   Users,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
-import type { DetailTarget } from "./DetailPane";
+import { memberDetailTarget, type DetailTarget } from "./DetailPane";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
+import { MessageBody } from "./MessageBody";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
@@ -387,10 +386,9 @@ export function ConversationView({
                             </span>
                           ) : (
                             <button
-                              onClick={() => m.author_kind === "agent" && onOpenDetail({ kind: "agent", memberID: m.author_member_id })}
-                              className={`block mt-0.5 ${m.author_kind === "agent" ? "" : "cursor-default"}`}
-                              tabIndex={m.author_kind === "agent" ? 0 : -1}
-                              aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : undefined}
+                              onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                              className="block mt-0.5"
+                              aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
                             >
                               <MemberAvatar
                                 id={m.author_member_id}
@@ -411,7 +409,12 @@ export function ConversationView({
                             </div>
                           )}
                           <div className={`${grouped ? "" : "mt-1"} text-[14px] leading-[1.6] text-fg md`}>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
+                            <MessageBody
+                              body={m.body_markdown}
+                              members={boot.members}
+                              selfID={boot.current_member.id}
+                              onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
+                            />
                           </div>
 
                           <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />

@@ -1,14 +1,13 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { activityLabel, api, formatClock, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
+import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
 import { describeAction } from "./ConversationView";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
+import { MessageBody } from "./MessageBody";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
@@ -17,7 +16,12 @@ export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
   | { kind: "agent"; memberID: string }
+  | { kind: "human"; memberID: string }
   | { kind: "members"; convID: string };
+
+export function memberDetailTarget(member: Pick<Member, "id" | "kind">): DetailTarget {
+  return member.kind === "agent" ? { kind: "agent", memberID: member.id } : { kind: "human", memberID: member.id };
+}
 
 const PERMISSIONS: { code: Permission; label: string; hint: string }[] = [
   { code: "agent.create", label: "Create agents", hint: "Spin up new agents on its computer" },
@@ -49,7 +53,17 @@ function KV({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function CompactMessage({ m, spaceSlug }: { m: Message; spaceSlug: string }) {
+function CompactMessage({
+  m,
+  spaceSlug,
+  boot,
+  onSelectTarget,
+}: {
+  m: Message;
+  spaceSlug: string;
+  boot: BootstrapData;
+  onSelectTarget: (t: DetailTarget) => void;
+}) {
   if (m.kind !== "text") {
     return (
       <div className="flex items-center gap-2 text-[13px] text-fg-3 pl-1">
@@ -61,16 +75,35 @@ function CompactMessage({ m, spaceSlug }: { m: Message; spaceSlug: string }) {
       </div>
     );
   }
+  const author = boot.members.find((x) => x.id === m.author_member_id);
   return (
     <article className="flex items-start gap-2.5 animate-fade-in">
-      <MemberAvatar id={m.author_member_id} name={m.author_display_name ?? "?"} kind={m.author_kind ?? "human"} size="sm" />
+      <button
+        type="button"
+        onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+        aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
+        className="shrink-0"
+      >
+        <MemberAvatar
+          id={m.author_member_id}
+          name={m.author_display_name ?? "?"}
+          kind={m.author_kind ?? "human"}
+          size="sm"
+          state={author?.agent?.runtime_state}
+        />
+      </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 h-5">
           <span className="text-[13.5px] font-semibold text-fg">{m.author_display_name}</span>
           <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
         </div>
         <div className="mt-0.5 text-[14px] leading-relaxed text-fg md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body_markdown}</ReactMarkdown>
+          <MessageBody
+            body={m.body_markdown}
+            members={boot.members}
+            selfID={boot.current_member.id}
+            onSelectMember={(member) => onSelectTarget(memberDetailTarget(member))}
+          />
         </div>
         <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
       </div>
@@ -165,6 +198,7 @@ export function DetailPane({
   onClose,
   onSelectTarget,
   onOpenConversation,
+  onOpenDM,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -172,12 +206,13 @@ export function DetailPane({
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
+  onOpenDM?: (memberID: string) => void;
 }) {
   return (
     <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
-      {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} />}
+      {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "thread" && (
-        <ThreadDetail spaceSlug={spaceSlug} boot={boot} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} />
+        <ThreadDetail spaceSlug={spaceSlug} boot={boot} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} onSelectTarget={onSelectTarget} />
       )}
       {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "agent" && (
@@ -188,6 +223,15 @@ export function DetailPane({
           onClose={onClose}
           onSelectTarget={onSelectTarget}
           onOpenConversation={onOpenConversation}
+        />
+      )}
+      {target.kind === "human" && (
+        <HumanDetail
+          boot={boot}
+          memberID={target.memberID}
+          onClose={onClose}
+          onSelectTarget={onSelectTarget}
+          onOpenDM={onOpenDM}
         />
       )}
     </aside>
@@ -305,7 +349,7 @@ function MembersDetail({
                 <div key={m.id} className="group h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-subtle">
                   <button
                     className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
-                    onClick={() => (full.kind === "agent" ? onSelectTarget({ kind: "agent", memberID: full.id }) : undefined)}
+                    onClick={() => onSelectTarget(memberDetailTarget(full))}
                   >
                     <MemberAvatar id={full.id} name={full.display_name} kind={full.kind} size="sm" state={full.agent?.runtime_state} />
                     <span className="truncate text-[14px] text-fg">{full.display_name}</span>
@@ -337,7 +381,19 @@ function MembersDetail({
   );
 }
 
-function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; boot: BootstrapData; taskID: string; onClose: () => void }) {
+function TaskDetail({
+  spaceSlug,
+  boot,
+  taskID,
+  onClose,
+  onSelectTarget,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  taskID: string;
+  onClose: () => void;
+  onSelectTarget: (t: DetailTarget) => void;
+}) {
   const qc = useQueryClient();
   const act = useAction();
   const taskQ = useQuery({ queryKey: ["task", spaceSlug, taskID], queryFn: () => api.getTask(spaceSlug, taskID).then((r) => r.task) });
@@ -433,7 +489,7 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
           ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
             <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
           ) : (
-            msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} />)
+            msgsQ.data!.messages.map((m) => <CompactMessage key={m.id} m={m} spaceSlug={spaceSlug} boot={boot} onSelectTarget={onSelectTarget} />)
           )}
         </div>
         <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
@@ -462,12 +518,14 @@ function ThreadDetail({
   threadConvID,
   parentSlug,
   onClose,
+  onSelectTarget,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
   threadConvID: string;
   parentSlug: string;
   onClose: () => void;
+  onSelectTarget: (t: DetailTarget) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
@@ -514,7 +572,7 @@ function ThreadDetail({
           {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
           {(msgsQ.data?.messages ?? []).map((m, i) => (
             <div key={m.id}>
-              <CompactMessage m={m} spaceSlug={spaceSlug} />
+              <CompactMessage m={m} spaceSlug={spaceSlug} boot={boot} onSelectTarget={onSelectTarget} />
               {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
                 <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
                   <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
@@ -787,6 +845,101 @@ function AgentDetail({
             })}
           </div>
         </Section>
+      </div>
+    </>
+  );
+}
+
+function HumanDetail({
+  boot,
+  memberID,
+  onClose,
+  onSelectTarget,
+  onOpenDM,
+}: {
+  boot: BootstrapData;
+  memberID: string;
+  onClose: () => void;
+  onSelectTarget: (t: DetailTarget) => void;
+  onOpenDM?: (memberID: string) => void;
+}) {
+  const member = boot.members.find((m) => m.id === memberID);
+  if (!member) return <DetailSkeleton />;
+  const isSelf = member.id === boot.current_member.id;
+  const computers = boot.computers.filter((c) => c.owner_member_id === member.id);
+  const openTasks = boot.tasks.filter((t) => t.assignee_member_id === member.id && t.status !== "done" && t.status !== "closed");
+
+  return (
+    <>
+      <PaneHeader onClose={onClose}>
+        <span className="font-semibold text-fg">Person</span>
+      </PaneHeader>
+      <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
+        <div className="px-5 py-5 flex items-center gap-4">
+          <MemberAvatar id={member.id} name={member.display_name} kind="human" size="xl" />
+          <div className="min-w-0 flex-1">
+            <div className="font-display text-[22px] font-semibold text-fg truncate">{member.display_name}</div>
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              <Badge className="capitalize">{member.access_level}</Badge>
+              {isSelf && <Badge tone="accent">You</Badge>}
+            </div>
+            {!isSelf && onOpenDM && (
+              <div className="mt-3">
+                <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
+                  Message
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Section title="Profile">
+          <div className="grid grid-cols-[96px_1fr] gap-x-3">
+            <KV label="Handle">
+              <span className="font-mono text-[13px]">@{member.display_name}</span>
+            </KV>
+            <KV label="Access">
+              <span className="capitalize">{member.access_level}</span>
+            </KV>
+            {member.created_at && (
+              <KV label="Joined">
+                <span className="tabular text-fg-2">{formatDay(member.created_at)}</span>
+              </KV>
+            )}
+          </div>
+        </Section>
+
+        {computers.length > 0 && (
+          <Section title="Computers">
+            <div className="space-y-1.5">
+              {computers.map((c) => (
+                <div key={c.id} className="h-9 px-2.5 rounded-[8px] bg-subtle/60 flex items-center gap-2 text-[13.5px]">
+                  <Monitor className="size-4 text-fg-3 shrink-0" />
+                  <span className="truncate flex-1 text-fg">{c.name}</span>
+                  <span className={`size-1.5 rounded-full shrink-0 ${c.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {openTasks.length > 0 && (
+          <Section title="Assigned tasks">
+            <div className="rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden">
+              {openTasks.map((tk) => (
+                <button
+                  key={tk.id}
+                  onClick={() => onSelectTarget({ kind: "task", taskID: tk.id })}
+                  className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left transition-colors"
+                >
+                  <TaskStatusIcon status={tk.status} />
+                  <span className="font-mono text-[12.5px] text-fg-3 shrink-0">#{tk.number}</span>
+                  <span className="text-[13.5px] font-medium text-fg truncate flex-1">{tk.title}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
       </div>
     </>
   );
