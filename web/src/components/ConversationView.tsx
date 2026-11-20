@@ -21,6 +21,7 @@ import { api, formatClock, formatDay, type BootstrapData, type Conversation, typ
 import type { DetailTarget } from "./DetailPane";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
+import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
@@ -189,6 +190,14 @@ export function ConversationView({
   });
   const memberCount = membersQ.data?.members.length ?? boot.members.length;
   const headerFaces = (membersQ.data?.members ?? []).slice(0, 3);
+  const mentionMembers = useMentionMembers(spaceSlug, boot, conv.id, conv.kind === "dm" ? conv.peer_member_id : undefined);
+  const mentions = useMentionPicker({
+    members: mentionMembers,
+    selfID: boot.current_member.id,
+    value: composer,
+    onChange: setComposer,
+    inputRef: textRef,
+  });
 
   async function handleSend(e?: FormEvent) {
     e?.preventDefault();
@@ -201,6 +210,7 @@ export function ConversationView({
     setComposer("");
     setReplyingTo(null);
     draft.clear();
+    mentions.close();
     jumpToEnd();
     textRef.current?.focus();
     void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
@@ -505,7 +515,8 @@ export function ConversationView({
       <div className="shrink-0 bg-bg/60 border-t border-line">
         <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
         <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
-          <div className="bg-card border border-line-strong rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+          <div className="relative bg-card border border-line-strong rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+            <MentionPopup picker={mentions} />
             {replyTarget && (
               <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
                 <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
@@ -522,8 +533,14 @@ export function ConversationView({
               ref={textRef}
               rows={1}
               value={composer}
-              onChange={(e) => setComposer(e.target.value)}
+              onChange={(e) => {
+                setComposer(e.target.value);
+                mentions.detect();
+              }}
+              onClick={mentions.detect}
+              onBlur={mentions.close}
               onKeyDown={(e) => {
+                if (mentions.handleKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   void handleSend();

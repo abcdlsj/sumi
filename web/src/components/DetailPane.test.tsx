@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData, type Member, type Message, type Task } from "../api";
 import { DetailPane } from "./DetailPane";
@@ -87,6 +87,22 @@ describe("ThreadDetail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Follow" }));
     await waitFor(() => expect(setFollowing).toHaveBeenCalledWith("s", "th-1", true));
     expect(await screen.findByRole("button", { name: "Following" })).toBeTruthy();
+  });
+
+  it("completes mentions in the reply box without sending", async () => {
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [reply(1), reply(2)], read_seq: 0, following: true });
+    renderPane({ kind: "thread", threadConvID: "th-1", rootMessageID: "m1", parentSlug: "general" });
+    await screen.findByText("reply 2");
+
+    const box = screen.getByRole("textbox", { name: "Reply in thread…" });
+    fireEvent.change(box, { target: { value: "@" } });
+    const list = await screen.findByRole("listbox", { name: "Mention candidates" });
+    const options = within(list).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringContaining("Lin"), expect.stringContaining("Sam")]);
+
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect((box as HTMLTextAreaElement).value).toBe("@Lin ");
+    expect(api.sendMessage).not.toHaveBeenCalled();
   });
 
   it("follows new replies and offers a jump pill when parked", async () => {

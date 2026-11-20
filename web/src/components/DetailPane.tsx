@@ -8,6 +8,7 @@ import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
 import { describeAction } from "./ConversationView";
+import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
@@ -80,16 +81,21 @@ function CompactMessage({ m, spaceSlug }: { m: Message; spaceSlug: string }) {
 function ReplyBox({
   spaceSlug,
   placeholder,
+  members,
+  selfID,
   onSend,
 }: {
   spaceSlug: string;
   placeholder: string;
+  members: Member[];
+  selfID: string;
   onSend: (body: string, attachmentIDs: string[]) => Promise<void>;
 }) {
   const [reply, setReply] = useState("");
   const draft = useAttachmentDraft(spaceSlug);
   const { busy, run } = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const mentions = useMentionPicker({ members, selfID, value: reply, onChange: setReply, inputRef: textRef });
 
   useLayoutEffect(() => {
     const el = textRef.current;
@@ -105,13 +111,15 @@ function ReplyBox({
     if (ok) {
       setReply("");
       draft.clear();
+      mentions.close();
       textRef.current?.focus();
     }
   }
 
   return (
     <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
-      <div className="rounded-[12px] border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+      <div className="relative rounded-[12px] border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow]">
+        <MentionPopup picker={mentions} />
         <AttachmentDraftRow draft={draft} />
         <div className="p-1.5 flex items-end gap-1">
           <AttachmentPicker draft={draft} />
@@ -119,8 +127,14 @@ function ReplyBox({
             ref={textRef}
             rows={1}
             value={reply}
-            onChange={(e) => setReply(e.target.value)}
+            onChange={(e) => {
+              setReply(e.target.value);
+              mentions.detect();
+            }}
+            onClick={mentions.detect}
+            onBlur={mentions.close}
             onKeyDown={(e) => {
+              if (mentions.handleKeyDown(e)) return;
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void submit();
@@ -162,7 +176,9 @@ export function DetailPane({
   return (
     <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
       {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} />}
-      {target.kind === "thread" && <ThreadDetail spaceSlug={spaceSlug} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} />}
+      {target.kind === "thread" && (
+        <ThreadDetail spaceSlug={spaceSlug} boot={boot} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} />
+      )}
       {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "agent" && (
         <AgentDetail
@@ -332,6 +348,7 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
     enabled: Boolean(task?.conversation_id),
   });
   const stream = useStickToBottom({ streamKey: task?.conversation_id ?? taskID, count: msgsQ.data?.messages.length ?? 0 });
+  const members = useMentionMembers(spaceSlug, boot, task?.conversation_id ?? task?.channel_id);
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["task", spaceSlug, taskID] });
@@ -425,6 +442,8 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
       <ReplyBox
         spaceSlug={spaceSlug}
         placeholder={`Reply in #${task.number}…`}
+        members={members}
+        selfID={boot.current_member.id}
         onSend={async (body, ids) => {
           let convID = task.conversation_id;
           if (!convID) convID = (await api.ensureTaskConv(spaceSlug, task.id)).task.conversation_id;
@@ -437,12 +456,25 @@ function TaskDetail({ spaceSlug, boot, taskID, onClose }: { spaceSlug: string; b
   );
 }
 
-function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceSlug: string; threadConvID: string; parentSlug: string; onClose: () => void }) {
+function ThreadDetail({
+  spaceSlug,
+  boot,
+  threadConvID,
+  parentSlug,
+  onClose,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  threadConvID: string;
+  parentSlug: string;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const act = useAction();
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
   const following = msgsQ.data?.following;
   const stream = useStickToBottom({ streamKey: threadConvID, count: msgsQ.data?.messages.length ?? 0 });
+  const members = useMentionMembers(spaceSlug, boot, threadConvID);
 
   return (
     <>
@@ -497,6 +529,8 @@ function ThreadDetail({ spaceSlug, threadConvID, parentSlug, onClose }: { spaceS
       <ReplyBox
         spaceSlug={spaceSlug}
         placeholder="Reply in thread…"
+        members={members}
+        selfID={boot.current_member.id}
         onSend={async (body, ids) => {
           await api.sendMessage(spaceSlug, threadConvID, body, undefined, ids);
           stream.jumpToEnd();

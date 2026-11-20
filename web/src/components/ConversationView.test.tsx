@@ -213,3 +213,44 @@ describe("composer", () => {
     expect(container).toBeTruthy();
   });
 });
+
+describe("@mention autocomplete", () => {
+  it("offers agents first and inserts the picked name without sending", async () => {
+    renderView();
+    await screen.findByText("message 2");
+    const box = screen.getByRole("textbox", { name: "Message #engineering" });
+    fireEvent.change(box, { target: { value: "@" } });
+
+    const list = await screen.findByRole("listbox", { name: "Mention candidates" });
+    const options = within(list).getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0].textContent).toContain("Lin");
+    expect(options[0].textContent).toContain("Agent");
+    expect(options[1].textContent).toContain("Sam");
+    expect(options[1].textContent).toContain("member");
+
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(within(list).getAllByRole("option")[1].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    expect((box as HTMLTextAreaElement).value).toBe("@Sam ");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("filters as you type and disappears without a match", async () => {
+    renderView();
+    await screen.findByText("message 2");
+    const box = screen.getByRole("textbox", { name: "Message #engineering" });
+
+    fireEvent.change(box, { target: { value: "@n" } });
+    const list = await screen.findByRole("listbox", { name: "Mention candidates" });
+    const options = within(list).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain("Lin");
+
+    fireEvent.change(box, { target: { value: "@zzz" } });
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Mention candidates" })).toBeNull());
+    fireEvent.keyDown(box, { key: "Escape" });
+  });
+});
