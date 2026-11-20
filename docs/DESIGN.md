@@ -28,7 +28,7 @@ Sumi 是一个 Human 与 Agent 在同一个 Space 中持续协作的平台。Age
 - **单一本地根目录**：所有本地状态都在 `~/.sumi`（数据库、附件对象、Daemon 状态、桌面配置），不按版本分子目录。代码不认别的布局，也不替使用者搬数据。
 - **三认证面隔离**：Browser Cookie、Computer token、Agent driver token 互不通用，服务端只存 hash；模型凭据只下发给承载该 Agent 的 Computer，永不回给浏览器。
 - **Computer ↔ Server**：一条 WebSocket 加能力协商；唤醒是轻量通知而不是重型队列。未读始终在服务端，重连即补齐；失败按退避重试，连续失败后熔断，暂停期间不丢消息。
-- **Agent 隔离**：每个 Agent 有独立 Agent Home、独立 driver token 与 capability socket，同机 Agent 互相读不到目录与对话；外部 coding agent（ACP）跑在按 provider 隔离的配置目录里，不继承宿主的 skills / hooks / 会话。隔离只带入跑得起来所需的东西：宿主凭据与模型目录软链，模型与 provider 偏好按 Agent 覆盖，另有按 Agent 显式点名的 provider 插件（`driver_config.pi_packages`，仅 `npm:` 规格）——不点名就不加载任何宿主扩展。Runtime Session 只在 provider 与模型未变时才能被恢复：换了凭据就重开，不拿旧会话假装续上。
+- **Agent 隔离**：每个 Agent 有独立 Agent Home、独立 driver token 与 capability socket，同机 Agent 互相读不到目录与对话；外部 coding agent（ACP）跑在按 provider 隔离的配置目录里，不继承宿主的 skills / hooks / 会话。隔离只带入跑得起来所需的东西：宿主凭据与模型目录软链，模型与 provider 偏好按 Agent 覆盖，另有按 Agent 显式点名的 provider 插件（`driver_config.pi_packages`，仅 `npm:` 规格）——不点名就不加载任何宿主扩展。Runtime Session 只在 provider 与模型未变时才能被恢复：换了凭据就重开，不拿旧会话假装续上。provider 与模型怎么选以隔离目录的 pi settings 为准（pi 不认 `PI_PROVIDER` 这类环境覆盖），ACP 启动命令（含自定义 command）只负责把凭据带进去。
 - **失败要可见**：错误以稳定错误码加有界描述上报；日志、错误与协议帧都不带消息正文、prompt、memory 内容与 secret。
 
 ## 四、界面
