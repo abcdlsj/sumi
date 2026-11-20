@@ -268,7 +268,8 @@ export function TasksView({
 }
 
 const STATE_WORD: Record<RuntimeState, string> = { idle: "Idle", working: "Working", error: "Error", offline: "Offline" };
-const STATE_DOT: Record<RuntimeState, string> = { idle: "bg-fg-4", working: "bg-work animate-breathe", error: "bg-danger", offline: "border border-fg-4" };
+const STATE_DOT: Record<RuntimeState, string> = { idle: "bg-online", working: "bg-busy animate-breathe", error: "bg-danger", offline: "border border-fg-4" };
+const STATE_TEXT: Record<RuntimeState, string> = { idle: "text-online", working: "text-busy", error: "text-danger", offline: "text-fg-3" };
 
 /** Raft-style agent table: identity on the left, aligned status / runtime / computer columns on the right. */
 function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selectedID?: string; onInspect: (id: string) => void }) {
@@ -336,7 +337,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                       <span className="flex items-baseline gap-2 min-w-0">
                         <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
                         {st === "working" || st === "error" ? (
-                          <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-work"}`} title={agentStatusText(boot, m)}>
+                          <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
                             {agentStatusText(boot, m)}
                           </span>
                         ) : null}
@@ -348,7 +349,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                         {[STATE_WORD[st], runtime, model, comp?.name].filter(Boolean).join(" · ")}
                       </span>
                     </span>
-                    <span className="hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] text-fg-2 shrink-0">
+                    <span className={`hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] shrink-0 ${STATE_TEXT[st]}`}>
                       <span className={`size-2 rounded-full shrink-0 ${STATE_DOT[st]}`} />
                       {STATE_WORD[st]}
                     </span>
@@ -356,7 +357,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                       {model || runtime}
                     </span>
                     <span className="hidden @[640px]:flex items-center gap-1.5 w-[136px] text-[13px] text-fg-3 shrink-0 min-w-0" title={comp?.hostname}>
-                      <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-work" : "bg-fg-4"}`} />
+                      <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
                       <span className="truncate">{comp?.name ?? "No computer"}</span>
                     </span>
                     <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -522,8 +523,8 @@ export function AdminPanel({
                             </span>
                           ))}
                         </div>
-                        <Badge tone={online ? "work" : "neutral"}>
-                          <span className={`size-1.5 rounded-full ${online ? "bg-work" : "bg-fg-4"}`} />
+                        <Badge tone={online ? "online" : "neutral"}>
+                          <span className={`size-1.5 rounded-full ${online ? "bg-online" : "bg-fg-4"}`} />
                           {online ? "Online" : c.last_seen_at ? `Seen ${formatDay(c.last_seen_at)} ${formatClock(c.last_seen_at)}` : "Offline"}
                         </Badge>
                       </div>

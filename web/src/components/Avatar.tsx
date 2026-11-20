@@ -145,8 +145,7 @@ export function stateLabel(state?: RuntimeState): string {
 /** Status dot; `ring` must match the surface it sits on so it reads as a cut-out. */
 export function StatusDot({ state, ring = "var(--panel)", size = 10 }: { state?: RuntimeState; ring?: string; size?: number }) {
   const s = state ?? "offline";
-  const fill =
-    s === "working" ? "var(--work)" : s === "error" ? "var(--danger)" : s === "idle" ? "var(--text-4)" : "transparent";
+  const fill = s === "working" ? "var(--busy)" : s === "error" ? "var(--danger)" : s === "idle" ? "var(--online)" : "transparent";
   return (
     <span
       title={stateLabel(s)}

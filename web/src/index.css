@@ -28,6 +28,11 @@
   --review: #b7791f;
   --work: #0c9a82;
   --work-soft: #e3f6f1;
+  /* Runtime state: idle reads as online green, working as amber. */
+  --online: #0c7d57;
+  --online-soft: #e2f3ec;
+  --busy: #9e6408;
+  --busy-soft: #fbf1dd;
   --danger: #d92d2d;
   --danger-soft: #fdeded;
 
@@ -43,7 +48,8 @@
   --nav-fill-2: rgba(20, 20, 40, 0.09);
   --nav-line: rgba(20, 20, 40, 0.08);
   --nav-line-strong: rgba(20, 20, 40, 0.2);
-  --nav-work: #0b8a74;
+  --nav-online: #0a7a52;
+  --nav-busy: #9c6209;
   --nav-danger: #c62828;
 
   --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.05);
@@ -75,6 +81,10 @@
   --review: #f2c14e;
   --work: #2fd3b0;
   --work-soft: rgba(47, 211, 176, 0.12);
+  --online: #34d399;
+  --online-soft: rgba(52, 211, 153, 0.13);
+  --busy: #f2b544;
+  --busy-soft: rgba(242, 181, 68, 0.14);
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.13);
 
@@ -90,7 +100,8 @@
   --nav-fill-2: rgba(255, 255, 255, 0.11);
   --nav-line: rgba(255, 255, 255, 0.06);
   --nav-line-strong: rgba(255, 255, 255, 0.2);
-  --nav-work: #5fe0c2;
+  --nav-online: #45dfa4;
+  --nav-busy: #f5c05a;
   --nav-danger: #ff8a8a;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -183,6 +194,10 @@
   --color-warm-soft: var(--warm-soft);
   --color-work: var(--work);
   --color-work-soft: var(--work-soft);
+  --color-online: var(--online);
+  --color-online-soft: var(--online-soft);
+  --color-busy: var(--busy);
+  --color-busy-soft: var(--busy-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-nav: var(--nav);
@@ -197,7 +212,8 @@
   --color-nav-line-strong: var(--nav-line-strong);
   --color-nav-fill: var(--nav-fill);
   --color-nav-fill-2: var(--nav-fill-2);
-  --color-nav-work: var(--nav-work);
+  --color-nav-online: var(--nav-online);
+  --color-nav-busy: var(--nav-busy);
   --color-nav-danger: var(--nav-danger);
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
