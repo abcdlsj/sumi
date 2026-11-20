@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type BootstrapData, type Conversation, type Member, type Message } from "../api";
+import { api, formatClock, type BootstrapData, type Conversation, type Member, type Message } from "../api";
 import { ConversationView } from "./ConversationView";
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
@@ -298,5 +298,55 @@ describe("@mention highlights in messages", () => {
     const humanMention = screen.getByRole("button", { name: "@Sam" });
     fireEvent.click(humanMention);
     expect(onOpenDetail).toHaveBeenCalledWith({ kind: "human", memberID: sam.id });
+  });
+});
+
+describe("thread reply summary", () => {
+  it("shows the newest replies under the root message and opens the thread", async () => {
+    messages = [
+      {
+        ...msg(1, lisi, "rollout plan?"),
+        reply_count: 7,
+        thread_conversation_id: "th-1",
+        last_reply_at: new Date(Date.UTC(2026, 10, 19, 10, 9)).toISOString(),
+        latest_replies: [
+          {
+            message_id: "r-1",
+            seq: 2,
+            author_member_id: lin.id,
+            author_display_name: lin.display_name,
+            author_kind: "agent",
+            preview: "canary first",
+            created_at: new Date(Date.UTC(2026, 10, 19, 10, 5)).toISOString(),
+          },
+          {
+            message_id: "r-2",
+            seq: 3,
+            author_member_id: sam.id,
+            author_display_name: sam.display_name,
+            author_kind: "human",
+            preview: "then the rest",
+            created_at: new Date(Date.UTC(2026, 10, 19, 10, 9)).toISOString(),
+          },
+        ],
+      },
+    ];
+    const { onOpenDetail } = renderView();
+
+    const summary = await screen.findByRole("button", { name: /7 replies/ });
+    expect(within(summary).getByText("canary first")).toBeTruthy();
+    expect(within(summary).getByText("then the rest")).toBeTruthy();
+    expect(within(summary).getByText("Lin")).toBeTruthy();
+    expect(within(summary).getByText(`Last ${formatClock(new Date(Date.UTC(2026, 10, 19, 10, 9)).toISOString())}`)).toBeTruthy();
+
+    fireEvent.click(within(summary).getByText("then the rest"));
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "thread", threadConvID: "th-1", rootMessageID: "msg-1", parentSlug: "engineering" });
+  });
+
+  it("keeps the count when a thread has no text replies to preview", async () => {
+    messages = [{ ...msg(1, lisi, "see thread"), reply_count: 2, thread_conversation_id: "th-2" }];
+    renderView();
+    const summary = await screen.findByRole("button", { name: /2 replies/ });
+    expect(within(summary).queryAllByRole("img")).toHaveLength(0);
   });
 });

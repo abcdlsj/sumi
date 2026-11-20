@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -221,12 +220,9 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 			convID,
 		).Scan(&latestAuthor, &latestBody, &latestAction, &latestAtStr)
 
-		preview := strings.TrimSpace(latestBody)
+		preview := previewText(latestBody)
 		if preview == "" && latestAction != "" {
 			preview = "[" + latestAction + "]"
-		}
-		if r := []rune(preview); len(r) > 120 {
-			preview = string(r[:120]) + "…"
 		}
 
 		title := slug

@@ -220,28 +220,42 @@ type ReactionGroup struct {
 }
 
 type Message struct {
-	ID               string          `json:"id"`
-	SpaceID          string          `json:"space_id"`
-	ConversationID   string          `json:"conversation_id"`
-	Seq              int64           `json:"seq"`
-	AuthorMemberID   string          `json:"author_member_id"`
-	AuthorName       string          `json:"author_display_name,omitempty"`
-	AuthorKind       MemberKind      `json:"author_kind,omitempty"`
-	Kind             MessageKind     `json:"kind"`
-	BodyMarkdown     string          `json:"body_markdown"`
-	ActionKind       ActionKind      `json:"action_kind,omitempty"`
-	PayloadJSON      string          `json:"payload_json,omitempty"`
-	MentionAll       bool            `json:"mention_all,omitempty"`
-	MentionMemberIDs []string        `json:"mention_member_ids,omitempty"`
-	ReplyCount       int64           `json:"reply_count,omitempty"`
-	ThreadConvID     string          `json:"thread_conversation_id,omitempty"`
-	LastReplyAt      *time.Time      `json:"last_reply_at,omitempty"`
-	AttachedTasks    []Task          `json:"attached_tasks,omitempty"`
-	Attachments      []Attachment    `json:"attachments,omitempty"`
-	Reactions        []ReactionGroup `json:"reactions,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	EditedAt         *time.Time      `json:"edited_at,omitempty"`
-	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
+	ID               string               `json:"id"`
+	SpaceID          string               `json:"space_id"`
+	ConversationID   string               `json:"conversation_id"`
+	Seq              int64                `json:"seq"`
+	AuthorMemberID   string               `json:"author_member_id"`
+	AuthorName       string               `json:"author_display_name,omitempty"`
+	AuthorKind       MemberKind           `json:"author_kind,omitempty"`
+	Kind             MessageKind          `json:"kind"`
+	BodyMarkdown     string               `json:"body_markdown"`
+	ActionKind       ActionKind           `json:"action_kind,omitempty"`
+	PayloadJSON      string               `json:"payload_json,omitempty"`
+	MentionAll       bool                 `json:"mention_all,omitempty"`
+	MentionMemberIDs []string             `json:"mention_member_ids,omitempty"`
+	ReplyCount       int64                `json:"reply_count,omitempty"`
+	ThreadConvID     string               `json:"thread_conversation_id,omitempty"`
+	LastReplyAt      *time.Time           `json:"last_reply_at,omitempty"`
+	LatestReplies    []ThreadReplyPreview `json:"latest_replies,omitempty"`
+	AttachedTasks    []Task               `json:"attached_tasks,omitempty"`
+	Attachments      []Attachment         `json:"attachments,omitempty"`
+	Reactions        []ReactionGroup      `json:"reactions,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	EditedAt         *time.Time           `json:"edited_at,omitempty"`
+	DeletedAt        *time.Time           `json:"deleted_at,omitempty"`
+}
+
+// ThreadReplyPreview is the one-line excerpt of a thread reply that rides along
+// with its root message, so a channel row can show what the thread says.
+// ReplyCount stays authoritative; this is the newest few, display only.
+type ThreadReplyPreview struct {
+	MessageID  string     `json:"message_id"`
+	Seq        int64      `json:"seq"`
+	AuthorID   string     `json:"author_member_id"`
+	AuthorName string     `json:"author_display_name,omitempty"`
+	AuthorKind MemberKind `json:"author_kind,omitempty"`
+	Preview    string     `json:"preview"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type Task struct {

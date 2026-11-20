@@ -23,6 +23,7 @@ import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachment
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
+import { ThreadReplySummary } from "./ThreadReplies";
 import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
@@ -493,18 +494,14 @@ export function ConversationView({
                           )}
 
                           {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
-                            <button
-                              onClick={() =>
+                            <ThreadReplySummary
+                              replyCount={m.reply_count}
+                              lastReplyAt={m.last_reply_at}
+                              replies={m.latest_replies}
+                              onOpen={() =>
                                 onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: conv.slug ?? "dm" })
                               }
-                              className="mt-1.5 h-8 pl-2 pr-3 -ml-2 rounded-[8px] inline-flex items-center gap-2 text-[13px] text-accent-text hover:bg-accent-soft transition-colors"
-                            >
-                              <MessageSquare className="size-4" />
-                              <span className="font-medium">
-                                {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}
-                              </span>
-                              <span className="tabular text-[12px] text-fg-3">Last {formatClock(m.last_reply_at)}</span>
-                            </button>
+                            />
                           ) : null}
                         </div>
 

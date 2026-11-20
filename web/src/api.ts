@@ -158,6 +158,16 @@ export interface ReactionGroup {
   reacted: boolean;
 }
 
+export interface ThreadReplyPreview {
+  message_id: string;
+  seq: number;
+  author_member_id: string;
+  author_display_name?: string;
+  author_kind?: MemberKind;
+  preview: string;
+  created_at: string;
+}
+
 export interface Message {
   id: string;
   space_id: string;
@@ -174,6 +184,7 @@ export interface Message {
   reply_count?: number;
   thread_conversation_id?: string;
   last_reply_at?: string;
+  latest_replies?: ThreadReplyPreview[];
   attached_tasks?: Task[];
   attachments?: Attachment[];
   reactions?: ReactionGroup[];

@@ -1099,28 +1099,10 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 	s.loadMessageAttachments(ctx, msgs)
 	s.loadMessageReactions(ctx, viewer.ID, msgs)
 
-	// Enrich channel/DM root messages with compact thread reply counts and attached tasks.
+	// Enrich channel/DM root messages with thread reply summaries and attached tasks.
 	if c.Kind != domain.ConversationThread && c.Kind != domain.ConversationTask && len(msgs) > 0 {
+		s.loadThreadSummaries(ctx, msgs)
 		for i := range msgs {
-			var threadID string
-			var replyCount int64
-			var lastReply sql.NullString
-			if err := s.store.ReadDB().QueryRowContext(ctx,
-				`SELECT th.id, COUNT(rm.id), MAX(rm.created_at)
-				 FROM conversations th
-				 LEFT JOIN messages rm ON rm.conversation_id = th.id AND rm.deleted_at IS NULL
-				 WHERE th.kind = 'thread' AND th.root_message_id = ?
-				 GROUP BY th.id`,
-				msgs[i].ID,
-			).Scan(&threadID, &replyCount, &lastReply); err == nil {
-				msgs[i].ThreadConvID = threadID
-				msgs[i].ReplyCount = replyCount
-				if lastReply.Valid {
-					t := store.ParseTime(lastReply.String)
-					msgs[i].LastReplyAt = &t
-				}
-			}
-
 			taskRows, err := s.store.ReadDB().QueryContext(ctx,
 				`SELECT t.id, t.space_id, t.number, t.channel_id, COALESCE(t.source_message_id, ''), COALESCE(t.conversation_id, ''),
 				        t.title, t.description, t.status, t.creator_member_id, COALESCE(t.assignee_member_id, ''),
