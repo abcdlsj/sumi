@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Loader2 } from "lucide-react";
+import { api, type Message } from "../api";
 
 /** Distance from the end that still counts as reading the newest message. */
 const NEAR_END_PX = 80;
@@ -138,6 +139,87 @@ export function NewMessagesPill({ count, onClick }: { count: number; onClick: ()
       >
         {count} new {count === 1 ? "message" : "messages"}
         <ArrowDown className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+/** Prepends older pages before the live tail while preserving the reader's scroll position. */
+export function useOlderMessages({
+  spaceSlug,
+  convID,
+  latest,
+  latestHasMore,
+  scrollRef,
+}: {
+  spaceSlug: string;
+  convID?: string;
+  latest?: Message[];
+  latestHasMore?: boolean;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [older, setOlder] = useState<Message[]>([]);
+  const [hasOlder, setHasOlder] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(false);
+  const pendingHeight = useRef<number | null>(null);
+
+  useEffect(() => {
+    setOlder([]);
+    setHasOlder(null);
+    setLoading(false);
+    pendingHeight.current = null;
+  }, [convID]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || pendingHeight.current === null) return;
+    const delta = el.scrollHeight - pendingHeight.current;
+    if (delta > 0) el.scrollTop += delta;
+    pendingHeight.current = null;
+  }, [older, scrollRef]);
+
+  const messages = useMemo(() => {
+    if (!latest) return undefined;
+    if (older.length === 0) return latest;
+    const seen = new Set(older.map((m) => m.id));
+    return [...older, ...latest.filter((m) => !seen.has(m.id))];
+  }, [older, latest]);
+
+  const hasMore = hasOlder ?? Boolean(latestHasMore);
+
+  const loadEarlier = useCallback(async () => {
+    if (!convID || loading || !hasMore) return;
+    const oldest = messages?.[0];
+    if (!oldest) return;
+    setLoading(true);
+    try {
+      const page = await api.listMessages(spaceSlug, convID, false, { beforeSeq: oldest.seq });
+      if (scrollRef.current) pendingHeight.current = scrollRef.current.scrollHeight;
+      setOlder((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [...page.messages.filter((m) => !seen.has(m.id)), ...prev];
+      });
+      setHasOlder(Boolean(page.has_more));
+    } finally {
+      setLoading(false);
+    }
+  }, [spaceSlug, convID, loading, hasMore, messages, scrollRef]);
+
+  return { messages, hasMore, loading, loadEarlier };
+}
+
+export function LoadEarlierButton({ hasMore, loading, onClick }: { hasMore: boolean; loading: boolean; onClick: () => void }) {
+  if (!hasMore) return null;
+  return (
+    <div className="pt-3 pb-1 flex justify-center">
+      <button
+        type="button"
+        disabled={loading}
+        onClick={onClick}
+        className="h-7 px-3 rounded-full border border-line bg-card hover:bg-subtle text-[12.5px] font-medium text-fg-2 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+      >
+        {loading && <Loader2 className="size-3.5 animate-spin" />}
+        {loading ? "Loading…" : "Load earlier messages"}
       </button>
     </div>
   );

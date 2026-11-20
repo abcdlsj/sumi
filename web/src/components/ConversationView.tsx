@@ -22,7 +22,7 @@ import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
-import { NewMessagesPill, useStickToBottom } from "./scroll";
+import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
 
@@ -142,15 +142,23 @@ export function ConversationView({
     queryKey: ["messages", spaceSlug, conv.id],
     queryFn: () => api.listMessages(spaceSlug, conv.id, true),
   });
-  const messages = msgsQ.data?.messages;
-  const isNew = useArrivals(conv.id, messages);
+  const tailMessages = msgsQ.data?.messages;
+  const isNew = useArrivals(conv.id, tailMessages);
   // Place the stream once the fresh page is here, not on a cached page that is about to change.
   const settled = msgsQ.isFetchedAfterMount || msgsQ.isError;
   const { ref: scrollRef, onScroll, newCount, jumpToEnd } = useStickToBottom({
     streamKey: conv.id,
-    count: settled ? messages?.length ?? 0 : 0,
+    count: settled ? tailMessages?.length ?? 0 : 0,
     anchorId: "new",
   });
+  const history = useOlderMessages({
+    spaceSlug,
+    convID: conv.id,
+    latest: tailMessages,
+    latestHasMore: msgsQ.data?.has_more,
+    scrollRef,
+  });
+  const messages = history.messages;
 
   useEffect(() => {
     drafts.set(conv.id, { text: composer, replyTo: replyingTo });
@@ -338,6 +346,7 @@ export function ConversationView({
             )
           ) : (
             <div className="pb-4 animate-fade-in">
+              <LoadEarlierButton hasMore={history.hasMore} loading={history.loading} onClick={() => void history.loadEarlier()} />
               {messages.map((m, idx) => {
                 const prev = messages[idx - 1];
                 const showDay = !prev || !sameDay(prev.created_at, m.created_at);

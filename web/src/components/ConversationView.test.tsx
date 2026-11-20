@@ -172,6 +172,24 @@ describe("message stream", () => {
     expect(screen.getByText("New messages")).toBeTruthy();
     expect(await screen.findByRole("button", { name: /1 new message/ })).toBeTruthy();
   });
+
+  it("loads earlier messages when has_more is true without triggering the new-messages pill", async () => {
+    vi.spyOn(api, "listMessages").mockImplementation(async (_s, _c, _m, opts) => {
+      if (opts?.beforeSeq === 3) {
+        return { messages: [msg(1), msg(2)], read_seq: 0, following: false, has_more: false };
+      }
+      return { messages: [msg(3), msg(4)], read_seq: 0, following: false, has_more: true };
+    });
+    const { box } = renderView();
+    sizeStream(box, 600);
+    await screen.findByText("message 4");
+
+    const loadBtn = screen.getByRole("button", { name: "Load earlier messages" });
+    fireEvent.click(loadBtn);
+    expect(await screen.findByText("message 1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load earlier messages" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /new message/ })).toBeNull();
+  });
 });
 
 describe("composer", () => {

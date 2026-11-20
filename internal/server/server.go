@@ -764,11 +764,15 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	afterSeq, _ := strconv.ParseInt(r.URL.Query().Get("after_seq"), 10, 64)
+	beforeSeq, _ := strconv.ParseInt(r.URL.Query().Get("before_seq"), 10, 64)
+	latest := r.URL.Query().Get("latest") == "true"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	markRead := r.URL.Query().Get("mark_read") == "true"
 	page, err := s.svc.ListMessages(r.Context(), member, app.ListMessagesInput{
 		ConversationID: chi.URLParam(r, "convID"),
 		AfterSeq:       afterSeq,
+		BeforeSeq:      beforeSeq,
+		Latest:         latest,
 		Limit:          limit,
 		MarkRead:       markRead,
 	})

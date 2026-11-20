@@ -261,10 +261,20 @@ export const api = {
   removeFromChannel: (spaceSlug: string, convID: string, memberID: string) =>
     request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/members/${memberID}`, { method: "DELETE" }),
   bootstrap: (spaceSlug: string) => request<BootstrapData>(`/api/v1/spaces/${spaceSlug}/bootstrap`),
-  listMessages: (spaceSlug: string, convID: string, markRead = true) =>
-    request<{ messages: Message[]; read_seq: number; following: boolean }>(
-      `/api/v1/spaces/${spaceSlug}/conversations/${convID}/messages?limit=100&mark_read=${markRead}`,
-    ),
+  listMessages: (
+    spaceSlug: string,
+    convID: string,
+    markRead = true,
+    opts?: { beforeSeq?: number; limit?: number },
+  ) => {
+    const limit = opts?.limit ?? 100;
+    const params = opts?.beforeSeq
+      ? `before_seq=${opts.beforeSeq}&limit=${limit}&mark_read=false`
+      : `latest=true&limit=${limit}&mark_read=${markRead}`;
+    return request<{ messages: Message[]; read_seq: number; following: boolean; has_more?: boolean }>(
+      `/api/v1/spaces/${spaceSlug}/conversations/${convID}/messages?${params}`,
+    );
+  },
   sendMessage: (
     spaceSlug: string,
     convID: string,

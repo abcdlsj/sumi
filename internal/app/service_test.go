@@ -315,3 +315,45 @@ func TestListMessagesReportsViewerFollowing(t *testing.T) {
 		t.Fatalf("unfollow must be reflected: page.Following=%v err=%v", page.Following, err)
 	}
 }
+
+func TestListMessagesTailPagination(t *testing.T) {
+	svc, _, _, owner, _ := setupTestService(t)
+	ctx := context.Background()
+	convs, err := svc.ListConversations(ctx, owner)
+	if err != nil || len(convs) == 0 {
+		t.Fatalf("list conversations: %v", err)
+	}
+	convID := convs[0].ID
+	for i := 1; i <= 5; i++ {
+		if _, err := svc.SendMessage(ctx, owner, SendMessageInput{
+			ConversationID: convID,
+			BodyMarkdown:   "msg",
+		}); err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+	}
+
+	latest, err := svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: convID, Latest: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	if !latest.HasMore || len(latest.Messages) != 2 || latest.Messages[0].Seq != 4 || latest.Messages[1].Seq != 5 {
+		t.Fatalf("expected seqs [4,5] has_more=true, got %d msgs has_more=%v", len(latest.Messages), latest.HasMore)
+	}
+
+	prev, err := svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: convID, BeforeSeq: 4, Limit: 2})
+	if err != nil {
+		t.Fatalf("before 4: %v", err)
+	}
+	if !prev.HasMore || len(prev.Messages) != 2 || prev.Messages[0].Seq != 2 || prev.Messages[1].Seq != 3 {
+		t.Fatalf("expected seqs [2,3] has_more=true, got %d msgs has_more=%v", len(prev.Messages), prev.HasMore)
+	}
+
+	oldest, err := svc.ListMessages(ctx, owner, ListMessagesInput{ConversationID: convID, BeforeSeq: 2, Limit: 2})
+	if err != nil {
+		t.Fatalf("before 2: %v", err)
+	}
+	if oldest.HasMore || len(oldest.Messages) != 1 || oldest.Messages[0].Seq != 1 {
+		t.Fatalf("expected seq [1] has_more=false, got %d msgs has_more=%v", len(oldest.Messages), oldest.HasMore)
+	}
+}

@@ -956,6 +956,72 @@ func queryMessages(ctx context.Context, q queryer, convID string, afterSeq int64
 	return msgs, rows.Err()
 }
 
+// queryMessagesTail fetches the newest `limit` messages (or those strictly before `beforeSeq`),
+// returning them in ascending seq order along with whether older messages remain.
+func queryMessagesTail(ctx context.Context, q queryer, convID string, beforeSeq int64, limit int) ([]domain.Message, bool, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var rows *sql.Rows
+	var err error
+	if beforeSeq > 0 {
+		rows, err = q.QueryContext(ctx,
+			`SELECT msg.id, msg.space_id, msg.conversation_id, msg.seq, msg.author_member_id, m.display_name, m.kind,
+			        msg.kind, msg.body_markdown, msg.action_kind, msg.payload_json, msg.mention_all, msg.created_at
+			 FROM messages msg
+			 JOIN members m ON m.id = msg.author_member_id
+			 WHERE msg.conversation_id = ? AND msg.seq < ? AND msg.deleted_at IS NULL
+			 ORDER BY msg.seq DESC LIMIT ?`,
+			convID, beforeSeq, limit+1,
+		)
+	} else {
+		rows, err = q.QueryContext(ctx,
+			`SELECT msg.id, msg.space_id, msg.conversation_id, msg.seq, msg.author_member_id, m.display_name, m.kind,
+			        msg.kind, msg.body_markdown, msg.action_kind, msg.payload_json, msg.mention_all, msg.created_at
+			 FROM messages msg
+			 JOIN members m ON m.id = msg.author_member_id
+			 WHERE msg.conversation_id = ? AND msg.deleted_at IS NULL
+			 ORDER BY msg.seq DESC LIMIT ?`,
+			convID, limit+1,
+		)
+	}
+	if err != nil {
+		return nil, false, domain.WrapError(domain.CodeInternal, "query messages tail", err)
+	}
+	defer rows.Close()
+
+	msgs := make([]domain.Message, 0)
+	for rows.Next() {
+		var msg domain.Message
+		var authorKind, kind, actionKind, createdAt string
+		var mentionAll int
+		if err := rows.Scan(
+			&msg.ID, &msg.SpaceID, &msg.ConversationID, &msg.Seq, &msg.AuthorMemberID, &msg.AuthorName, &authorKind,
+			&kind, &msg.BodyMarkdown, &actionKind, &msg.PayloadJSON, &mentionAll, &createdAt,
+		); err != nil {
+			return nil, false, err
+		}
+		msg.AuthorKind = domain.MemberKind(authorKind)
+		msg.Kind = domain.MessageKind(kind)
+		msg.ActionKind = domain.ActionKind(actionKind)
+		msg.MentionAll = mentionAll == 1
+		msg.CreatedAt = store.ParseTime(createdAt)
+		msgs = append(msgs, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := false
+	if len(msgs) > limit {
+		hasMore = true
+		msgs = msgs[:limit]
+	}
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, hasMore, nil
+}
+
 // loadBoundAttachmentsTx reads attachments just bound inside the same transaction.
 func loadBoundAttachmentsTx(ctx context.Context, tx *sql.Tx, messageID string) []domain.Attachment {
 	rows, err := tx.QueryContext(ctx,
@@ -987,6 +1053,8 @@ func loadBoundAttachmentsTx(ctx context.Context, tx *sql.Tx, messageID string) [
 type ListMessagesInput struct {
 	ConversationID string
 	AfterSeq       int64
+	BeforeSeq      int64
+	Latest         bool
 	UnreadOnly     bool
 	Limit          int
 	MarkRead       bool
@@ -997,6 +1065,7 @@ type MessagePage struct {
 	Messages  []domain.Message `json:"messages"`
 	ReadSeq   int64            `json:"read_seq"`
 	Following bool             `json:"following"`
+	HasMore   bool             `json:"has_more,omitempty"`
 }
 
 func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in ListMessagesInput) (MessagePage, error) {
@@ -1011,12 +1080,17 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 		c.ID, viewer.ID,
 	).Scan(&currentReadSeq, &following)
 
-	afterSeq := in.AfterSeq
-	if in.UnreadOnly && currentReadSeq > afterSeq {
-		afterSeq = currentReadSeq
+	var msgs []domain.Message
+	var hasMore bool
+	if in.BeforeSeq > 0 || (in.Latest && in.AfterSeq == 0 && !in.UnreadOnly) {
+		msgs, hasMore, err = queryMessagesTail(ctx, s.store.ReadDB(), c.ID, in.BeforeSeq, in.Limit)
+	} else {
+		afterSeq := in.AfterSeq
+		if in.UnreadOnly && currentReadSeq > afterSeq {
+			afterSeq = currentReadSeq
+		}
+		msgs, err = queryMessages(ctx, s.store.ReadDB(), c.ID, afterSeq, in.Limit, "")
 	}
-
-	msgs, err := queryMessages(ctx, s.store.ReadDB(), c.ID, afterSeq, in.Limit, "")
 	if err != nil {
 		return MessagePage{}, err
 	}
@@ -1083,5 +1157,5 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 			_ = s.MarkRead(ctx, viewer, c.ID, lastSeq)
 		}
 	}
-	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following}, nil
+	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following, HasMore: hasMore}, nil
 }
