@@ -20,8 +20,8 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/** Curated hues; muddy ranges between them are skipped. */
-const HUES = [4, 22, 38, 52, 95, 140, 168, 190, 208, 228, 255, 282, 310, 335];
+/** Curated hues; the muddy and violet ranges between them are skipped. */
+const HUES = [6, 22, 36, 50, 72, 96, 124, 150, 172, 190, 208, 224];
 
 /** Cell tones: 0 empty, 1 body, 2 highlight, 3 eye, 4 accent. */
 export type SpriteCell = 0 | 1 | 2 | 3 | 4;
