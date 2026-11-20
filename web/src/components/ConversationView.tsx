@@ -24,7 +24,7 @@ import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPick
 import { MessageBody } from "./MessageBody";
 import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
+import { Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NOTIFY: { value: NotifyLevel; label: string; short: string; hint: string; icon: React.ReactNode }[] = [
@@ -254,14 +254,16 @@ export function ConversationView({
           ) : (
             <Hash className="size-4 text-fg-3 shrink-0" />
           )}
-          <h1 className="text-[15px] font-semibold text-fg truncate">{title}</h1>
-          {peer?.kind === "agent" && <Badge tone="accent">Agent</Badge>}
-          {conv.topic && (
-            <>
-              <span className="w-px h-4 bg-line-strong shrink-0" />
-              <span className="text-[13.5px] text-fg-3 truncate">{conv.topic}</span>
-            </>
-          )}
+          <h1 className="text-[15px] font-semibold text-fg shrink-0">{title}</h1>
+          {(conv.topic || (conv.kind === "dm" && peer?.agent?.role_text?.trim())) && (() => {
+            const sub = conv.topic || peer!.agent!.role_text.replace(/\s+/g, " ").trim();
+            return (
+              <>
+                <span className="w-px h-4 bg-line-strong shrink-0" />
+                <span className="text-[13.5px] text-fg-3 truncate" title={sub}>{sub}</span>
+              </>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {conv.kind !== "dm" && (
@@ -419,7 +421,6 @@ export function ConversationView({
                               >
                                 {m.author_display_name}
                               </button>
-                              {m.author_kind === "agent" && <Badge tone="accent" className="!h-[18px] !px-1.5 !text-[11px]">Agent</Badge>}
                               <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>
                           )}
