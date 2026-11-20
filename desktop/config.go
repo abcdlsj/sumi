@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/abcdlsj/sumi/internal/datadir"
 )
 
 const defaultServerURL = "http://127.0.0.1:8087"
@@ -30,11 +31,11 @@ func configPath() string {
 	if custom := os.Getenv("SUMI_DESKTOP_CONFIG"); custom != "" {
 		return custom
 	}
-	home, err := os.UserHomeDir()
+	root, err := datadir.Root()
 	if err != nil {
 		return "desktop.json"
 	}
-	return filepath.Join(home, ".sumi", "desktop.json")
+	return datadir.ConfigPath(root)
 }
 
 // normalizeServerURL canonicalizes a user-provided server address to scheme://host[:port].
@@ -85,11 +86,11 @@ func loadConfig() (Config, error) {
 		cfg.ServerURL = defaultServerURL
 	}
 	if cfg.DataDir == "" {
-		home, homeErr := os.UserHomeDir()
+		root, homeErr := datadir.Root()
 		if homeErr != nil {
 			return Config{}, fmt.Errorf("resolve home directory: %w", homeErr)
 		}
-		cfg.DataDir = filepath.Join(home, ".sumi")
+		cfg.DataDir = root
 	}
 	if cfg.Servers == nil {
 		cfg.Servers = map[string]ServerProfile{}

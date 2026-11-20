@@ -16,6 +16,7 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/computer"
+	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/server"
 	"github.com/abcdlsj/sumi/internal/store"
 	"github.com/abcdlsj/sumi/internal/webui"
@@ -70,7 +71,7 @@ func (r *runtime) ensureServerFor(ctx context.Context, serverURL string) error {
 	dataDir := r.cfg.DataDir
 	r.mu.Unlock()
 
-	dbPath := filepath.Join(dataDir, "sumi.db")
+	dbPath := datadir.DBPath(dataDir)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
@@ -162,7 +163,7 @@ func (r *runtime) startDaemon(parent context.Context) {
 	d := computer.NewDaemon(computer.Config{
 		ServerURL:     r.cfg.ServerURL,
 		ComputerToken: r.cfg.ComputerToken,
-		DataDir:       filepath.Join(r.cfg.DataDir, "computer"),
+		DataDir:       datadir.ComputerDir(r.cfg.DataDir),
 	}, r.logger)
 	if err := d.Start(ctx); err != nil {
 		r.daemonStatus = "error"

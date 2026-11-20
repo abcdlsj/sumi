@@ -1,4 +1,4 @@
--- Sumi v2 SQLite baseline schema (version 5).
+-- Sumi SQLite baseline schema (version 5).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (

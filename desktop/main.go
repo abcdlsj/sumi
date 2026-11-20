@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,10 +11,15 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"github.com/abcdlsj/sumi/internal/cli"
 )
+
+//go:embed assets/appicon.png
+var appIconPNG []byte
+
+//go:embed assets/tray_template.png
+var trayTemplatePNG []byte
 
 func main() {
 	// The daemon exposes this binary to agents as <data_dir>/bin/sumi; run as the Agent CLI then.
@@ -162,6 +168,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Sumi",
 		Description: "Sumi collaboration workspace",
+		Icon:        appIconPNG,
 		Logger:      logger,
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -190,7 +197,7 @@ func main() {
 	})
 
 	tray := app.SystemTray.New()
-	tray.SetTemplateIcon(icons.SystrayMacTemplate)
+	tray.SetTemplateIcon(trayTemplatePNG)
 	tray.SetTooltip("Sumi")
 
 	menu := app.NewMenu()

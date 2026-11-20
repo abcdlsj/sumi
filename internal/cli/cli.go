@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/pair"
 )
@@ -677,13 +678,15 @@ func Run(args []string, stdout io.Writer) int {
 		Use:   "pair",
 		Short: "Pair this computer and write the desktop config",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			root, err := datadir.Root()
+			if err != nil {
+				return fail(localError(codeInternal, err), nil)
+			}
 			if pairOpts.ConfigPath == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fail(localError(codeInternal, err), nil)
-				}
-				pairOpts.ConfigPath = filepath.Join(home, ".sumi", "desktop.json")
-				pairOpts.DataDir = filepath.Join(home, ".sumi", "v2")
+				pairOpts.ConfigPath = datadir.ConfigPath(root)
+			}
+			if pairOpts.DataDir == "" {
+				pairOpts.DataDir = root
 			}
 			norm := pairOpts.ServerURL
 			if norm == "" {

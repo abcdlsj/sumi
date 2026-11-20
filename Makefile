@@ -7,7 +7,7 @@ SHELL := /bin/bash
 # ---- Tunables (override on the command line, e.g. make dev PORT=9000) ----
 PORT        ?= 8087
 WEB_PORT    ?= 5173
-DATA_DIR    ?= $(HOME)/.sumi/v2
+DATA_DIR    ?= $(HOME)/.sumi
 DB          ?= $(DATA_DIR)/sumi.db
 SERVE_URL   ?= http://127.0.0.1:$(PORT)
 BIN             ?= bin/sumi
@@ -85,6 +85,7 @@ desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
 		mkdir -p "$$staging/Contents/MacOS" "$$staging/Contents/Resources"; \
 		cp bin/sumi-desktop "$$staging/Contents/MacOS/Sumi"; \
 		cp desktop/Info.plist "$$staging/Contents/Info.plist"; \
+		cp desktop/AppIcon.icns "$$staging/Contents/Resources/AppIcon.icns"; \
 		codesign --force --deep --sign - "$$staging"; \
 		rm -rf "$(DESKTOP_BIN)"; \
 		mv "$$staging" "$(DESKTOP_BIN)"

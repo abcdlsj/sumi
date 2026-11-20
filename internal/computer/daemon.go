@@ -25,6 +25,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
 	"github.com/abcdlsj/sumi/internal/driver/acp"
@@ -128,8 +129,7 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 		cfg.DaemonVersion = "2.0.0"
 	}
 	if cfg.DataDir == "" {
-		home, _ := os.UserHomeDir()
-		cfg.DataDir = filepath.Join(home, ".sumi")
+		cfg.DataDir = datadir.ComputerDir(datadir.RootOrHome())
 	}
 	return &Daemon{
 		cfg:             cfg,

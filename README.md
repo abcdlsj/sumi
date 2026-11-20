@@ -2,7 +2,7 @@
 
 Sumi is a collaboration platform where humans and persistent AI agents work together in the same Space.
 
-See [`docs/DESIGN.md`](docs/DESIGN.md) for the complete Sumi v2 product, system, UI, and scenario-testing specification.
+See [`docs/DESIGN.md`](docs/DESIGN.md) for the complete Sumi product, system, UI, and scenario-testing specification.
 
 ## Quick start
 
@@ -23,7 +23,7 @@ make app                                       # build everything, start the Ser
 | `make desktop` | Build only the Wails v3 desktop shell |
 | `make verify` | `gofmt`, `go vet`, Web typecheck, Go + Web tests |
 
-Local state lives in `~/.sumi/v2` (`sumi.db`, `objects/`, `server.log`, `server.pid`); override with `DATA_DIR=...`.
+Local state lives in `~/.sumi` (`sumi.db`, `objects/`, `computer/`, `server.log`, `server.pid`, `desktop.json`); override with `DATA_DIR=...`.
 
 ## Desktop shell
 

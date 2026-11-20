@@ -15,6 +15,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/cli"
 	"github.com/abcdlsj/sumi/internal/computer"
+	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/server"
 	"github.com/abcdlsj/sumi/internal/store"
 	"github.com/abcdlsj/sumi/internal/webui"
@@ -36,9 +37,10 @@ func main() {
 }
 
 func runServer(args []string) {
+	root := dataRoot()
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8087", "HTTP listen address")
-	dbPath := fs.String("db", "sumi.db", "SQLite database file path")
+	dbPath := fs.String("db", datadir.DBPath(root), "SQLite database file path")
 	webOrigin := fs.String("web-origin", "http://localhost:5173", "Allowed Web UI origin for CORS")
 	webDir := fs.String("web-dir", "", "Optional static Web UI directory overriding the embedded UI")
 	_ = fs.Parse(args)
@@ -84,10 +86,11 @@ func runServer(args []string) {
 }
 
 func runComputer(args []string) {
+	root := dataRoot()
 	fs := flag.NewFlagSet("computer", flag.ExitOnError)
 	serverURL := fs.String("server", "http://127.0.0.1:8087", "Sumi server URL")
 	token := fs.String("token", os.Getenv("SUMI_COMPUTER_TOKEN"), "Computer bearer token")
-	dataDir := fs.String("data-dir", "", "Daemon local state directory")
+	dataDir := fs.String("data-dir", datadir.ComputerDir(root), "Daemon local state directory")
 	_ = fs.Parse(args)
 
 	if *token == "" {
@@ -111,4 +114,14 @@ func runComputer(args []string) {
 	logger.Info("Sumi computer daemon started", "server", *serverURL, "socket", d.SocketPath())
 	<-ctx.Done()
 	d.Stop()
+}
+
+// dataRoot resolves the single local state root and exits when it is unavailable.
+func dataRoot() string {
+	root, err := datadir.Root()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cannot resolve local data directory:", err)
+		os.Exit(1)
+	}
+	return root
 }
