@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +64,7 @@ func TestCreateAgentAutoAssignsPoolNames(t *testing.T) {
 	}
 }
 
-func TestCreateAgentFallsBackToNumberedNamesWhenPoolExhausted(t *testing.T) {
+func TestCreateAgentRejectsAutoNameWhenPoolExhausted(t *testing.T) {
 	svc, _, space, owner, comp := setupTestService(t)
 	ctx := context.Background()
 
@@ -88,17 +90,30 @@ func TestCreateAgentFallsBackToNumberedNamesWhenPoolExhausted(t *testing.T) {
 		t.Fatalf("fill pool: %v", err)
 	}
 
-	for _, want := range []string{"Agent1", "Agent2"} {
-		created, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
-			RoleText:   "Generalist",
-			ComputerID: comp.ID,
-			DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
-		})
-		if err != nil {
-			t.Fatalf("create %s: %v", want, err)
-		}
-		if created.DisplayName != want {
-			t.Fatalf("expected %q, got %q", want, created.DisplayName)
-		}
+	_, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		RoleText:   "Generalist",
+		ComputerID: comp.ID,
+		DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeInvalidArgument {
+		t.Fatalf("expected invalid_argument when the pool is exhausted, got %v", err)
+	}
+	if !strings.Contains(domainErr.Message, "display_name") {
+		t.Fatalf("expected the error to demand an explicit display_name, got %q", domainErr.Message)
+	}
+
+	// An explicit name still works once the pool is drained.
+	explicit, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Kira",
+		RoleText:    "Generalist",
+		ComputerID:  comp.ID,
+		DriverKind:  domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create with explicit name: %v", err)
+	}
+	if explicit.DisplayName != "Kira" {
+		t.Fatalf("expected Kira, got %q", explicit.DisplayName)
 	}
 }

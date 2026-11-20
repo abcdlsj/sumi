@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -21,7 +20,8 @@ var agentNamePool = []string{
 
 // pickAgentDisplayNameTx returns the first pool name not yet used in the Space.
 // Uniqueness is case-insensitive and covers retired members, matching
-// idx_members_space_name. When the pool is exhausted it falls back to Agent<N>.
+// idx_members_space_name. An exhausted pool is an error: the caller must name
+// the Agent explicitly rather than get a numbered placeholder.
 func pickAgentDisplayNameTx(ctx context.Context, tx *sql.Tx, spaceID string) (string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT lower(display_name) FROM members WHERE space_id = ?`, spaceID)
 	if err != nil {
@@ -46,10 +46,5 @@ func pickAgentDisplayNameTx(ctx context.Context, tx *sql.Tx, spaceID string) (st
 			return name, nil
 		}
 	}
-	for n := 1; ; n++ {
-		name := fmt.Sprintf("Agent%d", n)
-		if _, used := taken[strings.ToLower(name)]; !used {
-			return name, nil
-		}
-	}
+	return "", domain.NewError(domain.CodeInvalidArgument, "agent name pool is exhausted in this Space; pass display_name explicitly")
 }
