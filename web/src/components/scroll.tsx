@@ -1,0 +1,144 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown } from "lucide-react";
+
+/** Distance from the end that still counts as reading the newest message. */
+const NEAR_END_PX = 80;
+
+function distanceFromEnd(el: HTMLElement): number {
+  return el.scrollHeight - el.scrollTop - el.clientHeight;
+}
+
+export interface StickToBottomOptions {
+  /** Identity of the stream; switching streams re-places the view. */
+  streamKey: string;
+  /** Messages currently rendered. */
+  count: number;
+  /** Element id of the persisted unread divider, used for the first placement only. */
+  anchorId?: string;
+}
+
+export interface StickToBottom {
+  ref: React.RefObject<HTMLDivElement | null>;
+  /** Attach to the scroller's `onScroll`. */
+  onScroll: () => void;
+  /** Messages that arrived while the reader was above the end. */
+  newCount: number;
+  /** Jump to the end and clear the counter. */
+  jumpToEnd: () => void;
+}
+
+/**
+ * Keeps a message stream glued to its end while the reader stays there. Scrolling up
+ * parks the stream and counts later arrivals instead of yanking the view; the first
+ * placement of a stream lands on the unread divider when there is one, else the end.
+ */
+export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOptions): StickToBottom {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const pinned = useRef(true);
+  const placed = useRef(false);
+  const anchored = useRef(false);
+  const seen = useRef(0);
+  const lastTop = useRef(0);
+  const moved = useRef(false);
+  const [newCount, setNewCount] = useState(0);
+
+  /** Records our own scroll positions so they are not read as the reader moving. */
+  const setTop = useCallback((el: HTMLElement, top: number) => {
+    el.scrollTop = top;
+    lastTop.current = el.scrollTop;
+  }, []);
+
+  const jumpToEnd = useCallback(() => {
+    const el = ref.current;
+    if (el) setTop(el, el.scrollHeight);
+    pinned.current = true;
+    setNewCount(0);
+  }, [setTop]);
+
+  useLayoutEffect(() => {
+    pinned.current = true;
+    placed.current = false;
+    anchored.current = false;
+    seen.current = 0;
+    lastTop.current = 0;
+    moved.current = false;
+    setNewCount(0);
+  }, [streamKey]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || count === 0) return;
+    const grew = Math.max(0, count - seen.current);
+    seen.current = count;
+    const anchor = anchorId ? el.querySelector<HTMLElement>(`[data-unread-anchor="${anchorId}"]`) : null;
+
+    // First placement, and a divider that only shows up once the fresh page lands.
+    if (!placed.current || (!anchored.current && anchor && !moved.current)) {
+      placed.current = true;
+      if (anchor) {
+        anchored.current = true;
+        setTop(el, Math.max(0, anchor.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 16));
+      } else {
+        setTop(el, el.scrollHeight);
+      }
+      pinned.current = distanceFromEnd(el) < NEAR_END_PX;
+      return;
+    }
+    if (!pinned.current) {
+      if (grew > 0) setNewCount((n) => n + grew);
+      return;
+    }
+    setTop(el, el.scrollHeight);
+  }, [count, anchorId, setTop]);
+
+  const onScroll = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (Math.abs(el.scrollTop - lastTop.current) > 1) moved.current = true;
+    const atEnd = distanceFromEnd(el) < NEAR_END_PX;
+    pinned.current = atEnd;
+    if (atEnd) setNewCount(0);
+  }, []);
+
+  // Images and embeds settle after their row rendered; keep the end in view.
+  const observer = useRef<ResizeObserver | null>(null);
+  const watched = useRef<Element | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    if (!observer.current) {
+      observer.current = new ResizeObserver(() => {
+        const box = ref.current;
+        if (!box || !pinned.current) return;
+        box.scrollTop = box.scrollHeight;
+        lastTop.current = box.scrollTop;
+      });
+    }
+    const content = el.firstElementChild;
+    if (content === watched.current) return;
+    observer.current.disconnect();
+    observer.current.observe(el);
+    if (content) observer.current.observe(content);
+    watched.current = content;
+  }, [streamKey, count]);
+  useEffect(() => () => observer.current?.disconnect(), []);
+
+  return { ref, onScroll, newCount, jumpToEnd };
+}
+
+/** Floating "N new messages" pill shown while the stream is parked above its end. */
+export function NewMessagesPill({ count, onClick }: { count: number; onClick: () => void }) {
+  if (count <= 0) return null;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+      <button
+        type="button"
+        onClick={onClick}
+        className="pointer-events-auto h-8 pl-3 pr-2.5 rounded-full bg-accent text-accent-fg shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in hover:bg-accent-hover transition-colors"
+      >
+        {count} new {count === 1 ? "message" : "messages"}
+        <ArrowDown className="size-4" />
+      </button>
+    </div>
+  );
+}
