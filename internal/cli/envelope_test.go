@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // serveSocket runs h on a unix socket and points the CLI environment at it.
@@ -133,5 +134,74 @@ func TestHeldSendSavesDraftAndDraftResendsWithSameKey(t *testing.T) {
 	}
 	if _, err := draftPath("../escape"); err == nil {
 		t.Fatalf("conversation ids must not escape the draft dir")
+	}
+}
+
+func TestDraftSurvivesUnrelatedSendAndIsReplacedWithBackup(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SUMI_DRAFT_DIR", dir)
+	held := map[string]bool{}
+	serveSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			BodyMarkdown string `json:"body_markdown"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if held[body.BodyMarkdown] {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"held":true,"unread_messages":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"message":{"id":"m1"}}`))
+	})
+	held["first"], held["second"] = true, true
+
+	if env, _ := runCLI(t, "send", "conv-1", "--body", "first"); env.Error == nil || env.Error.Code != "held" {
+		t.Fatalf("first send should be held: %+v", env.Error)
+	}
+	// An unrelated successful send keeps the draft and flags it as pending.
+	env, _ := runCLI(t, "send", "conv-1", "--body", "VOTE: bram")
+	if !env.OK || !bytes.Contains(env.Data, []byte(`"draft_pending":true`)) {
+		t.Fatalf("unrelated send must keep the draft: ok=%v data=%s", env.OK, env.Data)
+	}
+	if d, err := loadDraft("conv-1"); err != nil || d.BodyMarkdown != "first" {
+		t.Fatalf("draft lost after unrelated send: %+v %v", d, err)
+	}
+
+	// A different held send replaces the draft but archives the old body.
+	env, _ = runCLI(t, "send", "conv-1", "--body", "second")
+	if !bytes.Contains(env.Data, []byte(`"replaced_draft"`)) {
+		t.Fatalf("replacing a draft must report the backup: %s", env.Data)
+	}
+	backups, _ := filepath.Glob(filepath.Join(dir, "replaced", "conv-1-*.json"))
+	if len(backups) != 1 {
+		t.Fatalf("backups = %v", backups)
+	}
+
+	if env, _ := runCLI(t, "send", "conv-1", "--discard-draft", "--body", "x"); env.Error == nil {
+		t.Fatal("--discard-draft with --body must be rejected")
+	}
+	if env, _ := runCLI(t, "send", "conv-1", "--discard-draft"); !env.OK {
+		t.Fatalf("discard failed: %+v", env.Error)
+	}
+	if _, err := loadDraft("conv-1"); err == nil {
+		t.Fatal("draft must be gone after --discard-draft")
+	}
+}
+
+func TestExpiredDraftCannotBeResent(t *testing.T) {
+	t.Setenv("SUMI_DRAFT_DIR", t.TempDir())
+	serveSocket(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("an expired draft must not reach the server")
+	})
+	if _, err := saveDraft(draft{ConversationID: "conv-1", BodyMarkdown: "old", IdempotencyKey: "k", SavedAt: time.Now().Add(-draftTTL - time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := runCLI(t, "send", "conv-1", "--draft")
+	if env.Error == nil || !bytes.Contains(env.Data, []byte(`"draft_expired":true`)) || !bytes.Contains(env.Data, []byte(`"old"`)) {
+		t.Fatalf("expired draft: %+v data=%s", env.Error, env.Data)
+	}
+	if _, err := loadDraft("conv-1"); err == nil {
+		t.Fatal("expired draft must be removed")
 	}
 }

@@ -5,21 +5,36 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 // draft is a held send kept on disk so the Agent can resend it after reading, without retyping
 // or re-uploading. It lives under the Agent's own draft dir and never enters logs.
 type draft struct {
-	ConversationID   string   `json:"conversation_id"`
-	ReplyToMessageID string   `json:"reply_to_message_id,omitempty"`
-	BodyMarkdown     string   `json:"body_markdown"`
-	AttachmentIDs    []string `json:"attachment_ids,omitempty"`
-	IdempotencyKey   string   `json:"idempotency_key"`
+	ConversationID   string    `json:"conversation_id"`
+	ReplyToMessageID string    `json:"reply_to_message_id,omitempty"`
+	BodyMarkdown     string    `json:"body_markdown"`
+	AttachmentIDs    []string  `json:"attachment_ids,omitempty"`
+	IdempotencyKey   string    `json:"idempotency_key"`
+	SavedAt          time.Time `json:"saved_at"`
 }
+
+const (
+	// draftTTL bounds how long a held send stays resendable; older context is stale anyway.
+	draftTTL = 10 * time.Minute
+	// keepReplaced is how many replaced drafts per conversation are kept under replaced/.
+	keepReplaced = 5
+)
+
+var errNoDraft = errors.New("no saved draft for this conversation")
+
+func (d draft) expired(now time.Time) bool { return now.Sub(d.SavedAt) > draftTTL }
 
 func draftDir() string {
 	if d := os.Getenv("SUMI_DRAFT_DIR"); d != "" {
@@ -35,20 +50,50 @@ func draftPath(convID string) (string, error) {
 	return filepath.Join(draftDir(), convID+".json"), nil
 }
 
-func saveDraft(d draft) error {
+// saveDraft stores d as the conversation's draft. A different, unexpired draft already there is
+// moved to replaced/ first and its path returned, so a rewrite never silently loses text.
+func saveDraft(d draft) (string, error) {
 	path, err := draftPath(d.ConversationID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return "", err
+	}
+	if d.SavedAt.IsZero() {
+		d.SavedAt = time.Now().UTC()
+	}
+	replaced := ""
+	if old, err := loadDraft(d.ConversationID); err == nil && old.IdempotencyKey != d.IdempotencyKey && !old.expired(time.Now()) {
+		if replaced, err = archiveDraft(old); err != nil {
+			return "", err
+		}
 	}
 	raw, _ := json.Marshal(d)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(tmp, path)
+	return replaced, os.Rename(tmp, path)
+}
+
+func archiveDraft(d draft) (string, error) {
+	dir := filepath.Join(draftDir(), "replaced")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	raw, _ := json.Marshal(d)
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.json", d.ConversationID, time.Now().UnixNano()))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", err
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, d.ConversationID+"-*.json"))
+	sort.Strings(matches) // Names end in a fixed-width nanosecond timestamp, so this is oldest first.
+	for len(matches) > keepReplaced {
+		_ = os.Remove(matches[0])
+		matches = matches[1:]
+	}
+	return path, nil
 }
 
 func loadDraft(convID string) (draft, error) {
@@ -59,7 +104,7 @@ func loadDraft(convID string) (draft, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return draft{}, errors.New("no saved draft for this conversation")
+			return draft{}, errNoDraft
 		}
 		return draft{}, err
 	}
@@ -74,6 +119,20 @@ func deleteDraft(convID string) {
 	if path, err := draftPath(convID); err == nil {
 		_ = os.Remove(path)
 	}
+}
+
+// settleDraftAfterSend runs after a successful send: the draft is deleted only when this send
+// was that draft (same Idempotency-Key) or it has expired. It reports whether one is still pending.
+func settleDraftAfterSend(convID, sentKey string) bool {
+	d, err := loadDraft(convID)
+	if err != nil {
+		return false
+	}
+	if d.IdempotencyKey == sentKey || d.expired(time.Now()) {
+		deleteDraft(convID)
+		return false
+	}
+	return true
 }
 
 // sendKey derives a stable Idempotency-Key from the logical message, so re-running the same

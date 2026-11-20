@@ -79,7 +79,7 @@ func responseError(status int, raw []byte) (*EnvelopeError, any) {
 	return e, nil
 }
 
-const hintHeldDraft = "Your message was saved as a draft. Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then either drop it (a normal outcome when it is no longer needed), send it unchanged with `sumi send <target> --draft`, or send a rewritten --body."
+const hintHeldDraft = "Your message was saved as a draft (kept 10 minutes). Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then drop it with `sumi send <target> --discard-draft` (a normal outcome when it is no longer needed), send it unchanged with `sumi send <target> --draft`, or send a rewritten --body."
 
 func hintFor(code string) string {
 	switch code {

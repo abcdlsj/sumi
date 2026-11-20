@@ -263,15 +263,18 @@ func Run(args []string, stdout io.Writer) int {
 	var sendBody string
 	var sendReplyTo string
 	var sendAttach []string
-	var sendDraft bool
+	var sendDraft, sendDiscard bool
 	sendCmd := &cobra.Command{
 		Use:   "send <target>",
 		Args:  cobra.ExactArgs(1),
-		Short: "Send a message (protected by Freshness Guard); --draft resends a held message",
+		Short: "Send a message (protected by Freshness Guard); --draft resends a held message, --discard-draft drops it",
 		RunE: func(cmd *cobra.Command, a []string) error {
-			if sendDraft {
+			if sendDraft && sendDiscard {
+				return fail(localError(codeInvalidArgument, errors.New("--draft and --discard-draft are exclusive")), nil)
+			}
+			if sendDraft || sendDiscard {
 				if cmd.Flags().Changed("body") || len(sendAttach) > 0 || sendReplyTo != "" {
-					return fail(localError(codeInvalidArgument, errors.New("--draft cannot be combined with --body, --attach or --reply-to")), nil)
+					return fail(localError(codeInvalidArgument, errors.New("--draft/--discard-draft cannot be combined with --body, --attach or --reply-to")), nil)
 				}
 			} else if strings.TrimSpace(sendBody) == "" {
 				return fail(localError(codeInvalidArgument, errors.New("--body is required (or --draft to resend a held message)")), nil)
@@ -279,6 +282,14 @@ func Run(args []string, stdout io.Writer) int {
 			convID, err := resolveConv(a[0])
 			if err != nil {
 				return err
+			}
+			if sendDiscard {
+				if _, err := loadDraft(convID); err != nil {
+					return fail(localError(codeInvalidArgument, err), nil)
+				}
+				deleteDraft(convID)
+				writeEnvelope(stdout, true, map[string]any{"draft_discarded": true}, nil)
+				return nil
 			}
 			c, err := NewFromEnv()
 			if err != nil {
@@ -288,6 +299,11 @@ func Run(args []string, stdout io.Writer) int {
 			if sendDraft {
 				if d, err = loadDraft(convID); err != nil {
 					return fail(localError(codeInvalidArgument, err), nil)
+				}
+				if d.expired(time.Now()) {
+					deleteDraft(convID)
+					e := localError(codeInvalidArgument, errors.New("the saved draft expired; read the conversation again and send a fresh --body"))
+					return fail(e, map[string]any{"draft_expired": true, "body_markdown": d.BodyMarkdown})
 				}
 			} else {
 				key, err := sendKey(convID, sendReplyTo, sendBody, sendAttach)
@@ -310,18 +326,25 @@ func Run(args []string, stdout io.Writer) int {
 			}
 			if e, data := responseError(status, raw); e != nil {
 				if e.Code == codeHeld {
-					if err := saveDraft(d); err == nil {
+					d.SavedAt = time.Now().UTC()
+					if replaced, err := saveDraft(d); err == nil {
 						if m, ok := data.(map[string]any); ok {
 							m["draft_saved"] = true
+							if replaced != "" {
+								m["replaced_draft"] = replaced
+							}
 						}
 						e.Hint = hintHeldDraft
 					}
 				}
 				return fail(e, data)
 			}
-			deleteDraft(d.ConversationID)
+			pending := settleDraftAfterSend(d.ConversationID, d.IdempotencyKey)
 			var parsed any
 			_ = json.Unmarshal(raw, &parsed)
+			if m, ok := parsed.(map[string]any); ok && pending {
+				m["draft_pending"] = true
+			}
 			writeEnvelope(stdout, true, parsed, nil)
 			return nil
 		},
@@ -330,6 +353,7 @@ func Run(args []string, stdout io.Writer) int {
 	sendCmd.Flags().StringVar(&sendReplyTo, "reply-to", "", "root message id for thread reply")
 	sendCmd.Flags().StringArrayVar(&sendAttach, "attach", nil, "local file to upload and attach (repeatable)")
 	sendCmd.Flags().BoolVar(&sendDraft, "draft", false, "resend the draft saved when the last send was held")
+	sendCmd.Flags().BoolVar(&sendDiscard, "discard-draft", false, "delete the saved draft for this conversation without sending")
 	root.AddCommand(sendCmd)
 
 	root.AddCommand(&cobra.Command{

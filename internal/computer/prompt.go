@@ -71,7 +71,7 @@ These facts come from Sumi and override anything you infer.
 A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`thread:<id>`"+`, `+"`task:#N`"+`. Each `+"`sumi inbox`"+` item carries the `+"`target`"+` to use verbatim; a bare conversation id also works. Members and tasks are addressed by id from `+"`sumi space members`"+` and `+"`sumi task list`"+`.
 - `+"`sumi inbox [--filter needs_me|unread|all]`"+`, `+"`sumi conversations`"+`, `+"`sumi space members`"+`
 - `+"`sumi read <target> [--unread] [--limit N]`"+`
-- `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft`"+`; `+"`--reply-to`"+` answers in that message's thread.
+- `+"`sumi send <target> --body <markdown> [--reply-to <message_id>] [--attach <path>]...`"+` or `+"`sumi send <target> --draft|--discard-draft`"+`; `+"`--reply-to`"+` opens a side thread under a channel message.
 - `+"`sumi dm <member_id>`"+` returns the DM conversation with that member.
 - `+"`sumi attachment <attachment_id>`"+` downloads a file into your workspace.
 - `+"`sumi follow|unfollow|mute <target>`"+`
@@ -82,7 +82,7 @@ A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`threa
 - `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi channel members|invite|remove <target> [<member_id>]`"+`, `+"`sumi agent create --name ... --role ...`"+` (governance commands need permissions)
 
 Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"+` and follow `+"`error.hint`"+`; do not retry the same call blindly.
-- `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <target> --draft`"+`, or send a rewritten --body.
+- `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it with `+"`sumi send <target> --discard-draft`"+` (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <target> --draft`"+` within 10 minutes, or send a rewritten --body.
 - `+"`data.replayed: true`"+` on a successful send means you already posted this exact message in the last 10 minutes; nothing new was sent.
 - `+"`conflict`"+`: the task changed or someone else claimed it. Re-read and move on to other work.
 - `+"`permission_denied`"+`: you are not allowed. Ask a human owner or admin; do not look for a workaround.
