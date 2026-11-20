@@ -12,12 +12,12 @@ Sumi 让 Human 与 Agent 在同一个 Space 中持续协作。Agent 是拥有持
 
 | 词 | 定义 | Avoid |
 | --- | --- | --- |
-| Space | Members、Conversations、Tasks 与 Computers 归属的协作边界 | Team、Workspace |
+| Space | Members、Conversations、Tasks 归属的协作边界 | Team、Workspace |
 | Member | 属于一个 Space 的协作者，Human 与 Agent 共用该模型 | User、Actor、Bot |
 | Display Name | Member 在 Space 内的唯一寻址名称（字母、数字、下划线，不含空格） | Handle、Username |
 | Human | 由人控制并通过账号进入 Space 的 Member | User |
 | Agent | 具有持续身份、Role、Memory 并由一台 Computer 承载的 AI Member | Bot、Assistant |
-| Computer | 与 Space 配对、运行 `sumi computer` daemon 并托管本机 Agents 的计算机 | Node、Worker |
+| Computer | 归属一个账号（User）、运行 `sumi computer` daemon 并托管本机 Agents 的计算机；可承载该账号所在任意 Space 的 Agents | Node、Worker |
 | Conversation | 统一的有序消息容器，类型取 `public`、`private`、`dm`、`thread`、`task` | Room、Chat、Session |
 | Channel | `public` 或 `private` 类型的长期共享 Conversation | Group、Room |
 | DM | 固定由两个 Members 组成的 `dm` Conversation | Private Chat |
@@ -97,7 +97,7 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 2. `spaces`：Space 元信息（含 `accent` 强调色与 `event_seq` 单调递增提交序）。
 3. `members`：Human 与 Agent 统一成员表（`kind`、`display_name`、`access_level`、`retired_at`）。
 4. `member_permissions`：`(member_id, action_code)`，原子权限授权。
-5. `computers` / `computer_pairings`：已配对机器与配对流程（只存 token hash）。
+5. `computers` / `computer_pairings`：已配对机器与配对流程（只存 token hash）。`computers.owner_user_id` 指向所属账号，Computer 不归属任何 Space。
 6. `agents`：`member_id`、`computer_id`、`role_text`、`driver_kind`（`acp` / `builtin`）、`driver_config_json`、`runtime_state`（`idle` / `working` / `offline` / `error`）、`last_error_code`。
 7. `conversations`：`id`、`space_id`、`kind`（`public` / `private` / `dm` / `thread` / `task`）、`slug`、`topic`、`parent_conversation_id`、`root_message_id`、`task_id`、`next_seq`。
 8. `conversation_members`：Channel 与 DM 的成员边界（Thread 与 Task 继承父级成员边界）。
@@ -124,6 +124,14 @@ Makefile               # 唯一开发/构建/运行入口（make help 列出全�
 - 托盘菜单固定四项：`Open Sumi`、`Computer` 状态（只读）、`Restart Computer Daemon`、`Quit`。关闭窗口只隐藏，Server/Daemon/托盘继续运行；Quit 才停止它们并退出。
 - 薄壳不含业务逻辑：鉴权、Space、Agent、附件全部由 Server 与 Daemon 承担。
 
+### Computer 归属与隔离
+
+- **归属**：Computer 属于确认配对的账号（`owner_user_id`），与 Space 无关。同一台 Computer 可同时承载该账号所在多个 Space 的 Agents。
+- **在 Space 中可见**：某 Space 的 Computer 列表 = 所有者是该 Space 未退出 Human 成员的 Computer，加上正承载本 Space Agent 的 Computer；每项带 `owner_member_id`（所有者在本 Space 的 member id，所有者已离开则为空）。Space 成员只看到 Computer 的名称、主机名、系统、在线状态、能力，以及本 Space 内由它承载的 Agents；看不到其他 Space 的 Agent。
+- **放置权限**：只有 Computer 的所有者能把 Agent 创建到这台 Computer 上（仍需 `agent.create` 或 owner/admin）；Agent 用 `agent.create` 创建子 Agent 时只能放在承载自己的 Computer 上。Space admin 不能占用他人的 Computer。
+- **隔离**：每个 Agent 有独立的 Agent Home（`<data_dir>/agents/<member_id>`）与 driver token；capability socket 按 driver token 识别 Agent，所有 `/api/v1/computer/agents/{id}/*` 调用都以该 Agent 的 Space 与成员边界鉴权，同机 Agent 互相读不到对方的目录与对话。
+- **事件**：`computer.changed` 发往该 Computer 当前可见的每个 Space。
+
 ### 确认式配对（Computer Pairing）
 
 Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时持有的 secret；服务端只存 hash，不保存任何明文。
@@ -131,15 +139,17 @@ Computer 先申请、Human 再确认，Computer 拿到的 token 就是申请时�
 1. **申请**（无鉴权）：`POST /api/v1/computer/pairings`，请求 `{hostname, os, daemon_version}`，返回 `{pairing: {id, code, expires_at}, secret}`。`code` 为 6 位易读字符（不含 `0/O/1/I`），`secret` 为 32 字节随机 token；`computer_pairings` 只存 `code_hash` 与 `token_hash`，状态 `pending`，10 分钟后过期。
    - **限流**：同一来源 IP 每分钟最多 6 次申请（进程内令牌桶，超限返回 `rate_limited` / 429）；全局未过期 `pending` 申请最多 200 条，超出同样返回 `rate_limited`。每次申请在同一写事务内删除已过期的 `pending` 行，表不会无限增长。
 2. **查看**（Browser Session）：`GET /api/v1/pairings/{id}?code=...` 返回 `{pairing: {id, hostname, os, status, expires_at}}`；code 不符与不存在一律返回 `not_found`。
-3. **确认**（owner / admin）：`POST /api/v1/spaces/{slug}/computers/pairings/{id}/confirm`，请求 `{code, name}`。同一写事务内创建 `computers` 行（`token_hash` 直接取自 pairing）并把 pairing 置为 `confirmed`、写入 `computer_id` 与 `space_id`，发出 `computer.changed`。pairing 只能确认一次；已过期返回 `expired`。
-4. **轮询**（Bearer secret）：`GET /api/v1/computer/pairings/{id}`，返回 `{status, space_slug?, computer_id?}`；secret 不符返回 `not_found`。确认后 Computer 以该 secret 作为 computer token 连接 `/ws/computer`。
+3. **确认**（任意已登录账号，确认后即为所有者）：`POST /api/v1/computers/pairings/{id}/confirm`，请求 `{code, name}`。同一写事务内创建 `computers` 行（`token_hash` 直接取自 pairing，`owner_user_id` 为确认者）并把 pairing 置为 `confirmed`、写入 `computer_id` 与 `owner_user_id`，发出 `computer.changed`。pairing 只能确认一次；已过期返回 `expired`。
+4. **轮询**（Bearer secret）：`GET /api/v1/computer/pairings/{id}`，返回 `{status, computer_id?}`；secret 不符返回 `not_found`。确认后 Computer 以该 secret 作为 computer token 连接 `/ws/computer`。
 
-桌面薄壳每 2 秒轮询一次；pairing 过期时重新申请并刷新窗口地址。Web 读到 `?pair=&code=` 后存入 `sessionStorage` 并从地址栏移除，登录、建 Space 后弹出确认卡片，卡片显示 hostname 与 code，必须由用户点击确认，不自动确认。
+桌面薄壳每 2 秒轮询一次；pairing 过期时重新申请并刷新窗口地址。Web 读到 `?pair=&code=` 后存入 `sessionStorage` 并从地址栏移除，登录后弹出确认卡片（「连接到你的账号」），卡片显示 hostname 与 code，必须由用户点击确认，不自动确认。
+
+浏览器直连配对：`POST /api/v1/computers/pair`（已登录账号，请求 `{name, hostname, os}`）直接创建归属该账号的 Computer 并返回一次性 token。
 
 ### 配对与本地引导（`sumi pair`）
 
-- `sumi pair --server ... --email ... --password ... --space ...`：注册或登录 → 取得/创建 Space → 配对一台 Computer → 写出 `desktop.json`（0600）。
-- 每次执行都会配对新 Computer（服务端不回传既有 token），故不要把它当幂等命令；重复执行会在 Space 里多出一台同名机器。
+- `sumi pair --server ... --email ... --password ... --space ...`：注册或登录 → 取得/创建 Space（只为首次引导准备工作区）→ 为该账号配对一台 Computer → 写出 `desktop.json`（0600）。
+- 每次执行都会配对新 Computer（服务端不回传既有 token），故不要把它当幂等命令；重复执行会给账号多出一台同名机器。
 
 ### 本地开发与运行（Makefile）
 
@@ -243,10 +253,10 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
 
 1. **Account**：`Sign in` / `Create account` 分段切换；邮箱、密码（可显隐）、注册时的 Display Name（按邮箱前缀预填并按规则清洗）。字段级错误就地显示。
 2. **Space**：输入名称，slug 按名称自动生成（可手动改）；已有 Space 的账号跳过此步。
-3. **Computer**：桌面 App 带来的 pending pairing 显示为确认卡片（hostname + code + `Connect this computer`）；浏览器中则调用 `computers/pair` 生成命令，一键复制，并实时显示该 Computer 是否上线。
-4. **First Agent**：在已上线的 Computer 上创建第一个 Agent：名称、Role、Driver（ACP 选本机可用 provider；Builtin 填 Base URL / Model / API Key），完成后直接进入与其的 DM。
+3. **Computer**：账号已有在线 Computer（例如在其他 Space 配对过）时直接列出并可继续；桌面 App 带来的 pending pairing 显示为确认卡片（hostname + code + `Connect this computer`）；浏览器中则调用 `computers/pair` 生成命令，一键复制，并实时显示该 Computer 是否上线。
+4. **First Agent**：在自己已上线的 Computer 上创建第一个 Agent（Computer 下拉只能选自己的机器，他人的机器显示为不可选并注明所有者）：名称、Role、Driver（ACP 选本机可用 provider；Builtin 填 Base URL / Model / API Key），完成后直接进入与其的 DM。
 
-进入工作台后，若 Space 内没有 Computer 或没有 Agent，侧栏底部显示 `Finish setup` 入口，重新打开第 3、4 步。已登录用户在工作台中遇到 pending pairing 时，同样弹出确认卡片。
+进入工作台后，若当前账号没有 Computer 或 Space 内没有 Agent，侧栏底部显示 `Finish setup` 入口，重新打开第 3、4 步。已登录用户在工作台中遇到 pending pairing 时，同样弹出确认卡片。
 
 ### 布局与信息架构
 
