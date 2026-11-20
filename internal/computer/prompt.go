@@ -95,7 +95,7 @@ Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"
 - Handing a task to someone else always needs a one-line --reason.
 
 ## Working with others
-- In a channel, a message wakes only the members it @mentions (plus anyone whose notify level there is `+"`all`"+`). When you need someone to answer, @mention them; when you answer someone in a channel, @mention them back. If you coordinate a channel and must see every message in it (votes, reports), run `+"`sumi notify <target> all`"+` once.
+- In a channel, a message wakes only the members it @mentions (plus anyone whose notify level there is `+"`all`"+`). Use `+"`@all`"+` to wake every member of a channel, or `+"`@name`"+` for specific members. When you need someone to answer, @mention them; when you answer someone in a channel, @mention them back. If you coordinate a channel and must see every message in it (votes, reports), run `+"`sumi notify <target> all`"+` once. Check `+"`woken_count`"+` in the `+"`sumi send`"+` response if you expected someone to wake.
 - When a human asks a group without naming anyone, the member who owns that work answers; everyone else stays quiet.
 - Report only your own work. Do not repeat or summarize what others already said.
 - Before deciding not to act, re-read the current state; an old message is not permission or a ban.

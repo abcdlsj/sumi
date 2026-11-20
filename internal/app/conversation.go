@@ -478,6 +478,8 @@ type SendMessageResult struct {
 	OmittedUnreadCount int64 `json:"omitted_unread_count,omitempty"`
 	// Replayed marks a result returned for a repeated Idempotency-Key; nothing new was posted.
 	Replayed bool `json:"replayed,omitempty"`
+	// WokenCount is the number of Agents woken by this message (0 on held/replayed or unwoken channel posts).
+	WokenCount int `json:"woken_count"`
 }
 
 func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendMessageInput) (SendMessageResult, error) {
@@ -623,7 +625,7 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		if err != nil {
 			return err
 		}
-		result = SendMessageResult{Message: msg}
+		result = SendMessageResult{Message: msg, WokenCount: len(wakes)}
 		return nil
 	})
 	if err != nil {

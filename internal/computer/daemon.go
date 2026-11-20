@@ -790,6 +790,8 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 
 		focus := items[0]
+		turnStart := time.Now()
+		d.logger.Info("Agent turn started", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "inbox_items", len(items), "reason", focus.Reason)
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
 		turnCtx, cancel := context.WithCancelCause(ctx)
@@ -838,6 +840,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		ag.mu.Lock()
 		ag.resetBreakerLocked()
 		ag.mu.Unlock()
+		d.logger.Info("Agent turn completed", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "duration_ms", time.Since(turnStart).Milliseconds())
 		d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 
 		// Check if new wakes arrived while busy.
@@ -914,6 +917,7 @@ func (d *Daemon) armRetry(ctx context.Context, ag *hostedAgent) time.Duration {
 		d.scheduleWake(ctx, agentID, "", "retry")
 	})
 	ag.retryTimer = timer
+	d.logger.Info("Agent retry scheduled", "agent_id", agentID, "fail_streak", ag.failStreak, "delay_ms", delay.Milliseconds())
 	return delay
 }
 

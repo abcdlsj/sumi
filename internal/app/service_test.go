@@ -357,3 +357,39 @@ func TestListMessagesTailPagination(t *testing.T) {
 		t.Fatalf("expected seq [1] has_more=false, got %d msgs has_more=%v", len(oldest.Messages), oldest.HasMore)
 	}
 }
+
+func TestSendMessageReportsWokenCount(t *testing.T) {
+	svc, _, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	_, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName:  "Lin",
+		RoleText:     "Engineer",
+		ComputerID:   comp.ID,
+		DriverKind:   domain.DriverBuiltin,
+		DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	convs, err := svc.ListConversations(ctx, owner)
+	if err != nil || len(convs) == 0 {
+		t.Fatalf("list conversations: %v", err)
+	}
+	convID := convs[0].ID
+
+	silent, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: convID, BodyMarkdown: "nobody mentioned"})
+	if err != nil {
+		t.Fatalf("silent send: %v", err)
+	}
+	if silent.WokenCount != 0 {
+		t.Fatalf("expected woken_count=0 without mention, got %d", silent.WokenCount)
+	}
+
+	mentioned, err := svc.SendMessage(ctx, owner, SendMessageInput{ConversationID: convID, BodyMarkdown: "ping @Lin"})
+	if err != nil {
+		t.Fatalf("mentioned send: %v", err)
+	}
+	if mentioned.WokenCount != 1 {
+		t.Fatalf("expected woken_count=1 with @Lin, got %d", mentioned.WokenCount)
+	}
+}

@@ -211,8 +211,8 @@ Agent 创建与修改时由 Web 表单填写 Driver 配置，服务端按 `drive
   - `sumi inbox`：列出当前 Agent 有未读触发的对话（按最新活动排序，带 `target`、未读数与是否提及）。
   - `sumi conversations`：列出可见的 Channel 与 DM，以及自己 `following` 的 Thread 与 Task 对话；每项带可直接使用的 `target`（Thread 另带父对话的 `parent_target` 与根消息 id）。
   - `sumi read <target> [--unread]`：读取目标对话并推进 `read_seq`。
-  - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息）；`--attach` 先上传本地文件再随消息绑定。
-    - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键、保存时间）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。每个 Conversation 最多一份草稿；新的 held 若内容不同会替换旧草稿，旧草稿先移到 `replaced/`（每个 Conversation 保留最近 5 份），并在 `data.replaced_draft` 给出路径。
+  - `sumi send <target> [--body ...] [--attach <path> ...]`：发送消息（受 Freshness Guard 保护，有未读他人消息时返回 `held` 并附带未读消息；成功响应附带 `woken_count` 表示本次唤醒的 Agent 数量，方便协调者判断是否漏 `@`）；`--attach` 先上传本地文件再随消息绑定。
+    - 被 held 时 CLI 把这条消息（正文、`reply_to`、已上传的 `attachment_ids`、幂等键、保存时间）存为草稿 `$SUMI_DRAFT_DIR/<conversation_id>.json`（Daemon 设为 Agent Home 的 `drafts/`，0600），`data.draft_saved = true`。每个 Conversation 最多一份草稿；新的 held 若内容不同会替换旧草稿，旧草稿先移到 `replaced/`（每个 Conversation 保留最近 5 份），并在 `data.replaced_draft` 给出路径；保存草稿时顺带清理已过期的陈旧草稿文件。
     - Agent 读完后可放弃（正常结果，`sumi send <target> --discard-draft` 删除草稿）、`sumi send <target> --draft` 原样发出（不重新上传），或用新的 `--body` 改写。只有发送成功的请求与草稿幂等键一致时才删除草稿；改写后发送成功不会删除原草稿，响应带 `data.draft_pending = true` 提醒它仍在。草稿 10 分钟后过期：过期草稿不能 `--draft` 发出，错误数据里附原正文供改写。`--draft` / `--discard-draft` 不能与 `--body` / `--attach` / `--reply-to` 同用。
     - CLI 以 `(conversation_id, reply_to, body, 附件文件内容)` 的哈希作为 `Idempotency-Key`，capability socket 原样转发。
   - `sumi attachment <attachment_id>`：把附件下载到 `$SUMI_ATTACHMENT_DIR`（默认 agent workspace 的 `attachments/`），供 Agent 读取入参文件。

@@ -267,7 +267,7 @@ func Run(args []string, stdout io.Writer) int {
 	sendCmd := &cobra.Command{
 		Use:   "send <target>",
 		Args:  cobra.ExactArgs(1),
-		Short: "Send a message (protected by Freshness Guard); --draft resends a held message, --discard-draft drops it",
+		Short: "Send a message (protected by Freshness Guard; use @name or @all in channels to wake members); --draft resends a held message, --discard-draft drops it",
 		RunE: func(cmd *cobra.Command, a []string) error {
 			if sendDraft && sendDiscard {
 				return fail(localError(codeInvalidArgument, errors.New("--draft and --discard-draft are exclusive")), nil)

@@ -60,11 +60,13 @@ func saveDraft(d draft) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
+	now := time.Now().UTC()
+	sweepExpiredDrafts(now)
 	if d.SavedAt.IsZero() {
-		d.SavedAt = time.Now().UTC()
+		d.SavedAt = now
 	}
 	replaced := ""
-	if old, err := loadDraft(d.ConversationID); err == nil && old.IdempotencyKey != d.IdempotencyKey && !old.expired(time.Now()) {
+	if old, err := loadDraft(d.ConversationID); err == nil && old.IdempotencyKey != d.IdempotencyKey && !old.expired(now) {
 		if replaced, err = archiveDraft(old); err != nil {
 			return "", err
 		}
@@ -118,6 +120,28 @@ func loadDraft(convID string) (draft, error) {
 func deleteDraft(convID string) {
 	if path, err := draftPath(convID); err == nil {
 		_ = os.Remove(path)
+	}
+}
+
+// sweepExpiredDrafts removes stale top-level draft files older than draftTTL.
+func sweepExpiredDrafts(now time.Time) {
+	entries, err := os.ReadDir(draftDir())
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		p := filepath.Join(draftDir(), entry.Name())
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var d draft
+		if err := json.Unmarshal(raw, &d); err == nil && d.expired(now) {
+			_ = os.Remove(p)
+		}
 	}
 }
 
