@@ -72,11 +72,11 @@ func main() {
 		MinHeight:        600,
 		BackgroundColour: application.NewRGBA(244, 244, 247, 255),
 		URL:              startURL,
-		// Content runs under a transparent title bar; the Web UI keeps the top
-		// 28px clear for the traffic lights and the native drag strip.
+		// Content runs under a transparent title bar. The drag strip is kept thin so it
+		// never covers header buttons; only the rail reserves room for the traffic lights.
 		Mac: application.MacWindow{
 			TitleBar:                application.MacTitleBarHidden,
-			InvisibleTitleBarHeight: 28,
+			InvisibleTitleBarHeight: 8,
 		},
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {

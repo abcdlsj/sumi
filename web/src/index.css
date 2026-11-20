@@ -293,7 +293,7 @@ html.desktop {
   font-family: var(--font-ui);
 }
 
-/* Desktop shell: native drag strip and traffic lights live in the top --titlebar px. */
+/* Desktop shell: only the rail clears the traffic lights; the 52px headers stay aligned with them. */
 .titlebar-pad {
   padding-top: var(--titlebar);
 }

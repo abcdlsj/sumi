@@ -290,7 +290,7 @@ export function Workbench({
       </nav>
 
       {/* Sidebar */}
-      <aside aria-label="Sidebar" className="relative bg-nav titlebar-pad border-r border-nav-line flex flex-col min-h-0 select-none">
+      <aside aria-label="Sidebar" className="relative bg-nav border-r border-nav-line flex flex-col min-h-0 select-none">
         <ResizeHandle
           label="Resize sidebar"
           edge="right"
@@ -423,7 +423,7 @@ export function Workbench({
       </aside>
 
       {/* Main */}
-      <main className="bg-panel titlebar-pad flex flex-col min-w-0 min-h-0">
+      <main className="bg-panel flex flex-col min-w-0 min-h-0">
         <div key={viewKey(mainView)} className="h-full min-h-0 animate-fade-in">
           {mainView.kind === "conversation" && activeConv && <ConversationView spaceSlug={spaceSlug} boot={boot} conv={activeConv} onOpenDetail={setDetail} />}
           {mainView.kind === "inbox" && (
@@ -454,7 +454,7 @@ export function Workbench({
       </main>
 
       {/* Detail */}
-      <div className="relative min-w-0 min-h-0 bg-panel titlebar-pad">
+      <div className="relative min-w-0 min-h-0 bg-panel">
         {detail && (
           <ResizeHandle
             label="Resize panel"
