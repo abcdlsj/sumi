@@ -312,7 +312,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
         groups.map((g) => (
           <div key={g.key}>
             {g.label && (
-              <div className="px-1 pb-1.5 pt-1 flex items-center gap-2 text-[12px] font-semibold text-fg-3 ui-font">
+              <div className="px-1 pb-1.5 pt-1 flex items-center gap-2 text-[12px] font-semibold text-fg-3">
                 {g.label} <span className="font-mono text-fg-4">{g.items.length}</span>
               </div>
             )}

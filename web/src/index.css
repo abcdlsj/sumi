@@ -233,11 +233,14 @@
   }
 }
 
-/* Interface chrome uses Avenir Next; reading text (messages, descriptions, inputs) keeps the body face. */
+/* Three faces, bundled with the app (main.tsx): Space Grotesk for chrome and
+   display, Inter for reading, JetBrains Mono for machine-written identifiers.
+   CJK falls back to the platform's Simplified Chinese faces. */
 :root {
-  --font-ui: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-  --font-body: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-  --font-display: "Iowan Old Style", "Charter", "Source Serif Pro", Georgia, "Songti SC", serif;
+  --font-ui: "Space Grotesk Variable", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-body: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-display: var(--font-ui);
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
   --titlebar: 0px;
 }
 html.desktop {
@@ -257,7 +260,6 @@ html.desktop {
     font-size: 14px;
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
-    font-feature-settings: "cv11", "ss01";
   }
   input,
   textarea,
@@ -286,11 +288,7 @@ html.desktop {
 }
 .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.01em;
-}
-/* Avenir Next sets small; give interface weights a touch more presence. */
-.ui-font {
-  font-family: var(--font-ui);
+  letter-spacing: -0.022em;
 }
 
 /* Desktop shell: native drag strip and traffic lights live in the top --titlebar px. */
@@ -326,7 +324,7 @@ html.desktop {
 }
 
 .font-mono {
-  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .tabular {
@@ -394,7 +392,7 @@ html.desktop {
   margin-top: 0.2em;
 }
 .md code {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.12em 0.4em;
   border-radius: 5px;
