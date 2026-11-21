@@ -452,12 +452,29 @@ func Run(args []string, stdout io.Writer) int {
 	})
 
 	// Task subcommands
+	resolveTaskArg := func(raw string) (string, error) {
+		c, err := NewFromEnv()
+		if err != nil {
+			return "", fail(localError(codeUnauthenticated, err), nil)
+		}
+		id, e := resolveTaskID(c, raw)
+		if e != nil {
+			return "", fail(e, nil)
+		}
+		return id, nil
+	}
 	taskCmd := &cobra.Command{Use: "task", Short: "Manage tasks"}
 	taskCmd.AddCommand(&cobra.Command{
-		Use:   "show <task_id>",
+		Use:   "show <task_id|#N>",
 		Short: "Show one task",
 		Args:  cobra.ExactArgs(1),
-		RunE:  func(_ *cobra.Command, a []string) error { return call(http.MethodGet, "/tasks/"+a[0], nil) },
+		RunE: func(_ *cobra.Command, a []string) error {
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodGet, "/tasks/"+id, nil)
+		},
 	})
 	var taskStatusFilter, taskAssigneeFilter string
 	taskListCmd := &cobra.Command{
@@ -499,23 +516,39 @@ func Run(args []string, stdout io.Writer) int {
 	taskCmd.AddCommand(taskCreateCmd)
 
 	taskCmd.AddCommand(&cobra.Command{
-		Use:  "claim <task_id>",
+		Use:  "claim <task_id|#N>",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, a []string) error { return call(http.MethodPost, "/tasks/"+a[0]+"/claim", nil) },
+		RunE: func(_ *cobra.Command, a []string) error {
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPost, "/tasks/"+id+"/claim", nil)
+		},
 	})
 	taskCmd.AddCommand(&cobra.Command{
-		Use:  "unclaim <task_id>",
+		Use:  "unclaim <task_id|#N>",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, a []string) error { return call(http.MethodPost, "/tasks/"+a[0]+"/unclaim", nil) },
+		RunE: func(_ *cobra.Command, a []string) error {
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPost, "/tasks/"+id+"/unclaim", nil)
+		},
 	})
 
 	var assignTo, assignReason string
 	var assignRev int64
 	taskAssignCmd := &cobra.Command{
-		Use:  "assign <task_id>",
+		Use:  "assign <task_id|#N>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
-			return call(http.MethodPost, "/tasks/"+a[0]+"/assign", map[string]any{
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPost, "/tasks/"+id+"/assign", map[string]any{
 				"assignee_member_id": assignTo,
 				"reason":             assignReason,
 				"expected_revision":  assignRev,
@@ -528,19 +561,27 @@ func Run(args []string, stdout io.Writer) int {
 	taskCmd.AddCommand(taskAssignCmd)
 
 	taskCmd.AddCommand(&cobra.Command{
-		Use:  "status <task_id> <status>",
+		Use:  "status <task_id|#N> <status>",
 		Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, a []string) error {
-			return call(http.MethodPut, "/tasks/"+a[0]+"/status", map[string]any{"status": a[1]})
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
+			return call(http.MethodPut, "/tasks/"+id+"/status", map[string]any{"status": a[1]})
 		},
 	})
 
 	var amendTitle, amendDesc string
 	var amendRev int64
 	taskAmendCmd := &cobra.Command{
-		Use:  "amend <task_id>",
+		Use:  "amend <task_id|#N>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
+			id, err := resolveTaskArg(a[0])
+			if err != nil {
+				return err
+			}
 			payload := map[string]any{"expected_revision": amendRev}
 			if amendTitle != "" {
 				payload["title"] = amendTitle
@@ -548,7 +589,7 @@ func Run(args []string, stdout io.Writer) int {
 			if amendDesc != "" {
 				payload["description"] = amendDesc
 			}
-			return call(http.MethodPatch, "/tasks/"+a[0], payload)
+			return call(http.MethodPatch, "/tasks/"+id, payload)
 		},
 	}
 	taskAmendCmd.Flags().StringVar(&amendTitle, "title", "", "new title")

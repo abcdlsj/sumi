@@ -192,6 +192,29 @@ describe("TaskDetail", () => {
       }),
     );
   });
+
+  it("uses custom selects for status/assignee and toggles Claim/Unclaim correctly", async () => {
+    vi.spyOn(api, "getTask").mockResolvedValue({ task });
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [], read_seq: 0, following: true });
+    const updateStatus = vi.spyOn(api, "updateTaskStatus").mockResolvedValue({ task: { ...task, status: "in_review" } });
+    const assign = vi.spyOn(api, "assignTask").mockResolvedValue({ task: { ...task, assignee_member_id: lin.id } });
+    const claim = vi.spyOn(api, "claimTask").mockResolvedValue({ task: { ...task, assignee_member_id: lisi.id } });
+
+    const { container } = renderPane({ kind: "task", taskID: task.id });
+    const statusTrigger = await screen.findByRole("button", { name: "Task status" });
+    expect(container.querySelector("select")).toBeNull();
+
+    fireEvent.click(statusTrigger);
+    fireEvent.click(screen.getByRole("option", { name: /In review/ }));
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledWith("s", task.id, "in_review"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Task assignee" }));
+    fireEvent.click(screen.getByRole("option", { name: /Lin/ }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("s", task.id, lin.id));
+
+    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    await waitFor(() => expect(claim).toHaveBeenCalledWith("s", task.id));
+  });
 });
 
 describe("AgentDetail activity", () => {

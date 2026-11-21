@@ -67,6 +67,9 @@ func (s *Service) CreateTask(ctx context.Context, actor domain.Member, in Create
 			if err != nil || m.SpaceID != actor.SpaceID || m.RetiredAt != nil {
 				return domain.NewError(domain.CodeNotFound, "assignee member not found")
 			}
+			if _, err := canAccessConversation(ctx, tx, m, chMeta.ID); err != nil {
+				return domain.NewError(domain.CodeInvalidArgument, "assignee does not have access to this channel")
+			}
 			assignee = &m
 		}
 
@@ -127,15 +130,15 @@ func (s *Service) CreateTask(ctx context.Context, actor domain.Member, in Create
 			task.AssigneeMemberID = assignee.ID
 			task.AssigneeName = assignee.DisplayName
 			task.AssigneeKind = assignee.Kind
-			// If assigned to an agent other than creator, lazily create task conversation and wake them.
-			if assignee.Kind == domain.MemberKindAgent && assignee.ID != actor.ID {
+			// When assigned to another member, lazily create the task conversation so both creator and assignee follow it.
+			if assignee.ID != actor.ID {
 				taskConv, _, err := ensureTaskConversationTx(ctx, tx, &task)
 				if err != nil {
 					return err
 				}
 				_ = setFollowingTx(ctx, tx, taskConv.ID, actor.ID, true)
 				_ = setFollowingTx(ctx, tx, taskConv.ID, assignee.ID, true)
-				_, ev2, err := insertActionMessageTx(ctx, tx, actor, taskConv.ID, domain.ActionTaskEvent, map[string]any{
+				msg, ev2, err := insertActionMessageTx(ctx, tx, actor, taskConv.ID, domain.ActionTaskEvent, map[string]any{
 					"op":            "assigned",
 					"task_number":   task.Number,
 					"assignee_id":   assignee.ID,
@@ -145,9 +148,13 @@ func (s *Service) CreateTask(ctx context.Context, actor domain.Member, in Create
 				if err != nil {
 					return err
 				}
+				_ = advanceReadSeqTx(ctx, tx, taskConv.ID, actor.ID, msg.Seq)
 				events = append(events, ev2)
-				if w, ok := agentWakeForMemberTx(ctx, tx, assignee.ID, taskConv.ID, "task_assigned"); ok {
-					wakes = append(wakes, w)
+				task.MessageCount++
+				if assignee.Kind == domain.MemberKindAgent {
+					if w, ok := agentWakeForMemberTx(ctx, tx, assignee.ID, taskConv.ID, "task_assigned"); ok {
+						wakes = append(wakes, w)
+					}
 				}
 			}
 		}
@@ -378,6 +385,9 @@ func (s *Service) ClaimTask(ctx context.Context, actor domain.Member, taskID str
 		if t.AssigneeMemberID != "" && t.AssigneeMemberID != actor.ID {
 			return domain.NewError(domain.CodeConflict, "task is already claimed by another member")
 		}
+		if t.AssigneeMemberID == actor.ID && t.Status != domain.TaskTodo {
+			return domain.NewError(domain.CodeConflict, "task is already claimed by you")
+		}
 		if enforceFreshness && t.ConversationID != "" {
 			held, err := checkFreshnessTx(ctx, tx, t.ConversationID, actor.ID)
 			if err != nil {
@@ -459,6 +469,18 @@ func (s *Service) UnclaimTask(ctx context.Context, actor domain.Member, taskID s
 		}
 		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
+		}
+		if t.Status == domain.TaskDone {
+			return domain.NewError(domain.CodeConflict, "task is done; reopen it before unclaiming")
+		}
+		if t.Status == domain.TaskClosed {
+			return domain.NewError(domain.CodeConflict, "task is closed; reopen it before unclaiming")
+		}
+		if t.AssigneeMemberID == "" {
+			return domain.NewError(domain.CodeConflict, "task is not claimed")
+		}
+		if t.AssigneeMemberID != actor.ID {
+			return domain.NewError(domain.CodePermissionDenied, "only the current assignee can unclaim a task")
 		}
 		now := time.Now().UTC()
 		newStatus := t.Status
@@ -543,6 +565,12 @@ func (s *Service) AssignTask(ctx context.Context, actor domain.Member, in Assign
 		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
+		if t.Status == domain.TaskDone {
+			return domain.NewError(domain.CodeConflict, "task is done; reopen it before assigning")
+		}
+		if t.Status == domain.TaskClosed {
+			return domain.NewError(domain.CodeConflict, "task is closed; reopen it before assigning")
+		}
 		if in.ExpectedRevision > 0 && t.Revision != in.ExpectedRevision {
 			return domain.NewError(domain.CodeConflict, "task revision changed; reread before assigning")
 		}
@@ -564,8 +592,15 @@ func (s *Service) AssignTask(ctx context.Context, actor domain.Member, in Assign
 			if err != nil || m.SpaceID != actor.SpaceID || m.RetiredAt != nil {
 				return domain.NewError(domain.CodeNotFound, "assignee member not found")
 			}
+			if _, err := canAccessConversation(ctx, tx, m, chMeta.ID); err != nil {
+				return domain.NewError(domain.CodeInvalidArgument, "assignee does not have access to this channel")
+			}
 			assignee = &m
 			assigneeArg = m.ID
+		}
+		if in.AssigneeMemberID == t.AssigneeMemberID {
+			res = TaskWriteResult{Task: t}
+			return nil
 		}
 
 		now := time.Now().UTC()

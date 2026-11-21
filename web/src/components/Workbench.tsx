@@ -648,7 +648,7 @@ export function Workbench({
               onOpenDetail={setDetail}
             />
           )}
-          {mainView.kind === "tasks" && <TasksView spaceSlug={spaceSlug} filter={taskFilter} onFilter={setTaskFilter} onOpenDetail={setDetail} />}
+          {mainView.kind === "tasks" && <TasksView spaceSlug={spaceSlug} boot={boot} filter={taskFilter} onFilter={setTaskFilter} onOpenDetail={setDetail} />}
           {mainView.kind === "admin" && (
             <AdminPanel
               boot={boot}

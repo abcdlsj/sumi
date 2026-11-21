@@ -90,33 +90,67 @@ func resolveDM(c *Client, peer string) (string, *EnvelopeError) {
 }
 
 func resolveTask(c *Client, digits string) (string, *EnvelopeError) {
+	task, e := findTaskByNumber(c, digits)
+	if e != nil {
+		return "", e
+	}
+	if task.ConversationID != "" {
+		return task.ConversationID, nil
+	}
+	return materializeTaskConversation(c, task.ID)
+}
+
+// resolveTaskID turns `#N`, `N`, `task:#N`, or a bare task UUID into a task id.
+func resolveTaskID(c *Client, raw string) (string, *EnvelopeError) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", localError(codeInvalidArgument, fmt.Errorf("task id or #number is required"))
+	}
+	digits := ""
+	switch {
+	case strings.HasPrefix(s, targetTask):
+		digits = strings.TrimPrefix(s, targetTask)
+	case strings.HasPrefix(s, "#"):
+		digits = strings.TrimPrefix(s, "#")
+	default:
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			digits = s
+		}
+	}
+	if digits == "" {
+		return s, nil
+	}
+	task, e := findTaskByNumber(c, digits)
+	if e != nil {
+		return "", e
+	}
+	return task.ID, nil
+}
+
+func findTaskByNumber(c *Client, digits string) (taskRef, *EnvelopeError) {
 	number, err := strconv.ParseInt(strings.TrimSpace(digits), 10, 64)
 	if err != nil || number <= 0 {
-		return "", localError(codeInvalidArgument, fmt.Errorf("task target needs a task number: `task:#N`"))
+		return taskRef{}, localError(codeInvalidArgument, fmt.Errorf("task target needs a task number: `#N` or `task:#N`"))
 	}
 	status, raw, err := c.Do(http.MethodGet, "/tasks?status=all", nil)
 	if err != nil {
-		return "", localError(codeUnavailable, err)
+		return taskRef{}, localError(codeUnavailable, err)
 	}
 	if e, _ := responseError(status, raw); e != nil {
-		return "", e
+		return taskRef{}, e
 	}
 	var parsed struct {
 		Tasks []taskRef `json:"tasks"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", localError(codeInternal, err)
+		return taskRef{}, localError(codeInternal, err)
 	}
 	for _, task := range parsed.Tasks {
-		if task.Number != number {
-			continue
+		if task.Number == number {
+			return task, nil
 		}
-		if task.ConversationID != "" {
-			return task.ConversationID, nil
-		}
-		return materializeTaskConversation(c, task.ID)
 	}
-	return "", targetNotFound(fmt.Sprintf("no task #%d in this space", number))
+	return taskRef{}, targetNotFound(fmt.Sprintf("no task #%d in this space", number))
 }
 
 // materializeTaskConversation asks the Server to lazily create the task's own conversation.

@@ -12,7 +12,7 @@ import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, IconButton, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
+import { Badge, Button, IconButton, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
@@ -465,6 +465,30 @@ function TaskDetail({
 
   if (!task) return <DetailSkeleton />;
   const open = task.status !== "done" && task.status !== "closed";
+  const meID = boot.current_member.id;
+  const canClaim = open && (!task.assignee_member_id || (task.assignee_member_id === meID && task.status === "todo"));
+  const canUnclaim = open && task.assignee_member_id === meID && task.status !== "todo";
+
+  const assigneePool = members.slice();
+  if (task.assignee_member_id && !assigneePool.some((m) => m.id === task.assignee_member_id)) {
+    const existing = boot.members.find((m) => m.id === task.assignee_member_id);
+    if (existing) assigneePool.push(existing);
+  }
+  const statusOptions: SelectOption<TaskStatus>[] = STATUSES.map((s) => ({
+    value: s,
+    label: taskStatusLabel(s),
+    icon: <TaskStatusIcon status={s} size={14} />,
+  }));
+  const assigneeOptions: SelectOption<string>[] = [
+    { value: "", label: "Unassigned" },
+    ...assigneePool.map((m) => ({
+      value: m.id,
+      label: m.display_name,
+      description: m.kind === "agent" ? m.agent?.role_text || "Agent" : undefined,
+      icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.agent?.runtime_state} />,
+      trailing: m.kind === "agent" ? <Badge>Agent</Badge> : undefined,
+    })),
+  ];
 
   function startEdit() {
     if (!task) return;
@@ -541,49 +565,44 @@ function TaskDetail({
             {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
           </>
         )}
-        <div className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-1 pt-1">
+        <div className="grid grid-cols-[84px_1fr] gap-x-3 gap-y-2 pt-1">
           <KV label="Status">
-            <div className="relative">
-              <select
-                value={task.status}
-                onChange={(e) => void act.run(() => api.updateTaskStatus(spaceSlug, task.id, e.target.value as TaskStatus)).then(refresh)}
-                className="h-8 pl-8 pr-3 rounded-[8px] border border-line bg-card text-[14px] font-medium outline-none hover:border-line-strong focus:border-accent appearance-none"
-              >
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {taskStatusLabel(s)}
-                  </option>
-                ))}
-              </select>
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                <TaskStatusIcon status={task.status} size={14} />
-              </span>
-            </div>
+            <Select
+              size="sm"
+              ariaLabel="Task status"
+              value={task.status}
+              options={statusOptions}
+              onChange={(next) => void act.run(() => api.updateTaskStatus(spaceSlug, task.id, next)).then(refresh)}
+              className="w-[176px]"
+            />
           </KV>
           <KV label="Assignee">
-            <div className="flex items-center gap-2 min-w-0">
-              <select
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <Select
+                size="sm"
+                searchable
+                searchPlaceholder="Search channel members…"
+                ariaLabel="Task assignee"
                 value={task.assignee_member_id ?? ""}
-                onChange={(e) => void act.run(() => api.assignTask(spaceSlug, task.id, e.target.value)).then(refresh)}
-                className="h-8 px-2.5 rounded-[8px] border border-line bg-card text-[14px] outline-none hover:border-line-strong focus:border-accent max-w-[180px]"
-              >
-                <option value="">Unassigned</option>
-                {boot.members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.display_name}
-                    {m.kind === "agent" ? " (agent)" : ""}
-                  </option>
-                ))}
-              </select>
-              {task.assignee_member_id !== boot.current_member.id && open && (
+                options={assigneeOptions}
+                disabled={!open}
+                onChange={(next) => void act.run(() => api.assignTask(spaceSlug, task.id, next)).then(refresh)}
+                className="flex-1 min-w-0 max-w-[210px]"
+              />
+              {canClaim && (
                 <Button size="sm" variant="soft" loading={act.busy} onClick={() => void act.run(() => api.claimTask(spaceSlug, task.id)).then(refresh)}>
                   Claim
+                </Button>
+              )}
+              {canUnclaim && (
+                <Button size="sm" variant="ghost" loading={act.busy} onClick={() => void act.run(() => api.unclaimTask(spaceSlug, task.id)).then(refresh)}>
+                  Unclaim
                 </Button>
               )}
             </div>
           </KV>
           <KV label="Revision">
-            <span className="tabular text-fg-3">rev {task.revision}</span>
+            <span className="tabular text-[13px] text-fg-3">rev {task.revision}</span>
           </KV>
         </div>
       </div>

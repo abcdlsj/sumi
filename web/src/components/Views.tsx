@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveRestore,
@@ -26,10 +26,10 @@ import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, Segmented, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
+import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
 
 export type InboxFilter = "needs_me" | "unread" | "all";
-export type TaskFilter = "active" | "mine" | "done";
+export type TaskFilter = "active" | "mine" | "done" | "closed";
 export type AdminTab = "agents" | "computers" | "people" | "settings";
 
 const REASON: Record<string, { label: string; icon: ReactNode }> = {
@@ -181,17 +181,17 @@ const STATUS_ORDER: TaskStatus[] = ["in_progress", "in_review", "todo", "done", 
 
 function TaskRow({ t, onOpen }: { t: Task; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="w-full h-12 px-4 hover:bg-subtle flex items-center gap-4 text-left transition-colors">
+    <button onClick={onOpen} className="w-full min-h-12 px-4 py-2 hover:bg-subtle flex items-center gap-3.5 text-left transition-colors">
       <TaskStatusIcon status={t.status} />
-      <span className="tabular text-[13px] text-fg-3 w-10 shrink-0">#{t.number}</span>
-      <span className="text-[14px] font-medium text-fg truncate flex-1">{t.title}</span>
+      <span className="font-mono tabular text-[12.5px] text-fg-3 w-10 shrink-0">#{t.number}</span>
+      <span className="text-[14px] font-medium text-fg truncate flex-1 min-w-0">{t.title}</span>
       {t.message_count > 0 && (
-        <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-3 shrink-0">
+        <span className="inline-flex items-center gap-1 text-[12.5px] text-fg-3 shrink-0">
           <MessageSquare className="size-3.5" />
           <span className="tabular">{t.message_count}</span>
         </span>
       )}
-      <span className="w-28 text-[13px] text-fg-3 truncate shrink-0">{t.channel_slug ? `#${t.channel_slug}` : "DM"}</span>
+      <span className="w-28 text-[12.5px] text-fg-3 truncate shrink-0 text-right">{t.channel_slug ? `#${t.channel_slug}` : "DM"}</span>
       <span className="w-36 flex items-center gap-2 text-[13px] text-fg-2 shrink-0 min-w-0">
         {t.assignee_member_id ? (
           <>
@@ -206,27 +206,142 @@ function TaskRow({ t, onOpen }: { t: Task; onOpen: () => void }) {
   );
 }
 
+function NewTaskModal({
+  spaceSlug,
+  boot,
+  onClose,
+  onCreated,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  onClose: () => void;
+  onCreated: (task: Task) => void;
+}) {
+  const channels = boot.conversations.filter((c) => (c.kind === "public" || c.kind === "private") && !c.archived_at);
+  const [channelID, setChannelID] = useState(channels[0]?.id ?? "");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [assigneeID, setAssigneeID] = useState("");
+  const act = useAction();
+
+  const membersQ = useQuery({
+    queryKey: ["conv-members", spaceSlug, channelID],
+    queryFn: () => api.listConversationMembers(spaceSlug, channelID).then((r) => r.members),
+    enabled: Boolean(channelID),
+  });
+  const channelMembers = membersQ.data ?? boot.members.filter((m) => m.kind === "human");
+
+  const channelOptions: SelectOption<string>[] = channels.map((c) => ({
+    value: c.id,
+    label: `#${c.slug ?? "channel"}`,
+    description: c.topic || undefined,
+    icon: c.kind === "private" ? <Lock className="size-3.5 text-fg-3" /> : <Hash className="size-3.5 text-fg-3" />,
+  }));
+
+  const assigneeOptions: SelectOption<string>[] = [
+    { value: "", label: "Unassigned" },
+    ...channelMembers.map((m) => ({
+      value: m.id,
+      label: m.display_name,
+      description: m.kind === "agent" ? m.agent?.role_text || "Agent" : undefined,
+      icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.agent?.runtime_state} />,
+      trailing: m.kind === "agent" ? <Badge>Agent</Badge> : undefined,
+    })),
+  ];
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!channelID || !title.trim()) return;
+    let created: Task | null = null;
+    const ok = await act.run(async () => {
+      const res = await api.createTask(spaceSlug, {
+        channel_id: channelID,
+        title: title.trim(),
+        description: description.trim() || undefined,
+        assignee_member_id: assigneeID || undefined,
+      });
+      created = res.task;
+    });
+    if (ok && created) onCreated(created);
+  }
+
+  return (
+    <Modal open label="New task" title="New task" description="Track work inside a channel and optionally assign a member." onClose={onClose}>
+      <form onSubmit={(e) => void submit(e)} className="space-y-4">
+        <Field label="Title" autoFocus placeholder="e.g. Ship workspace file viewer" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Select
+          label="Channel"
+          searchable
+          searchPlaceholder="Filter channels…"
+          value={channelID}
+          options={channelOptions}
+          onChange={(next) => {
+            setChannelID(next);
+            setAssigneeID("");
+          }}
+          placeholder="Select a channel"
+        />
+        <Select
+          label="Assignee"
+          optional
+          searchable
+          searchPlaceholder="Search channel members…"
+          value={assigneeID}
+          options={assigneeOptions}
+          onChange={setAssigneeID}
+          placeholder="Unassigned"
+        />
+        <TextArea label="Description" optional rows={3} placeholder="Context, acceptance criteria, or links…" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={act.busy} disabled={!channelID || !title.trim()}>
+            Create task
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function TasksView({
   spaceSlug,
+  boot,
   filter,
   onFilter,
   onOpenDetail,
 }: {
   spaceSlug: string;
+  boot: BootstrapData;
   filter: TaskFilter;
   onFilter: (f: TaskFilter) => void;
   onOpenDetail: (t: DetailTarget) => void;
 }) {
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const statusQuery = filter === "done" ? "done" : filter === "closed" ? "closed" : "active";
   const tasksQ = useQuery({
     queryKey: ["tasks", spaceSlug, filter],
-    queryFn: () => api.listTasks(spaceSlug, filter === "done" ? "done" : "active", filter === "mine" ? "mine" : "").then((r) => r.tasks),
+    queryFn: () => api.listTasks(spaceSlug, statusQuery, filter === "mine" ? "mine" : "").then((r) => r.tasks),
   });
   const tasks = tasksQ.data ?? [];
   const groups = STATUS_ORDER.map((s) => ({ status: s, tasks: tasks.filter((t) => t.status === s) })).filter((g) => g.tasks.length > 0);
+  const hasChannel = boot.conversations.some((c) => (c.kind === "public" || c.kind === "private") && !c.archived_at);
 
   return (
     <section className="flex flex-col h-full min-h-0 bg-bg">
-      <ViewHeader title="Tasks" icon={<CheckCircle2 />}>
+      <ViewHeader
+        title="Tasks"
+        icon={<CheckCircle2 />}
+        actions={
+          hasChannel ? (
+            <Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>
+              New task
+            </Button>
+          ) : undefined
+        }
+      >
         <Segmented
           value={filter}
           onChange={onFilter}
@@ -234,6 +349,7 @@ export function TasksView({
             { value: "active", label: "Active" },
             { value: "mine", label: "Assigned to me" },
             { value: "done", label: "Done" },
+            { value: "closed", label: "Closed" },
           ]}
         />
       </ViewHeader>
@@ -243,11 +359,26 @@ export function TasksView({
         ) : groups.length === 0 ? (
           <EmptyState
             icon={<CheckCircle2 />}
-            title={filter === "done" ? "No finished tasks yet" : filter === "mine" ? "Nothing assigned to you" : "No active tasks"}
-            body="Hover any message in a channel and choose Task to turn it into tracked work."
+            title={
+              filter === "done"
+                ? "No finished tasks yet"
+                : filter === "closed"
+                  ? "No closed tasks"
+                  : filter === "mine"
+                    ? "Nothing assigned to you"
+                    : "No active tasks"
+            }
+            body="Create a task directly here, or hover any message in a channel to turn it into tracked work."
+            action={
+              hasChannel ? (
+                <Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>
+                  New task
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
-          <div className="px-6 py-5 space-y-5 animate-fade-in">
+          <div className="px-6 py-5 space-y-5 max-w-[960px] animate-fade-in">
             {groups.map((g) => (
               <div key={g.status}>
                 <div className="mb-2 px-1 flex items-center gap-2 text-[13px] font-semibold text-fg-2">
@@ -265,6 +396,19 @@ export function TasksView({
           </div>
         )}
       </div>
+      {creating && (
+        <NewTaskModal
+          spaceSlug={spaceSlug}
+          boot={boot}
+          onClose={() => setCreating(false)}
+          onCreated={(created) => {
+            setCreating(false);
+            void qc.invalidateQueries({ queryKey: ["tasks", spaceSlug] });
+            void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+            onOpenDetail({ kind: "task", taskID: created.id });
+          }}
+        />
+      )}
     </section>
   );
 }
