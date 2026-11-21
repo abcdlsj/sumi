@@ -128,7 +128,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       <pre ref={preRef}>{children}</pre>
       <div className="absolute top-2 right-2 flex items-center gap-1.5">
         {lang && (
-          <span className="h-6 px-1.5 rounded-[6px] bg-card/80 border border-line font-mono text-[11px] text-fg-4 inline-flex items-center select-none">
+          <span className="h-6 px-1.5 rounded-[4px] bg-card/80 border border-line font-mono text-[11px] text-fg-4 inline-flex items-center select-none">
             {lang}
           </span>
         )}
@@ -137,7 +137,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
           onClick={copy}
           aria-label={copied ? "Copied code" : "Copy code"}
           title={copied ? "Copied" : "Copy"}
-          className="h-7 px-2 rounded-[7px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
+          className="h-7 px-2 rounded-[5px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
         >
           {copied ? <Check className="size-3.5 text-work" /> : <Copy className="size-3.5" />}
           <span>{copied ? "Copied" : "Copy"}</span>
@@ -203,7 +203,7 @@ export const MessageBody = memo(function MessageBody({
       },
       table({ children }) {
         return (
-          <div className="my-2 overflow-x-auto rounded-[9px] border border-line bg-card/50">
+          <div className="my-2 overflow-x-auto rounded-[7px] border border-line bg-card/50">
             <table>{children}</table>
           </div>
         );
@@ -215,7 +215,7 @@ export const MessageBody = memo(function MessageBody({
           const task = taskByNum.get(taskKey);
           if (!task) return <span {...props}>{children}</span>;
           const cls =
-            "inline-flex items-baseline px-1.5 py-[0.5px] -my-[0.5px] rounded-[5px] font-mono text-[0.88em] font-medium bg-subtle text-fg border border-line transition-colors";
+            "inline-flex items-baseline px-1.5 py-[0.5px] -my-[0.5px] rounded-[4px] font-mono text-[0.88em] font-medium bg-subtle text-fg border border-line transition-colors";
           if (!clickableTask) {
             return (
               <span data-task-ref={task.number} className={cls}>
@@ -243,7 +243,7 @@ export const MessageBody = memo(function MessageBody({
           return (
             <span
               data-mention="all"
-              className="inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[5px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text ring-1 ring-inset ring-accent/30"
+              className="inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text ring-1 ring-inset ring-accent/30"
             >
               {children}
             </span>
@@ -255,7 +255,7 @@ export const MessageBody = memo(function MessageBody({
 
         const isSelf = member.id === selfID;
         const base =
-          "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[5px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text transition-colors";
+          "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text transition-colors";
         const emphasis = isSelf ? " ring-1 ring-inset ring-accent/30" : "";
 
         if (!clickableMember) {

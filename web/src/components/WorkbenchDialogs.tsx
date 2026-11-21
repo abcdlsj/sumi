@@ -331,14 +331,14 @@ export function JumpDialog({
                 type="button"
                 onMouseEnter={() => setSel(i)}
                 onClick={() => pick(i)}
-                className={`w-full h-10 px-2.5 rounded-[9px] flex items-center gap-3 text-[14px] text-left transition-colors ${
+                className={`w-full h-10 px-2.5 rounded-[6px] flex items-center gap-3 text-[14px] text-left transition-colors ${
                   i === sel ? "bg-accent-soft text-fg" : "text-fg-2 hover:bg-hover"
                 }`}
               >
                 <span className="size-5 flex items-center justify-center text-fg-3 shrink-0">{it.icon}</span>
                 <span className="truncate flex-1">{it.label}</span>
                 {it.shortcut && (
-                  <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[5px] bg-subtle border border-line text-fg-3">{it.shortcut}</kbd>
+                  <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[4px] bg-subtle border border-line text-fg-3">{it.shortcut}</kbd>
                 )}
               </button>
             </div>

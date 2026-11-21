@@ -160,7 +160,7 @@ export function MentionPopup({ picker }: { picker: MentionPicker }) {
     <div
       role="listbox"
       aria-label="Mention candidates"
-      className="absolute left-2 bottom-full mb-2 z-30 w-[300px] max-h-[248px] overflow-y-auto scroll-thin bg-card border border-line rounded-[12px] shadow-lg p-1 animate-pop-in"
+      className="absolute left-2 bottom-full mb-2 z-30 w-[300px] max-h-[248px] overflow-y-auto scroll-thin bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
     >
       {picker.candidates.map((m, i) => (
         <div
@@ -172,7 +172,7 @@ export function MentionPopup({ picker }: { picker: MentionPicker }) {
           onMouseEnter={() => picker.highlight(i)}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => picker.accept(m)}
-          className={`h-9 px-2 rounded-[8px] flex items-center gap-2 cursor-pointer select-none ${
+          className={`h-9 px-2 rounded-[6px] flex items-center gap-2 cursor-pointer select-none ${
             i === picker.index ? "bg-accent-soft" : "hover:bg-subtle"
           }`}
         >

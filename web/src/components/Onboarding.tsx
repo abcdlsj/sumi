@@ -121,7 +121,7 @@ function fieldError(err: unknown): { field?: "email" | "password" | "display_nam
 }
 
 function FormError({ text }: { text: string }) {
-  return <div className="px-3.5 py-2.5 rounded-[10px] bg-danger-soft text-danger text-[13.5px] animate-fade-in">{text}</div>;
+  return <div className="px-3.5 py-2.5 rounded-[6px] bg-danger-soft text-danger text-[13.5px] animate-fade-in">{text}</div>;
 }
 
 function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
@@ -154,7 +154,7 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
   return (
     <form onSubmit={submit} className="space-y-5">
       {pairing && (
-        <div className="px-4 py-3 rounded-[12px] bg-accent-soft text-accent-text text-[13.5px] flex items-center gap-2.5">
+        <div className="px-4 py-3 rounded-[8px] bg-accent-soft text-accent-text text-[13.5px] flex items-center gap-2.5">
           <Laptop className="size-4 shrink-0" />
           This computer is ready to connect. Sign in, then confirm it.
         </div>
@@ -267,8 +267,8 @@ function SpaceStep({ user, onCreated }: { user: User; onCreated: (slug: string) 
         title="Create a space"
         body="A space holds your channels, tasks, agents and computers. You can invite people later."
       />
-      <div className="flex items-center gap-3.5 p-4 rounded-[14px] border border-line bg-subtle">
-        <span className="size-12 rounded-[12px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
+      <div className="flex items-center gap-3.5 p-4 rounded-[8px] border border-line bg-subtle">
+        <span className="size-12 rounded-[8px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
           {(name.trim()[0] ?? "S").toUpperCase()}
         </span>
         <div className="min-w-0">

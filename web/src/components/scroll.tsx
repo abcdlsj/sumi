@@ -172,7 +172,7 @@ export function NewMessagesPill({ count, onClick }: { count: number; onClick: ()
       <button
         type="button"
         onClick={onClick}
-        className="pointer-events-auto h-8 pl-3 pr-2.5 rounded-full bg-accent text-accent-fg shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in hover:bg-accent-hover transition-colors"
+        className="pointer-events-auto h-8 pl-3 pr-2.5 rounded-[6px] bg-accent text-accent-fg shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in hover:bg-accent-hover transition-colors"
       >
         {count} new {count === 1 ? "message" : "messages"}
         <ArrowDown className="size-4" />
@@ -266,7 +266,7 @@ export function LoadEarlierButton({ hasMore, loading, onClick }: { hasMore: bool
         type="button"
         disabled={loading}
         onClick={onClick}
-        className="h-7 px-3 rounded-full border border-line bg-card hover:bg-subtle text-[12.5px] font-medium text-fg-2 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+        className="h-7 px-3 rounded-[6px] border border-line bg-card hover:bg-subtle text-[12.5px] font-medium text-fg-2 inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
       >
         {loading && <Loader2 className="size-3.5 animate-spin" />}
         {loading ? "Loading…" : "Load earlier messages"}

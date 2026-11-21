@@ -239,7 +239,7 @@ export function AgentWorkspace({
             title={entry.is_symlink ? "Symlinks cannot be opened" : entry.path}
             onClick={() => (entry.is_dir ? toggleDir(entry.path) : void openFile(entry.path))}
             style={{ paddingLeft: `${depth * 14 + 8}px` }}
-            className={`w-full pr-2.5 h-8 flex items-center gap-1.5 text-left rounded-[7px] text-[13px] transition-colors ${
+            className={`w-full pr-2.5 h-8 flex items-center gap-1.5 text-left rounded-[5px] text-[13px] transition-colors ${
               entry.is_symlink
                 ? "text-fg-4 cursor-not-allowed opacity-70"
                 : isSelected
@@ -291,7 +291,7 @@ export function AgentWorkspace({
             <button
               type="button"
               onClick={() => setSelectedFile(null)}
-              className="h-7 px-2 rounded-[7px] text-[12.5px] text-fg-2 hover:text-fg hover:bg-hover inline-flex items-center gap-1 shrink-0 transition-colors"
+              className="h-7 px-2 rounded-[5px] text-[12.5px] text-fg-2 hover:text-fg hover:bg-hover inline-flex items-center gap-1 shrink-0 transition-colors"
             >
               <ArrowLeft className="size-3.5" />
               Files
@@ -306,11 +306,11 @@ export function AgentWorkspace({
             )}
           </div>
           {md && isText && (
-            <div className="p-0.5 rounded-[7px] bg-subtle border border-line flex items-center shrink-0">
+            <div className="p-0.5 rounded-[6px] bg-subtle border border-line flex items-center shrink-0">
               <button
                 type="button"
                 onClick={() => setMdMode("preview")}
-                className={`h-6 px-2 rounded-[5px] text-[11.5px] font-medium transition-colors ${
+                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium transition-colors ${
                   mdMode === "preview" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
                 }`}
               >
@@ -319,7 +319,7 @@ export function AgentWorkspace({
               <button
                 type="button"
                 onClick={() => setMdMode("raw")}
-                className={`h-6 px-2 rounded-[5px] text-[11.5px] font-medium inline-flex items-center gap-1 transition-colors ${
+                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium inline-flex items-center gap-1 transition-colors ${
                   mdMode === "raw" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
                 }`}
               >
@@ -362,7 +362,7 @@ export function AgentWorkspace({
               <img
                 src={`data:${fileContent.mime_type};base64,${fileContent.content}`}
                 alt={fileName}
-                className="max-w-full max-h-[65vh] rounded-[8px] border border-line object-contain bg-card"
+                className="max-w-full max-h-[65vh] rounded-[6px] border border-line object-contain bg-card"
               />
             </div>
           ) : fileContent && md && mdMode === "preview" ? (
@@ -406,7 +406,7 @@ export function AgentWorkspace({
           <button
             type="button"
             onClick={refresh}
-            className="mt-3 h-7 px-3 rounded-[7px] border border-line bg-card text-[12.5px] text-fg-2 hover:text-fg hover:bg-hover inline-flex items-center gap-1.5 transition-colors"
+            className="mt-3 h-7 px-3 rounded-[5px] border border-line bg-card text-[12.5px] text-fg-2 hover:text-fg hover:bg-hover inline-flex items-center gap-1.5 transition-colors"
           >
             <RefreshCw className="size-3.5" />
             Retry
@@ -429,7 +429,7 @@ export function AgentWorkspace({
   const toolbar = (
     <div className="px-3 py-2 border-b border-line flex items-center gap-1.5 bg-subtle/30 shrink-0">
       <div
-        className="flex-1 min-w-0 h-7 px-2 rounded-[7px] bg-card border border-line flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3"
+        className="flex-1 min-w-0 h-7 px-2 rounded-[5px] bg-card border border-line flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3"
         title={rootPath || "Agent workspace"}
       >
         <Folder className="size-3.5 text-fg-4 shrink-0" />
@@ -474,7 +474,7 @@ export function AgentWorkspace({
               if (e.target === e.currentTarget) setFullscreen(false);
             }}
           >
-            <div className="w-full max-w-[1040px] h-[80vh] rounded-[14px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden animate-pop-in">
+            <div className="w-full max-w-[1040px] h-[80vh] rounded-[10px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden animate-pop-in">
               <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <FolderOpen className="size-4 text-accent-text shrink-0" />

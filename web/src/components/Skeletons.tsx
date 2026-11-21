@@ -9,7 +9,7 @@ export function MessageListSkeleton({ rows = 6, compact = false }: { rows?: numb
     <div className={compact ? "px-4 py-4 space-y-5" : "px-6 py-5 space-y-6"} aria-label="Loading messages">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-start gap-3">
-          <Skeleton className={`${compact ? "size-7" : "size-9"} ${i % 3 === 1 ? "rounded-[8px]" : "rounded-full"} shrink-0`} />
+          <Skeleton className={`${compact ? "size-7" : "size-9"} ${i % 3 === 1 ? "rounded-[6px]" : "rounded-full"} shrink-0`} />
           <div className="flex-1 space-y-2 pt-0.5">
             <div className="flex items-center gap-2">
               <Skeleton className="h-3.5 w-24" />
@@ -28,7 +28,7 @@ export function RowListSkeleton({ rows = 7 }: { rows?: number }) {
   return (
     <div className="px-6 py-4 space-y-2" aria-label="Loading">
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="h-12 px-4 rounded-[10px] bg-card border border-line flex items-center gap-3">
+        <div key={i} className="h-12 px-4 rounded-[8px] bg-card border border-line flex items-center gap-3">
           <Skeleton className="size-4 rounded-full shrink-0" />
           <Skeleton className="h-3.5 w-9 shrink-0" />
           <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
@@ -44,8 +44,8 @@ export function InboxSkeleton() {
   return (
     <div className="px-6 py-4 space-y-2" aria-label="Loading inbox">
       {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="px-4 py-3.5 rounded-[12px] bg-card border border-line flex items-center gap-3.5">
-          <Skeleton className="size-9 rounded-[10px] shrink-0" />
+        <div key={i} className="px-4 py-3.5 rounded-[8px] bg-card border border-line flex items-center gap-3.5">
+          <Skeleton className="size-9 rounded-[6px] shrink-0" />
           <div className="flex-1 space-y-2">
             <div className="flex items-center gap-2">
               <Skeleton className="h-3.5 w-24" />
@@ -53,7 +53,7 @@ export function InboxSkeleton() {
             </div>
             <Skeleton className={`h-3.5 ${W[i % W.length]}`} />
           </div>
-          <Skeleton className="h-8 w-16 rounded-[8px]" />
+          <Skeleton className="h-8 w-16 rounded-[6px]" />
         </div>
       ))}
     </div>
@@ -74,7 +74,7 @@ export function DetailSkeleton() {
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="contents">
               <Skeleton className="h-3.5 w-16" />
-              <Skeleton className="h-7 w-36 rounded-[8px]" />
+              <Skeleton className="h-7 w-36 rounded-[6px]" />
             </div>
           ))}
         </div>
@@ -93,7 +93,7 @@ function SidebarSkeleton({ desktop }: { desktop: boolean }) {
         </div>
       )}
       <div className={`px-3 space-y-6 ${desktop ? "pt-3" : "pt-2"}`}>
-        <Skeleton nav className="h-9 w-full rounded-[9px]" />
+        <Skeleton nav className="h-9 w-full rounded-[6px]" />
         <div className="space-y-3 px-1">
           <Skeleton nav className="h-4 w-24" />
           <Skeleton nav className="h-4 w-20" />
@@ -128,7 +128,7 @@ export function WorkbenchSkeleton() {
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
           <nav className="bg-nav-rail flex flex-col items-center py-3 gap-2">
-            <Skeleton nav className="size-9 rounded-[10px]" />
+            <Skeleton nav className="size-9 rounded-[8px]" />
           </nav>
           <SidebarSkeleton desktop={desktop} />
         </div>
@@ -142,7 +142,7 @@ export function WorkbenchSkeleton() {
           <MessageListSkeleton rows={6} />
         </div>
         <div className="p-4">
-          <Skeleton className="h-[92px] w-full rounded-[14px]" />
+          <Skeleton className="h-[92px] w-full rounded-[8px]" />
         </div>
       </main>
     </div>

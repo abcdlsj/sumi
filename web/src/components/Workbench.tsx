@@ -72,7 +72,7 @@ function NavItem({
     <button
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`w-full h-8 px-2 rounded-[8px] flex items-center gap-2.5 text-[14px] transition-colors duration-100 ${
+      className={`w-full h-8 px-2 rounded-[6px] flex items-center gap-2.5 text-[14px] transition-colors duration-100 ${
         active ? "bg-nav-active text-nav-fg-strong" : dim ? "text-nav-fg-3 hover:bg-nav-hover" : bold ? "text-nav-fg-strong font-semibold hover:bg-nav-hover" : "text-nav-fg-2 hover:bg-nav-hover hover:text-nav-fg"
       }`}
     >
@@ -86,7 +86,7 @@ function NavItem({
 function Count({ n, tone = "warm" }: { n: number; tone?: "warm" | "muted" }) {
   return (
     <span
-      className={`min-w-5 h-5 px-1.5 rounded-full text-[11.5px] font-semibold tabular inline-flex items-center justify-center ${
+      className={`min-w-5 h-5 px-1.5 rounded-[5px] text-[11.5px] font-semibold tabular inline-flex items-center justify-center ${
         tone === "warm" ? "bg-accent text-accent-fg" : "bg-nav-fill-2 text-nav-fg-2"
       }`}
     >
@@ -106,7 +106,7 @@ function SectionLabel({ children, action }: { children: ReactNode; action?: Reac
 
 function SectionAdd({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} title={label} aria-label={label} className="size-6 rounded-[6px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center">
+    <button onClick={onClick} title={label} aria-label={label} className="size-6 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center">
       <Plus className="size-4" />
     </button>
   );
@@ -474,7 +474,7 @@ export function Workbench({
         key={m.id}
         onClick={() => void openOrCreateDM(m.id)}
         aria-current={active ? "page" : undefined}
-        className={`w-full px-2 ${m.kind === "agent" ? "h-11" : "h-9"} rounded-[8px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
+        className={`w-full px-2 ${m.kind === "agent" ? "h-11" : "h-9"} rounded-[6px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
           active ? "bg-nav-active" : "hover:bg-nav-hover"
         }`}
       >
@@ -502,7 +502,7 @@ export function Workbench({
         onClick={() => setMainView({ kind: "admin", tab })}
         title={title}
         aria-label={title}
-        className={`relative size-9 rounded-[10px] flex items-center justify-center transition-colors [&>svg]:size-[18px] ${
+        className={`relative size-9 rounded-[7px] flex items-center justify-center transition-colors [&>svg]:size-[18px] ${
           active ? "bg-nav-active text-nav-fg-strong" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
         }`}
       >
@@ -556,8 +556,8 @@ export function Workbench({
                       className={`absolute -left-3 w-1 rounded-r-full bg-nav-fg-strong transition-all duration-200 ${active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
                     />
                     <span
-                      className={`size-9 rounded-[11px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
-                        active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[9px] text-white"
+                      className={`size-9 rounded-[8px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
+                        active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[6px] text-white"
                       }`}
                       style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
                     >
@@ -570,7 +570,7 @@ export function Workbench({
                 onClick={() => setDialog("space")}
                 title="New space"
                 aria-label="New space"
-                className="size-9 rounded-[11px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
+                className="size-9 rounded-[8px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
               >
                 <Plus className="size-4" />
               </button>
@@ -594,11 +594,11 @@ export function Workbench({
             <div className={`px-3 pb-2 shrink-0 ${desktop ? "pt-3" : ""}`}>
           <button
             onClick={() => setDialog("jump")}
-            className="w-full h-9 px-3 rounded-[9px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line text-nav-fg-3 flex items-center gap-2 text-[13.5px] transition-colors"
+            className="w-full h-9 px-3 rounded-[6px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line text-nav-fg-3 flex items-center gap-2 text-[13.5px] transition-colors"
           >
             <Search className="size-4" />
             <span className="flex-1 text-left">Jump to…</span>
-            <kbd className="text-[11.5px] font-sans px-1.5 h-5 rounded-[5px] bg-nav-fill-2 inline-flex items-center">⌘K</kbd>
+            <kbd className="text-[11.5px] font-sans px-1.5 h-5 rounded-[4px] bg-nav-fill-2 inline-flex items-center">⌘K</kbd>
           </button>
         </div>
 
@@ -629,7 +629,7 @@ export function Workbench({
               if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === "__ungrouped__" ? null : cur));
             }}
             onDrop={(e) => handleGroupDrop(e, "")}
-            className={`rounded-[10px] transition-colors ${dropTarget === "__ungrouped__" ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+            className={`rounded-[7px] transition-colors ${dropTarget === "__ungrouped__" ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
           >
             <SectionLabel
               action={
@@ -641,7 +641,7 @@ export function Workbench({
                     }}
                     title="New channel group"
                     aria-label="New channel group"
-                    className="size-6 rounded-[6px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+                    className="size-6 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
                   >
                     <FolderPlus className="size-3.5" />
                   </button>
@@ -654,7 +654,7 @@ export function Workbench({
             <div className="space-y-0.5">
               {ungroupedChannels.map(renderChannelRow)}
               {ungroupedChannels.length === 0 && dragChannelID && (
-                <div className="px-2 py-2 text-[12px] text-nav-fg-3 text-center rounded-[8px] border border-dashed border-nav-line-strong">
+                <div className="px-2 py-2 text-[12px] text-nav-fg-3 text-center rounded-[6px] border border-dashed border-nav-line-strong">
                   Drop here to ungroup
                 </div>
               )}
@@ -674,7 +674,7 @@ export function Workbench({
                   if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === g.id ? null : cur));
                 }}
                 onDrop={(e) => handleGroupDrop(e, g.id)}
-                className={`rounded-[10px] transition-colors ${isOver ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+                className={`rounded-[7px] transition-colors ${isOver ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
               >
                 <div className="group/grp px-2 mb-0.5 h-7 flex items-center gap-1">
                   <button
@@ -739,9 +739,9 @@ export function Workbench({
               {agents.length === 0 && (
                 <button
                   onClick={() => setDialog(myComputers.length ? "agent" : "computer")}
-                  className="w-full h-9 px-2 rounded-[8px] flex items-center gap-2.5 text-[13.5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg"
+                  className="w-full h-9 px-2 rounded-[6px] flex items-center gap-2.5 text-[13.5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg"
                 >
-                  <span className="size-6 rounded-[6px] border border-dashed border-nav-line-strong flex items-center justify-center">
+                  <span className="size-6 rounded-[5px] border border-dashed border-nav-line-strong flex items-center justify-center">
                     <Plus className="size-3.5" />
                   </span>
                   Create your first agent
@@ -761,7 +761,7 @@ export function Workbench({
         {reconnecting && (
           <div
             role="status"
-            className="pointer-events-none absolute bottom-2 inset-x-3 px-2.5 h-8 rounded-[8px] bg-busy-soft border border-busy/25 text-nav-busy shadow-sm flex items-center gap-2 text-[12.5px] font-medium animate-fade-in"
+            className="pointer-events-none absolute bottom-2 inset-x-3 px-2.5 h-8 rounded-[6px] bg-busy-soft border border-busy/25 text-nav-busy shadow-sm flex items-center gap-2 text-[12.5px] font-medium animate-fade-in"
           >
             <span className="size-2 rounded-full bg-busy animate-breathe shrink-0" />
             <span>Reconnecting…</span>
@@ -773,7 +773,7 @@ export function Workbench({
           <div className="px-3 pb-3 shrink-0">
             <button
               onClick={() => setDialog(myComputers.length === 0 ? "computer" : "agent")}
-              className="w-full p-3 rounded-[12px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
+              className="w-full p-3 rounded-[8px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
             >
               <div className="flex items-center gap-2 text-[14px] font-semibold text-nav-fg-strong">
                 <Sparkles className="size-4" /> Finish setup
@@ -787,7 +787,7 @@ export function Workbench({
         )}
 
         <div className="h-14 px-3 border-t border-nav-line flex items-center gap-2.5 shrink-0">
-          <button onClick={() => setMainView({ kind: "admin", tab: "settings" })} className="flex items-center gap-2.5 min-w-0 flex-1 rounded-[8px] p-1 -m-1 hover:bg-nav-hover">
+          <button onClick={() => setMainView({ kind: "admin", tab: "settings" })} className="flex items-center gap-2.5 min-w-0 flex-1 rounded-[6px] p-1 -m-1 hover:bg-nav-hover">
             <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="sm" />
             <span className="min-w-0 text-left">
               <span className="block text-[14px] leading-5 font-medium text-nav-fg-strong truncate">{boot.current_member.display_name}</span>
@@ -798,7 +798,7 @@ export function Workbench({
             onClick={() => setTheme(dark ? "light" : "dark")}
             aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
             title={dark ? "Light mode" : "Dark mode"}
-            className="size-8 rounded-[8px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+            className="size-8 rounded-[6px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
           >
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>

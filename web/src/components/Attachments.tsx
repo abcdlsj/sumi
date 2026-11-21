@@ -109,7 +109,7 @@ export function AttachmentPicker({
         disabled={draft.uploading}
         title="Attach files"
         aria-label="Attach files"
-        className="size-8 rounded-[8px] hover:bg-hover text-fg-3 hover:text-fg flex items-center justify-center disabled:opacity-40 transition-colors"
+        className="size-8 rounded-[6px] hover:bg-hover text-fg-3 hover:text-fg flex items-center justify-center disabled:opacity-40 transition-colors"
       >
         {draft.uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
       </button>
@@ -128,7 +128,7 @@ export function AttachmentDraftRow({
       {draft.pending.map((a) => (
         <span
           key={a.id}
-          className="inline-flex items-center gap-1.5 h-8 pl-2 pr-1 rounded-[8px] border border-line bg-subtle text-[13px] text-fg-2 max-w-[260px] animate-pop-in"
+          className="inline-flex items-center gap-1.5 h-8 pl-2 pr-1 rounded-[6px] border border-line bg-subtle text-[13px] text-fg-2 max-w-[260px] animate-pop-in"
         >
           <FileText className="size-4 text-fg-3 shrink-0" />
           <span className="truncate">{a.name}</span>
@@ -137,7 +137,7 @@ export function AttachmentDraftRow({
             type="button"
             onClick={() => draft.remove(a.id)}
             aria-label={`Remove ${a.name}`}
-            className="size-6 rounded-[6px] hover:bg-hover text-fg-3 flex items-center justify-center"
+            className="size-6 rounded-[4px] hover:bg-hover text-fg-3 flex items-center justify-center"
           >
             <X className="size-3.5" />
           </button>
@@ -181,15 +181,15 @@ function ImageLightbox({
         <img
           src={url}
           alt={attachment.name}
-          className="max-w-full max-h-[78vh] object-contain rounded-[10px] shadow-lg bg-card"
+          className="max-w-full max-h-[78vh] object-contain rounded-[8px] shadow-lg bg-card"
         />
-        <div className="px-3.5 py-2 rounded-[10px] bg-card border border-line shadow-md flex items-center gap-3 text-[13px]">
+        <div className="px-3.5 py-2 rounded-[8px] bg-card border border-line shadow-md flex items-center gap-3 text-[13px]">
           <span className="font-medium text-fg truncate max-w-[320px]">{attachment.name}</span>
           <span className="tabular text-fg-3 shrink-0">{formatBytes(attachment.size_bytes)}</span>
           <a
             href={url}
             download={attachment.name}
-            className="h-7 px-2.5 rounded-[7px] bg-subtle hover:bg-hover text-fg inline-flex items-center gap-1.5 font-medium transition-colors"
+            className="h-7 px-2.5 rounded-[5px] bg-subtle hover:bg-hover text-fg inline-flex items-center gap-1.5 font-medium transition-colors"
           >
             <Download className="size-3.5" />
             Download
@@ -198,7 +198,7 @@ function ImageLightbox({
             type="button"
             onClick={onClose}
             aria-label="Close preview"
-            className="size-7 rounded-[7px] hover:bg-hover text-fg-3 hover:text-fg inline-flex items-center justify-center"
+            className="size-7 rounded-[5px] hover:bg-hover text-fg-3 hover:text-fg inline-flex items-center justify-center"
           >
             <X className="size-4" />
           </button>
@@ -224,7 +224,7 @@ function InlineImage({
       type="button"
       onClick={() => onPreview(attachment)}
       aria-label={`Preview ${attachment.name}`}
-      className={`block border border-line rounded-[10px] overflow-hidden bg-subtle hover:shadow-md transition-shadow ${
+      className={`block border border-line rounded-[7px] overflow-hidden bg-subtle hover:shadow-md transition-shadow ${
         loaded ? "" : "min-w-[180px] min-h-[120px]"
       }`}
     >
@@ -265,7 +265,7 @@ export function MessageAttachments({
         </div>
       )}
       {files.length > 0 && (
-        <div className="border border-line rounded-[10px] divide-y divide-line overflow-hidden max-w-[440px] bg-card">
+        <div className="border border-line rounded-[7px] divide-y divide-line overflow-hidden max-w-[440px] bg-card">
           {files.map((a) => (
             <a
               key={a.id}

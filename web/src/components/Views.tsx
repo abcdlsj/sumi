@@ -135,12 +135,12 @@ export function InboxView({
               return (
                 <div
                   key={it.conversation_id}
-                  className={`group rounded-[12px] border bg-card px-4 py-3 flex items-center gap-3.5 transition-[opacity,transform,box-shadow,border-color] duration-200 hover:shadow-md ${
+                  className={`group rounded-[8px] border bg-card px-4 py-3 flex items-center gap-3.5 transition-[opacity,transform,box-shadow,border-color] duration-200 hover:shadow-md ${
                     gone ? "opacity-0 translate-x-3 pointer-events-none" : ""
                   } ${it.needs_attention ? "border-warm/30" : "border-line"}`}
                 >
                   <span
-                    className={`size-9 rounded-[10px] flex items-center justify-center shrink-0 [&>svg]:size-4 ${
+                    className={`size-9 rounded-[6px] flex items-center justify-center shrink-0 [&>svg]:size-4 ${
                       it.needs_attention ? "bg-warm-soft text-warm" : "bg-subtle text-fg-3"
                     }`}
                   >
@@ -392,7 +392,7 @@ export function TasksView({
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Filter by title, #number, or assignee…"
                 aria-label="Filter tasks"
-                className="w-full h-8 pl-8 pr-3 rounded-[8px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+                className="w-full h-8 pl-8 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
               />
             </div>
             {activeChannels.length > 1 && (
@@ -449,7 +449,7 @@ export function TasksView({
                   {taskStatusLabel(g.status)}
                   <span className="tabular font-normal text-fg-4">{g.tasks.length}</span>
                 </div>
-                <div className="rounded-[12px] border border-line bg-card divide-y divide-line overflow-hidden">
+                <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} t={t} onOpen={() => onOpenDetail({ kind: "task", taskID: t.id })} />
                   ))}
@@ -504,7 +504,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search agents"
             aria-label="Search agents"
-            className="w-full h-8 pl-8 pr-3 rounded-[8px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+            className="w-full h-8 pl-8 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
           />
         </div>
         <Segmented
@@ -526,7 +526,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                 {g.label} <span className="font-mono text-fg-4">{g.items.length}</span>
               </div>
             )}
-            <div className="@container rounded-[12px] border border-line bg-card divide-y divide-line overflow-hidden">
+            <div className="@container rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
               {g.items.map((m) => {
                 const ag = m.agent;
                 const st = ag?.runtime_state ?? "offline";
@@ -585,7 +585,7 @@ function AccentPicker({ spaceSlug, value, disabled }: { spaceSlug: string; value
   const qc = useQueryClient();
   const { busy, run } = useAction();
   return (
-    <div className="mb-3 px-4 h-12 rounded-[14px] border border-line bg-card flex items-center text-[14px]">
+    <div className="mb-3 px-4 h-12 rounded-[8px] border border-line bg-card flex items-center text-[14px]">
       <span className="w-40 text-fg-3">Accent</span>
       <div role="radiogroup" aria-label="Space accent" className="flex items-center gap-2">
         {SPACE_ACCENTS.map((a) => (
@@ -648,16 +648,16 @@ function ArchivedChannelsSection({
     <div>
       <SectionTitle title="Archived channels" body="Read-only channels. Unarchive a channel to resume messaging and notifications." />
       {archivedQ.isLoading ? (
-        <div className="rounded-[14px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
+        <div className="rounded-[8px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
       ) : list.length === 0 ? (
-        <div className="rounded-[14px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
+        <div className="rounded-[8px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
           No archived channels.
         </div>
       ) : (
-        <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
+        <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
           {list.map((c) => (
             <div key={c.id} className="px-4 py-3 flex items-center gap-3">
-              <span className="size-8 rounded-[9px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
+              <span className="size-8 rounded-[6px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
                 {c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />}
               </span>
               <button
@@ -769,7 +769,7 @@ export function AdminPanel({
                 }
               />
               {agents.length === 0 ? (
-                <div className="rounded-[14px] border border-dashed border-line-strong bg-card">
+                <div className="rounded-[8px] border border-dashed border-line-strong bg-card">
                   <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
                 </div>
               ) : (
@@ -790,7 +790,7 @@ export function AdminPanel({
                 }
               />
               {boot.computers.length === 0 ? (
-                <div className="rounded-[14px] border border-dashed border-line-strong bg-card">
+                <div className="rounded-[8px] border border-dashed border-line-strong bg-card">
                   <EmptyState
                     icon={<Monitor />}
                     title="No computers yet"
@@ -799,13 +799,13 @@ export function AdminPanel({
                   />
                 </div>
               ) : (
-                <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
+                <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
                   {boot.computers.map((c) => {
                     const hosted = agents.filter((a) => a.agent?.computer_id === c.id);
                     const online = c.connection_status === "online";
                     return (
                       <div key={c.id} className="px-4 py-3.5 flex items-center gap-3.5">
-                        <span className="size-10 rounded-[11px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
+                        <span className="size-10 rounded-[7px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
                           <Monitor className="size-5" />
                         </span>
                         <div className="min-w-0 flex-1">
@@ -840,7 +840,7 @@ export function AdminPanel({
           {tab === "people" && (
             <>
               <SectionTitle title="People" body="Humans in this space." />
-              <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
+              <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
                 {humans.map((m) => {
                   const selected = m.id === selectedHumanID;
                   return (
@@ -881,7 +881,7 @@ export function AdminPanel({
               <div>
                 <SectionTitle title="Space" />
                 <AccentPicker spaceSlug={boot.space.slug} value={boot.space.accent} disabled={boot.current_member.access_level === "member"} />
-                <div className="rounded-[14px] border border-line bg-card divide-y divide-line text-[14px]">
+                <div className="rounded-[8px] border border-line bg-card divide-y divide-line text-[14px]">
                   {[
                     ["Name", boot.space.name],
                     ["Address", `/${boot.space.slug}`],

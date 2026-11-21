@@ -139,12 +139,12 @@ function KindCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex-1 text-left p-3.5 rounded-[12px] border transition-[border-color,background-color,box-shadow] duration-150 ${
+      className={`flex-1 text-left p-3.5 rounded-[8px] border transition-[border-color,background-color,box-shadow] duration-150 ${
         active ? "border-accent bg-accent-soft shadow-[var(--ring)]" : "border-line-strong bg-card hover:border-fg-4"
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className={`size-7 rounded-[8px] flex items-center justify-center [&>svg]:size-4 ${active ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"}`}>
+        <span className={`size-7 rounded-[6px] flex items-center justify-center [&>svg]:size-4 ${active ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"}`}>
           {icon}
         </span>
         <span className="text-[14px] font-semibold text-fg">{title}</span>
@@ -210,7 +210,7 @@ export function DriverFields({
                   aria-checked={active}
                   disabled={!ok}
                   onClick={() => set({ provider: p.id })}
-                  className={`w-full px-3.5 py-2.5 rounded-[10px] border flex items-center gap-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`w-full px-3.5 py-2.5 rounded-[7px] border flex items-center gap-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     active ? "border-accent bg-accent-soft" : "border-line-strong bg-card hover:border-fg-4"
                   }`}
                 >
@@ -238,7 +238,7 @@ export function DriverFields({
             </button>
           </div>
           {showAdvanced && (
-            <div className="space-y-3.5 rounded-[10px] border border-line bg-subtle/40 p-3.5 animate-fade-in">
+            <div className="space-y-3.5 rounded-[7px] border border-line bg-subtle/40 p-3.5 animate-fade-in">
               <Field
                 label="Custom command"
                 optional
@@ -422,7 +422,7 @@ export function AgentForm({
               key={p.label}
               type="button"
               onClick={() => setRole(p.text)}
-              className={`h-7 px-2.5 rounded-[7px] border text-[12.5px] transition-colors ${
+              className={`h-7 px-2.5 rounded-[5px] border text-[12.5px] transition-colors ${
                 role === p.text ? "border-accent text-accent-text bg-accent-soft" : "border-line text-fg-3 hover:border-line-strong hover:text-fg"
               }`}
             >
@@ -458,7 +458,7 @@ export function AgentForm({
       </div>
 
       {serverError && (
-        <div className="px-3.5 py-2.5 rounded-[10px] bg-danger-soft text-danger text-[13.5px] animate-fade-in">{serverError}</div>
+        <div className="px-3.5 py-2.5 rounded-[6px] bg-danger-soft text-danger text-[13.5px] animate-fade-in">{serverError}</div>
       )}
 
       {footer ? footer(submitBtn) : <div className="flex justify-end">{submitBtn}</div>}

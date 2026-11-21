@@ -120,7 +120,7 @@ function DayDivider({ iso }: { iso: string }) {
   return (
     <div className="sticky top-0 z-10 px-6 py-2.5 flex items-center gap-3 pointer-events-none">
       <span className="flex-1 h-px bg-line/80" />
-      <span className="h-6 px-3 rounded-full bg-panel/95 backdrop-blur border border-line text-[11.5px] font-medium text-fg-3 inline-flex items-center shadow-sm">
+      <span className="h-6 px-2.5 rounded-[5px] bg-panel/95 backdrop-blur border border-line text-[11.5px] font-medium text-fg-3 inline-flex items-center shadow-sm">
         {formatDay(iso)}
       </span>
       <span className="flex-1 h-px bg-line/80" />
@@ -216,22 +216,22 @@ function MessageComposer({
   }
 
   return (
-    <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
+    <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-1">
       <div
         {...draft.dropProps}
-        className={`relative bg-card border rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+        className={`relative bg-card border rounded-[8px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
           draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
         }`}
       >
         <MentionPopup picker={mentions} />
         {replyTarget && (
-          <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
+          <div className="mx-2 mt-2 px-3 py-2 rounded-[6px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
             <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
             <span className="text-fg-3 shrink-0">Replying in thread to</span>
             <span className="font-medium text-fg shrink-0">{replyTarget.author_display_name}</span>
             <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
             <span className="flex-1" />
-            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[6px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
+            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[5px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
               <X className="size-3.5" />
             </button>
           </div>
@@ -270,7 +270,7 @@ function MessageComposer({
               type="submit"
               aria-label="Send"
               disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
-              className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
+              className="size-8 rounded-[6px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
             >
               <ArrowUp className="size-4" />
             </button>
@@ -429,7 +429,7 @@ export function ConversationView({
                   aria-expanded={open}
                   aria-label={`Notifications: ${NOTIFY.find((n) => n.value === level)?.label}`}
                   title={NOTIFY.find((n) => n.value === level)?.label}
-                  className={`h-8 px-2 rounded-[8px] text-[13px] flex items-center gap-1.5 transition-colors [&>svg]:size-4 ${
+                  className={`h-8 px-2 rounded-[6px] text-[13px] flex items-center gap-1.5 transition-colors [&>svg]:size-4 ${
                     open ? "bg-hover text-fg" : level === "mute" ? "text-fg-4 hover:bg-hover" : "text-fg-2 hover:bg-hover"
                   }`}
                 >
@@ -477,7 +477,7 @@ export function ConversationView({
               onClick={() => onOpenDetail({ kind: "members", convID: conv.id })}
               aria-label="Members"
               title="Members"
-              className="h-8 pl-2 pr-2.5 rounded-[8px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
+              className="h-8 pl-2 pr-2.5 rounded-[6px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
             >
               <Users className="size-4 text-fg-3" />
               <span className="tabular min-w-[1ch] text-center">{memberCount ?? "·"}</span>
@@ -686,7 +686,7 @@ export function ConversationView({
                           />
 
                           {m.attached_tasks && m.attached_tasks.length > 0 && (
-                            <div className="mt-2.5 rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
+                            <div className="mt-2.5 rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
                               {m.attached_tasks.map((tk) => (
                                 <button
                                   key={tk.id}
@@ -717,7 +717,7 @@ export function ConversationView({
                                 onChange={(e) => setNewTaskTitle(e.target.value)}
                                 onKeyDown={(e) => e.key === "Escape" && setCreatingTaskOnMsg(null)}
                                 placeholder="Task title"
-                                className="flex-1 h-9 px-3 rounded-[9px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
+                                className="flex-1 h-9 px-3 rounded-[6px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
                               />
                               <Button type="submit" size="sm" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
                                 Create task
@@ -744,7 +744,7 @@ export function ConversationView({
                           <div
                             className={`absolute right-5 -top-3.5 ${
                               reactionPickerMsgID === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
-                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md z-20`}
+                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[6px] p-0.5 shadow-md z-20`}
                           >
                             <ReactionPickerButton
                               reactions={m.reactions}
@@ -757,7 +757,7 @@ export function ConversationView({
                                 setReplyingTo(m.id);
                                 composerFocusRef.current?.();
                               }}
-                              className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                              className="h-7 px-2 rounded-[5px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                             >
                               <CornerUpLeft className="size-3.5" /> Reply
                             </button>
@@ -766,7 +766,7 @@ export function ConversationView({
                                 setNewTaskTitle("");
                                 setCreatingTaskOnMsg(m.id);
                               }}
-                              className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                              className="h-7 px-2 rounded-[5px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                             >
                               <ListPlus className="size-3.5" /> Task
                             </button>
@@ -786,7 +786,7 @@ export function ConversationView({
       {isArchived ? (
         <div className="shrink-0 px-6 py-4 bg-bg/70 border-t border-line flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="size-9 rounded-[10px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
+            <span className="size-9 rounded-[7px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
               <Archive className="size-4" />
             </span>
             <div className="min-w-0">

@@ -97,7 +97,7 @@ export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?:
       aria-label={label}
       className="agent-sprite shrink-0 block"
       style={{
-        borderRadius: Math.max(5, px * 0.24),
+        borderRadius: Math.max(4, Math.round(px * 0.18)),
         ["--sprite-h" as string]: hue,
         ["--sprite-l" as string]: l,
       }}

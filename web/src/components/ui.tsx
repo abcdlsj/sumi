@@ -32,9 +32,9 @@ const VARIANTS: Record<Variant, string> = {
   danger: "bg-card text-danger border border-line-strong hover:bg-danger-soft hover:border-danger",
 };
 const SIZES: Record<Size, string> = {
-  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-[8px]",
-  md: "h-9 px-3.5 text-[14px] gap-2 rounded-[9px]",
-  lg: "h-11 px-5 text-[15px] gap-2 rounded-[10px]",
+  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-[6px]",
+  md: "h-9 px-3.5 text-[14px] gap-2 rounded-[6px]",
+  lg: "h-11 px-5 text-[15px] gap-2 rounded-[7px]",
 };
 
 export function Button({
@@ -72,7 +72,7 @@ export function IconButton({
       {...rest}
       aria-label={label}
       title={label}
-      className={`size-8 rounded-[8px] inline-flex items-center justify-center transition-colors duration-150 [&>svg]:size-4 ${
+      className={`size-8 rounded-[6px] inline-flex items-center justify-center transition-colors duration-150 [&>svg]:size-4 ${
         active ? "bg-hover text-fg" : "text-fg-3 hover:bg-hover hover:text-fg"
       } ${className}`}
     >
@@ -82,7 +82,7 @@ export function IconButton({
 }
 
 const inputBase =
-  "w-full rounded-[9px] border bg-card text-[14px] text-fg outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)] disabled:opacity-60";
+  "w-full rounded-[6px] border bg-card text-[14px] text-fg outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)] disabled:opacity-60";
 
 function FieldShell({
   id,
@@ -366,7 +366,7 @@ export function Select<T extends string = string>({
     };
   }, [open, filtered, activeIdx, onChange]);
 
-  const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[8px]" : "h-10 px-3 text-[14px] rounded-[9px]";
+  const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[6px]" : "h-10 px-3 text-[14px] rounded-[6px]";
 
   const trigger = (
     <div className={`relative ${className}`}>
@@ -396,7 +396,7 @@ export function Select<T extends string = string>({
             role="listbox"
             aria-label={ariaLabel ?? label ?? "Options"}
             style={floatingStyle}
-            className="z-50 bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in"
+            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
           >
             {searchable && (
               <div className="relative px-1 pb-1.5">
@@ -406,7 +406,7 @@ export function Select<T extends string = string>({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={searchPlaceholder}
-                  className="w-full h-8 pl-7 pr-2.5 rounded-[7px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+                  className="w-full h-8 pl-7 pr-2.5 rounded-[5px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
                 />
               </div>
             )}
@@ -433,7 +433,7 @@ export function Select<T extends string = string>({
                         setOpen(false);
                         triggerRef.current?.focus();
                       }}
-                      className={`w-full px-2.5 py-1.5 rounded-[8px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
+                      className={`w-full px-2.5 py-1.5 rounded-[6px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
                         isActive ? "bg-hover" : "hover:bg-hover"
                       }`}
                     >
@@ -499,7 +499,7 @@ export function MultiSelectList<T extends string = string>({
 
   return (
     <FieldShell id={id} label={label} hint={hint} optional={optional}>
-      <div className="rounded-[10px] border border-line-strong bg-card overflow-hidden">
+      <div className="rounded-[7px] border border-line-strong bg-card overflow-hidden">
         {options.length > 5 && (
           <div className="relative px-2.5 py-2 border-b border-line">
             <Search className="size-3.5 text-fg-4 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -507,7 +507,7 @@ export function MultiSelectList<T extends string = string>({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full h-7 pl-6 pr-2 rounded-[6px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
+              className="w-full h-7 pl-6 pr-2 rounded-[5px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
             />
           </div>
         )}
@@ -525,13 +525,13 @@ export function MultiSelectList<T extends string = string>({
                   aria-checked={checked}
                   disabled={opt.disabled}
                   onClick={() => toggle(opt.value)}
-                  className={`w-full px-2.5 py-1.5 rounded-[7px] flex items-center gap-2.5 text-left transition-colors ${
+                  className={`w-full px-2.5 py-1.5 rounded-[5px] flex items-center gap-2.5 text-left transition-colors ${
                     checked ? "bg-accent-soft/70" : "hover:bg-subtle"
                   }`}
                 >
                   <span
                     aria-hidden
-                    className={`size-4 rounded-[5px] border flex items-center justify-center shrink-0 transition-colors ${
+                    className={`size-4 rounded-[4px] border flex items-center justify-center shrink-0 transition-colors ${
                       checked ? "bg-accent border-accent text-accent-fg" : "border-line-strong bg-card"
                     }`}
                   >
@@ -571,7 +571,7 @@ export function EmptyState({
   return (
     <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6 py-10">
       {icon && (
-        <div className="size-12 rounded-[14px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
+        <div className="size-12 rounded-[8px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
           {icon}
         </div>
       )}
@@ -601,7 +601,7 @@ export function ErrorState({
       role="alert"
       className={`h-full flex flex-col items-center justify-center text-center px-6 ${compact ? "min-h-[160px] py-6" : "min-h-[260px] py-10"}`}
     >
-      <div className="size-10 rounded-[10px] bg-danger-soft border border-danger/20 text-danger flex items-center justify-center mb-3">
+      <div className="size-10 rounded-[7px] bg-danger-soft border border-danger/20 text-danger flex items-center justify-center mb-3">
         <AlertCircle className="size-5" />
       </div>
       <div className="text-[15px] font-semibold text-fg">{title}</div>
@@ -665,7 +665,7 @@ export function Segmented<T extends string>({
   full?: boolean;
 }) {
   return (
-    <div role="tablist" className={`inline-flex items-center p-[3px] rounded-[10px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
+    <div role="tablist" className={`inline-flex items-center p-[3px] rounded-[7px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -676,7 +676,7 @@ export function Segmented<T extends string>({
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
             aria-selected={active}
-            className={`${full ? "flex-1" : ""} h-8 px-3 rounded-[7px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,box-shadow] duration-150 disabled:opacity-40 [&>svg]:size-3.5 ${
+            className={`${full ? "flex-1" : ""} h-8 px-3 rounded-[5px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,box-shadow] duration-150 disabled:opacity-40 [&>svg]:size-3.5 ${
               active ? "bg-card text-fg font-medium shadow-sm" : "text-fg-3 hover:text-fg"
             }`}
           >
@@ -707,7 +707,7 @@ export function Badge({
     danger: "bg-danger-soft text-danger border-transparent",
   };
   return (
-    <span className={`inline-flex items-center gap-1 h-[22px] px-2 rounded-[6px] border text-[12px] font-medium whitespace-nowrap [&>svg]:size-3 ${tones[tone]} ${className}`}>
+    <span className={`inline-flex items-center gap-1 h-[22px] px-2 rounded-[4px] border text-[12px] font-medium whitespace-nowrap [&>svg]:size-3 ${tones[tone]} ${className}`}>
       {children}
     </span>
   );
@@ -800,7 +800,7 @@ export function Modal({
         aria-modal="true"
         aria-label={label}
         style={{ width }}
-        className="relative max-w-full max-h-[80vh] flex flex-col bg-panel border border-line rounded-[14px] shadow-lg animate-pop-in"
+        className="relative max-w-full max-h-[80vh] flex flex-col bg-panel border border-line rounded-[10px] shadow-lg animate-pop-in"
       >
         {title ? (
           <div className="px-6 pt-5 pb-1 flex items-start justify-between gap-4">
@@ -843,7 +843,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className="pointer-events-auto max-w-[420px] pl-3 pr-4 py-2.5 rounded-[10px] bg-card border border-line shadow-lg text-[13.5px] text-fg flex items-start gap-2.5 animate-rise-in"
+            className="pointer-events-auto max-w-[420px] pl-3 pr-4 py-2.5 rounded-[7px] bg-card border border-line shadow-lg text-[13.5px] text-fg flex items-start gap-2.5 animate-rise-in"
           >
             {t.tone === "error" ? (
               <AlertCircle className="size-4 text-danger shrink-0 mt-0.5" />
@@ -932,7 +932,7 @@ export function Menu({
             ref={menuRef}
             role="menu"
             style={floatingStyle}
-            className="z-50 bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in max-h-[360px] overflow-y-auto scroll-thin"
+            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in max-h-[360px] overflow-y-auto scroll-thin"
           >
             {children(() => setOpen(false))}
           </div>,
@@ -960,7 +960,7 @@ export function MenuItem({
       role="menuitemradio"
       aria-checked={active}
       onClick={onSelect}
-      className="w-full px-2.5 py-2 rounded-[8px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
+      className="w-full px-2.5 py-2 rounded-[6px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
     >
       <span className="size-5 shrink-0 flex items-center justify-center text-fg-3 [&>svg]:size-4">{icon}</span>
       <span className="min-w-0 flex-1">
@@ -975,7 +975,7 @@ export function MenuItem({
 export function SumiMark({ size = 32 }: { size?: number }) {
   return (
     <span
-      style={{ width: size, height: size, borderRadius: size * 0.3, background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.22), background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
       className="text-accent-fg inline-flex items-center justify-center shrink-0 select-none shadow-sm"
     >
       <svg viewBox="0 0 24 24" width={size * 0.56} height={size * 0.56} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">

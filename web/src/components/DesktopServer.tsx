@@ -43,7 +43,7 @@ export function DesktopServerTrigger({ variant }: { variant: "rail" | "pill" }) 
           onClick={() => setOpen(true)}
           title={`Server: ${label} · Switch`}
           aria-label={`Server: ${label}`}
-          className="relative mt-1 size-9 rounded-[10px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
+          className="relative mt-1 size-9 rounded-[7px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
         >
           {isLocal ? <HardDrive className="size-[16px]" /> : <Globe className="size-[16px]" />}
           {!isLocal && <span className="absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] bg-accent" />}
@@ -53,7 +53,7 @@ export function DesktopServerTrigger({ variant }: { variant: "rail" | "pill" }) 
           type="button"
           onClick={() => setOpen(true)}
           aria-label={`Server: ${label}`}
-          className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-[7px] text-[12.5px] text-nav-fg-3 hover:text-nav-fg-strong hover:bg-nav-hover transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-[6px] text-[12.5px] text-nav-fg-3 hover:text-nav-fg-strong hover:bg-nav-hover transition-colors"
         >
           {isLocal ? <HardDrive className="size-3.5" /> : <Globe className="size-3.5 text-accent" />}
           <span className="font-mono truncate max-w-[220px]">{label}</span>

@@ -131,7 +131,7 @@ function CompactMessage({
       <div
         className={`absolute right-0 -top-2 ${
           pickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
-        } transition-opacity duration-100 bg-card border border-line rounded-[8px] p-0.5 shadow-sm z-20`}
+        } transition-opacity duration-100 bg-card border border-line rounded-[6px] p-0.5 shadow-sm z-20`}
       >
         <ReactionPickerButton
           reactions={m.reactions}
@@ -187,7 +187,7 @@ function ReplyBox({
     <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
       <div
         {...draft.dropProps}
-        className={`relative rounded-[12px] border bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+        className={`relative rounded-[8px] border bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
           draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
         }`}
       >
@@ -221,7 +221,7 @@ function ReplyBox({
             type="submit"
             aria-label="Send"
             disabled={busy || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
-            className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
+            className="size-8 rounded-[6px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
           >
             <ArrowUp className="size-4" />
           </button>
@@ -341,7 +341,7 @@ function MembersDetail({
             onChange={(e) => setQ(e.target.value)}
             placeholder="Find people and agents"
             aria-label="Find members to add"
-            className="w-full h-9 px-3 rounded-[9px] border border-line-strong bg-card text-[14px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+            className="w-full h-9 px-3 rounded-[6px] border border-line-strong bg-card text-[14px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
           />
           <div className="mt-2 max-h-[240px] overflow-y-auto scroll-thin space-y-0.5">
             {candidates.length === 0 ? (
@@ -358,7 +358,7 @@ function MembersDetail({
                       refresh();
                     })
                   }
-                  className="w-full h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-hover text-left disabled:opacity-60"
+                  className="w-full h-10 px-2 rounded-[6px] flex items-center gap-2.5 hover:bg-hover text-left disabled:opacity-60"
                 >
                   <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" state={m.agent?.runtime_state} />
                   <span className="flex-1 truncate text-[14px] text-fg">{m.display_name}</span>
@@ -399,7 +399,7 @@ function MembersDetail({
               const self = m.id === me.id;
               const canRemove = canManage || self;
               return (
-                <div key={m.id} className="group h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-subtle">
+                <div key={m.id} className="group h-10 px-2 rounded-[6px] flex items-center gap-2.5 hover:bg-subtle">
                   <button
                     className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
                     onClick={() => onSelectTarget(memberDetailTarget(full))}
@@ -422,7 +422,7 @@ function MembersDetail({
                             if (self && isPrivate) onClose();
                           })
                         }
-                        className="absolute right-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto h-7 px-2 rounded-[7px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft inline-flex items-center transition-opacity"
+                        className="absolute right-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto h-7 px-2 rounded-[5px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft inline-flex items-center transition-opacity"
                       >
                         {self ? "Leave" : "Remove"}
                       </button>
@@ -575,7 +575,7 @@ function TaskDetail({
               onChange={(e) => setEditTitle(e.target.value)}
               aria-label="Task title"
               placeholder="Task title"
-              className="w-full h-9 px-3 rounded-[9px] border border-line-strong bg-card text-[15px] font-semibold text-fg outline-none focus:border-accent focus:shadow-[var(--ring)]"
+              className="w-full h-9 px-3 rounded-[6px] border border-line-strong bg-card text-[15px] font-semibold text-fg outline-none focus:border-accent focus:shadow-[var(--ring)]"
             />
             <textarea
               rows={3}
@@ -583,7 +583,7 @@ function TaskDetail({
               onChange={(e) => setEditDesc(e.target.value)}
               aria-label="Task description"
               placeholder="Add details…"
-              className="w-full px-3 py-2 rounded-[9px] border border-line-strong bg-card text-[14px] text-fg leading-relaxed outline-none resize-none focus:border-accent focus:shadow-[var(--ring)]"
+              className="w-full px-3 py-2 rounded-[6px] border border-line-strong bg-card text-[14px] text-fg leading-relaxed outline-none resize-none focus:border-accent focus:shadow-[var(--ring)]"
             />
             <div className="flex justify-end gap-2">
               <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -984,7 +984,7 @@ function AgentDetail({
         <button
           type="button"
           onClick={() => setTab("overview")}
-          className={`h-7 px-3 rounded-[7px] text-[13px] font-medium transition-colors ${
+          className={`h-7 px-3 rounded-[5px] text-[13px] font-medium transition-colors ${
             tab === "overview" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
           }`}
         >
@@ -993,7 +993,7 @@ function AgentDetail({
         <button
           type="button"
           onClick={() => setTab("workspace")}
-          className={`h-7 px-3 rounded-[7px] text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors ${
+          className={`h-7 px-3 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors ${
             tab === "workspace" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
           }`}
         >
@@ -1021,7 +1021,7 @@ function AgentDetail({
 
         {st === "working" && (
           <div className="px-5 py-3.5 bg-busy-soft/60 flex items-center gap-3 animate-fade-in">
-            <span className="size-8 rounded-[9px] bg-busy-soft text-busy flex items-center justify-center shrink-0">
+            <span className="size-8 rounded-[6px] bg-busy-soft text-busy flex items-center justify-center shrink-0">
               <RefreshCw className="size-4 animate-spin [animation-duration:2.4s]" />
             </span>
             <div className="min-w-0 flex-1">
@@ -1129,7 +1129,7 @@ function AgentDetail({
         </Section>
 
         <Section title="Permissions">
-          <div className="rounded-[12px] border border-line divide-y divide-line overflow-hidden">
+          <div className="rounded-[8px] border border-line divide-y divide-line overflow-hidden">
             {PERMISSIONS.map((p) => {
               const on = perms.has(p.code);
               return (
@@ -1250,7 +1250,7 @@ function HumanDetail({
           <Section title="Computers">
             <div className="space-y-1.5">
               {computers.map((c) => (
-                <div key={c.id} className="h-9 px-2.5 rounded-[8px] bg-subtle/60 flex items-center gap-2 text-[13.5px]">
+                <div key={c.id} className="h-9 px-2.5 rounded-[6px] bg-subtle/60 flex items-center gap-2 text-[13.5px]">
                   <Monitor className="size-4 text-fg-3 shrink-0" />
                   <span className="truncate flex-1 text-fg">{c.name}</span>
                   <span className={`size-1.5 rounded-full shrink-0 ${c.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
@@ -1262,7 +1262,7 @@ function HumanDetail({
 
         {openTasks.length > 0 && (
           <Section title="Assigned tasks">
-            <div className="rounded-[10px] border border-line bg-card divide-y divide-line overflow-hidden">
+            <div className="rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden">
               {openTasks.map((tk) => (
                 <button
                   key={tk.id}
