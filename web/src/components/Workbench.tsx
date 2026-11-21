@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, ChevronRight, FolderPlus, Hash, Inbox, Lock, Monitor, Moon, Pencil, Plus, Search, Settings, Sparkles, Sun, Trash2, Users } from "lucide-react";
-import { api, ownComputers, slugInput, slugify, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
+import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
 import { useTheme } from "../theme";
@@ -13,8 +13,9 @@ import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
-import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
+import { Button, Modal, useAction } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
+import { ChannelGroupDialog, JumpDialog, NewChannelDialog, NewSpaceDialog } from "./WorkbenchDialogs";
 
 type MainView = { kind: "conversation"; convID: string; archivedConv?: Conversation } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
 type Dialog = null | "channel" | "group" | "space" | "jump" | "computer" | "agent" | "pairing";
@@ -47,10 +48,6 @@ function detailKey(d: DetailTarget) {
         : d.kind === "human"
           ? `h:${d.memberID}`
           : `m:${d.convID}`;
-}
-
-function viewKey(v: MainView) {
-  return v.kind === "conversation" ? `c:${v.convID}` : v.kind === "admin" ? "admin" : v.kind;
 }
 
 function NavItem({
@@ -164,23 +161,86 @@ export function Workbench({
   useEffect(() => {
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });
     let dropped = false;
-    const invalidate = () => {
-      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members", "archived-channels"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
+    let stateTimer: number | null = null;
+
+    const invalidateAll = () => {
+      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members", "archived-channels"]) {
+        void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
+      }
     };
+
+    const parsePayload = (raw: Event): Record<string, unknown> => {
+      try {
+        const data = (raw as MessageEvent).data;
+        return typeof data === "string" && data ? (JSON.parse(data) as Record<string, unknown>) : {};
+      } catch {
+        return {};
+      }
+    };
+
+    const handleEvent = (kind: string) => (raw: Event) => {
+      const p = parsePayload(raw);
+      const convID = typeof p.conversation_id === "string" ? p.conversation_id : "";
+      const taskID = typeof p.task_id === "string" ? p.task_id : "";
+
+      switch (kind) {
+        case "agent.state_changed":
+          // Coalesce rapid tool-activity ticks so chat scroll and typing stay silky smooth.
+          if (stateTimer === null) {
+            stateTimer = window.setTimeout(() => {
+              stateTimer = null;
+              void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+            }, 250);
+          }
+          return;
+        case "message.created":
+        case "message.reaction_changed":
+          if (convID) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
+          else void qc.invalidateQueries({ queryKey: ["messages", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+          return;
+        case "task.created":
+        case "task.updated":
+          void qc.invalidateQueries({ queryKey: ["tasks", spaceSlug] });
+          if (taskID) void qc.invalidateQueries({ queryKey: ["task", spaceSlug, taskID] });
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+          return;
+        case "conversation.members_changed":
+          if (convID) void qc.invalidateQueries({ queryKey: ["conv-members", spaceSlug, convID] });
+          else void qc.invalidateQueries({ queryKey: ["conv-members", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          return;
+        case "conversation.created":
+        case "conversation.updated":
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["archived-channels", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+          return;
+        case "space.updated":
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+          void qc.invalidateQueries({ queryKey: ["me"] });
+          return;
+        default:
+          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      }
+    };
+
     es.onopen = () => {
       if (dropped) {
         dropped = false;
         setReconnecting(false);
-        invalidate();
+        invalidateAll();
       }
     };
     es.onerror = () => {
       dropped = true;
       setReconnecting(true);
     };
-    for (const ev of SSE_EVENTS) es.addEventListener(ev, invalidate);
-    es.addEventListener("space.updated", () => void qc.invalidateQueries({ queryKey: ["me"] }));
+    for (const ev of SSE_EVENTS) es.addEventListener(ev, handleEvent(ev));
     return () => {
+      if (stateTimer !== null) window.clearTimeout(stateTimer);
       setReconnecting(false);
       es.close();
     };
@@ -191,11 +251,17 @@ export function Workbench({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setDialog((d) => (d === "jump" ? null : "jump"));
+        return;
+      }
+      if (e.key === "Escape" && !dialog && detail) {
+        const tag = (document.activeElement as HTMLElement | null)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || document.querySelector('[role="dialog"],[role="listbox"],[role="menu"]')) return;
+        setDetail(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [dialog, detail]);
 
   const activeConvID = mainView.kind === "conversation" ? mainView.convID : "";
   const activeConv = useMemo(
@@ -262,16 +328,44 @@ export function Workbench({
     setDragChannelID(null);
     setDropTarget(null);
     if (!convID) return;
+    const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+    if (prev) {
+      qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+        ...prev,
+        channel_groups: (prev.channel_groups ?? []).map((g) => {
+          const without = g.conversation_ids.filter((id) => id !== convID);
+          return g.id === targetGroupID ? { ...g, conversation_ids: [...without, convID] } : { ...g, conversation_ids: without };
+        }),
+      });
+    }
     void groupAct.run(async () => {
-      await api.setConversationGroup(spaceSlug, convID, targetGroupID);
-      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      try {
+        await api.setConversationGroup(spaceSlug, convID, targetGroupID);
+      } catch (err) {
+        if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+        throw err;
+      }
+      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
     });
   }
 
   function toggleGroupCollapse(g: ChannelGroup) {
+    const nextCollapsed = !g.collapsed;
+    const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+    if (prev) {
+      qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+        ...prev,
+        channel_groups: (prev.channel_groups ?? []).map((item) => (item.id === g.id ? { ...item, collapsed: nextCollapsed } : item)),
+      });
+    }
     void groupAct.run(async () => {
-      await api.updateChannelGroup(spaceSlug, g.id, { collapsed: !g.collapsed });
-      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      try {
+        await api.updateChannelGroup(spaceSlug, g.id, { collapsed: nextCollapsed });
+      } catch (err) {
+        if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+        throw err;
+      }
+      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
     });
   }
 
@@ -628,7 +722,7 @@ export function Workbench({
 
       {/* Main */}
       <main className="bg-panel flex flex-col min-w-0 min-h-0">
-        <div key={viewKey(mainView)} className="h-full min-h-0 animate-fade-in">
+        <div className="h-full min-h-0">
           {mainView.kind === "conversation" && activeConv && (
             <ConversationView
               spaceSlug={spaceSlug}
@@ -768,10 +862,19 @@ export function Workbench({
         items={[
           { key: "inbox", label: "Inbox", group: "Go to", icon: <Inbox className="size-4" />, run: () => setMainView({ kind: "inbox" }) },
           { key: "tasks", label: "Tasks", group: "Go to", icon: <CheckCircle2 className="size-4" />, run: () => setMainView({ kind: "tasks" }) },
-          ...channels.map((c) => ({ key: c.id, label: c.slug ?? "", group: "Channels", icon: <Hash className="size-4" />, run: () => setMainView({ kind: "conversation", convID: c.id }) })),
+          { key: "settings", label: "Settings", group: "Go to", icon: <Settings className="size-4" />, run: () => setMainView({ kind: "admin", tab: "settings" }) },
+          ...channels.map((c) => ({
+            key: c.id,
+            label: `#${c.slug ?? ""}`,
+            keywords: c.topic ?? "",
+            group: "Channels",
+            icon: c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />,
+            run: () => setMainView({ kind: "conversation", convID: c.id }),
+          })),
           ...[...agents, ...people].map((m) => ({
             key: m.id,
             label: m.display_name,
+            keywords: m.agent?.role_text ?? "",
             group: m.kind === "agent" ? "Agents" : "People",
             icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" />,
             run: () => void openOrCreateDM(m.id),
@@ -779,10 +882,30 @@ export function Workbench({
           ...boot.tasks.map((t) => ({
             key: t.id,
             label: `#${t.number} ${t.title}`,
+            keywords: t.channel_slug ?? "",
             group: "Tasks",
             icon: <CheckCircle2 className="size-4" />,
             run: () => setDetail({ kind: "task", taskID: t.id }),
           })),
+          { key: "act:channel", label: "New channel", group: "Actions", icon: <Plus className="size-4" />, run: () => setDialog("channel") },
+          {
+            key: "act:group",
+            label: "New channel group",
+            group: "Actions",
+            icon: <FolderPlus className="size-4" />,
+            run: () => {
+              setEditingGroup(null);
+              setDialog("group");
+            },
+          },
+          {
+            key: "act:theme",
+            label: dark ? "Switch to light mode" : "Switch to dark mode",
+            keywords: "theme appearance dark light",
+            group: "Actions",
+            icon: dark ? <Sun className="size-4" /> : <Moon className="size-4" />,
+            run: () => setTheme(dark ? "light" : "dark"),
+          },
         ]}
       />
     </div>
@@ -797,285 +920,5 @@ function SetupLine({ done, children }: { done: boolean; children: ReactNode }) {
       </span>
       {children}
     </div>
-  );
-}
-
-function NewChannelDialog({
-  open,
-  spaceSlug,
-  members,
-  currentMemberID,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  spaceSlug: string;
-  members: Member[];
-  currentMemberID: string;
-  onClose: () => void;
-  onCreated: (convID: string) => void;
-}) {
-  const qc = useQueryClient();
-  const [slug, setSlug] = useState("");
-  const [topic, setTopic] = useState("");
-  const [kind, setKind] = useState<"public" | "private">("public");
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-  const { busy, run } = useAction();
-  useEffect(() => {
-    if (open) {
-      setSlug("");
-      setTopic("");
-      setKind("public");
-      setSelectedMembers([]);
-    }
-  }, [open]);
-
-  const candidates = useMemo(
-    () =>
-      members
-        .filter((m) => m.id !== currentMemberID)
-        .sort((a, b) => (a.kind === b.kind ? a.display_name.localeCompare(b.display_name) : a.kind === "agent" ? -1 : 1)),
-    [members, currentMemberID],
-  );
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    await run(async () => {
-      const r = await api.createChannel(spaceSlug, slugify(slug), kind, topic.trim(), selectedMembers);
-      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-      onCreated(r.conversation.id);
-    });
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} label="New channel" title="New channel" description="Start with only the agents and people you invite; you can add more anytime.">
-      <form onSubmit={submit} className="px-6 pb-6 pt-4 space-y-4">
-        <Field label="Name" autoFocus leading={<Hash />} value={slug} onChange={(e) => setSlug(slugInput(e.target.value))} placeholder="design-review" required />
-        <Field label="Topic" optional value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What is this channel about?" />
-        <div className="space-y-1.5">
-          <div className="text-[13px] font-medium text-fg-2">Visibility</div>
-          <Segmented
-            full
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: "public", label: <><Hash />Public</> },
-              { value: "private", label: <><Lock />Private</> },
-            ]}
-          />
-        </div>
-        {candidates.length > 0 && (
-          <MultiSelectList
-            label={selectedMembers.length > 0 ? `Initial members (${selectedMembers.length})` : "Initial members"}
-            optional
-            hint="Leave empty to start alone. Agents only see and wake in channels they are added to."
-            values={selectedMembers}
-            onChange={setSelectedMembers}
-            searchPlaceholder="Filter agents and people…"
-            options={candidates.map((m) => ({
-              value: m.id,
-              label: m.display_name,
-              description: m.kind === "agent" ? (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() : undefined,
-              icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.kind === "agent" ? m.agent?.runtime_state : undefined} />,
-              trailing: m.kind === "agent" ? "Agent" : m.access_level,
-            }))}
-          />
-        )}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" loading={busy} disabled={!slug}>
-            Create channel
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function ChannelGroupDialog({
-  open,
-  spaceSlug,
-  group,
-  onClose,
-}: {
-  open: boolean;
-  spaceSlug: string;
-  group: ChannelGroup | null;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [name, setName] = useState("");
-  const { busy, run } = useAction();
-
-  useEffect(() => {
-    if (open) setName(group?.name ?? "");
-  }, [open, group]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const clean = name.trim();
-    if (!clean) return;
-    await run(async () => {
-      if (group) await api.updateChannelGroup(spaceSlug, group.id, { name: clean });
-      else await api.createChannelGroup(spaceSlug, clean);
-      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-      onClose();
-    });
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      label={group ? "Rename channel group" : "New channel group"}
-      title={group ? "Rename group" : "New channel group"}
-      description="Organize your sidebar channels into collapsible groups by dragging them in."
-      width={420}
-    >
-      <form onSubmit={submit} className="px-6 pb-6 pt-4 space-y-4">
-        <Field label="Group name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Core projects" maxLength={40} required />
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" loading={busy} disabled={!name.trim()}>
-            {group ? "Save" : "Create group"}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function NewSpaceDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (slug: string) => void }) {
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [touched, setTouched] = useState(false);
-  const { busy, run } = useAction();
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setSlug("");
-      setTouched(false);
-    }
-  }, [open]);
-  return (
-    <Modal open={open} onClose={onClose} label="New space" title="New space" description="A separate home for channels, tasks, agents and computers.">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(async () => {
-            const r = await api.createSpace(slugify(slug), name.trim());
-            onCreated(r.space.slug);
-          });
-        }}
-        className="px-6 pb-6 pt-4 space-y-4"
-      >
-        <Field
-          label="Name"
-          autoFocus
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            if (!touched) setSlug(slugify(e.target.value));
-          }}
-          required
-        />
-        <Field
-          label="Address"
-          value={slug}
-          className="font-mono"
-          onChange={(e) => {
-            setTouched(true);
-            setSlug(slugInput(e.target.value));
-          }}
-          required
-        />
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" loading={busy} disabled={!slug || !name.trim()}>
-            Create space
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function JumpDialog({
-  open,
-  onClose,
-  items,
-}: {
-  open: boolean;
-  onClose: () => void;
-  items: { key: string; label: string; group: string; icon: ReactNode; run: () => void }[];
-}) {
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(0);
-  useEffect(() => {
-    if (open) {
-      setQ("");
-      setSel(0);
-    }
-  }, [open]);
-  const filtered = items.filter((i) => i.label.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 14);
-  const pick = (i: number) => {
-    const it = filtered[i];
-    if (!it) return;
-    onClose();
-    it.run();
-  };
-  return (
-    <Modal open={open} onClose={onClose} label="Jump to" width={560}>
-      <div className="border-b border-line flex items-center gap-3 px-4 h-14">
-        <Search className="size-5 text-fg-3" />
-        <input
-          autoFocus
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setSel(0);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setSel((s) => Math.min(s + 1, filtered.length - 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setSel((s) => Math.max(s - 1, 0));
-            } else if (e.key === "Enter") {
-              e.preventDefault();
-              pick(sel);
-            }
-          }}
-          placeholder="Search channels, agents, people and tasks"
-          className="flex-1 h-full text-[15px] bg-transparent outline-none placeholder:text-fg-4 pr-8"
-        />
-      </div>
-      <div className="max-h-[380px] overflow-y-auto scroll-thin p-2">
-        {filtered.length === 0 ? (
-          <div className="py-10 text-center text-[14px] text-fg-3">No matches</div>
-        ) : (
-          filtered.map((it, i) => (
-            <div key={it.key}>
-              {(i === 0 || filtered[i - 1].group !== it.group) && <div className="px-2.5 pt-2 pb-1 text-[12px] font-semibold text-fg-4">{it.group}</div>}
-              <button
-                onMouseEnter={() => setSel(i)}
-                onClick={() => pick(i)}
-                className={`w-full h-10 px-2.5 rounded-[9px] flex items-center gap-3 text-[14px] text-left ${i === sel ? "bg-accent-soft text-fg" : "text-fg-2"}`}
-              >
-                <span className="size-5 flex items-center justify-center text-fg-3">{it.icon}</span>
-                <span className="truncate">{it.label}</span>
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-    </Modal>
   );
 }

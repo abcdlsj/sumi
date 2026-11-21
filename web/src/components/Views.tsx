@@ -320,14 +320,36 @@ export function TasksView({
 }) {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [q, setQ] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
   const statusQuery = filter === "done" ? "done" : filter === "closed" ? "closed" : "active";
   const tasksQ = useQuery({
     queryKey: ["tasks", spaceSlug, filter],
     queryFn: () => api.listTasks(spaceSlug, statusQuery, filter === "mine" ? "mine" : "").then((r) => r.tasks),
   });
-  const tasks = tasksQ.data ?? [];
+  const allTasks = tasksQ.data ?? [];
+  const query = q.trim().toLowerCase();
+  const tasks = allTasks.filter((t) => {
+    if (channelFilter && t.channel_id !== channelFilter) return false;
+    if (!query) return true;
+    return (
+      t.title.toLowerCase().includes(query) ||
+      `#${t.number}`.includes(query) ||
+      (t.channel_slug ?? "").toLowerCase().includes(query) ||
+      (t.assignee_display_name ?? "").toLowerCase().includes(query)
+    );
+  });
   const groups = STATUS_ORDER.map((s) => ({ status: s, tasks: tasks.filter((t) => t.status === s) })).filter((g) => g.tasks.length > 0);
-  const hasChannel = boot.conversations.some((c) => (c.kind === "public" || c.kind === "private") && !c.archived_at);
+  const activeChannels = boot.conversations.filter((c) => (c.kind === "public" || c.kind === "private") && !c.archived_at);
+  const hasChannel = activeChannels.length > 0;
+  const channelFilterOptions: SelectOption<string>[] = [
+    { value: "", label: "All channels" },
+    ...activeChannels.map((c) => ({
+      value: c.id,
+      label: `#${c.slug ?? "channel"}`,
+      icon: c.kind === "private" ? <Lock className="size-3.5 text-fg-3" /> : <Hash className="size-3.5 text-fg-3" />,
+    })),
+  ];
 
   return (
     <section className="flex flex-col h-full min-h-0 bg-bg">
@@ -354,31 +376,59 @@ export function TasksView({
         />
       </ViewHeader>
       <div className="flex-1 overflow-y-auto scroll-thin">
+        {allTasks.length > 0 && (
+          <div className="px-6 pt-4 max-w-[960px] flex items-center gap-2.5 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-[320px]">
+              <Search className="size-4 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Filter by title, #number, or assignee…"
+                aria-label="Filter tasks"
+                className="w-full h-8 pl-8 pr-3 rounded-[8px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+              />
+            </div>
+            {activeChannels.length > 1 && (
+              <Select
+                size="sm"
+                ariaLabel="Filter by channel"
+                value={channelFilter}
+                options={channelFilterOptions}
+                onChange={setChannelFilter}
+                className="w-[180px]"
+              />
+            )}
+          </div>
+        )}
         {tasksQ.isLoading ? (
           <RowListSkeleton />
         ) : groups.length === 0 ? (
-          <EmptyState
-            icon={<CheckCircle2 />}
-            title={
-              filter === "done"
-                ? "No finished tasks yet"
-                : filter === "closed"
-                  ? "No closed tasks"
-                  : filter === "mine"
-                    ? "Nothing assigned to you"
-                    : "No active tasks"
-            }
-            body="Create a task directly here, or hover any message in a channel to turn it into tracked work."
-            action={
-              hasChannel ? (
-                <Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>
-                  New task
-                </Button>
-              ) : undefined
-            }
-          />
+          allTasks.length > 0 ? (
+            <div className="px-6 py-12 text-center text-[14px] text-fg-3">No tasks match the current filter.</div>
+          ) : (
+            <EmptyState
+              icon={<CheckCircle2 />}
+              title={
+                filter === "done"
+                  ? "No finished tasks yet"
+                  : filter === "closed"
+                    ? "No closed tasks"
+                    : filter === "mine"
+                      ? "Nothing assigned to you"
+                      : "No active tasks"
+              }
+              body="Create a task directly here, or hover any message in a channel to turn it into tracked work."
+              action={
+                hasChannel ? (
+                  <Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>
+                    New task
+                  </Button>
+                ) : undefined
+              }
+            />
+          )
         ) : (
-          <div className="px-6 py-5 space-y-5 max-w-[960px] animate-fade-in">
+          <div className="px-6 py-4 space-y-5 max-w-[960px]">
             {groups.map((g) => (
               <div key={g.status}>
                 <div className="mb-2 px-1 flex items-center gap-2 text-[13px] font-semibold text-fg-2">

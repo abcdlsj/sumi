@@ -9,6 +9,7 @@ import {
   BellOff,
   ChevronDown,
   CornerUpLeft,
+  FolderInput,
   Hash,
   ListPlus,
   Lock,
@@ -346,27 +347,73 @@ export function ConversationView({
               <span className="tabular">{memberCount}</span>
             </button>
           )}
-          {isChannel && canGovern && !isArchived && (
+          {isChannel && !isArchived && (canGovern || (boot.channel_groups?.length ?? 0) > 0) && (
             <Menu
-              width={220}
+              width={236}
               trigger={(open, toggle) => (
                 <IconButton label="Channel actions" active={open} onClick={toggle}>
                   <MoreHorizontal />
                 </IconButton>
               )}
             >
-              {(close) => (
-                <MenuItem
-                  icon={<Archive className="text-danger" />}
-                  hint="Make read-only and stop all notifications"
-                  onSelect={() => {
-                    close();
-                    setConfirmArchive(true);
-                  }}
-                >
-                  Archive channel
-                </MenuItem>
-              )}
+              {(close) => {
+                const groups = boot.channel_groups ?? [];
+                const currentGroupID = groups.find((g) => g.conversation_ids.includes(conv.id))?.id ?? "";
+                const moveGroup = (targetGroupID: string) => {
+                  close();
+                  const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                  if (prev) {
+                    qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                      ...prev,
+                      channel_groups: (prev.channel_groups ?? []).map((g) => {
+                        const without = g.conversation_ids.filter((id) => id !== conv.id);
+                        return g.id === targetGroupID ? { ...g, conversation_ids: [...without, conv.id] } : { ...g, conversation_ids: without };
+                      }),
+                    });
+                  }
+                  void notify.run(async () => {
+                    try {
+                      await api.setConversationGroup(spaceSlug, conv.id, targetGroupID);
+                    } catch (err) {
+                      if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+                      throw err;
+                    }
+                    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                  });
+                };
+                return (
+                  <>
+                    {groups.length > 0 && (
+                      <div className="pb-1">
+                        <div className="px-2.5 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-4">Move to group</div>
+                        {groups.map((g) => (
+                          <MenuItem key={g.id} active={currentGroupID === g.id} icon={<FolderInput />} onSelect={() => moveGroup(g.id)}>
+                            {g.name}
+                          </MenuItem>
+                        ))}
+                        {currentGroupID && (
+                          <MenuItem icon={<X />} onSelect={() => moveGroup("")}>
+                            Remove from group
+                          </MenuItem>
+                        )}
+                        {canGovern && <div className="my-1 border-t border-line" />}
+                      </div>
+                    )}
+                    {canGovern && (
+                      <MenuItem
+                        icon={<Archive className="text-danger" />}
+                        hint="Make read-only and stop all notifications"
+                        onSelect={() => {
+                          close();
+                          setConfirmArchive(true);
+                        }}
+                      >
+                        Archive channel
+                      </MenuItem>
+                    )}
+                  </>
+                );
+              }}
             </Menu>
           )}
           {peer?.kind === "agent" && (

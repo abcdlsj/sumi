@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
-import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
+import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
@@ -572,7 +572,27 @@ function TaskDetail({
               ariaLabel="Task status"
               value={task.status}
               options={statusOptions}
-              onChange={(next) => void act.run(() => api.updateTaskStatus(spaceSlug, task.id, next)).then(refresh)}
+              onChange={(next) => {
+                const prevTask = qc.getQueryData<Task>(["task", spaceSlug, taskID]);
+                const prevBoot = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, status: next });
+                if (prevBoot) {
+                  qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                    ...prevBoot,
+                    tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, status: next } : item)),
+                  });
+                }
+                void act.run(async () => {
+                  try {
+                    await api.updateTaskStatus(spaceSlug, task.id, next);
+                  } catch (err) {
+                    if (prevTask) qc.setQueryData(["task", spaceSlug, taskID], prevTask);
+                    if (prevBoot) qc.setQueryData(["bootstrap", spaceSlug], prevBoot);
+                    throw err;
+                  }
+                  refresh();
+                });
+              }}
               className="w-[176px]"
             />
           </KV>
@@ -586,7 +606,33 @@ function TaskDetail({
                 value={task.assignee_member_id ?? ""}
                 options={assigneeOptions}
                 disabled={!open}
-                onChange={(next) => void act.run(() => api.assignTask(spaceSlug, task.id, next)).then(refresh)}
+                onChange={(next) => {
+                  const nextMember = assigneePool.find((m) => m.id === next);
+                  const prevTask = qc.getQueryData<Task>(["task", spaceSlug, taskID]);
+                  const prevBoot = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                  const patch = {
+                    assignee_member_id: next || undefined,
+                    assignee_display_name: nextMember?.display_name,
+                    assignee_kind: nextMember?.kind,
+                  };
+                  if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, ...patch });
+                  if (prevBoot) {
+                    qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                      ...prevBoot,
+                      tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, ...patch } : item)),
+                    });
+                  }
+                  void act.run(async () => {
+                    try {
+                      await api.assignTask(spaceSlug, task.id, next);
+                    } catch (err) {
+                      if (prevTask) qc.setQueryData(["task", spaceSlug, taskID], prevTask);
+                      if (prevBoot) qc.setQueryData(["bootstrap", spaceSlug], prevBoot);
+                      throw err;
+                    }
+                    refresh();
+                  });
+                }}
                 className="flex-1 min-w-0 max-w-[210px]"
               />
               {canClaim && (
