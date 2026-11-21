@@ -2,7 +2,8 @@ import { Component, memo, useMemo, useRef, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
-import type { Member, Task } from "../api";
+import type { BootstrapData, Member, Task } from "../api";
+import { MemberHoverCard } from "./AgentVisibility";
 import { CodeBlock } from "./CodeHighlight";
 
 class MarkdownErrorBoundary extends Component<{ body: string; children: ReactNode }, { body: string; failed: boolean }> {
@@ -124,6 +125,7 @@ export const MessageBody = memo(function MessageBody({
   body,
   members,
   tasks = [],
+  boot,
   selfID,
   onSelectMember,
   onSelectTask,
@@ -131,6 +133,7 @@ export const MessageBody = memo(function MessageBody({
   body: string;
   members: Member[];
   tasks?: Task[];
+  boot?: BootstrapData;
   selfID?: string;
   onSelectMember?: (member: Member) => void;
   onSelectTask?: (task: Task) => void;
@@ -139,6 +142,8 @@ export const MessageBody = memo(function MessageBody({
   membersRef.current = members;
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
+  const bootRef = useRef(boot);
+  bootRef.current = boot;
 
   // Key by names and task numbers only so agent state ticks never re-parse markdown.
   const memberSig = members.map((m) => `${m.id}:${m.display_name}:${m.kind}`).join("\0");
@@ -239,7 +244,7 @@ export const MessageBody = memo(function MessageBody({
           );
         }
 
-        return (
+        const btn = (
           <button
             type="button"
             data-mention={member.display_name}
@@ -250,6 +255,14 @@ export const MessageBody = memo(function MessageBody({
             {children}
           </button>
         );
+        if (bootRef.current) {
+          return (
+            <MemberHoverCard boot={bootRef.current} member={member} onInspect={(m) => onSelectMemberRef.current?.(m)}>
+              {btn}
+            </MemberHoverCard>
+          );
+        }
+        return btn;
       },
     }),
     [memberByKey, taskByNum, selfID, clickableMember, clickableTask],

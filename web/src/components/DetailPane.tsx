@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
+import { AgentReadFaces, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
@@ -770,6 +771,11 @@ function ThreadDetail({
   const reactions = useReactionToggle(spaceSlug, threadConvID, undefined, boot.current_member.id);
   const following = msgsQ.data?.following;
   const threadMsgs = msgsQ.data?.messages;
+  const agentReadMap = useMemo(
+    () => buildAgentReadMap(threadMsgs, msgsQ.data?.agent_reads, boot.members),
+    [threadMsgs, msgsQ.data?.agent_reads, boot.members],
+  );
+  const [highlightedMsgID, setHighlightedMsgID] = useState<string | null>(null);
   const lastThreadMsg = threadMsgs && threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : undefined;
   const stream = useStickToBottom({
     streamKey: threadConvID,
@@ -778,6 +784,13 @@ function ThreadDetail({
     lastId: lastThreadMsg?.id,
   });
   const members = useMentionMembers(spaceSlug, boot, threadConvID);
+
+  function jumpToThreadMessage(messageID: string) {
+    const el = stream.ref.current?.querySelector<HTMLElement>(`[data-thread-msg-id="${messageID}"]`);
+    el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    setHighlightedMsgID(messageID);
+    window.setTimeout(() => setHighlightedMsgID((cur) => (cur === messageID ? null : cur)), 1600);
+  }
 
   return (
     <>
@@ -822,7 +835,7 @@ function ThreadDetail({
         )}
       </PaneHeader>
       <div className="relative flex-1 min-h-0">
-        <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin px-5 py-4 space-y-4">
+        <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin pl-5 pr-7 py-4 space-y-4">
           {msgsQ.isLoading ? (
             <MessageListSkeleton rows={4} compact />
           ) : msgsQ.isError && !msgsQ.data ? (
@@ -834,7 +847,11 @@ function ThreadDetail({
             />
           ) : (
             (msgsQ.data?.messages ?? []).map((m, i) => (
-              <div key={m.id}>
+              <div
+                key={m.id}
+                data-thread-msg-id={m.id}
+                className={`rounded-[6px] transition-colors duration-300 ${highlightedMsgID === m.id ? "bg-accent-soft/70 -mx-2 px-2 py-1" : ""}`}
+              >
                 <CompactMessage
                   m={m}
                   spaceSlug={spaceSlug}
@@ -843,6 +860,11 @@ function ThreadDetail({
                   pickerOpen={pickerMsgID === m.id}
                   onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
                   onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
+                />
+                <AgentReadFaces
+                  agents={agentReadMap.get(m.id)}
+                  boot={boot}
+                  onSelectAgent={(memberID) => onSelectTarget({ kind: "agent", memberID })}
                 />
                 {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
                   <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
@@ -854,6 +876,7 @@ function ThreadDetail({
             ))
           )}
         </div>
+        <ThreadOutlineRail messages={threadMsgs ?? []} selfID={boot.current_member.id} onJump={jumpToThreadMessage} />
         <NewMessagesPill count={stream.newCount} farFromEnd={stream.farFromEnd} onClick={stream.jumpToEnd} />
       </div>
       <ReplyBox

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
+import { AgentFaceStack, AgentReadFaces, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { CollapsibleMessage } from "./CollapsibleMessage";
@@ -80,22 +81,62 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
   return kind;
 }
 
-/** Honest runtime line above the composer: fixed height so status changes never shift the scroll viewport. */
+/** Honest runtime line above the composer: shows stacked working agents with a popover or DM peer state. */
 function AgentStatusLine({
   boot,
   conv,
   onOpenDetail,
+  onOpenConversation,
 }: {
   boot: BootstrapData;
   conv: Conversation;
   onOpenDetail: (t: DetailTarget) => void;
+  onOpenConversation?: (convID: string) => void;
 }) {
+  const [popOpen, setPopOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const agents = boot.members.filter((m) => m.kind === "agent");
   const peer = conv.kind === "dm" ? agents.find((a) => a.id === conv.peer_member_id) : undefined;
   const busyHere = agents.filter((a) => a.agent?.runtime_state === "working" && a.agent.focus_conversation_id === conv.id);
+
+  if (busyHere.length > 0 && conv.kind !== "dm") {
+    const names = busyHere.map((a) => a.display_name);
+    const label =
+      names.length === 1
+        ? `${names[0]} is working on a reply…`
+        : names.length === 2
+          ? `${names[0]} and ${names[1]} are working here`
+          : `${names[0]}, ${names[1]} and ${names.length - 2} ${names.length - 2 === 1 ? "other" : "others"} are working here`;
+    return (
+      <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => (busyHere.length === 1 ? onOpenDetail({ kind: "agent", memberID: busyHere[0].id }) : setPopOpen((v) => !v))}
+          className="min-w-0 inline-flex items-center gap-1.5 text-busy hover:underline underline-offset-2"
+        >
+          <AgentFaceStack agents={busyHere} ring="var(--panel)" />
+          <span className="truncate font-medium">{label}</span>
+        </button>
+        {busyHere.length > 1 && (
+          <WorkingAgentsPopover
+            boot={boot}
+            agents={busyHere}
+            open={popOpen}
+            triggerRef={triggerRef}
+            align="left"
+            onClose={() => setPopOpen(false)}
+            onOpenConversation={onOpenConversation}
+            onOpenDetail={onOpenDetail}
+          />
+        )}
+      </div>
+    );
+  }
+
   const subject: Member | undefined = peer ?? busyHere[0];
   if (!subject?.agent) {
-    return <div className="h-7 px-5 shrink-0" aria-live="polite" />;
+    return <div className="h-2 shrink-0" aria-live="polite" />;
   }
   const st = subject.agent.runtime_state;
   const focus = agentFocus(boot, subject);
@@ -111,11 +152,10 @@ function AgentStatusLine({
 
   return (
     <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
-      <StatusDot state={st} ring="var(--bg)" size={8} />
+      <StatusDot state={st} ring="var(--panel)" size={8} />
       <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
         <span className="font-semibold">{subject.display_name}</span> {text}
       </button>
-      {busyHere.length > 1 && <span className="text-fg-3 shrink-0">+{busyHere.length - 1} more working</span>}
     </div>
   );
 }
@@ -362,6 +402,8 @@ export function ConversationView({
   boot,
   conv,
   onOpenDetail,
+  onOpenConversation,
+  onOpenDM,
   onArchived,
   onUnarchived,
 }: {
@@ -369,6 +411,8 @@ export function ConversationView({
   boot: BootstrapData;
   conv: Conversation;
   onOpenDetail: (t: DetailTarget) => void;
+  onOpenConversation?: (convID: string) => void;
+  onOpenDM?: (memberID: string) => void;
   onArchived?: (conv: Conversation) => void;
   onUnarchived?: (conv: Conversation) => void;
 }) {
@@ -411,6 +455,10 @@ export function ConversationView({
     onAdjustScroll: syncScrollTop,
   });
   const messages = history.messages;
+  const agentReadMap = useMemo(
+    () => buildAgentReadMap(messages, msgsQ.data?.agent_reads, boot.members),
+    [messages, msgsQ.data?.agent_reads, boot.members],
+  );
   const reactions = useReactionToggle(
     spaceSlug,
     conv.id,
@@ -758,13 +806,20 @@ export function ConversationView({
                         <div className="min-w-0 flex-1 max-w-[740px]">
                           {!grouped && (
                             <div className="flex items-center gap-2 h-5">
-                              <button
-                                type="button"
-                                onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                                className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                              <MemberHoverCard
+                                boot={boot}
+                                member={author}
+                                onInspect={(member) => onOpenDetail(memberDetailTarget(member))}
+                                onMessage={onOpenDM}
                               >
-                                {m.author_display_name}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                                  className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                                >
+                                  {m.author_display_name}
+                                </button>
+                              </MemberHoverCard>
                               <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>
                           )}
@@ -774,6 +829,7 @@ export function ConversationView({
                                 body={m.body_markdown}
                                 members={boot.members}
                                 tasks={boot.tasks}
+                                boot={boot}
                                 selfID={boot.current_member.id}
                                 onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
                                 onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
@@ -842,6 +898,12 @@ export function ConversationView({
                               }
                             />
                           ) : null}
+
+                          <AgentReadFaces
+                            agents={agentReadMap.get(m.id)}
+                            boot={boot}
+                            onSelectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
+                          />
                         </div>
 
                         {!isArchived && (
@@ -967,7 +1029,7 @@ export function ConversationView({
         </div>
       ) : (
       <div className="shrink-0 bg-bg/60 border-t border-line">
-        <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
+        <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
         <MessageComposer
           spaceSlug={spaceSlug}
           boot={boot}

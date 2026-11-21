@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { ArrowDown, Loader2 } from "lucide-react";
-import { api, type Message } from "../api";
+import { api, type AgentReadProgress, type Message } from "../api";
 
 export interface MessagePage {
   messages: Message[];
   read_seq: number;
   following: boolean;
   has_more?: boolean;
+  agent_reads?: AgentReadProgress[];
 }
 
 /** Merges a freshly-sent message into the tail cache immediately so it doesn't vanish between POST and refetch. */

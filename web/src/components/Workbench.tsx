@@ -7,6 +7,7 @@ import { readPendingPairing } from "../pairing";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
+import { WorkingNowSummary } from "./AgentVisibility";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
 import { DesktopServerTrigger } from "./DesktopServer";
@@ -24,6 +25,7 @@ type Dialog = null | "channel" | "group" | "space" | "jump" | "computer" | "agen
 const SSE_EVENTS = [
   "message.created",
   "message.reaction_changed",
+  "conversation.read_updated",
   "task.created",
   "task.updated",
   "agent.created",
@@ -231,6 +233,25 @@ export function Workbench({
               stateTimer = null;
               void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
             }, 250);
+          }
+          return;
+        }
+        case "conversation.read_updated": {
+          const memberID = typeof p.member_id === "string" ? p.member_id : "";
+          const readSeq = typeof p.read_seq === "number" ? p.read_seq : 0;
+          if (convID && memberID && readSeq > 0) {
+            qc.setQueryData<{ messages: unknown[]; read_seq: number; following: boolean; has_more?: boolean; agent_reads?: { member_id: string; read_seq: number }[] }>(
+              ["messages", spaceSlug, convID],
+              (prev) => {
+                if (!prev) return prev;
+                const existing = prev.agent_reads ?? [];
+                const found = existing.some((r) => r.member_id === memberID);
+                const nextReads = found
+                  ? existing.map((r) => (r.member_id === memberID ? { ...r, read_seq: Math.max(r.read_seq, readSeq) } : r))
+                  : [...existing, { member_id: memberID, read_seq: readSeq }];
+                return { ...prev, agent_reads: nextReads };
+              },
+            );
           }
           return;
         }
@@ -533,9 +554,14 @@ export function Workbench({
         {desktop && (
           <div
             data-desktop-titlebar
-            className="h-[52px] pl-[92px] pr-4 border-b border-nav-line flex items-center shrink-0 titlebar-drag"
+            className="h-[52px] pl-[92px] pr-3 border-b border-nav-line flex items-center justify-between gap-2 shrink-0 titlebar-drag"
           >
             <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
+            <WorkingNowSummary
+              boot={boot}
+              onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+              onOpenDetail={setDetail}
+            />
           </div>
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
@@ -587,8 +613,13 @@ export function Workbench({
           {/* Sidebar */}
           <aside aria-label="Sidebar" className="bg-nav flex flex-col min-w-0 min-h-0">
             {!desktop && (
-              <div className="h-[52px] px-4 flex items-center shrink-0">
+              <div className="h-[52px] px-4 flex items-center justify-between gap-2 shrink-0">
                 <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
+                <WorkingNowSummary
+                  boot={boot}
+                  onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                  onOpenDetail={setDetail}
+                />
               </div>
             )}
             <div className={`px-3 pb-2 shrink-0 ${desktop ? "pt-3" : ""}`}>
@@ -821,6 +852,8 @@ export function Workbench({
                 boot={boot}
                 conv={activeConv}
                 onOpenDetail={setDetail}
+                onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                onOpenDM={(memberID) => void openOrCreateDM(memberID)}
                 onArchived={(archived) => setMainView({ kind: "conversation", convID: archived.id, archivedConv: archived })}
                 onUnarchived={(restored) => setMainView({ kind: "conversation", convID: restored.id })}
               />

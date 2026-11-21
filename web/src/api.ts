@@ -254,6 +254,29 @@ export interface WorkspaceFileContent {
   content: string;
 }
 
+export interface AgentReadProgress {
+  member_id: string;
+  read_seq: number;
+}
+
+export interface SearchHit {
+  message_id: string;
+  conversation_id: string;
+  conversation_kind: ConversationKind;
+  conversation_title: string;
+  parent_conversation_id?: string;
+  parent_slug?: string;
+  root_message_id?: string;
+  task_id?: string;
+  task_number?: number;
+  seq: number;
+  author_member_id: string;
+  author_display_name: string;
+  author_kind: MemberKind;
+  snippet: string;
+  created_at: string;
+}
+
 export interface BootstrapData {
   space: Space;
   current_member: Member;
@@ -332,9 +355,15 @@ export const api = {
     const params = opts?.beforeSeq
       ? `before_seq=${opts.beforeSeq}&limit=${limit}&mark_read=false`
       : `latest=true&limit=${limit}&mark_read=${markRead}`;
-    return request<{ messages: Message[]; read_seq: number; following: boolean; has_more?: boolean }>(
+    return request<{ messages: Message[]; read_seq: number; following: boolean; has_more?: boolean; agent_reads?: AgentReadProgress[] }>(
       `/api/v1/spaces/${spaceSlug}/conversations/${convID}/messages?${params}`,
     );
+  },
+  searchMessages: (spaceSlug: string, query: string, opts?: { conversationID?: string; limit?: number }) => {
+    const qs = new URLSearchParams({ q: query });
+    if (opts?.conversationID) qs.set("conversation_id", opts.conversationID);
+    if (opts?.limit) qs.set("limit", String(opts.limit));
+    return request<{ hits: SearchHit[] }>(`/api/v1/spaces/${spaceSlug}/search?${qs.toString()}`);
   },
   sendMessage: (
     spaceSlug: string,
