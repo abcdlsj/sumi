@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type TaskStatus } from "../api";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
+import { AgentWorkspace } from "./AgentWorkspace";
 import { describeAction } from "./ConversationView";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
@@ -256,6 +257,7 @@ export function DetailPane({
       {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "agent" && (
         <AgentDetail
+          key={target.memberID}
           spaceSlug={spaceSlug}
           boot={boot}
           memberID={target.memberID}
@@ -807,6 +809,7 @@ function AgentDetail({
   const act = useAction();
   const [pending, setPending] = useState<"restart" | "reset_session" | null>(null);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<"overview" | "workspace">("overview");
   const member = boot.members.find((m) => m.id === memberID);
   if (!member?.agent) return <DetailSkeleton />;
   const ag = member.agent;
@@ -840,7 +843,31 @@ function AgentDetail({
       >
         <span className="font-semibold text-fg">Agent</span>
       </PaneHeader>
-      <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
+      <div className="px-4 py-2 border-b border-line flex items-center gap-1 shrink-0 bg-panel">
+        <button
+          type="button"
+          onClick={() => setTab("overview")}
+          className={`h-7 px-3 rounded-[7px] text-[13px] font-medium transition-colors ${
+            tab === "overview" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
+          }`}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("workspace")}
+          className={`h-7 px-3 rounded-[7px] text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors ${
+            tab === "workspace" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
+          }`}
+        >
+          <FolderOpen className="size-3.5" />
+          Workspace
+        </button>
+      </div>
+      {tab === "workspace" ? (
+        <AgentWorkspace key={member.id} spaceSlug={spaceSlug} member={member} computer={comp} boot={boot} />
+      ) : (
+        <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
         <div className="px-5 py-5 flex items-center gap-4">
           <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} />
           <div className="min-w-0 flex-1">
@@ -995,7 +1022,8 @@ function AgentDetail({
             })}
           </div>
         </Section>
-      </div>
+        </div>
+      )}
     </>
   );
 }

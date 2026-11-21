@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"sync"
 
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -64,3 +65,9 @@ type noopNotifier struct{}
 
 func (noopNotifier) SendWake(string, protocol.WakeFrame)            {}
 func (noopNotifier) SendControl(string, protocol.AgentControlFrame) {}
+
+// WorkspaceClient fetches read-only agent workspace listings and files over the Computer WebSocket.
+type WorkspaceClient interface {
+	ListWorkspace(ctx context.Context, computerID, agentMemberID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error)
+	ReadWorkspaceFile(ctx context.Context, computerID, agentMemberID, relPath string) (*domain.WorkspaceFileContent, error)
+}

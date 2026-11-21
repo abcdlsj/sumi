@@ -17,9 +17,10 @@ import (
 )
 
 type Service struct {
-	store    *store.Store
-	hub      *EventHub
-	notifier ComputerNotifier
+	store     *store.Store
+	hub       *EventHub
+	notifier  ComputerNotifier
+	workspace WorkspaceClient
 
 	// activity holds ephemeral in-turn Agent activity keyed by member id; it is only exposed
 	// while the Agent's persisted runtime_state is working.
@@ -51,6 +52,10 @@ func (s *Service) SetNotifier(n ComputerNotifier) {
 		return
 	}
 	s.notifier = n
+}
+
+func (s *Service) SetWorkspaceClient(w WorkspaceClient) {
+	s.workspace = w
 }
 
 func randomToken(bytesLen int) (string, error) {

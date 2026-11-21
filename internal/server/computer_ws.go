@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -30,16 +31,24 @@ type computerConn struct {
 	sendCh       chan protocol.Envelope
 }
 
+type pendingWorkspaceReq struct {
+	computerID string
+	ch         chan protocol.Envelope
+}
+
 type computerHub struct {
-	mu     sync.RWMutex
-	conns  map[string]*computerConn
-	logger *slog.Logger
+	mu        sync.RWMutex
+	conns     map[string]*computerConn
+	pendingMu sync.Mutex
+	pending   map[string]pendingWorkspaceReq
+	logger    *slog.Logger
 }
 
 func newComputerHub(logger *slog.Logger) *computerHub {
 	return &computerHub{
-		conns:  make(map[string]*computerConn),
-		logger: logger,
+		conns:   make(map[string]*computerConn),
+		pending: make(map[string]pendingWorkspaceReq),
+		logger:  logger,
 	}
 }
 
@@ -55,12 +64,146 @@ func (h *computerHub) Register(cc *computerConn) {
 // Unregister removes cc only if no newer connection replaced it.
 func (h *computerHub) Unregister(cc *computerConn) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	removed := false
 	if cur, ok := h.conns[cc.computerID]; ok && cur == cc {
 		delete(h.conns, cc.computerID)
-		return true
+		removed = true
 	}
-	return false
+	h.mu.Unlock()
+	if removed {
+		h.pendingMu.Lock()
+		for id, p := range h.pending {
+			if p.computerID == cc.computerID {
+				close(p.ch)
+				delete(h.pending, id)
+			}
+		}
+		h.pendingMu.Unlock()
+	}
+	return removed
+}
+
+func (h *computerHub) resolvePending(requestID string, env protocol.Envelope) {
+	if requestID == "" {
+		return
+	}
+	h.pendingMu.Lock()
+	p, ok := h.pending[requestID]
+	if ok {
+		delete(h.pending, requestID)
+	}
+	h.pendingMu.Unlock()
+	if ok {
+		select {
+		case p.ch <- env:
+		default:
+		}
+	}
+}
+
+func (h *computerHub) callWorkspace(ctx context.Context, computerID, reqID string, env protocol.Envelope) (protocol.Envelope, error) {
+	h.mu.RLock()
+	cc := h.conns[computerID]
+	h.mu.RUnlock()
+	if cc == nil {
+		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer is offline")
+	}
+	if !protocol.Has(cc.capabilities, protocol.CapAgentWorkspace) {
+		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer does not support workspace viewing; please update the daemon")
+	}
+
+	ch := make(chan protocol.Envelope, 1)
+	h.pendingMu.Lock()
+	h.pending[reqID] = pendingWorkspaceReq{computerID: computerID, ch: ch}
+	h.pendingMu.Unlock()
+	defer func() {
+		h.pendingMu.Lock()
+		delete(h.pending, reqID)
+		h.pendingMu.Unlock()
+	}()
+
+	select {
+	case cc.sendCh <- env:
+	default:
+		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer connection is busy")
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	select {
+	case resp, ok := <-ch:
+		if !ok {
+			return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer disconnected")
+		}
+		return resp, nil
+	case <-waitCtx.Done():
+		if ctx.Err() != nil {
+			return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "request canceled")
+		}
+		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "workspace request timed out")
+	}
+}
+
+func workspaceResultError(code, msg string) error {
+	c := domain.Code(code)
+	if c == "" {
+		c = domain.CodeInternal
+	}
+	if msg == "" {
+		msg = "workspace request failed"
+	}
+	return domain.NewError(c, msg)
+}
+
+func (h *computerHub) ListWorkspace(ctx context.Context, computerID, agentMemberID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+	reqID := uuid.NewString()
+	resp, err := h.callWorkspace(ctx, computerID, reqID, protocol.Envelope{
+		Type: protocol.TypeWorkspaceList,
+		WorkspaceList: &protocol.WorkspaceListFrame{
+			RequestID:     reqID,
+			AgentMemberID: agentMemberID,
+			Path:          relPath,
+			IncludeHidden: includeHidden,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.WorkspaceListResult == nil {
+		return nil, domain.NewError(domain.CodeInternal, "empty workspace response")
+	}
+	if resp.WorkspaceListResult.ErrorCode != "" || resp.WorkspaceListResult.Error != "" {
+		return nil, workspaceResultError(resp.WorkspaceListResult.ErrorCode, resp.WorkspaceListResult.Error)
+	}
+	if resp.WorkspaceListResult.Listing == nil {
+		return nil, domain.NewError(domain.CodeInternal, "missing workspace listing")
+	}
+	return resp.WorkspaceListResult.Listing, nil
+}
+
+func (h *computerHub) ReadWorkspaceFile(ctx context.Context, computerID, agentMemberID, relPath string) (*domain.WorkspaceFileContent, error) {
+	reqID := uuid.NewString()
+	resp, err := h.callWorkspace(ctx, computerID, reqID, protocol.Envelope{
+		Type: protocol.TypeWorkspaceRead,
+		WorkspaceRead: &protocol.WorkspaceReadFrame{
+			RequestID:     reqID,
+			AgentMemberID: agentMemberID,
+			Path:          relPath,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.WorkspaceReadResult == nil {
+		return nil, domain.NewError(domain.CodeInternal, "empty workspace file response")
+	}
+	if resp.WorkspaceReadResult.ErrorCode != "" || resp.WorkspaceReadResult.Error != "" {
+		return nil, workspaceResultError(resp.WorkspaceReadResult.ErrorCode, resp.WorkspaceReadResult.Error)
+	}
+	if resp.WorkspaceReadResult.File == nil {
+		return nil, domain.NewError(domain.CodeInternal, "missing workspace file content")
+	}
+	return resp.WorkspaceReadResult.File, nil
 }
 
 func (h *computerHub) SendWake(computerID string, frame protocol.WakeFrame) {
@@ -124,6 +267,7 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer wsConn.CloseNow()
+	wsConn.SetReadLimit(10 << 20)
 
 	// Expect initial hello frame within 20 seconds.
 	helloCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -232,6 +376,14 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 					frame.AgentState.ErrorDetail,
 					frame.AgentState.Activity,
 				)
+			}
+		case protocol.TypeWorkspaceListResult:
+			if frame.WorkspaceListResult != nil {
+				s.hub.resolvePending(frame.WorkspaceListResult.RequestID, frame)
+			}
+		case protocol.TypeWorkspaceReadResult:
+			if frame.WorkspaceReadResult != nil {
+				s.hub.resolvePending(frame.WorkspaceReadResult.RequestID, frame)
 			}
 		}
 	}

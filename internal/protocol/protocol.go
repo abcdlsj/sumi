@@ -14,10 +14,12 @@ const (
 const (
 	// CapAgentActivity: the Server accepts agent_state.activity.
 	CapAgentActivity = "agent_activity"
+	// CapAgentWorkspace: the Computer serves read-only workspace_list and workspace_read requests.
+	CapAgentWorkspace = "agent_workspace"
 )
 
 // Supported lists every capability of this build, advertised in hello and hello_ack.
-var Supported = []string{CapAgentActivity}
+var Supported = []string{CapAgentActivity, CapAgentWorkspace}
 
 // Has reports whether caps contains c.
 func Has(caps []string, c string) bool {
@@ -37,25 +39,33 @@ type Envelope struct {
 	Type string `json:"type"`
 
 	// Computer -> Server frames
-	Hello      *HelloFrame      `json:"hello,omitempty"`
-	Heartbeat  *HeartbeatFrame  `json:"heartbeat,omitempty"`
-	AgentState *AgentStateFrame `json:"agent_state,omitempty"`
+	Hello               *HelloFrame               `json:"hello,omitempty"`
+	Heartbeat           *HeartbeatFrame           `json:"heartbeat,omitempty"`
+	AgentState          *AgentStateFrame          `json:"agent_state,omitempty"`
+	WorkspaceListResult *WorkspaceListResultFrame `json:"workspace_list_result,omitempty"`
+	WorkspaceReadResult *WorkspaceReadResultFrame `json:"workspace_read_result,omitempty"`
 
 	// Server -> Computer frames
-	HelloAck     *HelloAckFrame     `json:"hello_ack,omitempty"`
-	Wake         *WakeFrame         `json:"wake,omitempty"`
-	AgentControl *AgentControlFrame `json:"agent_control,omitempty"`
-	Shutdown     *ShutdownFrame     `json:"shutdown,omitempty"`
+	HelloAck      *HelloAckFrame      `json:"hello_ack,omitempty"`
+	Wake          *WakeFrame          `json:"wake,omitempty"`
+	AgentControl  *AgentControlFrame  `json:"agent_control,omitempty"`
+	Shutdown      *ShutdownFrame      `json:"shutdown,omitempty"`
+	WorkspaceList *WorkspaceListFrame `json:"workspace_list,omitempty"`
+	WorkspaceRead *WorkspaceReadFrame `json:"workspace_read,omitempty"`
 }
 
 const (
-	TypeHello        = "hello"
-	TypeHelloAck     = "hello_ack"
-	TypeHeartbeat    = "heartbeat"
-	TypeWake         = "wake"
-	TypeAgentState   = "agent_state"
-	TypeAgentControl = "agent_control"
-	TypeShutdown     = "shutdown"
+	TypeHello               = "hello"
+	TypeHelloAck            = "hello_ack"
+	TypeHeartbeat           = "heartbeat"
+	TypeWake                = "wake"
+	TypeAgentState          = "agent_state"
+	TypeAgentControl        = "agent_control"
+	TypeShutdown            = "shutdown"
+	TypeWorkspaceList       = "workspace_list"
+	TypeWorkspaceListResult = "workspace_list_result"
+	TypeWorkspaceRead       = "workspace_read"
+	TypeWorkspaceReadResult = "workspace_read_result"
 )
 
 type HelloFrame struct {
@@ -115,4 +125,31 @@ type AgentControlFrame struct {
 
 type ShutdownFrame struct {
 	Reason string `json:"reason"`
+}
+
+type WorkspaceListFrame struct {
+	RequestID     string `json:"request_id"`
+	AgentMemberID string `json:"agent_member_id"`
+	Path          string `json:"path"`
+	IncludeHidden bool   `json:"include_hidden,omitempty"`
+}
+
+type WorkspaceListResultFrame struct {
+	RequestID string                   `json:"request_id"`
+	Listing   *domain.WorkspaceListing `json:"listing,omitempty"`
+	ErrorCode string                   `json:"error_code,omitempty"`
+	Error     string                   `json:"error,omitempty"`
+}
+
+type WorkspaceReadFrame struct {
+	RequestID     string `json:"request_id"`
+	AgentMemberID string `json:"agent_member_id"`
+	Path          string `json:"path"`
+}
+
+type WorkspaceReadResultFrame struct {
+	RequestID string                       `json:"request_id"`
+	File      *domain.WorkspaceFileContent `json:"file,omitempty"`
+	ErrorCode string                       `json:"error_code,omitempty"`
+	Error     string                       `json:"error,omitempty"`
 }

@@ -357,6 +357,7 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 		return err
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(10 << 20)
 
 	hostname, _ := os.Hostname()
 	hello := protocol.Envelope{
@@ -465,10 +466,78 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 			if env.AgentControl != nil {
 				d.handleControl(ctx, *env.AgentControl)
 			}
+		case protocol.TypeWorkspaceList:
+			if env.WorkspaceList != nil {
+				req := *env.WorkspaceList
+				go d.handleWorkspaceList(req)
+			}
+		case protocol.TypeWorkspaceRead:
+			if env.WorkspaceRead != nil {
+				req := *env.WorkspaceRead
+				go d.handleWorkspaceRead(req)
+			}
 		case protocol.TypeShutdown:
 			return nil
 		}
 	}
+}
+
+func (d *Daemon) agentWorkDir(agentID string) (string, bool) {
+	d.mu.RLock()
+	ag := d.agents[agentID]
+	d.mu.RUnlock()
+	if ag == nil {
+		return "", false
+	}
+	return ag.workDir, true
+}
+
+func workspaceErrFrame(err error) (string, string) {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return string(de.Code), de.Message
+	}
+	return string(domain.CodeInternal), "workspace request failed"
+}
+
+func (d *Daemon) handleWorkspaceList(req protocol.WorkspaceListFrame) {
+	res := &protocol.WorkspaceListResultFrame{RequestID: req.RequestID}
+	workDir, ok := d.agentWorkDir(req.AgentMemberID)
+	if !ok {
+		res.ErrorCode = string(domain.CodeNotFound)
+		res.Error = "agent workspace is not hosted on this computer"
+	} else {
+		listing, err := listWorkspaceDir(workDir, req.Path, req.IncludeHidden)
+		if err != nil {
+			res.ErrorCode, res.Error = workspaceErrFrame(err)
+		} else {
+			res.Listing = listing
+		}
+	}
+	d.sendWS(protocol.Envelope{
+		Type:                protocol.TypeWorkspaceListResult,
+		WorkspaceListResult: res,
+	})
+}
+
+func (d *Daemon) handleWorkspaceRead(req protocol.WorkspaceReadFrame) {
+	res := &protocol.WorkspaceReadResultFrame{RequestID: req.RequestID}
+	workDir, ok := d.agentWorkDir(req.AgentMemberID)
+	if !ok {
+		res.ErrorCode = string(domain.CodeNotFound)
+		res.Error = "agent workspace is not hosted on this computer"
+	} else {
+		file, err := readWorkspaceFile(workDir, req.Path)
+		if err != nil {
+			res.ErrorCode, res.Error = workspaceErrFrame(err)
+		} else {
+			res.File = file
+		}
+	}
+	d.sendWS(protocol.Envelope{
+		Type:                protocol.TypeWorkspaceReadResult,
+		WorkspaceReadResult: res,
+	})
 }
 
 func (d *Daemon) serverHas(c string) bool {

@@ -220,6 +220,29 @@ describe("AgentDetail activity", () => {
     renderAgent({ tool: "execute", stalled_seconds: 720 });
     expect(screen.getByText("execute: no output for 12 min")).toBeTruthy();
   });
+
+  it("switches to the Workspace tab and previews a file", async () => {
+    const listSpy = vi.spyOn(api, "listAgentWorkspace").mockResolvedValue({
+      root_path: "/tmp/agents/a1/workspace",
+      path: "",
+      entries: [{ name: "notes.md", path: "notes.md", is_dir: false, size: 12, mtime_ms: Date.now() }],
+    });
+    const readSpy = vi.spyOn(api, "readAgentWorkspaceFile").mockResolvedValue({
+      path: "notes.md",
+      size: 12,
+      mtime_ms: Date.now(),
+      binary: false,
+      encoding: "utf8",
+      content: "Hello world!",
+    });
+
+    renderAgent({});
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledWith("s", "a1", "", false));
+    fireEvent.click(await screen.findByRole("button", { name: /notes\.md/ }));
+    await waitFor(() => expect(readSpy).toHaveBeenCalledWith("s", "a1", "notes.md"));
+    expect(await screen.findByText("Hello world!")).toBeTruthy();
+  });
 });
 
 describe("HumanDetail and thread @mentions", () => {

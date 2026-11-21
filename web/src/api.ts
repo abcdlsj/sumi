@@ -229,6 +229,31 @@ export interface ChannelGroup {
   created_at: string;
 }
 
+export interface WorkspaceFileNode {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_symlink?: boolean;
+  size: number;
+  mtime_ms: number;
+}
+
+export interface WorkspaceListing {
+  root_path: string;
+  path: string;
+  entries: WorkspaceFileNode[];
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  size: number;
+  mtime_ms: number;
+  binary: boolean;
+  mime_type?: string;
+  encoding?: "utf8" | "base64";
+  content: string;
+}
+
 export interface BootstrapData {
   space: Space;
   current_member: Member;
@@ -397,6 +422,17 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ group_id }),
     }),
+  listAgentWorkspace: (spaceSlug: string, agentID: string, path = "", includeHidden = false) => {
+    const qs = new URLSearchParams();
+    if (path) qs.set("path", path);
+    if (includeHidden) qs.set("include_hidden", "true");
+    const q = qs.toString();
+    return request<WorkspaceListing>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/workspace${q ? `?${q}` : ""}`);
+  },
+  readAgentWorkspaceFile: (spaceSlug: string, agentID: string, path: string) => {
+    const qs = new URLSearchParams({ path });
+    return request<WorkspaceFileContent>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/workspace/file?${qs.toString()}`);
+  },
   createDM: (spaceSlug: string, peer_member_id: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/dm`, {
       method: "POST",

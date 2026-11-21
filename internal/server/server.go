@@ -45,6 +45,7 @@ func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
 	}
 	hub := newComputerHub(logger)
 	svc.SetNotifier(hub)
+	svc.SetWorkspaceClient(hub)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -112,6 +113,8 @@ func (s *Server) registerRoutes() {
 		r.Post("/agents", s.handleCreateAgent)
 		r.Post("/agents/{agentID}/control", s.handleControlAgent)
 		r.Put("/agents/{agentID}/driver", s.handleUpdateAgentDriver)
+		r.Get("/agents/{agentID}/workspace", s.handleListAgentWorkspace)
+		r.Get("/agents/{agentID}/workspace/file", s.handleReadAgentWorkspaceFile)
 
 		r.Get("/conversations", s.handleListConversations)
 		r.Get("/channels/archived", s.handleListArchivedChannels)
@@ -593,6 +596,37 @@ func (s *Server) handleSetPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleListAgentWorkspace(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	relPath := r.URL.Query().Get("path")
+	includeHidden := r.URL.Query().Get("include_hidden") == "true"
+	listing, err := s.svc.ListAgentWorkspace(r.Context(), actor, chi.URLParam(r, "agentID"), relPath, includeHidden)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) handleReadAgentWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	filePath := r.URL.Query().Get("path")
+	file, err := s.svc.ReadAgentWorkspaceFile(r.Context(), actor, chi.URLParam(r, "agentID"), filePath)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, file)
 }
 
 func (s *Server) handleListComputers(w http.ResponseWriter, r *http.Request) {
