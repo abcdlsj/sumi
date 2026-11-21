@@ -49,7 +49,8 @@ func setFollowingTx(ctx context.Context, tx *sql.Tx, convID, memberID string, fo
 }
 
 func (s *Service) MarkRead(ctx context.Context, actor domain.Member, convID string, seq int64) error {
-	return s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	var events []domain.SpaceEvent
+	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		c, err := canAccessConversation(ctx, tx, actor, convID)
 		if err != nil {
 			return err
@@ -57,8 +58,35 @@ func (s *Service) MarkRead(ctx context.Context, actor domain.Member, convID stri
 		if seq <= 0 {
 			seq = c.NextSeq - 1
 		}
-		return advanceReadSeqTx(ctx, tx, c.ID, actor.ID, seq)
+		var prevSeq int64
+		_ = tx.QueryRowContext(ctx,
+			`SELECT read_seq FROM conversation_states WHERE conversation_id = ? AND member_id = ?`,
+			c.ID, actor.ID,
+		).Scan(&prevSeq)
+		if err := advanceReadSeqTx(ctx, tx, c.ID, actor.ID, seq); err != nil {
+			return err
+		}
+		// Broadcast agent read watermark advances so the UI updates agent read faces live.
+		if actor.Kind == domain.MemberKindAgent && seq > prevSeq {
+			ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "conversation.read_updated", map[string]any{
+				"conversation_id": c.ID,
+				"member_id":       actor.ID,
+				"read_seq":        seq,
+			})
+			if err != nil {
+				return err
+			}
+			events = append(events, ev)
+		}
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if len(events) > 0 {
+		s.dispatchPostCommit(events, nil)
+	}
+	return nil
 }
 
 func (s *Service) MarkDone(ctx context.Context, actor domain.Member, convID string) error {

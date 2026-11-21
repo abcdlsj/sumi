@@ -579,12 +579,19 @@ type ListMessagesInput struct {
 	MarkRead       bool
 }
 
+// AgentReadProgress reports the latest message sequence an agent has read in a conversation.
+type AgentReadProgress struct {
+	MemberID string `json:"member_id"`
+	ReadSeq  int64  `json:"read_seq"`
+}
+
 // MessagePage is one read of a Conversation together with the viewer's attention state.
 type MessagePage struct {
-	Messages  []domain.Message `json:"messages"`
-	ReadSeq   int64            `json:"read_seq"`
-	Following bool             `json:"following"`
-	HasMore   bool             `json:"has_more,omitempty"`
+	Messages   []domain.Message    `json:"messages"`
+	ReadSeq    int64               `json:"read_seq"`
+	Following  bool                `json:"following"`
+	HasMore    bool                `json:"has_more,omitempty"`
+	AgentReads []AgentReadProgress `json:"agent_reads,omitempty"`
 }
 
 func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in ListMessagesInput) (MessagePage, error) {
@@ -659,7 +666,35 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 			_ = s.MarkRead(ctx, viewer, c.ID, lastSeq)
 		}
 	}
-	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following, HasMore: hasMore}, nil
+	agentReads := s.loadAgentReadProgress(ctx, c.ID)
+	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following, HasMore: hasMore, AgentReads: agentReads}, nil
+}
+
+func (s *Service) loadAgentReadProgress(ctx context.Context, convID string) []AgentReadProgress {
+	rows, err := s.store.ReadDB().QueryContext(ctx,
+		`SELECT cs.member_id, cs.read_seq
+		 FROM conversation_states cs
+		 JOIN members m ON m.id = cs.member_id
+		 WHERE cs.conversation_id = ?
+		   AND m.kind = 'agent'
+		   AND m.retired_at IS NULL
+		   AND cs.read_seq > 0
+		 ORDER BY cs.read_seq DESC, cs.member_id ASC`,
+		convID,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []AgentReadProgress
+	for rows.Next() {
+		var p AgentReadProgress
+		if err := rows.Scan(&p.MemberID, &p.ReadSeq); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ArchiveChannel marks a public or private channel read-only; no messages, reactions, task changes,

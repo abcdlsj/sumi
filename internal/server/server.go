@@ -165,6 +165,7 @@ func (s *Server) registerRoutes() {
 		r.Delete("/conversations/{convID}/members/{memberID}", s.asHuman(s.handleRemoveFromChannel))
 
 		r.Get("/inbox", s.asHuman(s.handleListInbox))
+		r.Get("/search", s.asHuman(s.handleSearchMessages))
 
 		r.Get("/tasks", s.asHuman(s.handleListTasks))
 		r.Post("/tasks", s.asHuman(s.handleCreateTask))

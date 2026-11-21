@@ -298,6 +298,20 @@ func (s *Server) handleSetFollowing(w http.ResponseWriter, r *http.Request, acto
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	hits, err := s.svc.SearchMessages(r.Context(), actor, app.SearchMessagesInput{
+		Query:          r.URL.Query().Get("q"),
+		ConversationID: r.URL.Query().Get("conversation_id"),
+		Limit:          limit,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
+}
+
 func (s *Server) handleListInbox(w http.ResponseWriter, r *http.Request, actor domain.Member) {
 	filter := r.URL.Query().Get("filter")
 	if filter == "" && actor.Kind == domain.MemberKindAgent {
