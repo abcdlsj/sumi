@@ -25,7 +25,7 @@ import { api, formatClock, formatDay, type BootstrapData, type Conversation, typ
 import { isMacPlatform, useSendKey } from "../preferences";
 import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
-import { agentStatusText, MemberAvatar } from "./Avatar";
+import { agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, ErrorState, Field, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
 
@@ -478,7 +478,6 @@ export function TasksView({
 }
 
 const STATE_WORD: Record<RuntimeState, string> = { idle: "Idle", working: "Working", error: "Error", offline: "Offline" };
-const STATE_DOT: Record<RuntimeState, string> = { idle: "bg-online", working: "bg-busy animate-breathe", error: "bg-danger", offline: "border border-fg-4" };
 const STATE_TEXT: Record<RuntimeState, string> = { idle: "text-online", working: "text-busy", error: "text-danger", offline: "text-fg-3" };
 
 /** Raft-style agent table: identity on the left, aligned status / runtime / computer columns on the right. */
@@ -560,7 +559,7 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                       </span>
                     </span>
                     <span className={`hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] shrink-0 ${STATE_TEXT[st]}`}>
-                      <span className={`size-2 rounded-full shrink-0 ${STATE_DOT[st]}`} />
+                      <StatusDot state={st} size={7} ring="transparent" />
                       {STATE_WORD[st]}
                     </span>
                     <span className="hidden @[640px]:block w-[104px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={model || runtime}>

@@ -561,7 +561,7 @@ function MembersDetail({
           <div className="space-y-1">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-10 px-2 flex items-center gap-2.5">
-                <span className="skeleton size-6 rounded-full" />
+                <span className="skeleton size-6 rounded-[5px]" />
                 <span className="skeleton h-3.5 w-28" />
               </div>
             ))}

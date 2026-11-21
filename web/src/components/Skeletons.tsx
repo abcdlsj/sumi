@@ -9,7 +9,7 @@ export function MessageListSkeleton({ rows = 6, compact = false }: { rows?: numb
     <div className={compact ? "px-4 py-4 space-y-5" : "px-6 py-5 space-y-6"} aria-label="Loading messages">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-start gap-3">
-          <Skeleton className={`${compact ? "size-7" : "size-9"} ${i % 3 === 1 ? "rounded-[6px]" : "rounded-full"} shrink-0`} />
+          <Skeleton className={`${compact ? "size-7" : "size-9"} rounded-[6px] shrink-0`} />
           <div className="flex-1 space-y-2 pt-0.5">
             <div className="flex items-center gap-2">
               <Skeleton className="h-3.5 w-24" />
@@ -33,7 +33,7 @@ export function RowListSkeleton({ rows = 7 }: { rows?: number }) {
           <Skeleton className="h-3.5 w-9 shrink-0" />
           <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
           <span className="flex-1" />
-          <Skeleton className="size-6 rounded-full shrink-0" />
+          <Skeleton className="size-6 rounded-[5px] shrink-0" />
         </div>
       ))}
     </div>
@@ -103,7 +103,7 @@ function SidebarSkeleton({ desktop }: { desktop: boolean }) {
             <Skeleton nav className="h-3 w-16" />
             {Array.from({ length: n }).map((_, i) => (
               <div key={i} className="flex items-center gap-2.5">
-                <Skeleton nav className={`size-6 ${g === 1 ? "rounded-[6px]" : g === 2 ? "rounded-full" : "rounded-[4px]"}`} />
+                <Skeleton nav className={`size-6 ${g === 0 ? "rounded-[4px]" : "rounded-[5px]"}`} />
                 <Skeleton nav className={`h-3.5 ${["w-24", "w-32", "w-20"][i]}`} />
               </div>
             ))}

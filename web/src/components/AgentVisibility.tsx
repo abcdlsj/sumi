@@ -286,7 +286,7 @@ export function AgentReadFaces({
           >
             <PixelAvatar seed={a.id} size="xs" label={`${a.display_name} read`} />
             {a.agent?.runtime_state === "working" && (
-              <span className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-busy ring-1 ring-[var(--panel)]" />
+              <span className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-[1.5px] border border-[var(--dot-border)] bg-busy ring-1 ring-[var(--panel)]" />
             )}
           </button>
         ))}

@@ -83,6 +83,10 @@ const SPRITE_FILLS: Record<SpriteCell, string> = {
 const SIZES = { xs: 20, sm: 24, md: 32, lg: 40, xl: 56 } as const;
 export type AvatarSize = keyof typeof SIZES;
 
+function avatarRadius(px: number): number {
+  return Math.max(4, Math.round(px * 0.18));
+}
+
 export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?: AvatarSize; label?: string }) {
   const px = SIZES[size];
   const { cells, hue } = useMemo(() => agentSprite(seed), [seed]);
@@ -97,7 +101,7 @@ export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?:
       aria-label={label}
       className="agent-sprite shrink-0 block"
       style={{
-        borderRadius: Math.max(4, Math.round(px * 0.18)),
+        borderRadius: avatarRadius(px),
         ["--sprite-h" as string]: hue,
         ["--sprite-l" as string]: l,
       }}
@@ -115,7 +119,7 @@ function initial(name: string): string {
   return first ? first.toUpperCase() : "?";
 }
 
-/** One letter on a solid tone; the tone is seeded by the member id, not the name. */
+/** One letter on a rounded-square tile; the tone is seeded by the member id, not the name. */
 export function HumanAvatar({ seed, name, size = "md" }: { seed: string; name: string; size?: AvatarSize }) {
   const px = SIZES[size];
   const tone = (fnv(seed || name) % 8) + 1;
@@ -124,7 +128,12 @@ export function HumanAvatar({ seed, name, size = "md" }: { seed: string; name: s
       role="img"
       aria-label={name}
       className={`human-avatar avatar-tone-${tone}`}
-      style={{ width: px, height: px, fontSize: Math.max(9, Math.round(px * 0.45)) }}
+      style={{
+        width: px,
+        height: px,
+        borderRadius: avatarRadius(px),
+        fontSize: Math.max(9, Math.round(px * 0.45)),
+      }}
     >
       {initial(name)}
     </span>
@@ -142,19 +151,30 @@ export function stateLabel(state?: RuntimeState): string {
   return STATE_LABEL[state ?? "offline"];
 }
 
-/** Status dot; `ring` must match the surface it sits on so it reads as a cut-out. */
-export function StatusDot({ state, ring = "var(--panel)", size = 10 }: { state?: RuntimeState; ring?: string; size?: number }) {
+/** Square pixel status indicator with a fine hairline border; `ring` cuts it out against the avatar surface. */
+export function StatusDot({ state, ring = "var(--panel)", size = 8 }: { state?: RuntimeState; ring?: string; size?: number }) {
   const s = state ?? "offline";
-  const fill = s === "working" ? "var(--busy)" : s === "error" ? "var(--danger)" : s === "idle" ? "var(--online)" : "transparent";
+  const fill =
+    s === "working"
+      ? "var(--busy)"
+      : s === "error"
+        ? "var(--danger)"
+        : s === "idle"
+          ? "var(--online)"
+          : ring === "transparent"
+            ? "var(--subtle)"
+            : ring;
   return (
     <span
       title={stateLabel(s)}
-      className={`block rounded-full shrink-0 ${s === "working" ? "animate-breathe" : ""}`}
+      className={`block shrink-0 box-border ${s === "working" ? "animate-breathe" : ""}`}
       style={{
         width: size,
         height: size,
+        borderRadius: size <= 6 ? 1.5 : 2,
         background: fill,
-        boxShadow: `0 0 0 2px ${ring}${s === "offline" ? ", inset 0 0 0 1.5px var(--text-4)" : ""}`,
+        border: `1px solid ${s === "offline" ? "var(--text-4)" : "var(--dot-border)"}`,
+        boxShadow: ring === "transparent" ? undefined : `0 0 0 1.5px ${ring}`,
       }}
     />
   );
@@ -177,7 +197,7 @@ export function MemberAvatar({
 }) {
   const avatar = kind === "agent" ? <PixelAvatar seed={id} size={size} label={`${name} (agent)`} /> : <HumanAvatar seed={id} name={name} size={size} />;
   if (kind !== "agent" || state === undefined) return avatar;
-  const dot = size === "xs" ? 7 : size === "sm" ? 8 : size === "md" ? 10 : 12;
+  const dot = size === "xs" ? 6 : size === "sm" ? 7 : size === "md" ? 8 : size === "lg" ? 9 : 10;
   return (
     <span className="relative inline-flex shrink-0">
       {avatar}
