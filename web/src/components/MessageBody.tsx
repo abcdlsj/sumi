@@ -1,4 +1,4 @@
-import { isValidElement, useMemo, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -147,7 +147,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
-export function MessageBody({
+export const MessageBody = memo(function MessageBody({
   body,
   members,
   tasks = [],
@@ -162,23 +162,32 @@ export function MessageBody({
   onSelectMember?: (member: Member) => void;
   onSelectTask?: (task: Task) => void;
 }) {
+  const membersRef = useRef(members);
+  membersRef.current = members;
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
+  // Key by names and task numbers only so agent state ticks never re-parse markdown.
+  const memberSig = members.map((m) => `${m.id}:${m.display_name}:${m.kind}`).join("\0");
+  const taskSig = tasks.map((t) => `${t.id}:${t.number}:${t.title}`).join("\0");
+
   const memberByKey = useMemo(() => {
     const map = new Map<string, Member>();
-    for (const m of members) map.set(m.display_name.toLowerCase(), m);
+    for (const m of membersRef.current) map.set(m.display_name.toLowerCase(), m);
     return map;
-  }, [members]);
+  }, [memberSig]);
 
   const taskByNum = useMemo(() => {
     const map = new Map<string, Task>();
-    for (const t of tasks) map.set(String(t.number), t);
+    for (const t of tasksRef.current) map.set(String(t.number), t);
     return map;
-  }, [tasks]);
+  }, [taskSig]);
 
   const plugins = useMemo(() => {
-    const names = members.map((m) => m.display_name);
-    const nums = tasks.map((t) => t.number);
+    const names = membersRef.current.map((m) => m.display_name);
+    const nums = tasksRef.current.map((t) => t.number);
     return [remarkGfm, createRemarkRefs(names, nums)];
-  }, [members, tasks]);
+  }, [memberSig, taskSig]);
 
   const onSelectMemberRef = useRef(onSelectMember);
   onSelectMemberRef.current = onSelectMember;
@@ -278,4 +287,4 @@ export function MessageBody({
       {body}
     </ReactMarkdown>
   );
-}
+});

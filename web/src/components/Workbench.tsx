@@ -185,8 +185,46 @@ export function Workbench({
       const taskID = typeof p.task_id === "string" ? p.task_id : "";
 
       switch (kind) {
-        case "agent.state_changed":
-          // Coalesce rapid tool-activity ticks so chat scroll and typing stay silky smooth.
+        case "agent.state_changed": {
+          const memberID = typeof p.member_id === "string" ? p.member_id : "";
+          const runtimeState = typeof p.runtime_state === "string" ? p.runtime_state : "";
+          if (memberID && runtimeState) {
+            let patched = false;
+            qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], (prev) => {
+              if (!prev) return prev;
+              if (!prev.members.some((m) => m.id === memberID && m.agent)) return prev;
+              patched = true;
+              const focusID = typeof p.focus_conversation_id === "string" && p.focus_conversation_id ? p.focus_conversation_id : undefined;
+              const errCode = typeof p.error_code === "string" && p.error_code ? p.error_code : undefined;
+              const errDetail = typeof p.error_detail === "string" && p.error_detail ? p.error_detail : undefined;
+              const activity = p.activity && typeof p.activity === "object" ? (p.activity as NonNullable<Member["agent"]>["activity"]) : undefined;
+              return {
+                ...prev,
+                members: prev.members.map((m) =>
+                  m.id === memberID && m.agent
+                    ? {
+                        ...m,
+                        agent: {
+                          ...m.agent,
+                          runtime_state: runtimeState as NonNullable<Member["agent"]>["runtime_state"],
+                          focus_conversation_id: focusID,
+                          last_error_code: errCode,
+                          last_error_detail: errDetail,
+                          activity,
+                        },
+                      }
+                    : m,
+                ),
+                conversations: prev.conversations.map((c) =>
+                  c.kind === "dm" && c.peer_member_id === memberID
+                    ? { ...c, peer_runtime_state: runtimeState as NonNullable<Member["agent"]>["runtime_state"] }
+                    : c,
+                ),
+              };
+            });
+            if (patched) return;
+          }
+          // Fallback if the member isn't in bootstrap yet.
           if (stateTimer === null) {
             stateTimer = window.setTimeout(() => {
               stateTimer = null;
@@ -194,8 +232,12 @@ export function Workbench({
             }, 250);
           }
           return;
-        case "message.created":
+        }
         case "message.reaction_changed":
+          if (convID) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
+          else void qc.invalidateQueries({ queryKey: ["messages", spaceSlug] });
+          return;
+        case "message.created":
           if (convID) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
           else void qc.invalidateQueries({ queryKey: ["messages", spaceSlug] });
           void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
@@ -742,6 +784,7 @@ export function Workbench({
         <div className="h-full min-h-0">
           {mainView.kind === "conversation" && activeConv && (
             <ConversationView
+              key={activeConv.id}
               spaceSlug={spaceSlug}
               boot={boot}
               conv={activeConv}

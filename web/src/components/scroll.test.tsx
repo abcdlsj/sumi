@@ -2,8 +2,20 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NewMessagesPill, useStickToBottom } from "./scroll";
 
-function Harness({ streamKey, count, anchor }: { streamKey: string; count: number; anchor?: boolean }) {
-  const stick = useStickToBottom({ streamKey, count, anchorId: anchor ? "new" : undefined });
+function Harness({
+  streamKey,
+  count,
+  lastSeq,
+  lastId,
+  anchor,
+}: {
+  streamKey: string;
+  count: number;
+  lastSeq?: number;
+  lastId?: string;
+  anchor?: boolean;
+}) {
+  const stick = useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId: anchor ? "new" : undefined });
   return (
     <div>
       <div ref={stick.ref} onScroll={stick.onScroll} data-testid="stream">
@@ -120,5 +132,25 @@ describe("useStickToBottom", () => {
     view.el.scrollTop = 0;
     act(() => fire?.());
     expect(view.el.scrollTop).toBe(600);
+  });
+
+  it("tracks new arrivals via lastSeq even when a fixed-size tail window stays at 100 messages", () => {
+    const view = open();
+    box(view.el, 1200);
+    view.rerender(<Harness streamKey="c1" count={100} lastSeq={100} lastId="m-100" />);
+    expect(view.el.scrollTop).toBe(1200);
+
+    // Pinned at end: sliding window keeps count=100, lastSeq advances -> still follows.
+    box(view.el, 1260);
+    view.rerender(<Harness streamKey="c1" count={100} lastSeq={101} lastId="m-101" />);
+    expect(view.el.scrollTop).toBe(1260);
+
+    // Parked above end: sliding window keeps count=100, lastSeq advances by 2 -> pill counts 2.
+    view.el.scrollTop = 200;
+    fireEvent.scroll(view.el);
+    box(view.el, 1340);
+    view.rerender(<Harness streamKey="c1" count={100} lastSeq={103} lastId="m-103" />);
+    expect(view.el.scrollTop).toBe(200);
+    expect(screen.getByRole("button", { name: /2 new messages/ })).toBeTruthy();
   });
 });

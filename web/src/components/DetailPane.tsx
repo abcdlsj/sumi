@@ -10,7 +10,7 @@ import { describeAction } from "./ConversationView";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
-import { NewMessagesPill, useStickToBottom } from "./scroll";
+import { mergeMessageIntoCache, NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, IconButton, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
 
@@ -453,7 +453,14 @@ function TaskDetail({
     enabled: Boolean(task?.conversation_id),
   });
   const reactions = useReactionToggle(spaceSlug, task?.conversation_id);
-  const stream = useStickToBottom({ streamKey: task?.conversation_id ?? taskID, count: msgsQ.data?.messages.length ?? 0 });
+  const taskMsgs = msgsQ.data?.messages;
+  const lastTaskMsg = taskMsgs && taskMsgs.length > 0 ? taskMsgs[taskMsgs.length - 1] : undefined;
+  const stream = useStickToBottom({
+    streamKey: task?.conversation_id ?? taskID,
+    count: taskMsgs?.length ?? 0,
+    lastSeq: lastTaskMsg?.seq,
+    lastId: lastTaskMsg?.id,
+  });
   const members = useMentionMembers(spaceSlug, boot, task?.conversation_id ?? task?.channel_id);
 
   function refresh() {
@@ -691,7 +698,10 @@ function TaskDetail({
         onSend={async (body, ids) => {
           let convID = task.conversation_id;
           if (!convID) convID = (await api.ensureTaskConv(spaceSlug, task.id)).task.conversation_id;
-          if (convID) await api.sendMessage(spaceSlug, convID, body, undefined, ids);
+          if (convID) {
+            const res = await api.sendMessage(spaceSlug, convID, body, undefined, ids);
+            if (res.message) mergeMessageIntoCache(qc, spaceSlug, convID, res.message);
+          }
           stream.jumpToEnd();
           refresh();
         }}
@@ -721,7 +731,14 @@ function ThreadDetail({
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
   const reactions = useReactionToggle(spaceSlug, threadConvID);
   const following = msgsQ.data?.following;
-  const stream = useStickToBottom({ streamKey: threadConvID, count: msgsQ.data?.messages.length ?? 0 });
+  const threadMsgs = msgsQ.data?.messages;
+  const lastThreadMsg = threadMsgs && threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : undefined;
+  const stream = useStickToBottom({
+    streamKey: threadConvID,
+    count: threadMsgs?.length ?? 0,
+    lastSeq: lastThreadMsg?.seq,
+    lastId: lastThreadMsg?.id,
+  });
   const members = useMentionMembers(spaceSlug, boot, threadConvID);
 
   return (
@@ -788,7 +805,8 @@ function ThreadDetail({
         members={members}
         selfID={boot.current_member.id}
         onSend={async (body, ids) => {
-          await api.sendMessage(spaceSlug, threadConvID, body, undefined, ids);
+          const res = await api.sendMessage(spaceSlug, threadConvID, body, undefined, ids);
+          if (res.message) mergeMessageIntoCache(qc, spaceSlug, threadConvID, res.message);
           stream.jumpToEnd();
           void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
           void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });

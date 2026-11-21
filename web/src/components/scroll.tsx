@@ -1,6 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { api, type Message } from "../api";
+
+export interface MessagePage {
+  messages: Message[];
+  read_seq: number;
+  following: boolean;
+  has_more?: boolean;
+}
+
+/** Merges a freshly-sent message into the tail cache immediately so it doesn't vanish between POST and refetch. */
+export function mergeMessageIntoCache(qc: QueryClient, spaceSlug: string, convID: string, message: Message) {
+  qc.setQueryData<MessagePage>(["messages", spaceSlug, convID], (old) => {
+    if (!old) return old;
+    if (old.messages.some((m) => m.id === message.id || m.seq === message.seq)) return old;
+    const next = [...old.messages, message].sort((a, b) => a.seq - b.seq);
+    return { ...old, messages: next };
+  });
+}
 
 /** Distance from the end that still counts as reading the newest message. */
 const NEAR_END_PX = 80;
@@ -14,6 +32,10 @@ export interface StickToBottomOptions {
   streamKey: string;
   /** Messages currently rendered. */
   count: number;
+  /** Highest seq in the live tail so fixed-size sliding windows (>=100) still detect new arrivals. */
+  lastSeq?: number;
+  /** Identity of the newest message so cache replacements while pinned keep the end in view. */
+  lastId?: string;
   /** Element id of the persisted unread divider, used for the first placement only. */
   anchorId?: string;
 }
@@ -26,6 +48,8 @@ export interface StickToBottom {
   newCount: number;
   /** Jump to the end and clear the counter. */
   jumpToEnd: () => void;
+  /** Records a programmatic scroll adjustment (e.g. prepending older pages) so it isn't misread as user scrolling. */
+  syncScrollTop: (el: HTMLElement) => void;
 }
 
 /**
@@ -33,12 +57,13 @@ export interface StickToBottom {
  * parks the stream and counts later arrivals instead of yanking the view; the first
  * placement of a stream lands on the unread divider when there is one, else the end.
  */
-export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOptions): StickToBottom {
+export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }: StickToBottomOptions): StickToBottom {
   const ref = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
   const placed = useRef(false);
   const anchored = useRef(false);
-  const seen = useRef(0);
+  const seenCount = useRef(0);
+  const seenSeq = useRef(0);
   const lastTop = useRef(0);
   const moved = useRef(false);
   const [newCount, setNewCount] = useState(0);
@@ -46,6 +71,10 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
   /** Records our own scroll positions so they are not read as the reader moving. */
   const setTop = useCallback((el: HTMLElement, top: number) => {
     el.scrollTop = top;
+    lastTop.current = el.scrollTop;
+  }, []);
+
+  const syncScrollTop = useCallback((el: HTMLElement) => {
     lastTop.current = el.scrollTop;
   }, []);
 
@@ -60,7 +89,8 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
     pinned.current = true;
     placed.current = false;
     anchored.current = false;
-    seen.current = 0;
+    seenCount.current = 0;
+    seenSeq.current = 0;
     lastTop.current = 0;
     moved.current = false;
     setNewCount(0);
@@ -69,8 +99,15 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || count === 0) return;
-    const grew = Math.max(0, count - seen.current);
-    seen.current = count;
+    let grew = 0;
+    if (lastSeq !== undefined && lastSeq > 0) {
+      grew = seenSeq.current > 0 ? Math.max(0, lastSeq - seenSeq.current) : 0;
+      seenSeq.current = Math.max(seenSeq.current, lastSeq);
+      seenCount.current = count;
+    } else {
+      grew = Math.max(0, count - seenCount.current);
+      seenCount.current = count;
+    }
     const anchor = anchorId ? el.querySelector<HTMLElement>(`[data-unread-anchor="${anchorId}"]`) : null;
 
     // First placement, and a divider that only shows up once the fresh page lands.
@@ -90,7 +127,7 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
       return;
     }
     setTop(el, el.scrollHeight);
-  }, [count, anchorId, setTop]);
+  }, [count, lastSeq, lastId, anchorId, setTop]);
 
   const onScroll = useCallback(() => {
     const el = ref.current;
@@ -110,7 +147,7 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
     if (!observer.current) {
       observer.current = new ResizeObserver(() => {
         const box = ref.current;
-        if (!box || !pinned.current) return;
+        if (!box || !placed.current || !pinned.current) return;
         box.scrollTop = box.scrollHeight;
         lastTop.current = box.scrollTop;
       });
@@ -124,7 +161,7 @@ export function useStickToBottom({ streamKey, count, anchorId }: StickToBottomOp
   }, [streamKey, count]);
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  return { ref, onScroll, newCount, jumpToEnd };
+  return { ref, onScroll, newCount, jumpToEnd, syncScrollTop };
 }
 
 /** Floating "N new messages" pill shown while the stream is parked above its end. */
@@ -151,17 +188,21 @@ export function useOlderMessages({
   latest,
   latestHasMore,
   scrollRef,
+  onAdjustScroll,
 }: {
   spaceSlug: string;
   convID?: string;
   latest?: Message[];
   latestHasMore?: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  onAdjustScroll?: (el: HTMLElement) => void;
 }) {
   const [older, setOlder] = useState<Message[]>([]);
   const [hasOlder, setHasOlder] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const pendingHeight = useRef<number | null>(null);
+  const activeConvRef = useRef(convID);
+  activeConvRef.current = convID;
 
   useEffect(() => {
     setOlder([]);
@@ -174,9 +215,12 @@ export function useOlderMessages({
     const el = scrollRef.current;
     if (!el || pendingHeight.current === null) return;
     const delta = el.scrollHeight - pendingHeight.current;
-    if (delta > 0) el.scrollTop += delta;
+    if (delta > 0) {
+      el.scrollTop += delta;
+      onAdjustScroll?.(el);
+    }
     pendingHeight.current = null;
-  }, [older, scrollRef]);
+  }, [older, scrollRef, onAdjustScroll]);
 
   const messages = useMemo(() => {
     if (!latest) return undefined;
@@ -191,9 +235,11 @@ export function useOlderMessages({
     if (!convID || loading || !hasMore) return;
     const oldest = messages?.[0];
     if (!oldest) return;
+    const requestConvID = convID;
     setLoading(true);
     try {
-      const page = await api.listMessages(spaceSlug, convID, false, { beforeSeq: oldest.seq });
+      const page = await api.listMessages(spaceSlug, requestConvID, false, { beforeSeq: oldest.seq });
+      if (activeConvRef.current !== requestConvID) return;
       if (scrollRef.current) pendingHeight.current = scrollRef.current.scrollHeight;
       setOlder((prev) => {
         const seen = new Set(prev.map((m) => m.id));
@@ -201,7 +247,7 @@ export function useOlderMessages({
       });
       setHasOlder(Boolean(page.has_more));
     } finally {
-      setLoading(false);
+      if (activeConvRef.current === requestConvID) setLoading(false);
     }
   }, [spaceSlug, convID, loading, hasMore, messages, scrollRef]);
 

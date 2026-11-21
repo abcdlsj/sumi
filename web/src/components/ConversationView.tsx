@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -28,7 +28,7 @@ import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPick
 import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { ThreadReplySummary } from "./ThreadReplies";
-import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
+import { LoadEarlierButton, mergeMessageIntoCache, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, Modal, TaskStatusIcon, useAction, useToast } from "./ui";
 
@@ -126,6 +126,159 @@ function DayDivider({ iso }: { iso: string }) {
   );
 }
 
+/** Isolated composer so typing never re-renders the message list above it. */
+function MessageComposer({
+  spaceSlug,
+  boot,
+  conv,
+  title,
+  replyingTo,
+  replyTarget,
+  onCancelReply,
+  onSent,
+  focusRef,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  conv: Conversation;
+  title: string;
+  replyingTo: string | null;
+  replyTarget?: Message;
+  onCancelReply: () => void;
+  onSent: () => void;
+  focusRef: React.MutableRefObject<(() => void) | null>;
+}) {
+  const qc = useQueryClient();
+  const [composer, setComposer] = useState(() => drafts.get(conv.id)?.text ?? "");
+  const draft = useAttachmentDraft(spaceSlug);
+  const send = useAction();
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    focusRef.current = () => textRef.current?.focus();
+    textRef.current?.focus();
+    return () => {
+      focusRef.current = null;
+    };
+  }, [conv.id, focusRef]);
+
+  useEffect(() => {
+    drafts.set(conv.id, { text: composer, replyTo: replyingTo });
+  }, [conv.id, composer, replyingTo]);
+
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const prevScroll = el.scrollTop;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+    if (el.scrollHeight > 220) el.scrollTop = prevScroll;
+  }, [composer]);
+
+  const mentionMembers = useMentionMembers(spaceSlug, boot, conv.id, conv.kind === "dm" ? conv.peer_member_id : undefined);
+  const mentions = useMentionPicker({
+    members: mentionMembers,
+    selfID: boot.current_member.id,
+    value: composer,
+    onChange: setComposer,
+    inputRef: textRef,
+  });
+
+  async function handleSend(e?: FormEvent) {
+    e?.preventDefault();
+    const body = composer.trim();
+    if ((!body && draft.ids.length === 0) || draft.uploading || send.busy) return;
+    let sentMsg: Message | null = null;
+    const ok = await send.run(async () => {
+      const res = await api.sendMessage(
+        spaceSlug,
+        conv.id,
+        body || `Attached ${draft.pending.map((a) => a.name).join(", ")}`,
+        replyingTo ?? undefined,
+        draft.ids,
+      );
+      sentMsg = res.message;
+    });
+    if (!ok) return;
+    setComposer("");
+    onCancelReply();
+    draft.clear();
+    mentions.close();
+    if (sentMsg && !replyingTo && (sentMsg as Message).conversation_id === conv.id) {
+      mergeMessageIntoCache(qc, spaceSlug, conv.id, sentMsg);
+    }
+    onSent();
+    textRef.current?.focus();
+    void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
+    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
+      <div
+        {...draft.dropProps}
+        className={`relative bg-card border rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+          draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
+        }`}
+      >
+        <MentionPopup picker={mentions} />
+        {replyTarget && (
+          <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
+            <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
+            <span className="text-fg-3 shrink-0">Replying in thread to</span>
+            <span className="font-medium text-fg shrink-0">{replyTarget.author_display_name}</span>
+            <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
+            <span className="flex-1" />
+            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[6px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
+        <textarea
+          ref={textRef}
+          rows={1}
+          value={composer}
+          onChange={(e) => {
+            setComposer(e.target.value);
+            mentions.detect();
+          }}
+          onClick={mentions.detect}
+          onPaste={draft.handlePaste}
+          onBlur={mentions.close}
+          onKeyDown={(e) => {
+            if (mentions.handleKeyDown(e)) return;
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void handleSend();
+            }
+            if (e.key === "Escape" && replyingTo) onCancelReply();
+          }}
+          placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
+          aria-label={replyingTo ? "Reply in thread" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
+          className="block w-full px-4 pt-3 pb-1 min-h-[48px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
+        />
+        <AttachmentDraftRow draft={draft} />
+        <div className="px-2.5 pb-2.5 flex items-center justify-between gap-2">
+          <AttachmentPicker draft={draft} />
+          <div className="flex items-center gap-3">
+            <span className="text-[12px] text-fg-4 hidden md:inline">
+              <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
+            </span>
+            <button
+              type="submit"
+              aria-label="Send"
+              disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
+              className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
+            >
+              <ArrowUp className="size-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 export function ConversationView({
   spaceSlug,
   boot,
@@ -143,18 +296,15 @@ export function ConversationView({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [composer, setComposer] = useState(() => drafts.get(conv.id)?.text ?? "");
   const [replyingTo, setReplyingTo] = useState<string | null>(() => drafts.get(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
-  const draft = useAttachmentDraft(spaceSlug);
-  const send = useAction();
   const taskAction = useAction();
   const notify = useAction();
   const archiveAct = useAction();
-  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerFocusRef = useRef<(() => void) | null>(null);
   const isArchived = Boolean(conv.archived_at);
   const canGovern = boot.current_member.access_level !== "member";
   const isChannel = conv.kind === "public" || conv.kind === "private";
@@ -165,11 +315,12 @@ export function ConversationView({
   });
   const tailMessages = msgsQ.data?.messages;
   const isNew = useArrivals(conv.id, tailMessages);
-  // Place the stream once the fresh page is here, not on a cached page that is about to change.
-  const settled = msgsQ.isFetchedAfterMount || msgsQ.isError;
-  const { ref: scrollRef, onScroll, newCount, jumpToEnd } = useStickToBottom({
+  const lastTailMsg = tailMessages && tailMessages.length > 0 ? tailMessages[tailMessages.length - 1] : undefined;
+  const { ref: scrollRef, onScroll, newCount, jumpToEnd, syncScrollTop } = useStickToBottom({
     streamKey: conv.id,
-    count: settled ? tailMessages?.length ?? 0 : 0,
+    count: tailMessages?.length ?? 0,
+    lastSeq: lastTailMsg?.seq,
+    lastId: lastTailMsg?.id,
     anchorId: "new",
   });
   const history = useOlderMessages({
@@ -178,6 +329,7 @@ export function ConversationView({
     latest: tailMessages,
     latestHasMore: msgsQ.data?.has_more,
     scrollRef,
+    onAdjustScroll: syncScrollTop,
   });
   const messages = history.messages;
   const reactions = useReactionToggle(spaceSlug, conv.id, (messageID, next) => {
@@ -185,28 +337,17 @@ export function ConversationView({
   });
 
   useEffect(() => {
-    drafts.set(conv.id, { text: composer, replyTo: replyingTo });
-  }, [conv.id, composer, replyingTo]);
-
-  useEffect(() => {
     setCreatingTaskOnMsg(null);
     setReactionPickerMsgID(null);
-    textRef.current?.focus();
   }, [conv.id]);
-
-  useLayoutEffect(() => {
-    const el = textRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [composer]);
 
   const peer = conv.kind === "dm" ? boot.members.find((m) => m.id === conv.peer_member_id) : undefined;
   const title = conv.kind === "dm" ? conv.peer_display_name ?? "Direct message" : conv.slug ?? "";
-  const replyTarget = messages?.find((m) => m.id === replyingTo);
+  const replyTarget = useMemo(() => messages?.find((m) => m.id === replyingTo), [messages, replyingTo]);
   const level = conv.notify_level ?? "mentions";
   const readSeq = msgsQ.data?.read_seq ?? 0;
   // The unread boundary of this visit: later fetches advance the watermark, the divider stays put.
+  const settled = msgsQ.isFetchedAfterMount || msgsQ.isError;
   const [unreadBase, setUnreadBase] = useState<number | null>(null);
   const boundary = unreadBase ?? readSeq;
 
@@ -216,38 +357,14 @@ export function ConversationView({
   useEffect(() => {
     if (settled && unreadBase === null && msgsQ.data) setUnreadBase(msgsQ.data.read_seq);
   }, [settled, msgsQ.data, unreadBase]);
+
   const membersQ = useQuery({
     queryKey: ["conv-members", spaceSlug, conv.id],
     queryFn: () => api.listConversationMembers(spaceSlug, conv.id),
     enabled: conv.kind === "public" || conv.kind === "private",
   });
-  const memberCount = membersQ.data?.members.length ?? boot.members.length;
-  const mentionMembers = useMentionMembers(spaceSlug, boot, conv.id, conv.kind === "dm" ? conv.peer_member_id : undefined);
-  const mentions = useMentionPicker({
-    members: mentionMembers,
-    selfID: boot.current_member.id,
-    value: composer,
-    onChange: setComposer,
-    inputRef: textRef,
-  });
-
-  async function handleSend(e?: FormEvent) {
-    e?.preventDefault();
-    const body = composer.trim();
-    if ((!body && draft.ids.length === 0) || draft.uploading || send.busy) return;
-    const ok = await send.run(() =>
-      api.sendMessage(spaceSlug, conv.id, body || `Attached ${draft.pending.map((a) => a.name).join(", ")}`, replyingTo ?? undefined, draft.ids),
-    );
-    if (!ok) return;
-    setComposer("");
-    setReplyingTo(null);
-    draft.clear();
-    mentions.close();
-    jumpToEnd();
-    textRef.current?.focus();
-    void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
-    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-  }
+  const memberCount = membersQ.data?.members.length;
+  const clearReply = useCallback(() => setReplyingTo(null), []);
 
   async function handleCreateTask(e: FormEvent, sourceMsgID: string) {
     e.preventDefault();
@@ -344,7 +461,7 @@ export function ConversationView({
               className="h-8 pl-2 pr-2.5 rounded-[8px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
             >
               <Users className="size-4 text-fg-3" />
-              <span className="tabular">{memberCount}</span>
+              <span className="tabular min-w-[1ch] text-center">{memberCount ?? "·"}</span>
             </button>
           )}
           {isChannel && !isArchived && (canGovern || (boot.channel_groups?.length ?? 0) > 0) && (
@@ -442,7 +559,7 @@ export function ConversationView({
                 body={
                   conv.kind === "dm"
                     ? "Direct messages always notify the other person."
-                    : `${memberCount} members. @mention an agent to get it working, or turn any message into a Task.`
+                    : `${memberCount !== undefined ? `${memberCount} members. ` : ""}@mention an agent to get it working, or turn any message into a Task.`
                 }
               />
             )
@@ -613,7 +730,7 @@ export function ConversationView({
                             <button
                               onClick={() => {
                                 setReplyingTo(m.id);
-                                textRef.current?.focus();
+                                composerFocusRef.current?.();
                               }}
                               className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                             >
@@ -675,68 +792,17 @@ export function ConversationView({
       ) : (
       <div className="shrink-0 bg-bg/60 border-t border-line">
         <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
-        <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
-          <div
-            {...draft.dropProps}
-            className={`relative bg-card border rounded-[14px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
-              draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
-            }`}
-          >
-            <MentionPopup picker={mentions} />
-            {replyTarget && (
-              <div className="mx-2 mt-2 px-3 py-2 rounded-[9px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
-                <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
-                <span className="text-fg-3 shrink-0">Replying in thread to</span>
-                <span className="font-medium text-fg shrink-0">{replyTarget.author_display_name}</span>
-                <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
-                <span className="flex-1" />
-                <button type="button" onClick={() => setReplyingTo(null)} aria-label="Cancel thread reply" className="size-6 rounded-[6px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            )}
-            <textarea
-              ref={textRef}
-              rows={1}
-              value={composer}
-              onChange={(e) => {
-                setComposer(e.target.value);
-                mentions.detect();
-              }}
-              onClick={mentions.detect}
-              onPaste={draft.handlePaste}
-              onBlur={mentions.close}
-              onKeyDown={(e) => {
-                if (mentions.handleKeyDown(e)) return;
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-                if (e.key === "Escape" && replyingTo) setReplyingTo(null);
-              }}
-              placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
-              aria-label={replyingTo ? "Reply in thread" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
-              className="block w-full px-4 pt-3 pb-1 min-h-[48px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
-            />
-            <AttachmentDraftRow draft={draft} />
-            <div className="px-2.5 pb-2.5 flex items-center justify-between gap-2">
-              <AttachmentPicker draft={draft} />
-              <div className="flex items-center gap-3">
-                <span className="text-[12px] text-fg-4 hidden md:inline">
-                  <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
-                </span>
-                <button
-                  type="submit"
-                  aria-label="Send"
-                  disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
-                  className="size-8 rounded-[9px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
-                >
-                  <ArrowUp className="size-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </form>
+        <MessageComposer
+          spaceSlug={spaceSlug}
+          boot={boot}
+          conv={conv}
+          title={title}
+          replyingTo={replyingTo}
+          replyTarget={replyTarget}
+          onCancelReply={clearReply}
+          onSent={jumpToEnd}
+          focusRef={composerFocusRef}
+        />
       </div>
       )}
 
