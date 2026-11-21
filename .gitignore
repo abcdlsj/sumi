@@ -3,9 +3,6 @@
 /build/
 /web/node_modules/
 /web/dist/
-/web/test-results/
-/web/playwright-report/
-/desktop/build/bin/
 /.sumi/
 /.claude/
 *.db

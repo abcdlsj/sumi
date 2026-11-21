@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode"
 )
 
 type Options struct {
@@ -55,7 +56,7 @@ func Run(opts Options) (Result, error) {
 		opts.SpaceSlug = "studio"
 	}
 	if opts.SpaceName == "" {
-		opts.SpaceName = strings.Title(opts.SpaceSlug) //nolint:staticcheck // display-only default
+		opts.SpaceName = capitalizeFirst(opts.SpaceSlug)
 	}
 	if opts.ConfigPath == "" {
 		return Result{}, errors.New("config path is required")
@@ -153,6 +154,15 @@ func Run(opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("restrict desktop config permissions: %w", err)
 	}
 	return res, nil
+}
+
+func capitalizeFirst(s string) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 func detectOS() string {
