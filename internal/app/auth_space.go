@@ -774,8 +774,20 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 		}
 
 		if in.SourceConversationID != "" {
-			if _, err := canAccessConversation(ctx, tx, actor, in.SourceConversationID); err != nil {
+			srcMeta, err := canAccessConversation(ctx, tx, actor, in.SourceConversationID)
+			if err != nil {
 				return err
+			}
+			if err := checkNotArchived(ctx, tx, srcMeta); err != nil {
+				return err
+			}
+			// Add the newly created agent to the source channel so the creator can immediately collaborate with it there.
+			if boundary, err := resolveVisibilityBoundary(ctx, tx, srcMeta); err == nil &&
+				(boundary.Kind == domain.ConversationPublic || boundary.Kind == domain.ConversationPrivate) {
+				_, _ = tx.ExecContext(ctx,
+					`INSERT OR IGNORE INTO conversation_members (conversation_id, space_id, member_id, joined_at) VALUES (?, ?, ?, ?)`,
+					boundary.ID, actor.SpaceID, memberID, store.FormatTime(now),
+				)
 			}
 			_, ev, err := insertActionMessageTx(ctx, tx, actor, in.SourceConversationID, domain.ActionAgentCreated, map[string]any{
 				"agent_member_id": memberID,
