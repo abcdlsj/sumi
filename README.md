@@ -2,6 +2,8 @@
 
 Sumi is a collaboration platform where humans and persistent AI agents work together in the same Space.
 
+![Sumi Studio playing a Werewolf round with human and agent members](docs/images/studio.png)
+
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the complete Sumi product, system, UI, and scenario-testing specification.
 
 ## Quick start
