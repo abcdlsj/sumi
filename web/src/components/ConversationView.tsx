@@ -474,6 +474,7 @@ export function ConversationView({
   spaceSlug,
   boot,
   conv,
+  focusMessageID,
   onOpenDetail,
   onOpenConversation,
   onOpenDM,
@@ -483,6 +484,7 @@ export function ConversationView({
   spaceSlug: string;
   boot: BootstrapData;
   conv: Conversation;
+  focusMessageID?: string;
   onOpenDetail: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
@@ -496,6 +498,7 @@ export function ConversationView({
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
   const [moreMenuMsgID, setMoreMenuMsgID] = useState<string | null>(null);
+  const [highlightedMsgID, setHighlightedMsgID] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const taskAction = useAction();
   const notify = useAction();
@@ -545,6 +548,16 @@ export function ConversationView({
     setCreatingTaskOnMsg(null);
     setReactionPickerMsgID(null);
   }, [conv.id]);
+
+  useEffect(() => {
+    if (!focusMessageID || !messages) return;
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${focusMessageID}"]`);
+    if (!el) return;
+    el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    setHighlightedMsgID(focusMessageID);
+    const timer = window.setTimeout(() => setHighlightedMsgID((cur) => (cur === focusMessageID ? null : cur)), 2000);
+    return () => window.clearTimeout(timer);
+  }, [focusMessageID, messages, scrollRef]);
 
   const peer = conv.kind === "dm" ? boot.members.find((m) => m.id === conv.peer_member_id) : undefined;
   const title = conv.kind === "dm" ? conv.peer_display_name ?? "Direct message" : conv.slug ?? "";
@@ -866,8 +879,8 @@ export function ConversationView({
                       </div>
                     ) : (
                       <article
-                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3.5 pb-1"} flex items-start gap-3.5 group transition-colors duration-100 ${
-                          replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/60"
+                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3.5 pb-1"} flex items-start gap-3.5 group transition-colors duration-200 ${
+                          replyingTo === m.id || highlightedMsgID === m.id ? "bg-accent-soft" : "hover:bg-subtle/60"
                         }`}
                       >
                         <div className="w-8 shrink-0">

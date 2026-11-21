@@ -1,10 +1,41 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, ChevronRight, FolderPlus, Hash, Inbox, Lock, Monitor, Moon, Pencil, Plus, Search, Settings, Sparkles, Sun, Trash2, Users } from "lucide-react";
-import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
+import {
+  ArrowDownUp,
+  AtSign,
+  Bell,
+  BellOff,
+  Bot,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Copy,
+  FolderInput,
+  FolderPlus,
+  Hash,
+  Inbox,
+  Keyboard,
+  Lock,
+  Monitor,
+  Moon,
+  PanelLeft,
+  Pencil,
+  Plus,
+  Search,
+  Settings,
+  Sparkles,
+  Sun,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
+import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
+import { isMacPlatform, useChannelSort, useSidebarCollapsed, type ChannelSortPref } from "../preferences";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
@@ -16,12 +47,55 @@ import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
-import { Button, ErrorBoundary, ErrorState, Modal, useAction } from "./ui";
+import { Button, ErrorBoundary, ErrorState, Menu, MenuItem, Modal, useAction, useToast } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
-import { ChannelGroupDialog, JumpDialog, NewChannelDialog, NewSpaceDialog } from "./WorkbenchDialogs";
+import { ChannelGroupDialog, JumpDialog, NewChannelDialog, NewSpaceDialog, ShortcutsDialog, type JumpItem } from "./WorkbenchDialogs";
 
-type MainView = { kind: "conversation"; convID: string; archivedConv?: Conversation } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
-type Dialog = null | "channel" | "group" | "space" | "jump" | "computer" | "agent" | "pairing";
+type MainView =
+  | { kind: "conversation"; convID: string; archivedConv?: Conversation; focusMessageID?: string }
+  | { kind: "inbox" }
+  | { kind: "tasks" }
+  | { kind: "admin"; tab: AdminTab };
+type Dialog = null | "channel" | "group" | "space" | "jump" | "shortcuts" | "computer" | "agent" | "pairing";
+
+function readRecentConvs(spaceSlug: string): string[] {
+  try {
+    const raw = localStorage.getItem(`sumi.recent.${spaceSlug}`);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string").slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordRecentConv(spaceSlug: string, convID: string): string[] {
+  const prev = readRecentConvs(spaceSlug);
+  const next = [convID, ...prev.filter((id) => id !== convID)].slice(0, 6);
+  try {
+    localStorage.setItem(`sumi.recent.${spaceSlug}`, JSON.stringify(next));
+  } catch {
+    // ignore storage failures
+  }
+  return next;
+}
+
+function sortChannelsList(list: Conversation[], mode: ChannelSortPref): Conversation[] {
+  if (mode === "default") return list;
+  const copy = list.slice();
+  if (mode === "name") {
+    return copy.sort((a, b) => (a.slug ?? "").localeCompare(b.slug ?? ""));
+  }
+  return copy.sort((a, b) => {
+    const score = (c: Conversation) => {
+      if (c.mention_count > 0) return 3;
+      if (c.unread_count > 0 && c.notify_level !== "mute") return 2;
+      if (c.notify_level === "mute") return 0;
+      return 1;
+    };
+    const diff = score(b) - score(a);
+    return diff !== 0 ? diff : (a.slug ?? "").localeCompare(b.slug ?? "");
+  });
+}
 
 const SSE_EVENTS = [
   "message.created",
@@ -133,9 +207,10 @@ export function Workbench({
   onLogout: () => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const bootQ = useQuery({ queryKey: ["bootstrap", spaceSlug], queryFn: () => api.bootstrap(spaceSlug) });
   const [theme, setTheme] = useTheme();
-  const [mainView, setMainView] = useState<MainView>({ kind: "inbox" });
+  const [mainView, setMainViewState] = useState<MainView>({ kind: "inbox" });
   const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
@@ -144,14 +219,71 @@ export function Workbench({
   const [dragChannelID, setDragChannelID] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [channelSort, setChannelSort] = useChannelSort();
+  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
+  const [recentConvIDs, setRecentConvIDs] = useState<string[]>(() => readRecentConvs(spaceSlug));
+  const [ctxMenu, setCtxMenu] = useState<{ conv: Conversation; x: number; y: number } | null>(null);
   const dm = useAction();
   const groupAct = useAction();
   const landed = useRef(false);
+  const historyRef = useRef<{ stack: MainView[]; index: number }>({ stack: [{ kind: "inbox" }], index: 0 });
   const boot = bootQ.data;
   const panes = usePaneWidths();
   const draftConvIDs = useDraftConvIDs();
   const accent = boot?.space.accent;
   useEffect(() => applyAccent(accent), [accent]);
+  useEffect(() => setRecentConvIDs(readRecentConvs(spaceSlug)), [spaceSlug]);
+
+  const setMainView = useCallback(
+    (next: MainView, opts?: { replace?: boolean }) => {
+      setMainViewState(next);
+      if (next.kind === "conversation") {
+        setRecentConvIDs(recordRecentConv(spaceSlug, next.convID));
+      }
+      const h = historyRef.current;
+      if (opts?.replace) {
+        h.stack[h.index] = next;
+      } else {
+        const cur = h.stack[h.index];
+        const same =
+          cur &&
+          cur.kind === next.kind &&
+          (cur.kind !== "conversation" || (next.kind === "conversation" && cur.convID === next.convID)) &&
+          (cur.kind !== "admin" || (next.kind === "admin" && cur.tab === next.tab));
+        if (!same) {
+          h.stack = [...h.stack.slice(0, h.index + 1), next].slice(-30);
+          h.index = h.stack.length - 1;
+        }
+      }
+    },
+    [spaceSlug],
+  );
+
+  const stepHistory = useCallback((delta: -1 | 1) => {
+    const h = historyRef.current;
+    const nextIdx = h.index + delta;
+    if (nextIdx < 0 || nextIdx >= h.stack.length) return;
+    h.index = nextIdx;
+    setMainViewState(h.stack[nextIdx]);
+  }, []);
+
+  // Dismiss channel right-click context menu on outside click or Escape.
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
 
   // First landing: open the agent created during onboarding, else #general when Inbox is empty.
   useEffect(() => {
@@ -327,10 +459,39 @@ export function Workbench({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setDialog((d) => (d === "jump" ? null : "jump"));
         return;
+      }
+      if (mod && (e.key.toLowerCase() === "b" || e.key === "\\")) {
+        e.preventDefault();
+        setSidebarCollapsed((v) => !v);
+        return;
+      }
+      if (mod && e.key === "/") {
+        e.preventDefault();
+        setDialog((d) => (d === "shortcuts" ? null : "shortcuts"));
+        return;
+      }
+      if ((e.metaKey && e.key === "[") || (!isMacPlatform() && e.altKey && e.key === "ArrowLeft")) {
+        e.preventDefault();
+        stepHistory(-1);
+        return;
+      }
+      if ((e.metaKey && e.key === "]") || (!isMacPlatform() && e.altKey && e.key === "ArrowRight")) {
+        e.preventDefault();
+        stepHistory(1);
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && spaces.length > 1) {
+        const targetSpace = spaces[Number(e.key) - 1];
+        if (targetSpace && targetSpace.slug !== spaceSlug) {
+          e.preventDefault();
+          onSwitchSpace?.(targetSpace.slug);
+          return;
+        }
       }
       if (e.key === "Escape" && !dialog && detail) {
         const tag = (document.activeElement as HTMLElement | null)?.tagName;
@@ -340,7 +501,7 @@ export function Workbench({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog, detail]);
+  }, [dialog, detail, setSidebarCollapsed, stepHistory, spaces, spaceSlug, onSwitchSpace]);
 
   const activeConvID = mainView.kind === "conversation" ? mainView.convID : "";
   const activeConv = useMemo(
@@ -384,7 +545,10 @@ export function Workbench({
   const channelGroups = boot.channel_groups ?? [];
   const channelByID = new Map(channels.map((c) => [c.id, c]));
   const groupedConvIDs = new Set(channelGroups.flatMap((g) => g.conversation_ids));
-  const ungroupedChannels = channels.filter((c) => !groupedConvIDs.has(c.id));
+  const ungroupedChannels = sortChannelsList(
+    channels.filter((c) => !groupedConvIDs.has(c.id)),
+    channelSort,
+  );
   const dms = boot.conversations.filter((c) => c.kind === "dm");
   const agents = boot.members.filter((m) => m.kind === "agent");
   const people = boot.members.filter((m) => m.kind === "human" && m.id !== boot.current_member.id);
@@ -462,6 +626,32 @@ export function Workbench({
     });
   }
 
+  function openChannelContextMenu(e: ReactMouseEvent, c: Conversation) {
+    e.preventDefault();
+    const x = Math.min(e.clientX, (window.innerWidth || 1024) - 224);
+    const y = Math.min(e.clientY, (window.innerHeight || 768) - 260);
+    setCtxMenu({ conv: c, x: Math.max(8, x), y: Math.max(8, y) });
+  }
+
+  function setChannelNotify(c: Conversation, level: NotifyLevel) {
+    const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+    if (prev) {
+      qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+        ...prev,
+        conversations: prev.conversations.map((item) => (item.id === c.id ? { ...item, notify_level: level } : item)),
+      });
+    }
+    void groupAct.run(async () => {
+      try {
+        await api.setNotifyLevel(spaceSlug, c.id, level);
+      } catch (err) {
+        if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+        throw err;
+      }
+      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+    });
+  }
+
   const renderChannelRow = (c: Conversation) => {
     const muted = c.notify_level === "mute";
     const hasDraft = draftConvIDs.has(c.id) && activeConvID !== c.id;
@@ -471,6 +661,7 @@ export function Workbench({
         draggable
         onDragStart={(e) => handleChannelDragStart(e, c.id)}
         onDragEnd={handleChannelDragEnd}
+        onContextMenu={(e) => openChannelContextMenu(e, c)}
         className={dragChannelID === c.id ? "opacity-45" : ""}
       >
         <NavItem
@@ -543,36 +734,42 @@ export function Workbench({
     );
   };
 
+  const navWidth = sidebarCollapsed ? 56 : 56 + panes.sidebar;
+
   return (
     <div
       className="h-full grid bg-bg"
-      style={{ gridTemplateColumns: `${56 + panes.sidebar}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
+      style={{ gridTemplateColumns: `${navWidth}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
     >
       {/* Navigation shell: in desktop mode a unified 52px header spans rail + sidebar so macOS traffic lights sit on one continuous surface. */}
       <div className="relative flex flex-col min-w-0 min-h-0 border-r border-nav-line bg-nav select-none">
-        <ResizeHandle
-          label="Resize sidebar"
-          edge="right"
-          value={panes.sidebar}
-          min={SIDEBAR_MIN}
-          max={SIDEBAR_MAX}
-          onResize={panes.setSidebar}
-          onReset={panes.resetSidebar}
-        />
+        {!sidebarCollapsed && (
+          <ResizeHandle
+            label="Resize sidebar"
+            edge="right"
+            value={panes.sidebar}
+            min={SIDEBAR_MIN}
+            max={SIDEBAR_MAX}
+            onResize={panes.setSidebar}
+            onReset={panes.resetSidebar}
+          />
+        )}
         {desktop && (
           <div
             data-desktop-titlebar
-            className="h-[52px] pl-[92px] pr-3 border-b border-nav-line flex items-center justify-between gap-2 shrink-0 titlebar-drag"
+            className={`h-[52px] ${sidebarCollapsed ? "pl-3 justify-center" : "pl-[92px] pr-3 justify-between"} border-b border-nav-line flex items-center gap-2 shrink-0 titlebar-drag`}
           >
-            <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
-            <WorkingNowSummary
-              boot={boot}
-              onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
-              onOpenDetail={setDetail}
-            />
+            {!sidebarCollapsed && <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>}
+            {!sidebarCollapsed && (
+              <WorkingNowSummary
+                boot={boot}
+                onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                onOpenDetail={setDetail}
+              />
+            )}
           </div>
         )}
-        <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
+        <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: sidebarCollapsed ? "56px" : "56px minmax(0, 1fr)" }}>
           {/* Rail */}
           <nav aria-label="Spaces" className="bg-nav-rail flex flex-col items-center justify-between pb-3">
             <div className="flex flex-col items-center gap-2 pt-3">
@@ -610,6 +807,15 @@ export function Workbench({
               </button>
             </div>
             <div className="flex flex-col items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed((v) => !v)}
+                title={sidebarCollapsed ? `Expand sidebar (${isMacPlatform() ? "⌘B" : "Ctrl+B"})` : `Collapse sidebar (${isMacPlatform() ? "⌘B" : "Ctrl+B"})`}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                className="size-9 rounded-[7px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
+              >
+                <PanelLeft className="size-[18px]" />
+              </button>
               {railBtn("agents", <Bot />, "Agents")}
               {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, onlineComputers > 0)}
               {railBtn("people", <Users />, "People")}
@@ -619,6 +825,7 @@ export function Workbench({
           </nav>
 
           {/* Sidebar */}
+          {!sidebarCollapsed && (
           <aside aria-label="Sidebar" className="bg-nav flex flex-col min-w-0 min-h-0">
             {!desktop && (
               <div className="h-[52px] px-4 flex items-center justify-between gap-2 shrink-0">
@@ -673,6 +880,46 @@ export function Workbench({
             <SectionLabel
               action={
                 <div className="flex items-center gap-0.5">
+                  <Menu
+                    width={176}
+                    trigger={(open, toggle) => (
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        aria-expanded={open}
+                        title={`Sort channels (${channelSort})`}
+                        aria-label="Sort channels"
+                        className={`size-6 rounded-[5px] flex items-center justify-center transition-colors ${
+                          open || channelSort !== "default" ? "text-nav-fg-strong bg-nav-hover" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
+                        }`}
+                      >
+                        <ArrowDownUp className="size-3.5" />
+                      </button>
+                    )}
+                  >
+                    {(close) => (
+                      <>
+                        {(
+                          [
+                            ["default", "Default order"],
+                            ["unread", "Unread first"],
+                            ["name", "A–Z"],
+                          ] as const
+                        ).map(([mode, label]) => (
+                          <MenuItem
+                            key={mode}
+                            active={channelSort === mode}
+                            onSelect={() => {
+                              setChannelSort(mode);
+                              close();
+                            }}
+                          >
+                            {label}
+                          </MenuItem>
+                        ))}
+                      </>
+                    )}
+                  </Menu>
                   <button
                     onClick={() => {
                       setEditingGroup(null);
@@ -701,7 +948,10 @@ export function Workbench({
           </div>
 
           {channelGroups.map((g) => {
-            const items = g.conversation_ids.map((id) => channelByID.get(id)).filter((c): c is Conversation => Boolean(c));
+            const items = sortChannelsList(
+              g.conversation_ids.map((id) => channelByID.get(id)).filter((c): c is Conversation => Boolean(c)),
+              channelSort,
+            );
             const groupMentions = items.reduce((sum, c) => sum + c.mention_count, 0);
             const groupHasUnread = items.some((c) => c.unread_count > 0 && c.notify_level !== "mute");
             const isOver = dropTarget === g.id;
@@ -843,6 +1093,7 @@ export function Workbench({
           </button>
         </div>
           </aside>
+          )}
         </div>
       </div>
 
@@ -859,6 +1110,7 @@ export function Workbench({
                 spaceSlug={spaceSlug}
                 boot={boot}
                 conv={activeConv}
+                focusMessageID={mainView.focusMessageID}
                 onOpenDetail={setDetail}
                 onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
                 onOpenDM={(memberID) => void openOrCreateDM(memberID)}
@@ -996,7 +1248,39 @@ export function Workbench({
       <JumpDialog
         open={dialog === "jump"}
         onClose={() => setDialog(null)}
+        spaceSlug={spaceSlug}
+        onSelectMessageHit={(hit: SearchHit) => {
+          if (hit.conversation_kind === "task" && hit.task_id) {
+            setDetail({ kind: "task", taskID: hit.task_id });
+          } else if (hit.conversation_kind === "thread") {
+            if (hit.parent_conversation_id) {
+              setMainView({ kind: "conversation", convID: hit.parent_conversation_id });
+            }
+            setDetail({
+              kind: "thread",
+              threadConvID: hit.conversation_id,
+              rootMessageID: hit.root_message_id ?? "",
+              parentSlug: hit.parent_slug ?? "",
+            });
+          } else {
+            setMainView({ kind: "conversation", convID: hit.conversation_id, focusMessageID: hit.message_id });
+          }
+        }}
         items={[
+          ...recentConvIDs
+            .map((id) => boot.conversations.find((c) => c.id === id))
+            .filter((c): c is Conversation => Boolean(c && (c.kind === "public" || c.kind === "private" || c.kind === "dm")))
+            .slice(0, 4)
+            .map(
+              (c): JumpItem => ({
+                key: `recent:${c.id}`,
+                label: c.kind === "dm" ? c.peer_display_name ?? "Direct message" : `#${c.slug ?? ""}`,
+                keywords: c.topic ?? "",
+                group: "Recent",
+                icon: <Clock className="size-4" />,
+                run: () => setMainView({ kind: "conversation", convID: c.id }),
+              }),
+            ),
           { key: "inbox", label: "Inbox", group: "Go to", icon: <Inbox className="size-4" />, run: () => setMainView({ kind: "inbox" }) },
           { key: "tasks", label: "Tasks", group: "Go to", icon: <CheckCircle2 className="size-4" />, run: () => setMainView({ kind: "tasks" }) },
           { key: "settings", label: "Settings", group: "Go to", icon: <Settings className="size-4" />, run: () => setMainView({ kind: "admin", tab: "settings" }) },
@@ -1036,6 +1320,24 @@ export function Workbench({
             },
           },
           {
+            key: "act:sidebar",
+            label: sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
+            keywords: "sidebar navigation toggle",
+            group: "Actions",
+            icon: <PanelLeft className="size-4" />,
+            shortcut: isMacPlatform() ? "⌘B" : "Ctrl+B",
+            run: () => setSidebarCollapsed((v) => !v),
+          },
+          {
+            key: "act:shortcuts",
+            label: "Keyboard shortcuts",
+            keywords: "keys hotkeys help",
+            group: "Actions",
+            icon: <Keyboard className="size-4" />,
+            shortcut: isMacPlatform() ? "⌘/" : "Ctrl+/",
+            run: () => setDialog("shortcuts"),
+          },
+          {
             key: "act:theme",
             label: dark ? "Switch to light mode" : "Switch to dark mode",
             keywords: "theme appearance dark light",
@@ -1045,6 +1347,107 @@ export function Workbench({
           },
         ]}
       />
+      <ShortcutsDialog open={dialog === "shortcuts"} onClose={() => setDialog(null)} />
+      {ctxMenu &&
+        createPortal(
+          <div
+            role="menu"
+            aria-label={`#${ctxMenu.conv.slug} menu`}
+            style={{ position: "fixed", left: ctxMenu.x, top: ctxMenu.y, width: 216 }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
+          >
+            {ctxMenu.conv.unread_count > 0 && (
+              <MenuItem
+                icon={<Check />}
+                onSelect={() => {
+                  const target = ctxMenu.conv;
+                  setCtxMenu(null);
+                  void groupAct.run(async () => {
+                    await api.markDone(spaceSlug, target.id);
+                    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                    void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+                  });
+                }}
+              >
+                Mark as read
+              </MenuItem>
+            )}
+            <div className="px-2.5 pt-1.5 pb-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-4">Notifications</div>
+            {(
+              [
+                ["mentions", "Mentions only", <AtSign key="m" />],
+                ["all", "All messages", <Bell key="a" />],
+                ["mute", "Muted", <BellOff key="u" />],
+              ] as const
+            ).map(([level, label, icon]) => (
+              <MenuItem
+                key={level}
+                active={(ctxMenu.conv.notify_level ?? "mentions") === level}
+                icon={icon}
+                onSelect={() => {
+                  setChannelNotify(ctxMenu.conv, level);
+                  setCtxMenu(null);
+                }}
+              >
+                {label}
+              </MenuItem>
+            ))}
+            {channelGroups.length > 0 && (
+              <>
+                <div className="my-1 border-t border-line" />
+                <div className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-4">Move to group</div>
+                {channelGroups.map((g) => {
+                  const inGroup = g.conversation_ids.includes(ctxMenu.conv.id);
+                  return (
+                    <MenuItem
+                      key={g.id}
+                      active={inGroup}
+                      icon={<FolderInput />}
+                      onSelect={() => {
+                        const target = ctxMenu.conv;
+                        setCtxMenu(null);
+                        void groupAct.run(async () => {
+                          await api.setConversationGroup(spaceSlug, target.id, inGroup ? "" : g.id);
+                          void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                        });
+                      }}
+                    >
+                      {g.name}
+                    </MenuItem>
+                  );
+                })}
+                {channelGroups.some((g) => g.conversation_ids.includes(ctxMenu.conv.id)) && (
+                  <MenuItem
+                    icon={<X />}
+                    onSelect={() => {
+                      const target = ctxMenu.conv;
+                      setCtxMenu(null);
+                      void groupAct.run(async () => {
+                        await api.setConversationGroup(spaceSlug, target.id, "");
+                        void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                      });
+                    }}
+                  >
+                    Remove from group
+                  </MenuItem>
+                )}
+              </>
+            )}
+            <div className="my-1 border-t border-line" />
+            <MenuItem
+              icon={<Copy />}
+              onSelect={() => {
+                const slug = ctxMenu.conv.slug ?? "";
+                setCtxMenu(null);
+                void navigator.clipboard?.writeText(`#${slug}`).then(() => toast(`Copied #${slug}`, "success"));
+              }}
+            >
+              Copy #{ctxMenu.conv.slug}
+            </MenuItem>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

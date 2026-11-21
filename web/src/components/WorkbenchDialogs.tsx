@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Hash, Lock, Search } from "lucide-react";
-import { api, slugInput, slugify, type ChannelGroup, type Member } from "../api";
+import { Hash, Keyboard, Loader2, Lock, MessageSquare, Search } from "lucide-react";
+import { api, formatClock, slugInput, slugify, type ChannelGroup, type Member, type SearchHit } from "../api";
+import { isMacPlatform } from "../preferences";
 import { MemberAvatar } from "./Avatar";
 import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
 
@@ -242,25 +243,76 @@ export function NewSpaceDialog({ open, onClose, onCreated }: { open: boolean; on
   );
 }
 
+function HighlightText({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(q.toLowerCase());
+  if (idx < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-accent-soft text-accent-text rounded-[2px] px-0.5 font-medium">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
+
 export function JumpDialog({
   open,
   onClose,
   items,
+  spaceSlug,
+  onSelectMessageHit,
 }: {
   open: boolean;
   onClose: () => void;
   items: JumpItem[];
+  spaceSlug?: string;
+  onSelectMessageHit?: (hit: SearchHit) => void;
 }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     if (open) {
       setQ("");
       setSel(0);
+      setHits([]);
+      setSearching(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (!open || !spaceSlug || !onSelectMessageHit || term.length < 2) {
+      setHits([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      void api
+        .searchMessages(spaceSlug, term, { limit: 8 })
+        .then((res) => {
+          if (!cancelled) setHits(res.hits ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setHits([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, q, spaceSlug, onSelectMessageHit]);
 
   const filtered = useMemo(() => {
     const term = q.trim();
@@ -272,9 +324,16 @@ export function JumpDialog({
       }))
       .filter((x) => x.score >= 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 16)
+      .slice(0, 12)
       .map((x) => x.it);
   }, [items, q]);
+
+  const totalCount = filtered.length + hits.length;
+
+  useEffect(() => {
+    if (!open) return;
+    setSel((s) => (totalCount === 0 ? 0 : Math.min(s, totalCount - 1)));
+  }, [open, totalCount]);
 
   useEffect(() => {
     if (!open) return;
@@ -282,16 +341,23 @@ export function JumpDialog({
   }, [open, sel]);
 
   const pick = (i: number) => {
-    const it = filtered[i];
-    if (!it) return;
+    if (i < filtered.length) {
+      const it = filtered[i];
+      if (!it) return;
+      onClose();
+      it.run();
+      return;
+    }
+    const hit = hits[i - filtered.length];
+    if (!hit) return;
     onClose();
-    it.run();
+    onSelectMessageHit?.(hit);
   };
 
   return (
-    <Modal open={open} onClose={onClose} label="Command palette" width={560}>
+    <Modal open={open} onClose={onClose} label="Command palette" width={580}>
       <div className="border-b border-line flex items-center gap-3 px-4 h-14">
-        <Search className="size-4.5 text-fg-3 shrink-0" />
+        {searching ? <Loader2 className="size-4.5 text-fg-3 shrink-0 animate-spin" /> : <Search className="size-4.5 text-fg-3 shrink-0" />}
         <input
           autoFocus
           value={q}
@@ -302,52 +368,140 @@ export function JumpDialog({
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              setSel((s) => (filtered.length ? (s + 1) % filtered.length : 0));
+              setSel((s) => (totalCount ? (s + 1) % totalCount : 0));
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
-              setSel((s) => (filtered.length ? (s - 1 + filtered.length) % filtered.length : 0));
+              setSel((s) => (totalCount ? (s - 1 + totalCount) % totalCount : 0));
             } else if (e.key === "Enter") {
               e.preventDefault();
               pick(sel);
             }
           }}
-          placeholder="Search channels, agents, people, tasks, or actions…"
+          placeholder="Search channels, agents, tasks, or messages…"
           className="flex-1 h-full text-[15px] bg-transparent outline-none placeholder:text-fg-4 pr-8"
         />
       </div>
-      <div className="max-h-[360px] overflow-y-auto scroll-thin p-2">
-        {filtered.length === 0 ? (
+      <div className="max-h-[400px] overflow-y-auto scroll-thin p-2">
+        {totalCount === 0 && !searching ? (
           <div className="py-10 text-center text-[14px] text-fg-3">No matches</div>
         ) : (
-          filtered.map((it, i) => (
-            <div key={it.key}>
-              {(i === 0 || filtered[i - 1].group !== it.group) && (
-                <div className="px-2.5 pt-2 pb-1 text-[11.5px] font-semibold uppercase tracking-[0.04em] text-fg-4">{it.group}</div>
-              )}
-              <button
-                ref={(el) => {
-                  rowRefs.current[i] = el;
-                }}
-                type="button"
-                onMouseEnter={() => setSel(i)}
-                onClick={() => pick(i)}
-                className={`w-full h-10 px-2.5 rounded-[6px] flex items-center gap-3 text-[14px] text-left transition-colors ${
-                  i === sel ? "bg-accent-soft text-fg" : "text-fg-2 hover:bg-hover"
-                }`}
-              >
-                <span className="size-5 flex items-center justify-center text-fg-3 shrink-0">{it.icon}</span>
-                <span className="truncate flex-1">{it.label}</span>
-                {it.shortcut && (
-                  <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[4px] bg-subtle border border-line text-fg-3">{it.shortcut}</kbd>
+          <>
+            {filtered.map((it, i) => (
+              <div key={it.key}>
+                {(i === 0 || filtered[i - 1].group !== it.group) && (
+                  <div className="px-2.5 pt-2 pb-1 text-[11.5px] font-semibold uppercase tracking-[0.04em] text-fg-4">{it.group}</div>
                 )}
-              </button>
-            </div>
-          ))
+                <button
+                  ref={(el) => {
+                    rowRefs.current[i] = el;
+                  }}
+                  type="button"
+                  onMouseEnter={() => setSel(i)}
+                  onClick={() => pick(i)}
+                  className={`w-full h-10 px-2.5 rounded-[6px] flex items-center gap-3 text-[14px] text-left transition-colors ${
+                    i === sel ? "bg-accent-soft text-fg" : "text-fg-2 hover:bg-hover"
+                  }`}
+                >
+                  <span className="size-5 flex items-center justify-center text-fg-3 shrink-0">{it.icon}</span>
+                  <span className="truncate flex-1">{it.label}</span>
+                  {it.shortcut && (
+                    <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[4px] bg-subtle border border-line text-fg-3">{it.shortcut}</kbd>
+                  )}
+                </button>
+              </div>
+            ))}
+            {hits.length > 0 && (
+              <div>
+                <div className="px-2.5 pt-2.5 pb-1 text-[11.5px] font-semibold uppercase tracking-[0.04em] text-fg-4">Messages</div>
+                {hits.map((h, idx) => {
+                  const rowIdx = filtered.length + idx;
+                  return (
+                    <button
+                      key={h.message_id}
+                      ref={(el) => {
+                        rowRefs.current[rowIdx] = el;
+                      }}
+                      type="button"
+                      onMouseEnter={() => setSel(rowIdx)}
+                      onClick={() => pick(rowIdx)}
+                      className={`w-full px-2.5 py-2 rounded-[6px] flex items-start gap-2.5 text-left transition-colors ${
+                        rowIdx === sel ? "bg-accent-soft text-fg" : "text-fg-2 hover:bg-hover"
+                      }`}
+                    >
+                      <span className="size-5 mt-0.5 flex items-center justify-center text-fg-3 shrink-0">
+                        <MessageSquare className="size-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 text-[12px] text-fg-3">
+                          <span className="font-semibold text-fg">{h.author_display_name}</span>
+                          <span>in</span>
+                          <span className="font-medium text-fg-2 truncate">{h.conversation_title}</span>
+                          <span className="ml-auto tabular text-[11px] text-fg-4 shrink-0">{formatClock(h.created_at)}</span>
+                        </span>
+                        <span className="mt-0.5 block text-[13px] text-fg-2 truncate font-body">
+                          <HighlightText text={h.snippet} query={q} />
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
       <div className="px-4 py-2 border-t border-line bg-subtle/40 flex items-center justify-between text-[11.5px] text-fg-4">
         <span>↑↓ Navigate · ↵ Select · Esc Close</span>
-        <span>⌘K</span>
+        <span>{isMacPlatform() ? "⌘K" : "Ctrl+K"}</span>
+      </div>
+    </Modal>
+  );
+}
+
+export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const mod = isMacPlatform() ? "⌘" : "Ctrl";
+  const groups = [
+    {
+      title: "Navigation",
+      rows: [
+        { label: "Command palette & message search", keys: `${mod} K` },
+        { label: "Toggle sidebar", keys: `${mod} B` },
+        { label: "Back / Forward in history", keys: isMacPlatform() ? "⌘ [ / ⌘ ]" : "Alt ← / Alt →" },
+        { label: "Switch space", keys: `${mod} 1–9` },
+        { label: "Close detail panel / dialog", keys: "Esc" },
+      ],
+    },
+    {
+      title: "Composer & Reading",
+      rows: [
+        { label: "Send message (default)", keys: "Enter" },
+        { label: "New line (default)", keys: "Shift Enter" },
+        { label: "Mention agent or person", keys: "@" },
+        { label: "Keyboard shortcuts", keys: `${mod} /` },
+      ],
+    },
+  ];
+  return (
+    <Modal open={open} onClose={onClose} label="Keyboard shortcuts" title="Keyboard shortcuts" width={460}>
+      <div className="px-6 pb-6 pt-3 space-y-5">
+        {groups.map((g) => (
+          <div key={g.title}>
+            <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.05em] text-fg-4">
+              <Keyboard className="size-3.5" />
+              {g.title}
+            </div>
+            <div className="rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden">
+              {g.rows.map((r) => (
+                <div key={r.label} className="px-3.5 h-10 flex items-center justify-between gap-3 text-[13.5px]">
+                  <span className="text-fg-2">{r.label}</span>
+                  <kbd className="font-mono text-[11.5px] px-2 py-0.5 rounded-[4px] bg-subtle border border-line text-fg shrink-0">
+                    {r.keys}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </Modal>
   );

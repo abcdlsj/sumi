@@ -24,6 +24,16 @@ captureShellFromURL();
 capturePairingFromURL();
 applyTheme();
 
+// Gate focus rings by input modality: pointer clicks stay quiet, keyboard navigation stays crisp.
+window.addEventListener("pointerdown", () => {
+  document.documentElement.dataset.inputModality = "pointer";
+}, { capture: true, passive: true });
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Tab" || e.key.startsWith("Arrow") || e.key === "Enter" || e.key === "Escape" || e.key === " ") {
+    document.documentElement.dataset.inputModality = "keyboard";
+  }
+}, { capture: true });
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

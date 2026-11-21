@@ -224,4 +224,46 @@ describe("Workbench", () => {
     expect(within(sidebar).getByText("Backend engineer")).toBeTruthy();
     expect(bootSpy.mock.calls.length).toBe(callsBefore);
   });
+
+  it("toggles sidebar with Cmd+B, opens shortcuts with Cmd+/, and searches messages in Cmd+K", async () => {
+    const searchSpy = vi.spyOn(api, "searchMessages").mockResolvedValue({
+      hits: [
+        {
+          message_id: "msg-1",
+          conversation_id: "conv-eng",
+          conversation_kind: "public",
+          conversation_title: "#engineering",
+          seq: 1,
+          author_member_id: "m-owner",
+          author_display_name: "Lisi",
+          author_kind: "human",
+          snippet: "Split into tasks",
+          created_at: "2026-11-19T10:12:00Z",
+        },
+      ],
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <Workbench spaceSlug="studio" onLogout={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("complementary", { name: "Sidebar" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull();
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.getByRole("complementary", { name: "Sidebar" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "/", metaKey: true });
+    expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    fireEvent.change(within(palette).getByPlaceholderText(/Search channels/i), { target: { value: "Split" } });
+    await waitFor(() => expect(searchSpy).toHaveBeenCalledWith("studio", "Split", { limit: 8 }));
+    expect(await within(palette).findByText("Messages")).toBeTruthy();
+  });
 });
