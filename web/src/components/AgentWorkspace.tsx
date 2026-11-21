@@ -20,6 +20,7 @@ import {
   Loader2,
   Maximize2,
   RefreshCw,
+  Search,
   WifiOff,
   X,
 } from "lucide-react";
@@ -31,8 +32,20 @@ import {
   type WorkspaceFileContent,
   type WorkspaceFileNode,
 } from "../api";
+import { CodeBlock, languageFromPath } from "./CodeHighlight";
 import { MessageBody } from "./MessageBody";
+import { ResizeHandle } from "./Resize";
 import { IconButton } from "./ui";
+
+const HIDDEN_PREF_KEY = "sumi.workspace.include_hidden";
+
+function readHiddenPref(): boolean {
+  try {
+    return localStorage.getItem(HIDDEN_PREF_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif"]);
 const CODE_EXTS = new Set(["ts", "tsx", "js", "jsx", "go", "py", "rs", "sh", "bash", "zsh", "json", "yaml", "yml", "toml", "sql", "css", "html", "xml", "c", "cpp", "h"]);
@@ -86,7 +99,20 @@ export function AgentWorkspace({
   computer?: Computer;
   boot: BootstrapData;
 }) {
-  const [includeHidden, setIncludeHidden] = useState(false);
+  const [includeHidden, setIncludeHiddenState] = useState(readHiddenPref);
+  const [treeQuery, setTreeQuery] = useState("");
+  const [treeWidth, setTreeWidth] = useState(280);
+  const setIncludeHidden = (updater: boolean | ((v: boolean) => boolean)) => {
+    setIncludeHiddenState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      try {
+        localStorage.setItem(HIDDEN_PREF_KEY, next ? "true" : "false");
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  };
   const [rootPath, setRootPath] = useState("");
   const [dirEntries, setDirEntries] = useState<Record<string, WorkspaceFileNode[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -370,9 +396,11 @@ export function AgentWorkspace({
               <MessageBody body={fileContent.content} members={boot.members} tasks={boot.tasks} />
             </div>
           ) : fileContent ? (
-            <pre className="p-3.5 text-[12.5px] leading-[1.6] font-mono text-fg whitespace-pre overflow-x-auto">
-              {fileContent.content || <span className="text-fg-4 italic">(empty file)</span>}
-            </pre>
+            fileContent.content ? (
+              <CodeBlock code={fileContent.content} language={languageFromPath(selectedFile)} showLineNumbers bare />
+            ) : (
+              <pre className="p-3.5 text-[12.5px] leading-[1.6] font-mono text-fg-4 italic">(empty file)</pre>
+            )
           ) : null}
         </div>
 
@@ -423,7 +451,63 @@ export function AgentWorkspace({
         </div>
       );
     }
-    return <div className="flex-1 overflow-y-auto scroll-thin p-2 space-y-0.5">{renderTree("", 0)}</div>;
+    const cleanQuery = treeQuery.trim().toLowerCase();
+    const matchedNodes = cleanQuery
+      ? Object.values(dirEntries)
+          .flat()
+          .filter((e) => !e.is_dir && (e.name.toLowerCase().includes(cleanQuery) || e.path.toLowerCase().includes(cleanQuery)))
+      : null;
+
+    return (
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="px-2 pt-2 pb-1 shrink-0">
+          <div className="relative">
+            <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              value={treeQuery}
+              onChange={(e) => setTreeQuery(e.target.value)}
+              placeholder="Filter files…"
+              aria-label="Filter workspace files"
+              className="w-full h-7 pl-7 pr-6 rounded-[5px] border border-line bg-card text-[12.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+            />
+            {treeQuery && (
+              <button
+                type="button"
+                aria-label="Clear filter"
+                onClick={() => setTreeQuery("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 size-4 rounded text-fg-4 hover:text-fg flex items-center justify-center"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto scroll-thin p-2 pt-1 space-y-0.5">
+          {matchedNodes ? (
+            matchedNodes.length === 0 ? (
+              <div className="py-6 text-center text-[12.5px] text-fg-4">No matching loaded files</div>
+            ) : (
+              matchedNodes.map((entry) => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  disabled={entry.is_symlink}
+                  onClick={() => void openFile(entry.path)}
+                  className={`w-full px-2 h-8 flex items-center gap-1.5 text-left rounded-[5px] text-[13px] transition-colors ${
+                    selectedFile === entry.path ? "bg-accent-soft text-accent-text font-medium" : "text-fg-2 hover:bg-hover hover:text-fg"
+                  }`}
+                >
+                  <EntryIcon entry={entry} open={false} />
+                  <span className="truncate flex-1">{entry.path}</span>
+                </button>
+              ))
+            )
+          ) : (
+            renderTree("", 0)
+          )}
+        </div>
+      </div>
+    );
   }
 
   const toolbar = (
@@ -503,8 +587,19 @@ export function AgentWorkspace({
                   </IconButton>
                 </div>
               </div>
-              <div className="flex-1 min-h-0 flex divide-x divide-line">
-                <div className="w-[280px] shrink-0 flex flex-col min-h-0 bg-panel">{renderTreePane()}</div>
+              <div className="flex-1 min-h-0 flex">
+                <div className="relative shrink-0 flex flex-col min-h-0 bg-panel border-r border-line" style={{ width: treeWidth }}>
+                  {renderTreePane()}
+                  <ResizeHandle
+                    label="Resize file tree"
+                    edge="right"
+                    value={treeWidth}
+                    min={200}
+                    max={480}
+                    onResize={(w) => setTreeWidth(Math.max(200, Math.min(480, Math.round(w))))}
+                    onReset={() => setTreeWidth(280)}
+                  />
+                </div>
                 <div className="flex-1 min-w-0 flex flex-col min-h-0">{renderFileViewer(false)}</div>
               </div>
             </div>
