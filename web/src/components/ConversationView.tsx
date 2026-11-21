@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowUp,
   AtSign,
   Bell,
@@ -11,6 +13,7 @@ import {
   ListPlus,
   Lock,
   MessageSquare,
+  MoreHorizontal,
   PanelRight,
   Sparkles,
   Users,
@@ -26,7 +29,7 @@ import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Rea
 import { ThreadReplySummary } from "./ThreadReplies";
 import { LoadEarlierButton, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
-import { Button, EmptyState, IconButton, Menu, MenuItem, TaskStatusIcon, useAction } from "./ui";
+import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, Modal, TaskStatusIcon, useAction, useToast } from "./ui";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NOTIFY: { value: NotifyLevel; label: string; short: string; hint: string; icon: React.ReactNode }[] = [
@@ -56,6 +59,8 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
     const p = raw ? JSON.parse(raw) : {};
     if (kind === "agent_created") return `created agent ${p.display_name ?? ""}`;
     if (kind === "channel_created") return `created #${p.slug ?? ""}`;
+    if (kind === "channel_archived") return `archived #${p.slug ?? ""}`;
+    if (kind === "channel_unarchived") return `unarchived #${p.slug ?? ""}`;
     if (kind === "task_event") {
       if (p.op === "created") return `created #${p.task_number}`;
       if (p.op === "claimed") return `claimed #${p.task_number}`;
@@ -125,23 +130,33 @@ export function ConversationView({
   boot,
   conv,
   onOpenDetail,
+  onArchived,
+  onUnarchived,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
   conv: Conversation;
   onOpenDetail: (t: DetailTarget) => void;
+  onArchived?: (conv: Conversation) => void;
+  onUnarchived?: (conv: Conversation) => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [composer, setComposer] = useState(() => drafts.get(conv.id)?.text ?? "");
   const [replyingTo, setReplyingTo] = useState<string | null>(() => drafts.get(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const draft = useAttachmentDraft(spaceSlug);
   const send = useAction();
   const taskAction = useAction();
   const notify = useAction();
+  const archiveAct = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const isArchived = Boolean(conv.archived_at);
+  const canGovern = boot.current_member.access_level !== "member";
+  const isChannel = conv.kind === "public" || conv.kind === "private";
 
   const msgsQ = useQuery({
     queryKey: ["messages", spaceSlug, conv.id],
@@ -264,6 +279,12 @@ export function ConversationView({
             <Hash className="size-4 text-fg-3 shrink-0" />
           )}
           <h1 className="text-[15px] font-semibold text-fg shrink-0">{title}</h1>
+          {isArchived && (
+            <Badge tone="neutral">
+              <Archive className="size-3" />
+              Archived
+            </Badge>
+          )}
           {(conv.topic || (conv.kind === "dm" && peer?.agent?.role_text?.trim())) && (() => {
             const sub = conv.topic || peer!.agent!.role_text.replace(/\s+/g, " ").trim();
             return (
@@ -275,7 +296,7 @@ export function ConversationView({
           })()}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {conv.kind !== "dm" && (
+          {conv.kind !== "dm" && !isArchived && (
             <Menu
               trigger={(open, toggle) => (
                 <button
@@ -314,7 +335,7 @@ export function ConversationView({
               }
             </Menu>
           )}
-          {(conv.kind === "public" || conv.kind === "private") && (
+          {isChannel && (
             <button
               onClick={() => onOpenDetail({ kind: "members", convID: conv.id })}
               aria-label="Members"
@@ -324,6 +345,29 @@ export function ConversationView({
               <Users className="size-4 text-fg-3" />
               <span className="tabular">{memberCount}</span>
             </button>
+          )}
+          {isChannel && canGovern && !isArchived && (
+            <Menu
+              width={220}
+              trigger={(open, toggle) => (
+                <IconButton label="Channel actions" active={open} onClick={toggle}>
+                  <MoreHorizontal />
+                </IconButton>
+              )}
+            >
+              {(close) => (
+                <MenuItem
+                  icon={<Archive className="text-danger" />}
+                  hint="Make read-only and stop all notifications"
+                  onSelect={() => {
+                    close();
+                    setConfirmArchive(true);
+                  }}
+                >
+                  Archive channel
+                </MenuItem>
+              )}
+            </Menu>
           )}
           {peer?.kind === "agent" && (
             <IconButton label="Agent details" onClick={() => onOpenDetail({ kind: "agent", memberID: peer.id })}>
@@ -512,36 +556,38 @@ export function ConversationView({
                           ) : null}
                         </div>
 
-                        <div
-                          className={`absolute right-5 -top-3.5 ${
-                            reactionPickerMsgID === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
-                          } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md z-20`}
-                        >
-                          <ReactionPickerButton
-                            reactions={m.reactions}
-                            open={reactionPickerMsgID === m.id}
-                            onOpenChange={(open) => setReactionPickerMsgID(open ? m.id : null)}
-                            onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
-                          />
-                          <button
-                            onClick={() => {
-                              setReplyingTo(m.id);
-                              textRef.current?.focus();
-                            }}
-                            className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                        {!isArchived && (
+                          <div
+                            className={`absolute right-5 -top-3.5 ${
+                              reactionPickerMsgID === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[9px] p-0.5 shadow-md z-20`}
                           >
-                            <CornerUpLeft className="size-3.5" /> Reply
-                          </button>
-                          <button
-                            onClick={() => {
-                              setNewTaskTitle("");
-                              setCreatingTaskOnMsg(m.id);
-                            }}
-                            className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
-                          >
-                            <ListPlus className="size-3.5" /> Task
-                          </button>
-                        </div>
+                            <ReactionPickerButton
+                              reactions={m.reactions}
+                              open={reactionPickerMsgID === m.id}
+                              onOpenChange={(open) => setReactionPickerMsgID(open ? m.id : null)}
+                              onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
+                            />
+                            <button
+                              onClick={() => {
+                                setReplyingTo(m.id);
+                                textRef.current?.focus();
+                              }}
+                              className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                            >
+                              <CornerUpLeft className="size-3.5" /> Reply
+                            </button>
+                            <button
+                              onClick={() => {
+                                setNewTaskTitle("");
+                                setCreatingTaskOnMsg(m.id);
+                              }}
+                              className="h-7 px-2 rounded-[7px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                            >
+                              <ListPlus className="size-3.5" /> Task
+                            </button>
+                          </div>
+                        )}
                       </article>
                     )}
                   </div>
@@ -553,6 +599,38 @@ export function ConversationView({
         <NewMessagesPill count={newCount} onClick={jumpToEnd} />
       </div>
 
+      {isArchived ? (
+        <div className="shrink-0 px-6 py-4 bg-bg/70 border-t border-line flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="size-9 rounded-[10px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
+              <Archive className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[14px] font-medium text-fg">This channel is archived</div>
+              <div className="text-[12.5px] text-fg-3">No new messages, task updates, or notifications are allowed while archived.</div>
+            </div>
+          </div>
+          {canGovern && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<ArchiveRestore />}
+              loading={archiveAct.busy}
+              onClick={() =>
+                void archiveAct.run(async () => {
+                  const res = await api.unarchiveChannel(spaceSlug, conv.id);
+                  toast(`Unarchived #${conv.slug}`, "success");
+                  await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                  await qc.invalidateQueries({ queryKey: ["archived-channels", spaceSlug] });
+                  onUnarchived?.(res.conversation);
+                })
+              }
+            >
+              Unarchive
+            </Button>
+          )}
+        </div>
+      ) : (
       <div className="shrink-0 bg-bg/60 border-t border-line">
         <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} />
         <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-2">
@@ -618,6 +696,40 @@ export function ConversationView({
           </div>
         </form>
       </div>
+      )}
+
+      <Modal
+        open={confirmArchive}
+        onClose={() => setConfirmArchive(false)}
+        label="Archive channel"
+        title={`Archive #${conv.slug}?`}
+        description="People and agents will no longer be able to post messages or receive notifications from this channel. You can unarchive it anytime in Settings."
+        width={440}
+      >
+        <div className="px-6 pb-6 pt-4 flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => setConfirmArchive(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            icon={<Archive />}
+            loading={archiveAct.busy}
+            onClick={() =>
+              void archiveAct.run(async () => {
+                const res = await api.archiveChannel(spaceSlug, conv.id);
+                setConfirmArchive(false);
+                toast(`Archived #${conv.slug}`, "success");
+                await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                await qc.invalidateQueries({ queryKey: ["archived-channels", spaceSlug] });
+                onArchived?.(res.conversation);
+              })
+            }
+          >
+            Archive channel
+          </Button>
+        </div>
+      </Modal>
     </section>
   );
 }

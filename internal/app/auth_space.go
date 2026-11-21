@@ -761,10 +761,10 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 			return domain.WrapError(domain.CodeInternal, "insert agent", err)
 		}
 
-		// Auto-join #general if present so the agent is reachable in the default space channel.
+		// Auto-join #general if present and active so the agent is reachable in the default space channel.
 		var generalID string
 		if err := tx.QueryRowContext(ctx,
-			`SELECT id FROM conversations WHERE space_id = ? AND kind = 'public' AND slug = 'general'`,
+			`SELECT id FROM conversations WHERE space_id = ? AND kind = 'public' AND slug = 'general' AND archived_at IS NULL`,
 			actor.SpaceID,
 		).Scan(&generalID); err == nil {
 			_, _ = tx.ExecContext(ctx,

@@ -117,6 +117,7 @@ export interface Conversation {
   peer_display_name?: string;
   peer_kind?: MemberKind;
   peer_runtime_state?: RuntimeState;
+  archived_at?: string;
 }
 
 export interface Task {
@@ -355,6 +356,16 @@ export const api = {
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/channels`, {
       method: "POST",
       body: JSON.stringify({ slug, kind, topic, member_ids }),
+    }),
+  listArchivedChannels: (spaceSlug: string) =>
+    request<{ conversations: Conversation[] }>(`/api/v1/spaces/${spaceSlug}/channels/archived`),
+  archiveChannel: (spaceSlug: string, convID: string) =>
+    request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/archive`, {
+      method: "POST",
+    }),
+  unarchiveChannel: (spaceSlug: string, convID: string) =>
+    request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/unarchive`, {
+      method: "POST",
     }),
   createDM: (spaceSlug: string, peer_member_id: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/dm`, {

@@ -49,7 +49,11 @@ func (s *Service) setReaction(ctx context.Context, actor domain.Member, messageI
 		if err != nil {
 			return domain.WrapError(domain.CodeInternal, "query message for reaction", err)
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, convID); err != nil {
+		c, err := canAccessConversation(ctx, tx, actor, convID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, c); err != nil {
 			return err
 		}
 

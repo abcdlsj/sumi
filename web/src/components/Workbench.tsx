@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, Hash, Inbox, Lock, Monitor, Moon, Plus, Search, Settings, Sparkles, Sun, Users } from "lucide-react";
-import { api, ownComputers, slugInput, slugify, type Member, type Space } from "../api";
+import { api, ownComputers, slugInput, slugify, type Conversation, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
 import { useTheme } from "../theme";
@@ -16,7 +16,7 @@ import { WorkbenchSkeleton } from "./Skeletons";
 import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 
-type MainView = { kind: "conversation"; convID: string } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
+type MainView = { kind: "conversation"; convID: string; archivedConv?: Conversation } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
 type Dialog = null | "channel" | "space" | "jump" | "computer" | "agent" | "pairing";
 
 const SSE_EVENTS = [
@@ -29,6 +29,7 @@ const SSE_EVENTS = [
   "agent.state_changed",
   "computer.changed",
   "conversation.created",
+  "conversation.updated",
   "member.permissions_changed",
   "conversation.members_changed",
   "space.updated",
@@ -159,7 +160,7 @@ export function Workbench({
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });
     let dropped = false;
     const invalidate = () => {
-      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
+      for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members", "archived-channels"]) void qc.invalidateQueries({ queryKey: [k, spaceSlug] });
     };
     es.onopen = () => {
       if (dropped) {
@@ -192,7 +193,12 @@ export function Workbench({
   }, []);
 
   const activeConvID = mainView.kind === "conversation" ? mainView.convID : "";
-  const activeConv = useMemo(() => boot?.conversations.find((c) => c.id === activeConvID), [boot, activeConvID]);
+  const activeConv = useMemo(
+    () =>
+      boot?.conversations.find((c) => c.id === activeConvID) ??
+      (mainView.kind === "conversation" ? mainView.archivedConv : undefined),
+    [boot, activeConvID, mainView],
+  );
 
   async function openOrCreateDM(peerMemberID: string) {
     const existing = qc
@@ -468,7 +474,16 @@ export function Workbench({
       {/* Main */}
       <main className="bg-panel flex flex-col min-w-0 min-h-0">
         <div key={viewKey(mainView)} className="h-full min-h-0 animate-fade-in">
-          {mainView.kind === "conversation" && activeConv && <ConversationView spaceSlug={spaceSlug} boot={boot} conv={activeConv} onOpenDetail={setDetail} />}
+          {mainView.kind === "conversation" && activeConv && (
+            <ConversationView
+              spaceSlug={spaceSlug}
+              boot={boot}
+              conv={activeConv}
+              onOpenDetail={setDetail}
+              onArchived={(archived) => setMainView({ kind: "conversation", convID: archived.id, archivedConv: archived })}
+              onUnarchived={(restored) => setMainView({ kind: "conversation", convID: restored.id })}
+            />
+          )}
           {mainView.kind === "inbox" && (
             <InboxView
               spaceSlug={spaceSlug}
@@ -490,6 +505,7 @@ export function Workbench({
               selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
               onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
               onConnectComputer={() => setDialog("computer")}
+              onOpenArchivedChannel={(conv) => setMainView({ kind: "conversation", convID: conv.id, archivedConv: conv })}
               theme={theme}
               onTheme={setTheme}
               onLogout={onLogout}

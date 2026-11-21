@@ -114,9 +114,12 @@ func (s *Server) registerRoutes() {
 		r.Put("/agents/{agentID}/driver", s.handleUpdateAgentDriver)
 
 		r.Get("/conversations", s.handleListConversations)
+		r.Get("/channels/archived", s.handleListArchivedChannels)
 		r.Post("/attachments", s.handleUploadAttachment)
 		r.Get("/attachments/{attachmentID}", s.handleDownloadAttachment)
 		r.Post("/channels", s.handleCreateChannel)
+		r.Post("/conversations/{convID}/archive", s.handleArchiveChannel)
+		r.Post("/conversations/{convID}/unarchive", s.handleUnarchiveChannel)
 		r.Post("/dm", s.handleCreateDM)
 		r.Get("/conversations/{convID}/messages", s.handleListMessages)
 		r.Post("/conversations/{convID}/messages", s.handleSendMessage)
@@ -738,6 +741,48 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"conversation": conv})
+}
+
+func (s *Server) handleListArchivedChannels(w http.ResponseWriter, r *http.Request) {
+	_, member, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	convs, err := s.svc.ListArchivedChannels(r.Context(), member)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": convs})
+}
+
+func (s *Server) handleArchiveChannel(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	conv, err := s.svc.ArchiveChannel(r.Context(), actor, chi.URLParam(r, "convID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
+}
+
+func (s *Server) handleUnarchiveChannel(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	conv, err := s.svc.UnarchiveChannel(r.Context(), actor, chi.URLParam(r, "convID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
 }
 
 func (s *Server) handleCreateDM(w http.ResponseWriter, r *http.Request) {

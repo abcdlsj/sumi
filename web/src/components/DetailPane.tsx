@@ -297,12 +297,13 @@ function MembersDetail({
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const conv = boot.conversations.find((c) => c.id === convID);
+  const isArchived = !conv || Boolean(conv.archived_at);
   const membersQ = useQuery({
     queryKey: ["conv-members", spaceSlug, convID],
     queryFn: () => api.listConversationMembers(spaceSlug, convID),
   });
   const me = boot.current_member;
-  const canManage = me.access_level !== "member" || (me.permissions ?? []).includes("channel.manage_members");
+  const canManage = !isArchived && (me.access_level !== "member" || (me.permissions ?? []).includes("channel.manage_members"));
   const isPrivate = conv?.kind === "private";
   const members = membersQ.data?.members ?? [];
   const memberIDs = new Set(members.map((m) => m.id));

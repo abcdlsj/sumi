@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/protocol"
@@ -149,17 +150,18 @@ type convMeta struct {
 	RootMessageID        string
 	TaskID               string
 	NextSeq              int64
+	ArchivedAt           *time.Time
 }
 
 func loadConvMeta(ctx context.Context, q queryer, convID string) (convMeta, error) {
 	var c convMeta
 	var kind string
-	var slug, parentID, rootMsgID, taskID sql.NullString
+	var slug, parentID, rootMsgID, taskID, archivedAt sql.NullString
 	err := q.QueryRowContext(ctx,
-		`SELECT id, space_id, kind, slug, parent_conversation_id, root_message_id, task_id, next_seq
+		`SELECT id, space_id, kind, slug, parent_conversation_id, root_message_id, task_id, next_seq, archived_at
 		 FROM conversations WHERE id = ?`,
 		convID,
-	).Scan(&c.ID, &c.SpaceID, &kind, &slug, &parentID, &rootMsgID, &taskID, &c.NextSeq)
+	).Scan(&c.ID, &c.SpaceID, &kind, &slug, &parentID, &rootMsgID, &taskID, &c.NextSeq, &archivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return convMeta{}, domain.NewError(domain.CodeNotFound, "conversation not found")
 	}
@@ -171,7 +173,26 @@ func loadConvMeta(ctx context.Context, q queryer, convID string) (convMeta, erro
 	c.ParentConversationID = parentID.String
 	c.RootMessageID = rootMsgID.String
 	c.TaskID = taskID.String
+	if archivedAt.Valid && archivedAt.String != "" {
+		t := store.ParseTime(archivedAt.String)
+		c.ArchivedAt = &t
+	}
 	return c, nil
+}
+
+// checkNotArchived rejects writes to an archived channel or any thread/task under it.
+func checkNotArchived(ctx context.Context, q queryer, c convMeta) error {
+	if c.ArchivedAt != nil {
+		return domain.NewError(domain.CodeConflict, "channel is archived")
+	}
+	boundary, err := resolveVisibilityBoundary(ctx, q, c)
+	if err != nil {
+		return err
+	}
+	if boundary.ArchivedAt != nil {
+		return domain.NewError(domain.CodeConflict, "channel is archived")
+	}
+	return nil
 }
 
 // resolveVisibilityBoundary returns the conversation ID that owns membership (parent for thread/task).

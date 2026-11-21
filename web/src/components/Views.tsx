@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArchiveRestore,
   AtSign,
   Bot,
   CheckCircle2,
@@ -8,6 +9,7 @@ import {
   CircleDot,
   Hash,
   Inbox,
+  Lock,
   LogOut,
   MessageSquare,
   Monitor,
@@ -19,12 +21,12 @@ import {
   Users,
 } from "lucide-react";
 import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
-import { api, formatClock, formatDay, type BootstrapData, type InboxItem, type RuntimeState, type Task, type TaskStatus } from "../api";
+import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type RuntimeState, type Task, type TaskStatus } from "../api";
 import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, Segmented, TaskStatusIcon, taskStatusLabel, useAction } from "./ui";
+import { Badge, Button, EmptyState, Segmented, TaskStatusIcon, taskStatusLabel, useAction, useToast } from "./ui";
 
 export type InboxFilter = "needs_me" | "unread" | "all";
 export type TaskFilter = "active" | "mine" | "done";
@@ -416,6 +418,90 @@ function SectionTitle({ title, body, action }: { title: string; body?: string; a
   );
 }
 
+function ArchivedChannelsSection({
+  spaceSlug,
+  canGovern,
+  onOpenChannel,
+}: {
+  spaceSlug: string;
+  canGovern: boolean;
+  onOpenChannel?: (conv: Conversation) => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const act = useAction();
+  const [busyID, setBusyID] = useState<string | null>(null);
+  const archivedQ = useQuery({
+    queryKey: ["archived-channels", spaceSlug],
+    queryFn: () => api.listArchivedChannels(spaceSlug).then((r) => r.conversations),
+  });
+  const list = archivedQ.data ?? [];
+
+  return (
+    <div>
+      <SectionTitle title="Archived channels" body="Read-only channels. Unarchive a channel to resume messaging and notifications." />
+      {archivedQ.isLoading ? (
+        <div className="rounded-[14px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
+      ) : list.length === 0 ? (
+        <div className="rounded-[14px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
+          No archived channels.
+        </div>
+      ) : (
+        <div className="rounded-[14px] border border-line bg-card divide-y divide-line overflow-hidden">
+          {list.map((c) => (
+            <div key={c.id} className="px-4 py-3 flex items-center gap-3">
+              <span className="size-8 rounded-[9px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
+                {c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />}
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpenChannel?.(c)}
+                className="min-w-0 flex-1 text-left group"
+              >
+                <div className="text-[14px] font-semibold text-fg group-hover:underline underline-offset-2 truncate">#{c.slug}</div>
+                <div className="text-[12.5px] text-fg-3 truncate">
+                  {c.kind === "private" ? "Private" : "Public"}
+                  {c.archived_at ? ` · Archived ${formatDay(c.archived_at)} ${formatClock(c.archived_at)}` : ""}
+                  {c.topic ? ` · ${c.topic}` : ""}
+                </div>
+              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {onOpenChannel && (
+                  <Button size="sm" variant="ghost" onClick={() => onOpenChannel(c)}>
+                    View
+                  </Button>
+                )}
+                {canGovern && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<ArchiveRestore />}
+                    loading={busyID === c.id && act.busy}
+                    disabled={act.busy}
+                    onClick={() => {
+                      setBusyID(c.id);
+                      void act
+                        .run(async () => {
+                          await api.unarchiveChannel(spaceSlug, c.id);
+                          toast(`Unarchived #${c.slug}`, "success");
+                          await qc.invalidateQueries({ queryKey: ["archived-channels", spaceSlug] });
+                          await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                        })
+                        .finally(() => setBusyID(null));
+                    }}
+                  >
+                    Unarchive
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminPanel({
   boot,
   tab,
@@ -426,6 +512,7 @@ export function AdminPanel({
   selectedHumanID,
   onNewAgent,
   onConnectComputer,
+  onOpenArchivedChannel,
   theme,
   onTheme,
   onLogout,
@@ -439,6 +526,7 @@ export function AdminPanel({
   selectedHumanID?: string;
   onNewAgent: () => void;
   onConnectComputer: () => void;
+  onOpenArchivedChannel?: (conv: Conversation) => void;
   theme: ThemePref;
   onTheme: (t: ThemePref) => void;
   onLogout: () => void;
@@ -599,6 +687,11 @@ export function AdminPanel({
                   ))}
                 </div>
               </div>
+              <ArchivedChannelsSection
+                spaceSlug={boot.space.slug}
+                canGovern={boot.current_member.access_level !== "member"}
+                onOpenChannel={onOpenArchivedChannel}
+              />
               <Button variant="danger" icon={<LogOut />} onClick={onLogout}>
                 Sign out
               </Button>

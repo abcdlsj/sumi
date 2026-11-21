@@ -66,9 +66,11 @@ const (
 type ActionKind string
 
 const (
-	ActionChannelCreated ActionKind = "channel_created"
-	ActionAgentCreated   ActionKind = "agent_created"
-	ActionTaskEvent      ActionKind = "task_event"
+	ActionChannelCreated    ActionKind = "channel_created"
+	ActionChannelArchived   ActionKind = "channel_archived"
+	ActionChannelUnarchived ActionKind = "channel_unarchived"
+	ActionAgentCreated      ActionKind = "agent_created"
+	ActionTaskEvent         ActionKind = "task_event"
 )
 
 type TaskStatus string
@@ -186,6 +188,7 @@ type Conversation struct {
 	TaskID               string           `json:"task_id,omitempty"`
 	NextSeq              int64            `json:"next_seq"`
 	CreatedAt            time.Time        `json:"created_at"`
+	ArchivedAt           *time.Time       `json:"archived_at,omitempty"`
 	// Viewer-specific attention projections (optional, populated for list/read responses).
 	ReadSeq         int64        `json:"read_seq"`
 	UnreadCount     int64        `json:"unread_count"`

@@ -152,6 +152,9 @@ func (s *Service) InviteToChannel(ctx context.Context, actor domain.Member, chan
 		if c.Kind != domain.ConversationPublic && c.Kind != domain.ConversationPrivate {
 			return domain.NewError(domain.CodeInvalidArgument, "can only invite to public or private channels")
 		}
+		if err := checkNotArchived(ctx, tx, c); err != nil {
+			return err
+		}
 		target, err := loadMember(ctx, tx, targetMemberID)
 		if err != nil || target.SpaceID != actor.SpaceID || target.RetiredAt != nil {
 			return domain.NewError(domain.CodeNotFound, "target member not found")
@@ -198,6 +201,9 @@ func (s *Service) RemoveFromChannel(ctx context.Context, actor domain.Member, ch
 		}
 		if c.Kind != domain.ConversationPublic && c.Kind != domain.ConversationPrivate {
 			return domain.NewError(domain.CodeInvalidArgument, "can only remove members from channels")
+		}
+		if err := checkNotArchived(ctx, tx, c); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM conversation_members WHERE conversation_id = ? AND member_id = ?`,
@@ -506,6 +512,9 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		if err != nil {
 			return err
 		}
+		if err := checkNotArchived(ctx, tx, targetMeta); err != nil {
+			return err
+		}
 		if in.IdempotencyKey != "" {
 			prev, err := replayMessageTx(ctx, tx, actor.ID, in.IdempotencyKey, requestHash)
 			if err != nil {
@@ -797,6 +806,9 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 	boundary, err := resolveVisibilityBoundary(ctx, tx, target)
 	if err != nil {
 		return nil, err
+	}
+	if target.ArchivedAt != nil || boundary.ArchivedAt != nil {
+		return nil, nil
 	}
 	mentionedSet := make(map[string]struct{}, len(mentionIDs))
 	for _, id := range mentionIDs {
@@ -1139,4 +1151,168 @@ func (s *Service) ListMessages(ctx context.Context, viewer domain.Member, in Lis
 		}
 	}
 	return MessagePage{Messages: msgs, ReadSeq: currentReadSeq, Following: following, HasMore: hasMore}, nil
+}
+
+// ArchiveChannel marks a public or private channel read-only; no messages, reactions, task changes,
+// or notifications can happen while archived.
+func (s *Service) ArchiveChannel(ctx context.Context, actor domain.Member, channelID string) (domain.Conversation, error) {
+	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
+		return domain.Conversation{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can archive channels")
+	}
+	var conv domain.Conversation
+	var events []domain.SpaceEvent
+	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		c, err := loadConvMeta(ctx, tx, channelID)
+		if err != nil {
+			return err
+		}
+		if c.SpaceID != actor.SpaceID {
+			return domain.NewError(domain.CodePermissionDenied, "conversation belongs to another space")
+		}
+		if c.Kind != domain.ConversationPublic && c.Kind != domain.ConversationPrivate {
+			return domain.NewError(domain.CodeInvalidArgument, "only public or private channels can be archived")
+		}
+		if c.ArchivedAt != nil {
+			return domain.NewError(domain.CodeConflict, "channel is already archived")
+		}
+		now := time.Now().UTC()
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE conversations SET archived_at = ? WHERE id = ?`,
+			store.FormatTime(now), c.ID,
+		); err != nil {
+			return domain.WrapError(domain.CodeInternal, "archive channel", err)
+		}
+		_, evMsg, err := insertActionMessageTx(ctx, tx, actor, c.ID, domain.ActionChannelArchived, map[string]any{
+			"channel_id": c.ID,
+			"slug":       c.Slug,
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, evMsg)
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "conversation.updated", map[string]any{
+			"conversation_id": c.ID,
+			"archived":        true,
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+
+		conv = domain.Conversation{
+			ID:         c.ID,
+			SpaceID:    c.SpaceID,
+			Kind:       c.Kind,
+			Slug:       c.Slug,
+			NextSeq:    c.NextSeq + 1,
+			ArchivedAt: &now,
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	return conv, nil
+}
+
+// UnarchiveChannel restores an archived channel so members can post and receive notifications again.
+func (s *Service) UnarchiveChannel(ctx context.Context, actor domain.Member, channelID string) (domain.Conversation, error) {
+	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
+		return domain.Conversation{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can unarchive channels")
+	}
+	var conv domain.Conversation
+	var events []domain.SpaceEvent
+	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		c, err := loadConvMeta(ctx, tx, channelID)
+		if err != nil {
+			return err
+		}
+		if c.SpaceID != actor.SpaceID {
+			return domain.NewError(domain.CodePermissionDenied, "conversation belongs to another space")
+		}
+		if c.Kind != domain.ConversationPublic && c.Kind != domain.ConversationPrivate {
+			return domain.NewError(domain.CodeInvalidArgument, "only public or private channels can be unarchived")
+		}
+		if c.ArchivedAt == nil {
+			return domain.NewError(domain.CodeConflict, "channel is not archived")
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE conversations SET archived_at = NULL WHERE id = ?`,
+			c.ID,
+		); err != nil {
+			return domain.WrapError(domain.CodeInternal, "unarchive channel", err)
+		}
+		_, evMsg, err := insertActionMessageTx(ctx, tx, actor, c.ID, domain.ActionChannelUnarchived, map[string]any{
+			"channel_id": c.ID,
+			"slug":       c.Slug,
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, evMsg)
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "conversation.updated", map[string]any{
+			"conversation_id": c.ID,
+			"archived":        false,
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+
+		conv = domain.Conversation{
+			ID:      c.ID,
+			SpaceID: c.SpaceID,
+			Kind:    c.Kind,
+			Slug:    c.Slug,
+			NextSeq: c.NextSeq + 1,
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	return conv, nil
+}
+
+// ListArchivedChannels returns archived public/private channels visible to viewer.
+func (s *Service) ListArchivedChannels(ctx context.Context, viewer domain.Member) ([]domain.Conversation, error) {
+	isAdmin := viewer.Kind == domain.MemberKindHuman && (viewer.AccessLevel == domain.AccessOwner || viewer.AccessLevel == domain.AccessAdmin)
+	rows, err := s.store.ReadDB().QueryContext(ctx,
+		`SELECT c.id, c.space_id, c.kind, COALESCE(c.slug, ''), c.topic, c.next_seq, c.created_at, c.archived_at
+		 FROM conversations c
+		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.member_id = ?
+		 WHERE c.space_id = ?
+		   AND c.kind IN ('public', 'private')
+		   AND c.archived_at IS NOT NULL
+		   AND (? = 1 OR (c.kind = 'public' AND ? = 'human') OR cm.member_id IS NOT NULL)
+		 ORDER BY c.archived_at DESC, lower(COALESCE(c.slug, '')) ASC`,
+		viewer.ID, viewer.SpaceID, boolToInt(isAdmin), string(viewer.Kind),
+	)
+	if err != nil {
+		return nil, domain.WrapError(domain.CodeInternal, "list archived channels", err)
+	}
+	defer rows.Close()
+	out := make([]domain.Conversation, 0)
+	for rows.Next() {
+		var c domain.Conversation
+		var kind, createdAt, archivedAt string
+		if err := rows.Scan(&c.ID, &c.SpaceID, &kind, &c.Slug, &c.Topic, &c.NextSeq, &createdAt, &archivedAt); err != nil {
+			return nil, domain.WrapError(domain.CodeInternal, "scan archived channel", err)
+		}
+		c.Kind = domain.ConversationKind(kind)
+		c.CreatedAt = store.ParseTime(createdAt)
+		t := store.ParseTime(archivedAt)
+		c.ArchivedAt = &t
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

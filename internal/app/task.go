@@ -44,6 +44,9 @@ func (s *Service) CreateTask(ctx context.Context, actor domain.Member, in Create
 		if err != nil {
 			return err
 		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
+			return err
+		}
 		if chMeta.Kind == domain.ConversationThread || chMeta.Kind == domain.ConversationTask {
 			return domain.NewError(domain.CodeInvalidArgument, "task channel_id must be a channel or dm")
 		}
@@ -228,7 +231,11 @@ func (s *Service) EnsureTaskConversation(ctx context.Context, actor domain.Membe
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		conv, created, err := ensureTaskConversationTx(ctx, tx, &t)
@@ -296,6 +303,7 @@ func (s *Service) ListTasks(ctx context.Context, viewer domain.Member, statusFil
 		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.member_id = ?
 		 LEFT JOIN members am ON am.id = t.assignee_member_id
 		 WHERE t.space_id = ?
+		   AND c.archived_at IS NULL
 		   AND ((c.kind = 'public' AND ? = 'human') OR cm.member_id IS NOT NULL)
 		 ORDER BY CASE t.status WHEN 'in_review' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'todo' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, t.updated_at DESC`,
 		viewer.ID, viewer.SpaceID, string(viewer.Kind),
@@ -354,7 +362,11 @@ func (s *Service) ClaimTask(ctx context.Context, actor domain.Member, taskID str
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		if t.Status == domain.TaskDone {
@@ -441,7 +453,11 @@ func (s *Service) UnclaimTask(ctx context.Context, actor domain.Member, taskID s
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		now := time.Now().UTC()
@@ -520,7 +536,11 @@ func (s *Service) AssignTask(ctx context.Context, actor domain.Member, in Assign
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		if in.ExpectedRevision > 0 && t.Revision != in.ExpectedRevision {
@@ -632,7 +652,11 @@ func (s *Service) UpdateTaskStatus(ctx context.Context, actor domain.Member, tas
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		if t.Status == status {
@@ -703,7 +727,11 @@ func (s *Service) AmendTask(ctx context.Context, actor domain.Member, in AmendTa
 		if err != nil {
 			return err
 		}
-		if _, err := canAccessConversation(ctx, tx, actor, t.ChannelID); err != nil {
+		chMeta, err := canAccessConversation(ctx, tx, actor, t.ChannelID)
+		if err != nil {
+			return err
+		}
+		if err := checkNotArchived(ctx, tx, chMeta); err != nil {
 			return err
 		}
 		if in.ExpectedRevision > 0 && t.Revision != in.ExpectedRevision {
