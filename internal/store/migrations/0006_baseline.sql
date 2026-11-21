@@ -1,11 +1,6 @@
--- Sumi SQLite baseline schema (version 6).
--- Any schema change updates this baseline directly and increments schema_meta.version.
-
-CREATE TABLE schema_meta (
-    version INTEGER PRIMARY KEY CHECK (version > 0),
-    applied_at TEXT NOT NULL
-);
-INSERT INTO schema_meta (version, applied_at) VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+-- Sumi SQLite release baseline schema (version 6).
+-- Future schema changes must be added as new numbered files in internal/store/migrations/
+-- (e.g. 0007_description.sql); never edit an already-released migration in place.
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,

@@ -26,7 +26,7 @@ Sumi 是一个 Human 与 Agent 在同一个 Space 中持续协作的平台。Age
 依赖方向固定：adapters（`server` / `computer` / `cli` / `web`）→ `app` → `domain` / `store`。上层可以有多个，下层不知道上层存在。
 
 - **单二进制**：`sumi server`、`sumi computer` 与 Agent CLI 是同一个 Go 程序；Web UI 内嵌进二进制；桌面薄壳只做托盘、开窗与托管本机 Daemon，不含业务逻辑。
-- **SQLite 单写者**：WAL 加单写连接串行化写入；schema 是单一基线并带版本号，不做迁移，版本不匹配直接拒绝启动。
+- **SQLite 单写者**：WAL 加单写连接串行化写入；schema 通过内嵌的版本化 SQL migration 顺序向前演进（每步单事务落盘并记录在 `schema_meta`），低于基线或高于当前二进制支持版本的库直接拒绝启动。
 - **单一本地根目录**：所有本地状态都在 `~/.sumi`（数据库、附件对象、Daemon 状态、桌面配置），不按版本分子目录。代码不认别的布局，也不替使用者搬数据。
 - **三认证面隔离**：Browser Cookie、Computer token、Agent driver token 互不通用，服务端只存 hash；模型凭据只下发给承载该 Agent 的 Computer，永不回给浏览器。
 - **Computer ↔ Server**：一条 WebSocket 加能力协商；唤醒是轻量通知而不是重型队列。未读始终在服务端，重连即补齐；失败按退避重试，连续失败后熔断，暂停期间不丢消息。支持经由同一连接按需只读浏览 Agent 的本地 workspace 文件（强制路径限域、绝不跟随软链或硬链、屏蔽敏感凭据文件）。

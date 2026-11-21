@@ -3,9 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,11 +16,6 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/domain"
 )
-
-//go:embed schema.sql
-var schemaSQL string
-
-const ExpectedSchemaVersion = 6
 
 const timeFormat = "2006-01-02T15:04:05.000000Z"
 
@@ -41,10 +34,11 @@ func ParseTime(s string) time.Time {
 // Store owns the SQLite connection pools with strict write serialization (MaxOpenConns=1 + mutex)
 // and concurrent WAL reads.
 type Store struct {
-	writeDB *sql.DB
-	readDB  *sql.DB
-	writeMu sync.Mutex
-	objects *ObjectStore
+	writeDB        *sql.DB
+	readDB         *sql.DB
+	writeMu        sync.Mutex
+	objects        *ObjectStore
+	tempObjectRoot string
 }
 
 // Open initializes a SQLite database at path (or ":memory:" for isolated tests).
@@ -76,6 +70,7 @@ func Open(path string) (*Store, error) {
 	readDB.SetMaxIdleConns(4)
 
 	objectRoot := filepath.Join(filepath.Dir(path), "objects")
+	tempObjectRoot := ""
 	if path == ":memory:" {
 		tmpDir, err := os.MkdirTemp("", "sumi-mem-objects-")
 		if err != nil {
@@ -84,23 +79,32 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create temp object root: %w", err)
 		}
 		objectRoot = tmpDir
+		tempObjectRoot = tmpDir
 	}
 	objects, err := newObjectStore(objectRoot)
 	if err != nil {
 		_ = writeDB.Close()
 		_ = readDB.Close()
+		if tempObjectRoot != "" {
+			_ = os.RemoveAll(tempObjectRoot)
+		}
 		return nil, err
 	}
 
-	s := &Store{writeDB: writeDB, readDB: readDB, objects: objects}
-	if err := s.initPragmasAndSchema(); err != nil {
+	s := &Store{
+		writeDB:        writeDB,
+		readDB:         readDB,
+		objects:        objects,
+		tempObjectRoot: tempObjectRoot,
+	}
+	if err := s.initPragmasAndMigrate(); err != nil {
 		_ = s.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
-func (s *Store) initPragmasAndSchema() error {
+func (s *Store) initPragmasAndMigrate() error {
 	pragmas := []string{
 		"PRAGMA foreign_keys = ON;",
 		"PRAGMA busy_timeout = 5000;",
@@ -116,26 +120,16 @@ func (s *Store) initPragmasAndSchema() error {
 		}
 	}
 
-	var tableName string
-	err := s.writeDB.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'`).Scan(&tableName)
-	if errors.Is(err, sql.ErrNoRows) {
-		if _, err := s.writeDB.Exec(schemaSQL); err != nil {
-			return fmt.Errorf("apply baseline schema: %w", err)
-		}
-		return nil
-	}
+	migrations, err := loadEmbeddedMigrations()
 	if err != nil {
-		return fmt.Errorf("check schema_meta: %w", err)
+		return err
 	}
+	return applyMigrations(s.writeDB, migrations)
+}
 
-	var version int
-	if err := s.writeDB.QueryRow(`SELECT MAX(version) FROM schema_meta`).Scan(&version); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	if version != ExpectedSchemaVersion {
-		return fmt.Errorf("unsupported schema version %d (expected %d); rebuild empty database or upgrade binary", version, ExpectedSchemaVersion)
-	}
-	return nil
+// SchemaVersion returns the highest applied migration version recorded in schema_meta.
+func (s *Store) SchemaVersion() (int, error) {
+	return readSchemaVersion(s.readDB)
 }
 
 func (s *Store) Close() error {
@@ -149,6 +143,9 @@ func (s *Store) Close() error {
 		if err := s.writeDB.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+	}
+	if s.tempObjectRoot != "" {
+		_ = os.RemoveAll(s.tempObjectRoot)
 	}
 	return firstErr
 }
