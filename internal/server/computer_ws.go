@@ -286,15 +286,8 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	specs, err := s.svc.SetComputerStatus(r.Context(), comp.ID, "online", &app.ComputerHello{
-		DaemonVersion: env.Hello.DaemonVersion,
-		ACPProviders:  env.Hello.ACPProviders,
-	})
-	if err != nil {
-		_ = wsConn.Close(websocket.StatusInternalError, "failed to mark computer online")
-		return
-	}
-
+	// Register in the hub before marking online in SQLite so concurrent CreateAgent/Wake
+	// calls that observe "online" never drop control or wake frames into a missing connection.
 	cc := &computerConn{
 		computerID:      comp.ID,
 		daemonSessionID: env.Hello.DaemonSessionID,
@@ -303,6 +296,16 @@ func (s *Server) handleComputerWS(w http.ResponseWriter, r *http.Request) {
 		sendCh:          make(chan protocol.Envelope, 64),
 	}
 	s.hub.Register(cc)
+
+	specs, err := s.svc.SetComputerStatus(r.Context(), comp.ID, "online", &app.ComputerHello{
+		DaemonVersion: env.Hello.DaemonVersion,
+		ACPProviders:  env.Hello.ACPProviders,
+	})
+	if err != nil {
+		s.hub.Unregister(cc)
+		_ = wsConn.Close(websocket.StatusInternalError, "failed to mark computer online")
+		return
+	}
 	s.logger.Info("Computer connected", "computer_id", comp.ID, "daemon_session_id", cc.daemonSessionID,
 		"protocol_version", env.Hello.ProtocolVersion, "capabilities", strings.Join(cc.capabilities, ","))
 

@@ -140,7 +140,8 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		        COALESCE(peer.display_name, ''),
 		        COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.seq > COALESCE(cs.read_seq, 0) AND m.author_member_id <> ? AND m.deleted_at IS NULL), 0) AS unread_cnt,
 		        COALESCE((SELECT COUNT(*) FROM message_mentions mm WHERE mm.conversation_id = c.id AND mm.member_id = ? AND mm.seq > COALESCE(cs.read_seq, 0)), 0) AS mention_cnt,
-		        COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.mention_all = 1 AND m.seq > COALESCE(cs.read_seq, 0) AND m.author_member_id <> ? AND m.deleted_at IS NULL), 0) AS mention_all_cnt
+		        COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.mention_all = 1 AND m.seq > COALESCE(cs.read_seq, 0) AND m.author_member_id <> ? AND m.deleted_at IS NULL), 0) AS mention_all_cnt,
+		        COALESCE(lm.display_name, ''), COALESCE(latest.body_markdown, ''), COALESCE(latest.action_kind, ''), COALESCE(latest.created_at, '')
 		 FROM conversations c
 		 LEFT JOIN conversations pc ON pc.id = c.parent_conversation_id
 		 LEFT JOIN conversation_members cm ON cm.conversation_id = COALESCE(c.parent_conversation_id, c.id) AND cm.member_id = ?
@@ -148,6 +149,9 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		 LEFT JOIN tasks t ON t.id = c.task_id
 		 LEFT JOIN conversation_members pcm ON c.kind = 'dm' AND pcm.conversation_id = c.id AND pcm.member_id <> ?
 		 LEFT JOIN members peer ON peer.id = pcm.member_id
+		 LEFT JOIN messages latest ON latest.conversation_id = c.id
+		   AND latest.seq = (SELECT MAX(m2.seq) FROM messages m2 WHERE m2.conversation_id = c.id AND m2.deleted_at IS NULL)
+		 LEFT JOIN members lm ON lm.id = latest.author_member_id
 		 WHERE c.space_id = ?
 		   AND c.archived_at IS NULL
 		   AND pc.archived_at IS NULL
@@ -166,12 +170,14 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 	items := make([]domain.InboxItem, 0)
 	for rows.Next() {
 		var convID, kindStr, slug, parentSlug, taskID, taskTitle, notifyStr, peerName string
+		var latestAuthor, latestBody, latestAction, latestAtStr string
 		var taskNumber, latestSeq, readSeq, doneSeq, unreadCnt, mentionCnt, mentionAllCnt int64
 		var followingInt int
 		if err := rows.Scan(
 			&convID, &kindStr, &slug, &parentSlug, &taskNumber, &taskID, &taskTitle,
 			&latestSeq, &readSeq, &doneSeq, &notifyStr, &followingInt, &peerName,
 			&unreadCnt, &mentionCnt, &mentionAllCnt,
+			&latestAuthor, &latestBody, &latestAction, &latestAtStr,
 		); err != nil {
 			return nil, err
 		}
@@ -211,15 +217,6 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		if filter == "needs_me" && !needsAttention {
 			continue
 		}
-
-		var latestAuthor, latestBody, latestAction, latestAtStr string
-		_ = s.store.ReadDB().QueryRowContext(ctx,
-			`SELECT m.display_name, msg.body_markdown, msg.action_kind, msg.created_at
-			 FROM messages msg JOIN members m ON m.id = msg.author_member_id
-			 WHERE msg.conversation_id = ? AND msg.deleted_at IS NULL
-			 ORDER BY msg.seq DESC LIMIT 1`,
-			convID,
-		).Scan(&latestAuthor, &latestBody, &latestAction, &latestAtStr)
 
 		preview := previewText(latestBody)
 		if preview == "" && latestAction != "" {

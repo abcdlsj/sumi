@@ -208,6 +208,12 @@ func resolveVisibilityBoundary(ctx context.Context, q queryer, c convMeta) (conv
 	return c, nil
 }
 
+// CanAccessConversation reports whether member is permitted to view convID.
+func (s *Service) CanAccessConversation(ctx context.Context, member domain.Member, convID string) bool {
+	_, err := canAccessConversation(ctx, s.store.ReadDB(), member, convID)
+	return err == nil
+}
+
 // canAccessConversation enforces visibility in one place for HTTP, CLI, and SSE.
 func canAccessConversation(ctx context.Context, q queryer, member domain.Member, convID string) (convMeta, error) {
 	c, err := loadConvMeta(ctx, q, convID)

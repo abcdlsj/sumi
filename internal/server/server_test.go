@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -208,4 +209,114 @@ func TestEndToEndHTTPComputerWSAndSSE(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 after hold, got %d", resp.StatusCode)
 	}
+}
+
+func TestSSEFiltersPrivateChannelsAndPersonalGroups(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	svc := app.NewService(st, app.NewEventHub(), nil)
+	srv := New(svc, Config{}, nil)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	ownerJar, _ := cookiejar.New(nil)
+	ownerClient := &http.Client{Jar: ownerJar}
+	resp, _ := doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/auth/register", map[string]any{
+		"email": "owner@sumi.dev", "password": "password123", "display_name": "Owner",
+	}, "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register owner status=%d", resp.StatusCode)
+	}
+	resp, spaceOut := doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/spaces", map[string]any{
+		"slug": "studio", "name": "Studio",
+	}, "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create space status=%d", resp.StatusCode)
+	}
+	spaceID := spaceOut["space"].(map[string]any)["id"].(string)
+
+	// Register a second human member and add them to the space.
+	otherJar, _ := cookiejar.New(nil)
+	otherClient := &http.Client{Jar: otherJar}
+	resp, otherUserOut := doJSON(t, otherClient, http.MethodPost, ts.URL+"/api/v1/auth/register", map[string]any{
+		"email": "other@sumi.dev", "password": "password123", "display_name": "Other",
+	}, "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register other status=%d", resp.StatusCode)
+	}
+	otherUserID := otherUserOut["user"].(map[string]any)["id"].(string)
+	if err := st.WithWriteTx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO members (id, space_id, user_id, kind, display_name, access_level, created_at) VALUES ('m-other', ?, ?, 'human', 'Other', 'member', ?)`,
+			spaceID, otherUserID, store.FormatTime(time.Now().UTC()),
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("insert other member: %v", err)
+	}
+
+	// Owner creates a private channel without Other, plus a personal channel group.
+	resp, privOut := doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/spaces/studio/channels", map[string]any{
+		"slug": "secret-room", "kind": "private",
+	}, "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create private channel status=%d", resp.StatusCode)
+	}
+	privID := privOut["conversation"].(map[string]any)["id"].(string)
+
+	_, bootOut := doJSON(t, ownerClient, http.MethodGet, ts.URL+"/api/v1/spaces/studio/bootstrap", nil, "")
+	var generalID string
+	for _, raw := range bootOut["conversations"].([]any) {
+		c := raw.(map[string]any)
+		if c["slug"] == "general" {
+			generalID = c["id"].(string)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sseReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/spaces/studio/events", nil)
+	sseResp, err := otherClient.Do(sseReq)
+	if err != nil {
+		t.Fatalf("open other SSE: %v", err)
+	}
+	defer sseResp.Body.Close()
+
+	// Owner posts to private channel, creates personal group, then posts to #general.
+	doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/spaces/studio/conversations/"+privID+"/messages", map[string]any{
+		"body_markdown": "private note",
+	}, "")
+	doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/spaces/studio/channel-groups", map[string]any{
+		"name": "Owner Private Group",
+	}, "")
+	doJSON(t, ownerClient, http.MethodPost, ts.URL+"/api/v1/spaces/studio/conversations/"+generalID+"/messages", map[string]any{
+		"body_markdown": "public hello",
+	}, "")
+
+	scanner := bufio.NewScanner(sseResp.Body)
+	var curEvent string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: ") {
+			curEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if strings.Contains(data, privID) {
+				t.Fatalf("leaked private channel event to non-member: %s %s", curEvent, data)
+			}
+			if curEvent == "channel_groups.changed" {
+				t.Fatalf("leaked personal channel_groups.changed to another member: %s", data)
+			}
+			if curEvent == "message.created" && strings.Contains(data, generalID) {
+				return
+			}
+		}
+	}
+	t.Fatalf("never received expected public channel SSE event")
 }

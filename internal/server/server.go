@@ -498,7 +498,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
-	sp, _, err := s.requireSpaceMember(r)
+	sp, viewer, err := s.requireSpaceMember(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -531,7 +531,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					if err := rows.Scan(&ev.Sequence, &ev.Kind, &ev.PayloadJSON, &createdAt); err == nil {
 						ev.SpaceID = sp.ID
 						ev.CreatedAt = store.ParseTime(createdAt)
-						writeSSEEvent(w, ev)
+						if s.canReceiveSSEEvent(r.Context(), viewer, ev) {
+							writeSSEEvent(w, ev)
+						}
 					}
 				}
 				_ = rows.Close()
@@ -550,13 +552,40 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case ev := <-ch:
-			writeSSEEvent(w, ev)
-			flusher.Flush()
+			if s.canReceiveSSEEvent(r.Context(), viewer, ev) {
+				writeSSEEvent(w, ev)
+				flusher.Flush()
+			}
 		case <-keepalive.C:
 			_, _ = fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
 	}
+}
+
+// canReceiveSSEEvent prevents private channel, foreign DM, and personal group metadata from leaking over Space SSE.
+func (s *Server) canReceiveSSEEvent(ctx context.Context, viewer domain.Member, ev domain.SpaceEvent) bool {
+	if ev.PayloadJSON == "" {
+		return true
+	}
+	var meta struct {
+		ConversationID string `json:"conversation_id"`
+		ChannelID      string `json:"channel_id"`
+		MemberID       string `json:"member_id"`
+	}
+	if err := json.Unmarshal([]byte(ev.PayloadJSON), &meta); err != nil {
+		return true
+	}
+	if ev.Kind == "channel_groups.changed" && meta.MemberID != "" {
+		return meta.MemberID == viewer.ID
+	}
+	if meta.ConversationID != "" {
+		return s.svc.CanAccessConversation(ctx, viewer, meta.ConversationID)
+	}
+	if meta.ChannelID != "" {
+		return s.svc.CanAccessConversation(ctx, viewer, meta.ChannelID)
+	}
+	return true
 }
 
 func writeSSEEvent(w http.ResponseWriter, ev domain.SpaceEvent) {
