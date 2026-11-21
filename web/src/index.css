@@ -4,18 +4,18 @@
 
 /* Theme tokens. Components only use these variables, never raw colors. */
 :root {
-  --bg: #f6f6f8;
+  --bg: #f5f5f7;
   --panel: #ffffff;
   --card: #ffffff;
-  --subtle: #f3f3f6;
-  --hover: #ededf1;
-  --press: #e4e4ea;
-  --line: #e7e7ec;
-  --line-strong: #d8d8e0;
-  --text: #17171c;
-  --text-2: #3d3d48;
-  --text-3: #6c6c78;
-  --text-4: #9d9daa;
+  --subtle: #f2f2f6;
+  --hover: #ececf1;
+  --press: #e3e3ea;
+  --line: #e6e6ec;
+  --line-strong: #d5d5de;
+  --text: #16161b;
+  --text-2: #3b3b46;
+  --text-3: #696976;
+  --text-4: #9a9aa8;
   --accent: #f0602f;
   --accent-hover: #dc5323;
   --accent-fg: #ffffff;
@@ -36,42 +36,42 @@
   --danger: #d92d2d;
   --danger-soft: #fdeded;
 
-  --nav: #f4f4f7;
-  --nav-rail: #ebebf0;
-  --nav-text-strong: #17171c;
-  --nav-text: #2b2b33;
-  --nav-text-2: #52525e;
-  --nav-text-3: #85858f;
-  --nav-hover: rgba(20, 20, 40, 0.05);
-  --nav-active: rgba(20, 20, 40, 0.09);
-  --nav-fill: rgba(20, 20, 40, 0.05);
-  --nav-fill-2: rgba(20, 20, 40, 0.09);
-  --nav-line: rgba(20, 20, 40, 0.08);
-  --nav-line-strong: rgba(20, 20, 40, 0.2);
+  --nav: #f3f3f6;
+  --nav-rail: #eaeaf0;
+  --nav-text-strong: #16161b;
+  --nav-text: #2a2a33;
+  --nav-text-2: #50505d;
+  --nav-text-3: #82828e;
+  --nav-hover: rgba(20, 20, 40, 0.055);
+  --nav-active: rgba(20, 20, 40, 0.095);
+  --nav-fill: rgba(20, 20, 40, 0.045);
+  --nav-fill-2: rgba(20, 20, 40, 0.085);
+  --nav-line: rgba(20, 20, 40, 0.085);
+  --nav-line-strong: rgba(20, 20, 40, 0.19);
   --nav-online: #0a7a52;
   --nav-busy: #9c6209;
   --nav-danger: #c62828;
 
-  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.05);
-  --shadow-md: 0 2px 8px rgba(20, 20, 30, 0.06), 0 1px 2px rgba(20, 20, 30, 0.04);
-  --shadow-lg: 0 16px 48px rgba(20, 20, 30, 0.16), 0 2px 8px rgba(20, 20, 30, 0.06);
+  --shadow-sm: 0 1px 2px rgba(15, 15, 25, 0.045);
+  --shadow-md: 0 3px 10px rgba(15, 15, 25, 0.06), 0 1px 2px rgba(15, 15, 25, 0.04);
+  --shadow-lg: 0 18px 48px rgba(15, 15, 25, 0.14), 0 2px 10px rgba(15, 15, 25, 0.06);
   --ring: 0 0 0 3px var(--accent-ring);
   color-scheme: light;
 }
 
 .dark {
-  --bg: #0e0e11;
-  --panel: #141418;
-  --card: #1a1a1f;
-  --subtle: #1d1d23;
-  --hover: #24242b;
-  --press: #2c2c34;
-  --line: #26262d;
-  --line-strong: #33333c;
-  --text: #ededf2;
-  --text-2: #c6c6d0;
-  --text-3: #8d8d9a;
-  --text-4: #62626e;
+  --bg: #0c0c0f;
+  --panel: #121216;
+  --card: #18181d;
+  --subtle: #1c1c22;
+  --hover: #23232b;
+  --press: #2b2b34;
+  --line: #25252d;
+  --line-strong: #32323c;
+  --text: #eeeef3;
+  --text-2: #c5c5d0;
+  --text-3: #8c8c9a;
+  --text-4: #60606d;
   --accent: #ff7a45;
   --accent-hover: #ff8d5e;
   --accent-fg: #ffffff;
@@ -88,25 +88,25 @@
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.13);
 
-  --nav: #111114;
-  --nav-rail: #0a0a0c;
+  --nav: #101014;
+  --nav-rail: #09090c;
   --nav-text-strong: #ffffff;
   --nav-text: #ececf1;
   --nav-text-2: #a3a3b0;
-  --nav-text-3: #73737f;
+  --nav-text-3: #72727f;
   --nav-hover: rgba(255, 255, 255, 0.06);
   --nav-active: rgba(255, 255, 255, 0.11);
-  --nav-fill: rgba(255, 255, 255, 0.06);
-  --nav-fill-2: rgba(255, 255, 255, 0.11);
-  --nav-line: rgba(255, 255, 255, 0.06);
-  --nav-line-strong: rgba(255, 255, 255, 0.2);
+  --nav-fill: rgba(255, 255, 255, 0.055);
+  --nav-fill-2: rgba(255, 255, 255, 0.105);
+  --nav-line: rgba(255, 255, 255, 0.07);
+  --nav-line-strong: rgba(255, 255, 255, 0.18);
   --nav-online: #45dfa4;
   --nav-busy: #f5c05a;
   --nav-danger: #ff8a8a;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 18px 56px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.58), 0 2px 10px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   color-scheme: dark;
 }
 
@@ -221,10 +221,10 @@
 }
 
 @theme {
-  --animate-fade-in: fade-in 180ms ease-out both;
-  --animate-rise-in: rise-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  --animate-slide-in: slide-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  --animate-pop-in: pop-in 160ms ease-out both;
+  --animate-fade-in: fade-in 140ms ease-out both;
+  --animate-rise-in: rise-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-slide-in: slide-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-pop-in: pop-in 120ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-breathe: breathe 1.6s ease-in-out infinite;
 
   @keyframes fade-in {
@@ -232,15 +232,15 @@
     to { opacity: 1; }
   }
   @keyframes rise-in {
-    from { opacity: 0; transform: translateY(6px); }
+    from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
   }
   @keyframes slide-in {
-    from { opacity: 0; transform: translateX(16px); }
+    from { opacity: 0; transform: translateX(10px); }
     to { opacity: 1; transform: none; }
   }
   @keyframes pop-in {
-    from { opacity: 0; transform: scale(0.97) translateY(4px); }
+    from { opacity: 0; transform: scale(0.985) translateY(2px); }
     to { opacity: 1; transform: none; }
   }
   @keyframes breathe {
@@ -404,7 +404,11 @@ html.desktop {
 }
 
 .scroll-thin {
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-thin:hover {
   scrollbar-color: var(--line-strong) transparent;
 }
 .scroll-thin::-webkit-scrollbar {
@@ -412,13 +416,21 @@ html.desktop {
   height: 8px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  background: transparent;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
+.scroll-thin:hover::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: content-box;
+}
 .scroll-nav {
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-nav:hover {
   scrollbar-color: var(--nav-line-strong) transparent;
 }
 

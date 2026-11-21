@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -166,6 +167,18 @@ export function AgentWorkspace({
     setFileError(null);
     void loadDir("", includeHidden, true);
   }, [member.id, includeHidden, loadDir]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   function refresh() {
     setExpanded({});
@@ -446,49 +459,54 @@ export function AgentWorkspace({
       {toolbar}
       {selectedFile ? renderFileViewer(true) : renderTreePane()}
 
-      {fullscreen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-6 animate-fade-in"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setFullscreen(false);
-          }}
-        >
-          <div className="w-full max-w-[1040px] h-[80vh] rounded-[14px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden">
-            <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <FolderOpen className="size-4 text-accent-text shrink-0" />
-                <span className="text-[14.5px] font-semibold text-fg truncate">
-                  {member.display_name} · Workspace
-                </span>
-                {rootPath && (
-                  <span className="hidden sm:inline font-mono text-[12px] text-fg-4 truncate max-w-[420px]" title={rootPath}>
-                    {rootPath}
+      {fullscreen &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${member.display_name} workspace`}
+            className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-6 animate-fade-in"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setFullscreen(false);
+            }}
+          >
+            <div className="w-full max-w-[1040px] h-[80vh] rounded-[14px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden animate-pop-in">
+              <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="size-4 text-accent-text shrink-0" />
+                  <span className="text-[14.5px] font-semibold text-fg truncate">
+                    {member.display_name} · Workspace
                   </span>
-                )}
+                  {rootPath && (
+                    <span className="hidden sm:inline font-mono text-[12px] text-fg-4 truncate max-w-[420px]" title={rootPath}>
+                      {rootPath}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton
+                    label={includeHidden ? "Hide hidden files" : "Show hidden files"}
+                    active={includeHidden}
+                    onClick={() => setIncludeHidden((v) => !v)}
+                  >
+                    {includeHidden ? <Eye /> : <EyeOff />}
+                  </IconButton>
+                  <IconButton label="Refresh workspace" onClick={refresh}>
+                    <RefreshCw />
+                  </IconButton>
+                  <IconButton label="Close" onClick={() => setFullscreen(false)}>
+                    <X />
+                  </IconButton>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <IconButton
-                  label={includeHidden ? "Hide hidden files" : "Show hidden files"}
-                  active={includeHidden}
-                  onClick={() => setIncludeHidden((v) => !v)}
-                >
-                  {includeHidden ? <Eye /> : <EyeOff />}
-                </IconButton>
-                <IconButton label="Refresh workspace" onClick={refresh}>
-                  <RefreshCw />
-                </IconButton>
-                <IconButton label="Close" onClick={() => setFullscreen(false)}>
-                  <X />
-                </IconButton>
+              <div className="flex-1 min-h-0 flex divide-x divide-line">
+                <div className="w-[280px] shrink-0 flex flex-col min-h-0 bg-panel">{renderTreePane()}</div>
+                <div className="flex-1 min-w-0 flex flex-col min-h-0">{renderFileViewer(false)}</div>
               </div>
             </div>
-            <div className="flex-1 min-h-0 flex divide-x divide-line">
-              <div className="w-[280px] shrink-0 flex flex-col min-h-0 bg-panel">{renderTreePane()}</div>
-              <div className="flex-1 min-w-0 flex flex-col min-h-0">{renderFileViewer(false)}</div>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -4,12 +4,15 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type InputHTMLAttributes,
   type ReactNode,
+  type RefObject,
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
@@ -182,7 +185,73 @@ export interface SelectOption<T extends string = string> {
   disabled?: boolean;
 }
 
-/** Custom accessible dropdown select; replaces native <select> across the UI. */
+const FOCUSABLE_SELECTOR =
+  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+const modalStack: symbol[] = [];
+
+/** Computes viewport-safe fixed coordinates for a portaled popover, flipping upward when near the bottom edge. */
+function useFloatingPosition(
+  open: boolean,
+  triggerRef: RefObject<HTMLElement | null>,
+  floatingRef: RefObject<HTMLElement | null>,
+  opts: { align?: "left" | "right"; minWidth?: number; width?: number; maxHeight?: number } = {},
+) {
+  const [style, setStyle] = useState<CSSProperties>({ position: "fixed", visibility: "hidden", top: 0, left: 0 });
+  const { align = "left", minWidth, width, maxHeight = 300 } = opts;
+
+  const update = useCallback(() => {
+    const tr = triggerRef.current;
+    if (!tr) return;
+    const rect = tr.getBoundingClientRect();
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const pad = 8;
+    const gap = 6;
+    const flRect = floatingRef.current?.getBoundingClientRect();
+    const resolvedWidth = width ?? Math.min(320, Math.max(minWidth ?? rect.width, flRect?.width ?? rect.width));
+    const estHeight = Math.min(maxHeight, flRect?.height || 240);
+
+    const spaceBelow = vh - rect.bottom - pad - gap;
+    const spaceAbove = rect.top - pad - gap;
+    const placeAbove = spaceBelow < estHeight && spaceAbove > spaceBelow;
+
+    let left = align === "right" ? rect.right - resolvedWidth : rect.left;
+    left = Math.max(pad, Math.min(left, vw - resolvedWidth - pad));
+
+    const next: CSSProperties = {
+      position: "fixed",
+      left,
+      minWidth: width ?? Math.max(rect.width, minWidth ?? 0),
+      width: width,
+      maxWidth: `min(320px, calc(100vw - ${pad * 2}px))`,
+      visibility: "visible",
+    };
+    if (placeAbove) {
+      next.bottom = Math.max(pad, vh - rect.top + gap);
+    } else {
+      next.top = Math.min(vh - pad - 48, rect.bottom + gap);
+    }
+    setStyle(next);
+  }, [triggerRef, floatingRef, align, minWidth, width, maxHeight]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    update();
+    const raf = window.requestAnimationFrame(update);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, update]);
+
+  return style;
+}
+
+/** Custom accessible portal-backed dropdown select; replaces native <select> across the UI. */
 export function Select<T extends string = string>({
   label,
   hint,
@@ -220,8 +289,10 @@ export function Select<T extends string = string>({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const selected = useMemo(() => options.find((o) => o.value === value), [options, value]);
   const filtered = useMemo(() => {
@@ -229,6 +300,8 @@ export function Select<T extends string = string>({
     if (!q) return options;
     return options.filter((o) => o.label.toLowerCase().includes(q) || (o.description ?? "").toLowerCase().includes(q));
   }, [options, query]);
+
+  const floatingStyle = useFloatingPosition(open, triggerRef, menuRef, { align, width: menuWidth, maxHeight: 300 });
 
   useEffect(() => {
     if (!open) {
@@ -248,38 +321,55 @@ export function Select<T extends string = string>({
 
   useEffect(() => {
     if (!open) return;
+    optionRefs.current[activeIdx]?.scrollIntoView?.({ block: "nearest" });
+  }, [open, activeIdx]);
+
+  useEffect(() => {
+    if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopImmediatePropagation();
         setOpen(false);
+        triggerRef.current?.focus();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
         setActiveIdx((i) => (filtered.length ? (i + 1) % filtered.length : 0));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setActiveIdx((i) => (filtered.length ? (i - 1 + filtered.length) % filtered.length : 0));
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setActiveIdx(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setActiveIdx(Math.max(0, filtered.length - 1));
       } else if (e.key === "Enter" && filtered[activeIdx] && !filtered[activeIdx].disabled) {
         e.preventDefault();
         onChange(filtered[activeIdx].value);
         setOpen(false);
+        triggerRef.current?.focus();
       }
     };
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open, filtered, activeIdx, onChange]);
 
   const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[8px]" : "h-10 px-3 text-[14px] rounded-[9px]";
 
   const trigger = (
-    <div ref={rootRef} className={`relative ${className}`}>
+    <div className={`relative ${className}`}>
       <button
+        ref={triggerRef}
         id={id}
         type="button"
         disabled={disabled}
@@ -297,64 +387,69 @@ export function Select<T extends string = string>({
         </span>
         <ChevronDown className={`size-3.5 text-fg-3 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && (
-        <div
-          role="listbox"
-          aria-label={ariaLabel ?? label ?? "Options"}
-          style={menuWidth ? { width: menuWidth } : undefined}
-          className={`absolute z-40 top-full mt-1.5 ${align === "right" ? "right-0" : "left-0"} ${
-            menuWidth ? "" : "min-w-full"
-          } max-w-[320px] bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in`}
-        >
-          {searchable && (
-            <div className="relative px-1 pb-1.5">
-              <Search className="size-3.5 text-fg-4 absolute left-3 top-[9px] pointer-events-none" />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="w-full h-8 pl-7 pr-2.5 rounded-[7px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
-              />
-            </div>
-          )}
-          <div className="max-h-[240px] overflow-y-auto scroll-thin space-y-0.5">
-            {filtered.length === 0 ? (
-              <div className="px-2.5 py-3 text-center text-[13px] text-fg-3">No matches</div>
-            ) : (
-              filtered.map((opt, idx) => {
-                const isSelected = opt.value === value;
-                const isActive = idx === activeIdx;
-                return (
-                  <button
-                    key={opt.value || "__empty__"}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    disabled={opt.disabled}
-                    onMouseEnter={() => setActiveIdx(idx)}
-                    onClick={() => {
-                      onChange(opt.value);
-                      setOpen(false);
-                    }}
-                    className={`w-full px-2.5 py-1.5 rounded-[8px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
-                      isActive ? "bg-hover" : "hover:bg-hover"
-                    }`}
-                  >
-                    {opt.icon && <span className="shrink-0 flex items-center [&>svg]:size-4">{opt.icon}</span>}
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-[13.5px] leading-5 ${isSelected ? "font-semibold text-fg" : "text-fg"}`}>{opt.label}</span>
-                      {opt.description && <span className="block truncate text-[12px] text-fg-3 leading-tight">{opt.description}</span>}
-                    </span>
-                    {opt.trailing && <span className="shrink-0 text-[11.5px] text-fg-4">{opt.trailing}</span>}
-                    <span className="size-4 shrink-0 flex items-center justify-center text-accent">{isSelected && <Check className="size-3.5" />}</span>
-                  </button>
-                );
-              })
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={ariaLabel ?? label ?? "Options"}
+            style={floatingStyle}
+            className="z-50 bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in"
+          >
+            {searchable && (
+              <div className="relative px-1 pb-1.5">
+                <Search className="size-3.5 text-fg-4 absolute left-3 top-[9px] pointer-events-none" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full h-8 pl-7 pr-2.5 rounded-[7px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+                />
+              </div>
             )}
-          </div>
-        </div>
-      )}
+            <div className="max-h-[240px] overflow-y-auto scroll-thin space-y-0.5">
+              {filtered.length === 0 ? (
+                <div className="px-2.5 py-3 text-center text-[13px] text-fg-3">No matches</div>
+              ) : (
+                filtered.map((opt, idx) => {
+                  const isSelected = opt.value === value;
+                  const isActive = idx === activeIdx;
+                  return (
+                    <button
+                      key={opt.value || "__empty__"}
+                      ref={(el) => {
+                        optionRefs.current[idx] = el;
+                      }}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      disabled={opt.disabled}
+                      onMouseEnter={() => setActiveIdx(idx)}
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                        triggerRef.current?.focus();
+                      }}
+                      className={`w-full px-2.5 py-1.5 rounded-[8px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
+                        isActive ? "bg-hover" : "hover:bg-hover"
+                      }`}
+                    >
+                      {opt.icon && <span className="shrink-0 flex items-center [&>svg]:size-4">{opt.icon}</span>}
+                      <span className="min-w-0 flex-1">
+                        <span className={`block truncate text-[13.5px] leading-5 ${isSelected ? "font-semibold text-fg" : "text-fg"}`}>{opt.label}</span>
+                        {opt.description && <span className="block truncate text-[12px] text-fg-3 leading-tight">{opt.description}</span>}
+                      </span>
+                      {opt.trailing && <span className="shrink-0 text-[11.5px] text-fg-4">{opt.trailing}</span>}
+                      <span className="size-4 shrink-0 flex items-center justify-center text-accent">{isSelected && <Check className="size-3.5" />}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 
@@ -582,17 +677,52 @@ export function Modal({
   title?: string;
   description?: ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const token = Symbol("modal");
+    modalStack.push(token);
+    const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (modalStack[modalStack.length - 1] !== token) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const idx = modalStack.indexOf(token);
+      if (idx >= 0) modalStack.splice(idx, 1);
+      if (prevFocus && document.contains(prevFocus)) prevFocus.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-start justify-center pt-[10vh] px-4">
       <div className="absolute inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={label}
@@ -681,7 +811,7 @@ export function useAction() {
   return { busy, run };
 }
 
-/** Small anchored menu; closes on outside click and Escape. */
+/** Portal-backed anchored menu; auto-flips near viewport edges and closes on outside click or Escape. */
 export function Menu({
   trigger,
   children,
@@ -694,32 +824,47 @@ export function Menu({
   width?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const triggerWrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const floatingStyle = useFloatingPosition(open, triggerWrapRef, menuRef, { align, width, maxHeight: 360 });
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerWrapRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setOpen(false);
+      }
+    };
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={triggerWrapRef} className="relative">
       {trigger(open, () => setOpen((v) => !v))}
-      {open && (
-        <div
-          role="menu"
-          style={{ width }}
-          className={`absolute z-30 top-full mt-1.5 ${align === "right" ? "right-0" : "left-0"} bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in`}
-        >
-          {children(() => setOpen(false))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={floatingStyle}
+            className="z-50 bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in max-h-[360px] overflow-y-auto scroll-thin"
+          >
+            {children(() => setOpen(false))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
