@@ -1,11 +1,11 @@
--- Sumi SQLite baseline schema (version 5).
+-- Sumi SQLite baseline schema (version 6).
 -- Any schema change updates this baseline directly and increments schema_meta.version.
 
 CREATE TABLE schema_meta (
     version INTEGER PRIMARY KEY CHECK (version > 0),
     applied_at TEXT NOT NULL
 );
-INSERT INTO schema_meta (version, applied_at) VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO schema_meta (version, applied_at) VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -243,3 +243,24 @@ CREATE TABLE events (
     created_at TEXT NOT NULL,
     PRIMARY KEY (space_id, sequence)
 );
+
+CREATE TABLE channel_groups (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    collapsed INTEGER NOT NULL DEFAULT 0 CHECK (collapsed IN (0, 1)),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_channel_groups_member ON channel_groups(space_id, member_id, position);
+
+CREATE TABLE channel_group_items (
+    group_id TEXT NOT NULL REFERENCES channel_groups(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (group_id, conversation_id),
+    UNIQUE (member_id, conversation_id)
+);
+CREATE INDEX idx_channel_group_items_member ON channel_group_items(member_id, group_id, position);

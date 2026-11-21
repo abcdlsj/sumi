@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, Hash, Inbox, Lock, Monitor, Moon, Plus, Search, Settings, Sparkles, Sun, Users } from "lucide-react";
-import { api, ownComputers, slugInput, slugify, type Conversation, type Member, type Space } from "../api";
+import { Bot, CheckCircle2, ChevronRight, FolderPlus, Hash, Inbox, Lock, Monitor, Moon, Pencil, Plus, Search, Settings, Sparkles, Sun, Trash2, Users } from "lucide-react";
+import { api, ownComputers, slugInput, slugify, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
 import { useTheme } from "../theme";
@@ -17,7 +17,7 @@ import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./u
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 
 type MainView = { kind: "conversation"; convID: string; archivedConv?: Conversation } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
-type Dialog = null | "channel" | "space" | "jump" | "computer" | "agent" | "pairing";
+type Dialog = null | "channel" | "group" | "space" | "jump" | "computer" | "agent" | "pairing";
 
 const SSE_EVENTS = [
   "message.created",
@@ -30,6 +30,7 @@ const SSE_EVENTS = [
   "computer.changed",
   "conversation.created",
   "conversation.updated",
+  "channel_groups.changed",
   "member.permissions_changed",
   "conversation.members_changed",
   "space.updated",
@@ -136,8 +137,12 @@ export function Workbench({
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
   const [dialog, setDialog] = useState<Dialog>(() => (readPendingPairing() ? "pairing" : null));
+  const [editingGroup, setEditingGroup] = useState<ChannelGroup | null>(null);
+  const [dragChannelID, setDragChannelID] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const dm = useAction();
+  const groupAct = useAction();
   const landed = useRef(false);
   const boot = bootQ.data;
   const panes = usePaneWidths();
@@ -218,6 +223,10 @@ export function Workbench({
   if (!boot) return <WorkbenchSkeleton />;
 
   const channels = boot.conversations.filter((c) => c.kind === "public" || c.kind === "private");
+  const channelGroups = boot.channel_groups ?? [];
+  const channelByID = new Map(channels.map((c) => [c.id, c]));
+  const groupedConvIDs = new Set(channelGroups.flatMap((g) => g.conversation_ids));
+  const ungroupedChannels = channels.filter((c) => !groupedConvIDs.has(c.id));
   const dms = boot.conversations.filter((c) => c.kind === "dm");
   const agents = boot.members.filter((m) => m.kind === "agent");
   const people = boot.members.filter((m) => m.kind === "human" && m.id !== boot.current_member.id);
@@ -228,6 +237,69 @@ export function Workbench({
   const needsMe = boot.inbox.filter((i) => i.needs_attention).length;
   const pairing = readPendingPairing();
   const dark = theme === "dark" || (theme === "system" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+  function handleChannelDragStart(e: DragEvent, convID: string) {
+    setDragChannelID(convID);
+    e.dataTransfer.setData("text/x-sumi-channel", convID);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleChannelDragEnd() {
+    setDragChannelID(null);
+    setDropTarget(null);
+  }
+
+  function handleGroupDragOver(e: DragEvent, targetKey: string) {
+    if (!dragChannelID && !e.dataTransfer.types.includes("text/x-sumi-channel")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dropTarget !== targetKey) setDropTarget(targetKey);
+  }
+
+  function handleGroupDrop(e: DragEvent, targetGroupID: string) {
+    e.preventDefault();
+    const convID = e.dataTransfer.getData("text/x-sumi-channel") || dragChannelID;
+    setDragChannelID(null);
+    setDropTarget(null);
+    if (!convID) return;
+    void groupAct.run(async () => {
+      await api.setConversationGroup(spaceSlug, convID, targetGroupID);
+      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+    });
+  }
+
+  function toggleGroupCollapse(g: ChannelGroup) {
+    void groupAct.run(async () => {
+      await api.updateChannelGroup(spaceSlug, g.id, { collapsed: !g.collapsed });
+      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+    });
+  }
+
+  const renderChannelRow = (c: Conversation) => {
+    const muted = c.notify_level === "mute";
+    return (
+      <div
+        key={c.id}
+        draggable
+        onDragStart={(e) => handleChannelDragStart(e, c.id)}
+        onDragEnd={handleChannelDragEnd}
+        className={dragChannelID === c.id ? "opacity-45" : ""}
+      >
+        <NavItem
+          active={activeConvID === c.id}
+          onClick={() => setMainView({ kind: "conversation", convID: c.id })}
+          icon={c.kind === "private" ? <Lock /> : <Hash />}
+          dim={muted}
+          bold={c.unread_count > 0 && !muted}
+          trailing={
+            c.mention_count > 0 ? <Count n={c.mention_count} /> : c.unread_count > 0 && !muted ? <span className="size-2 rounded-full bg-nav-fg-strong shrink-0 mr-1.5" /> : null
+          }
+        >
+          {c.slug}
+        </NavItem>
+      </div>
+    );
+  };
 
   const memberRow = (m: Member) => {
     const conv = dms.find((d) => d.peer_member_id === m.id);
@@ -376,29 +448,112 @@ export function Workbench({
             </NavItem>
           </div>
 
-          <div>
-            <SectionLabel action={<SectionAdd label="New channel" onClick={() => setDialog("channel")} />}>Channels</SectionLabel>
-            <div className="space-y-0.5">
-              {channels.map((c) => {
-                const muted = c.notify_level === "mute";
-                return (
-                  <NavItem
-                    key={c.id}
-                    active={activeConvID === c.id}
-                    onClick={() => setMainView({ kind: "conversation", convID: c.id })}
-                    icon={c.kind === "private" ? <Lock /> : <Hash />}
-                    dim={muted}
-                    bold={c.unread_count > 0 && !muted}
-                    trailing={
-                      c.mention_count > 0 ? <Count n={c.mention_count} /> : c.unread_count > 0 && !muted ? <span className="size-2 rounded-full bg-nav-fg-strong shrink-0 mr-1.5" /> : null
-                    }
+          <div
+            onDragOver={(e) => handleGroupDragOver(e, "__ungrouped__")}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === "__ungrouped__" ? null : cur));
+            }}
+            onDrop={(e) => handleGroupDrop(e, "")}
+            className={`rounded-[10px] transition-colors ${dropTarget === "__ungrouped__" ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+          >
+            <SectionLabel
+              action={
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={() => {
+                      setEditingGroup(null);
+                      setDialog("group");
+                    }}
+                    title="New channel group"
+                    aria-label="New channel group"
+                    className="size-6 rounded-[6px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
                   >
-                    {c.slug}
-                  </NavItem>
-                );
-              })}
+                    <FolderPlus className="size-3.5" />
+                  </button>
+                  <SectionAdd label="New channel" onClick={() => setDialog("channel")} />
+                </div>
+              }
+            >
+              Channels
+            </SectionLabel>
+            <div className="space-y-0.5">
+              {ungroupedChannels.map(renderChannelRow)}
+              {ungroupedChannels.length === 0 && dragChannelID && (
+                <div className="px-2 py-2 text-[12px] text-nav-fg-3 text-center rounded-[8px] border border-dashed border-nav-line-strong">
+                  Drop here to ungroup
+                </div>
+              )}
             </div>
           </div>
+
+          {channelGroups.map((g) => {
+            const items = g.conversation_ids.map((id) => channelByID.get(id)).filter((c): c is Conversation => Boolean(c));
+            const groupMentions = items.reduce((sum, c) => sum + c.mention_count, 0);
+            const groupHasUnread = items.some((c) => c.unread_count > 0 && c.notify_level !== "mute");
+            const isOver = dropTarget === g.id;
+            return (
+              <div
+                key={g.id}
+                onDragOver={(e) => handleGroupDragOver(e, g.id)}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === g.id ? null : cur));
+                }}
+                onDrop={(e) => handleGroupDrop(e, g.id)}
+                className={`rounded-[10px] transition-colors ${isOver ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+              >
+                <div className="group/grp px-2 mb-0.5 h-7 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapse(g)}
+                    aria-expanded={!g.collapsed}
+                    className="min-w-0 flex-1 flex items-center gap-1 text-left text-[12px] font-semibold uppercase tracking-[0.05em] text-nav-fg-3 hover:text-nav-fg transition-colors"
+                  >
+                    <ChevronRight className={`size-3.5 shrink-0 transition-transform duration-150 ${g.collapsed ? "" : "rotate-90"}`} />
+                    <span className="truncate">{g.name}</span>
+                    {g.collapsed && groupMentions > 0 && <Count n={groupMentions} />}
+                    {g.collapsed && groupMentions === 0 && groupHasUnread && <span className="size-1.5 rounded-full bg-nav-fg-strong shrink-0 ml-1" />}
+                  </button>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover/grp:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      title={`Rename ${g.name}`}
+                      aria-label={`Rename ${g.name}`}
+                      onClick={() => {
+                        setEditingGroup(g);
+                        setDialog("group");
+                      }}
+                      className="size-5 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+                    >
+                      <Pencil className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      title={`Delete ${g.name}`}
+                      aria-label={`Delete ${g.name}`}
+                      onClick={() =>
+                        void groupAct.run(async () => {
+                          await api.deleteChannelGroup(spaceSlug, g.id);
+                          await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                        })
+                      }
+                      className="size-5 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-danger flex items-center justify-center"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </div>
+                </div>
+                {!g.collapsed && (
+                  <div className="space-y-0.5">
+                    {items.length > 0 ? (
+                      items.map(renderChannelRow)
+                    ) : (
+                      <div className="px-2.5 py-1.5 text-[12px] text-nav-fg-3">Drag channels here</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           <div>
             <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => setDialog(myComputers.length ? "agent" : "computer")} /> : undefined}>
@@ -551,6 +706,15 @@ export function Workbench({
         onCreated={(id) => {
           setDialog(null);
           setMainView({ kind: "conversation", convID: id });
+        }}
+      />
+      <ChannelGroupDialog
+        open={dialog === "group"}
+        spaceSlug={spaceSlug}
+        group={editingGroup}
+        onClose={() => {
+          setDialog(null);
+          setEditingGroup(null);
         }}
       />
       <NewSpaceDialog
@@ -723,6 +887,61 @@ function NewChannelDialog({
           </Button>
           <Button type="submit" loading={busy} disabled={!slug}>
             Create channel
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ChannelGroupDialog({
+  open,
+  spaceSlug,
+  group,
+  onClose,
+}: {
+  open: boolean;
+  spaceSlug: string;
+  group: ChannelGroup | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const { busy, run } = useAction();
+
+  useEffect(() => {
+    if (open) setName(group?.name ?? "");
+  }, [open, group]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const clean = name.trim();
+    if (!clean) return;
+    await run(async () => {
+      if (group) await api.updateChannelGroup(spaceSlug, group.id, { name: clean });
+      else await api.createChannelGroup(spaceSlug, clean);
+      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      onClose();
+    });
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      label={group ? "Rename channel group" : "New channel group"}
+      title={group ? "Rename group" : "New channel group"}
+      description="Organize your sidebar channels into collapsible groups by dragging them in."
+      width={420}
+    >
+      <form onSubmit={submit} className="px-6 pb-6 pt-4 space-y-4">
+        <Field label="Group name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Core projects" maxLength={40} required />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={busy} disabled={!name.trim()}>
+            {group ? "Save" : "Create group"}
           </Button>
         </div>
       </form>

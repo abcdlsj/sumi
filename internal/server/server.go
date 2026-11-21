@@ -118,6 +118,10 @@ func (s *Server) registerRoutes() {
 		r.Post("/attachments", s.handleUploadAttachment)
 		r.Get("/attachments/{attachmentID}", s.handleDownloadAttachment)
 		r.Post("/channels", s.handleCreateChannel)
+		r.Post("/channel-groups", s.handleCreateChannelGroup)
+		r.Patch("/channel-groups/{groupID}", s.handleUpdateChannelGroup)
+		r.Delete("/channel-groups/{groupID}", s.handleDeleteChannelGroup)
+		r.Put("/conversations/{convID}/group", s.handleSetConversationGroup)
 		r.Post("/conversations/{convID}/archive", s.handleArchiveChannel)
 		r.Post("/conversations/{convID}/unarchive", s.handleUnarchiveChannel)
 		r.Post("/dm", s.handleCreateDM)
@@ -473,11 +477,17 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	groups, err := s.svc.ListChannelGroups(r.Context(), member)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"space":          sp,
 		"current_member": member,
 		"members":        members,
 		"conversations":  convs,
+		"channel_groups": groups,
 		"inbox":          inbox,
 		"tasks":          tasks,
 		"computers":      computers,
@@ -783,6 +793,87 @@ func (s *Server) handleUnarchiveChannel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
+}
+
+func (s *Server) handleCreateChannelGroup(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	g, err := s.svc.CreateChannelGroup(r.Context(), actor, body.Name)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"group": g})
+}
+
+func (s *Server) handleUpdateChannelGroup(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		Name      *string `json:"name"`
+		Collapsed *bool   `json:"collapsed"`
+		Position  *int    `json:"position"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	g, err := s.svc.UpdateChannelGroup(r.Context(), actor, chi.URLParam(r, "groupID"), app.UpdateChannelGroupInput{
+		Name:      body.Name,
+		Collapsed: body.Collapsed,
+		Position:  body.Position,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"group": g})
+}
+
+func (s *Server) handleDeleteChannelGroup(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.DeleteChannelGroup(r.Context(), actor, chi.URLParam(r, "groupID")); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleSetConversationGroup(w http.ResponseWriter, r *http.Request) {
+	_, actor, err := s.requireSpaceMember(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		GroupID string `json:"group_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.SetConversationGroup(r.Context(), actor, chi.URLParam(r, "convID"), body.GroupID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleCreateDM(w http.ResponseWriter, r *http.Request) {

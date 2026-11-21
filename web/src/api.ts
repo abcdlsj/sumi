@@ -219,11 +219,22 @@ export interface PairingInfo {
   expires_at: string;
 }
 
+export interface ChannelGroup {
+  id: string;
+  space_id: string;
+  name: string;
+  position: number;
+  collapsed: boolean;
+  conversation_ids: string[];
+  created_at: string;
+}
+
 export interface BootstrapData {
   space: Space;
   current_member: Member;
   members: Member[];
   conversations: Conversation[];
+  channel_groups?: ChannelGroup[];
   inbox: InboxItem[];
   tasks: Task[];
   computers: Computer[];
@@ -366,6 +377,25 @@ export const api = {
   unarchiveChannel: (spaceSlug: string, convID: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/unarchive`, {
       method: "POST",
+    }),
+  createChannelGroup: (spaceSlug: string, name: string) =>
+    request<{ group: ChannelGroup }>(`/api/v1/spaces/${spaceSlug}/channel-groups`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  updateChannelGroup: (spaceSlug: string, groupID: string, patch: { name?: string; collapsed?: boolean; position?: number }) =>
+    request<{ group: ChannelGroup }>(`/api/v1/spaces/${spaceSlug}/channel-groups/${groupID}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteChannelGroup: (spaceSlug: string, groupID: string) =>
+    request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/channel-groups/${groupID}`, {
+      method: "DELETE",
+    }),
+  setConversationGroup: (spaceSlug: string, convID: string, group_id: string) =>
+    request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/group`, {
+      method: "PUT",
+      body: JSON.stringify({ group_id }),
     }),
   createDM: (spaceSlug: string, peer_member_id: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/dm`, {

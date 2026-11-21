@@ -320,6 +320,17 @@ type SpaceEvent struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// ChannelGroup is a member-owned collapsible sidebar group for organizing channels.
+type ChannelGroup struct {
+	ID              string    `json:"id"`
+	SpaceID         string    `json:"space_id"`
+	Name            string    `json:"name"`
+	Position        int       `json:"position"`
+	Collapsed       bool      `json:"collapsed"`
+	ConversationIDs []string  `json:"conversation_ids"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 var (
 	displayNameRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,32}$`)
 	slugRe        = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
