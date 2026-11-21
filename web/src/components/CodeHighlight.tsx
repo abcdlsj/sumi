@@ -20,33 +20,33 @@ const LANG_ALIASES: Record<string, string> = {
   gql: "graphql",
 };
 
-const SUPPORTED_LANGS = new Set([
-  "bash",
-  "c",
-  "cpp",
-  "css",
-  "diff",
-  "docker",
-  "go",
-  "graphql",
-  "html",
-  "java",
-  "javascript",
-  "json",
-  "jsx",
-  "kotlin",
-  "markdown",
-  "python",
-  "ruby",
-  "rust",
-  "sql",
-  "swift",
-  "toml",
-  "tsx",
-  "typescript",
-  "xml",
-  "yaml",
-]);
+const LANG_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
+  bash: () => import("@shikijs/langs/bash"),
+  c: () => import("@shikijs/langs/c"),
+  cpp: () => import("@shikijs/langs/cpp"),
+  css: () => import("@shikijs/langs/css"),
+  diff: () => import("@shikijs/langs/diff"),
+  docker: () => import("@shikijs/langs/docker"),
+  go: () => import("@shikijs/langs/go"),
+  graphql: () => import("@shikijs/langs/graphql"),
+  html: () => import("@shikijs/langs/html"),
+  java: () => import("@shikijs/langs/java"),
+  javascript: () => import("@shikijs/langs/javascript"),
+  json: () => import("@shikijs/langs/json"),
+  jsx: () => import("@shikijs/langs/jsx"),
+  kotlin: () => import("@shikijs/langs/kotlin"),
+  markdown: () => import("@shikijs/langs/markdown"),
+  python: () => import("@shikijs/langs/python"),
+  ruby: () => import("@shikijs/langs/ruby"),
+  rust: () => import("@shikijs/langs/rust"),
+  sql: () => import("@shikijs/langs/sql"),
+  swift: () => import("@shikijs/langs/swift"),
+  toml: () => import("@shikijs/langs/toml"),
+  tsx: () => import("@shikijs/langs/tsx"),
+  typescript: () => import("@shikijs/langs/typescript"),
+  xml: () => import("@shikijs/langs/xml"),
+  yaml: () => import("@shikijs/langs/yaml"),
+};
 
 export function normalizeCodeLanguage(raw?: string | null): string {
   if (!raw) return "";
@@ -103,14 +103,11 @@ const loadingLangs = new Map<string, Promise<void>>();
 async function getHighlighter(): Promise<HighlighterLike> {
   if (!highlighterPromise) {
     highlighterPromise = (async () => {
-      const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, { bundledThemes }] = await Promise.all([
+      const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, githubLight, githubDark] = await Promise.all([
         import("shiki/core"),
         import("shiki/engine/javascript"),
-        import("shiki/themes"),
-      ]);
-      const [githubLight, githubDark] = await Promise.all([
-        bundledThemes["github-light"](),
-        bundledThemes["github-dark"](),
+        import("@shikijs/themes/github-light"),
+        import("@shikijs/themes/github-dark"),
       ]);
       return (await createHighlighterCore({
         themes: [githubLight.default, githubDark.default],
@@ -124,7 +121,8 @@ async function getHighlighter(): Promise<HighlighterLike> {
 
 async function highlightTokens(code: string, lang: string, dark: boolean): Promise<HighlightLines | null> {
   const norm = normalizeCodeLanguage(lang);
-  if (!SUPPORTED_LANGS.has(norm) || code.length > 100_000) return null;
+  const loader = LANG_LOADERS[norm];
+  if (!loader || code.length > 100_000) return null;
 
   const theme = dark ? "github-dark" : "github-light";
   const key = `${theme}\0${norm}\0${code}`;
@@ -135,12 +133,7 @@ async function highlightTokens(code: string, lang: string, dark: boolean): Promi
   if (!hl.getLoadedLanguages().includes(norm)) {
     let pending = loadingLangs.get(norm);
     if (!pending) {
-      pending = import("shiki/langs").then(async ({ bundledLanguages }) => {
-        const loader = (bundledLanguages as Record<string, (() => Promise<{ default: unknown }>) | undefined>)[norm];
-        if (!loader) return;
-        const mod = await loader();
-        await hl.loadLanguage(mod.default);
-      });
+      pending = loader().then((mod) => hl.loadLanguage(mod.default));
       loadingLangs.set(norm, pending);
     }
     try {
@@ -180,7 +173,7 @@ function useHighlightedLines(code: string, lang: string, enabled: boolean): High
   });
 
   useEffect(() => {
-    if (!enabled || !SUPPORTED_LANGS.has(norm)) return;
+    if (!enabled || !LANG_LOADERS[norm]) return;
     const hit = cacheGet(cacheKey);
     if (hit) {
       setState({ key: cacheKey, lines: hit });
