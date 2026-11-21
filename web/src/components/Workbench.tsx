@@ -13,7 +13,7 @@ import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
-import { Button, Field, Modal, Segmented, useAction } from "./ui";
+import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 
 type MainView = { kind: "conversation"; convID: string } | { kind: "inbox" } | { kind: "tasks" } | { kind: "admin"; tab: AdminTab };
@@ -529,6 +529,8 @@ export function Workbench({
       <NewChannelDialog
         open={dialog === "channel"}
         spaceSlug={spaceSlug}
+        members={boot.members}
+        currentMemberID={boot.current_member.id}
         onClose={() => setDialog(null)}
         onCreated={(id) => {
           setDialog(null);
@@ -618,31 +620,55 @@ function SetupLine({ done, children }: { done: boolean; children: ReactNode }) {
   );
 }
 
-function NewChannelDialog({ open, spaceSlug, onClose, onCreated }: { open: boolean; spaceSlug: string; onClose: () => void; onCreated: (convID: string) => void }) {
+function NewChannelDialog({
+  open,
+  spaceSlug,
+  members,
+  currentMemberID,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  spaceSlug: string;
+  members: Member[];
+  currentMemberID: string;
+  onClose: () => void;
+  onCreated: (convID: string) => void;
+}) {
   const qc = useQueryClient();
   const [slug, setSlug] = useState("");
   const [topic, setTopic] = useState("");
   const [kind, setKind] = useState<"public" | "private">("public");
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const { busy, run } = useAction();
   useEffect(() => {
     if (open) {
       setSlug("");
       setTopic("");
       setKind("public");
+      setSelectedMembers([]);
     }
   }, [open]);
+
+  const candidates = useMemo(
+    () =>
+      members
+        .filter((m) => m.id !== currentMemberID)
+        .sort((a, b) => (a.kind === b.kind ? a.display_name.localeCompare(b.display_name) : a.kind === "agent" ? -1 : 1)),
+    [members, currentMemberID],
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      const r = await api.createChannel(spaceSlug, slugify(slug), kind, topic.trim());
+      const r = await api.createChannel(spaceSlug, slugify(slug), kind, topic.trim(), selectedMembers);
       await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
       onCreated(r.conversation.id);
     });
   }
 
   return (
-    <Modal open={open} onClose={onClose} label="New channel" title="New channel" description="Channels are where people and agents work in the open.">
+    <Modal open={open} onClose={onClose} label="New channel" title="New channel" description="Start with only the agents and people you invite; you can add more anytime.">
       <form onSubmit={submit} className="px-6 pb-6 pt-4 space-y-4">
         <Field label="Name" autoFocus leading={<Hash />} value={slug} onChange={(e) => setSlug(slugInput(e.target.value))} placeholder="design-review" required />
         <Field label="Topic" optional value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What is this channel about?" />
@@ -658,6 +684,23 @@ function NewChannelDialog({ open, spaceSlug, onClose, onCreated }: { open: boole
             ]}
           />
         </div>
+        {candidates.length > 0 && (
+          <MultiSelectList
+            label={selectedMembers.length > 0 ? `Initial members (${selectedMembers.length})` : "Initial members"}
+            optional
+            hint="Leave empty to start alone. Agents only see and wake in channels they are added to."
+            values={selectedMembers}
+            onChange={setSelectedMembers}
+            searchPlaceholder="Filter agents and people…"
+            options={candidates.map((m) => ({
+              value: m.id,
+              label: m.display_name,
+              description: m.kind === "agent" ? (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() : undefined,
+              icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.kind === "agent" ? m.agent?.runtime_state : undefined} />,
+              trailing: m.kind === "agent" ? "Agent" : m.access_level,
+            }))}
+          />
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

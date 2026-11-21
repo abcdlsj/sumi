@@ -195,7 +195,7 @@ func canAccessConversation(ctx context.Context, q queryer, member domain.Member,
 	if err != nil {
 		return convMeta{}, err
 	}
-	if boundary.Kind == domain.ConversationPublic {
+	if boundary.Kind == domain.ConversationPublic && member.Kind == domain.MemberKindHuman {
 		return c, nil
 	}
 	var count int

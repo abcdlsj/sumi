@@ -296,9 +296,9 @@ func (s *Service) ListTasks(ctx context.Context, viewer domain.Member, statusFil
 		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.member_id = ?
 		 LEFT JOIN members am ON am.id = t.assignee_member_id
 		 WHERE t.space_id = ?
-		   AND (c.kind = 'public' OR cm.member_id IS NOT NULL)
+		   AND ((c.kind = 'public' AND ? = 'human') OR cm.member_id IS NOT NULL)
 		 ORDER BY CASE t.status WHEN 'in_review' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'todo' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, t.updated_at DESC`,
-		viewer.ID, viewer.SpaceID,
+		viewer.ID, viewer.SpaceID, string(viewer.Kind),
 	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "list tasks", err)

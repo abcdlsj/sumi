@@ -111,10 +111,6 @@ func TestBindAttachmentsRejectsForeignUploader(t *testing.T) {
 	svc, _, _, owner, comp := setupTestService(t)
 	ctx := context.Background()
 
-	conv, err := svc.CreateChannel(ctx, owner, CreateChannelInput{Slug: "shared", Kind: domain.ConversationPublic})
-	if err != nil {
-		t.Fatalf("create channel: %v", err)
-	}
 	agent, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
 		DisplayName: "LinAttach",
 		RoleText:    "helper",
@@ -123,6 +119,14 @@ func TestBindAttachmentsRejectsForeignUploader(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
+	}
+	conv, err := svc.CreateChannel(ctx, owner, CreateChannelInput{
+		Slug:      "shared",
+		Kind:      domain.ConversationPublic,
+		MemberIDs: []string{agent.ID},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
 	}
 	att, err := svc.UploadAttachment(ctx, owner, "secret.txt", "text/plain", strings.NewReader("owner bytes"))
 	if err != nil {

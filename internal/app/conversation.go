@@ -223,9 +223,8 @@ func (s *Service) RemoveFromChannel(ctx context.Context, actor domain.Member, ch
 	return nil
 }
 
-// ListConversationMembers lists who can read the conversation: every member of the Space for a
-// public channel, the explicit member boundary for private channels and DMs. Threads and tasks
-// inherit their parent's boundary.
+// ListConversationMembers lists explicit members of the conversation. Threads and tasks inherit
+// their parent's membership roster.
 func (s *Service) ListConversationMembers(ctx context.Context, viewer domain.Member, convID string) ([]domain.Member, error) {
 	c, err := canAccessConversation(ctx, s.store.ReadDB(), viewer, convID)
 	if err != nil {
@@ -238,10 +237,10 @@ func (s *Service) ListConversationMembers(ctx context.Context, viewer domain.Mem
 	rows, err := s.store.ReadDB().QueryContext(ctx,
 		`SELECT m.id, m.space_id, m.kind, m.display_name, m.access_level
 		 FROM members m
+		 JOIN conversation_members cm ON cm.conversation_id = ? AND cm.member_id = m.id
 		 WHERE m.space_id = ? AND m.retired_at IS NULL
-		   AND (? = 'public' OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = ? AND cm.member_id = m.id))
 		 ORDER BY m.kind ASC, lower(m.display_name) ASC`,
-		boundary.SpaceID, string(boundary.Kind), boundary.ID,
+		boundary.ID, boundary.SpaceID,
 	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "list conversation members", err)
@@ -366,11 +365,11 @@ func (s *Service) ListConversations(ctx context.Context, viewer domain.Member) (
 		 WHERE c.space_id = ?
 		   AND c.archived_at IS NULL
 		   AND (
-		       c.kind = 'public'
-		       OR (c.kind IN ('private', 'dm') AND cm.member_id IS NOT NULL)
+		       (c.kind = 'public' AND ? = 'human')
+		       OR (c.kind IN ('public', 'private', 'dm') AND cm.member_id IS NOT NULL)
 		   )
 		 ORDER BY CASE c.kind WHEN 'public' THEN 0 WHEN 'private' THEN 1 ELSE 2 END, lower(COALESCE(c.slug, peer.display_name, '')) ASC`,
-		viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID,
+		viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID, string(viewer.Kind),
 	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "list conversations", err)
@@ -581,6 +580,16 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 				return err
 			}
 			msg.Attachments = loadBoundAttachmentsTx(ctx, tx, msg.ID)
+		}
+
+		// A human posting in a public channel joins its explicit member roster.
+		if actor.Kind == domain.MemberKindHuman {
+			if boundary, berr := resolveVisibilityBoundary(ctx, tx, targetMeta); berr == nil && boundary.Kind == domain.ConversationPublic {
+				_, _ = tx.ExecContext(ctx,
+					`INSERT OR IGNORE INTO conversation_members (conversation_id, space_id, member_id, joined_at) VALUES (?, ?, ?, ?)`,
+					boundary.ID, actor.SpaceID, actor.ID, store.FormatTime(time.Now().UTC()),
+				)
+			}
 		}
 
 		// Author has seen up to their own message; auto-follow thread/task on reply.
@@ -794,30 +803,17 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 		mentionedSet[id] = struct{}{}
 	}
 
-	// Candidate agents that can access this conversation and have an online computer.
-	var rows *sql.Rows
-	if boundary.Kind == domain.ConversationPublic {
-		rows, err = tx.QueryContext(ctx,
-			`SELECT a.member_id, COALESCE(a.computer_id, ''), COALESCE(cs.notify_level, 'mentions'), COALESCE(cs.following, 0)
-			 FROM agents a
-			 JOIN members m ON m.id = a.member_id
-			 JOIN computers c ON c.id = a.computer_id AND c.connection_status = 'online'
-			 LEFT JOIN conversation_states cs ON cs.conversation_id = ? AND cs.member_id = a.member_id
-			 WHERE a.space_id = ? AND m.retired_at IS NULL AND a.member_id <> ?`,
-			target.ID, target.SpaceID, authorID,
-		)
-	} else {
-		rows, err = tx.QueryContext(ctx,
-			`SELECT a.member_id, COALESCE(a.computer_id, ''), COALESCE(cs.notify_level, 'mentions'), COALESCE(cs.following, 0)
-			 FROM agents a
-			 JOIN members m ON m.id = a.member_id
-			 JOIN conversation_members cm ON cm.conversation_id = ? AND cm.member_id = a.member_id
-			 JOIN computers c ON c.id = a.computer_id AND c.connection_status = 'online'
-			 LEFT JOIN conversation_states cs ON cs.conversation_id = ? AND cs.member_id = a.member_id
-			 WHERE a.space_id = ? AND m.retired_at IS NULL AND a.member_id <> ?`,
-			boundary.ID, target.ID, target.SpaceID, authorID,
-		)
-	}
+	// Candidate agents that are explicit members of this conversation boundary and have an online computer.
+	rows, err := tx.QueryContext(ctx,
+		`SELECT a.member_id, COALESCE(a.computer_id, ''), COALESCE(cs.notify_level, 'mentions'), COALESCE(cs.following, 0)
+		 FROM agents a
+		 JOIN members m ON m.id = a.member_id
+		 JOIN conversation_members cm ON cm.conversation_id = ? AND cm.member_id = a.member_id
+		 JOIN computers c ON c.id = a.computer_id AND c.connection_status = 'online'
+		 LEFT JOIN conversation_states cs ON cs.conversation_id = ? AND cs.member_id = a.member_id
+		 WHERE a.space_id = ? AND m.retired_at IS NULL AND a.member_id <> ?`,
+		boundary.ID, target.ID, target.SpaceID, authorID,
+	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "query wake agents", err)
 	}

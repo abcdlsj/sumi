@@ -8,6 +8,8 @@ Sumi 是一个 Human 与 Agent 在同一个 Space 中持续协作的平台。Age
 
 - **Space 与 Member**：Space 是协作边界。Human 与 Agent 是同一个 `Member` 模型的两种 kind，共享 Display Name、权限与注意力状态——平权体现在结构上，不靠特判。
 - **Conversation 是唯一的对话原语**：Channel、DM、Thread、Task 讨论流都是 `Conversation`；消息、附件、Reaction、Mention、已读、关注与 UI 渲染只有一套实现。出现"在哪说话"的新概念时，先问它是不是 Conversation。
+- **显式频道成员**：新建频道默认只包含创建者与显式选择的初始成员，不会默认拉入所有 Agent；后续 Agent 必须单独邀请进群才可见、可读写与被唤醒。Public 频道允许空间内 Human 浏览并加入，Private 频道对 Human 同样按显式成员隔离。
+- **频道归档与分组**：Channel 可归档（Archive），归档后 Human 与 Agent 均不可写入（发消息、Reaction、Task 变更），也不会产生唤醒或 Inbox 通知，可在设置页单独查看并恢复（Unarchive）；成员可在侧边栏自定义可折叠分组并将频道拖入管理。
 - **Task 是纯协作工作项**：不绑定执行会话、不绑定队列；Human 与 Agent 用同一套 `claim` / `assign` / `amend`，状态只由成员显式切换，系统永不自动推进。每个 Task 有懒创建的独立讨论流，避免主频道噪音污染工作上下文。
 - **可见性不等于打扰**：能读到不意味着要被叫醒。默认只有 DM、`@mention`、followed 的 Thread/Task 新消息、assign 给自己四类事件构成唤醒信号，其余只进未读水位。
 - **单一已读真值**：已读水位只存在服务端，前端不做孤立的未读推断，Agent 也没有另外一份队列副本。
@@ -27,7 +29,7 @@ Sumi 是一个 Human 与 Agent 在同一个 Space 中持续协作的平台。Age
 - **SQLite 单写者**：WAL 加单写连接串行化写入；schema 是单一基线并带版本号，不做迁移，版本不匹配直接拒绝启动。
 - **单一本地根目录**：所有本地状态都在 `~/.sumi`（数据库、附件对象、Daemon 状态、桌面配置），不按版本分子目录。代码不认别的布局，也不替使用者搬数据。
 - **三认证面隔离**：Browser Cookie、Computer token、Agent driver token 互不通用，服务端只存 hash；模型凭据只下发给承载该 Agent 的 Computer，永不回给浏览器。
-- **Computer ↔ Server**：一条 WebSocket 加能力协商；唤醒是轻量通知而不是重型队列。未读始终在服务端，重连即补齐；失败按退避重试，连续失败后熔断，暂停期间不丢消息。
+- **Computer ↔ Server**：一条 WebSocket 加能力协商；唤醒是轻量通知而不是重型队列。未读始终在服务端，重连即补齐；失败按退避重试，连续失败后熔断，暂停期间不丢消息。支持经由同一连接按需只读浏览 Agent 的本地 workspace 文件（强制路径限域、绝不跟随软链或硬链、屏蔽敏感凭据文件）。
 - **Agent 隔离**：每个 Agent 有独立 Agent Home、独立 driver token 与 capability socket，同机 Agent 互相读不到目录与对话；外部 coding agent（ACP）跑在按 provider 隔离的配置目录里，不继承宿主的 skills / hooks / 会话。隔离只带入跑得起来所需的东西：宿主凭据与模型目录软链，模型与 provider 偏好按 Agent 覆盖，另有按 Agent 显式点名的 provider 插件（`driver_config.pi_packages`，仅 `npm:` 规格）——不点名就不加载任何宿主扩展。Runtime Session 只在 provider 与模型未变时才能被恢复：换了凭据就重开，不拿旧会话假装续上。provider 与模型怎么选以隔离目录的 pi settings 为准（pi 不认 `PI_PROVIDER` 这类环境覆盖），ACP 启动命令（含自定义 command）只负责把凭据带进去。
 - **失败要可见**：错误以稳定错误码加有界描述上报；日志、错误与协议帧都不带消息正文、prompt、memory 内容与 secret。
 

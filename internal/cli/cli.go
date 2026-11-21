@@ -609,6 +609,7 @@ func Run(args []string, stdout io.Writer) int {
 	// Channel subcommands
 	chCmd := &cobra.Command{Use: "channel", Short: "Manage channels"}
 	var chSlug, chKind, chTopic, chSrcConv string
+	var chMembers []string
 	chCreateCmd := &cobra.Command{
 		Use: "create",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -624,6 +625,7 @@ func Run(args []string, stdout io.Writer) int {
 				"slug":                   chSlug,
 				"kind":                   chKind,
 				"topic":                  chTopic,
+				"member_ids":             chMembers,
 				"source_conversation_id": sourceConv,
 			})
 		},
@@ -631,12 +633,13 @@ func Run(args []string, stdout io.Writer) int {
 	chCreateCmd.Flags().StringVar(&chSlug, "slug", "", "channel slug")
 	chCreateCmd.Flags().StringVar(&chKind, "kind", "public", "public|private")
 	chCreateCmd.Flags().StringVar(&chTopic, "topic", "", "topic")
+	chCreateCmd.Flags().StringSliceVar(&chMembers, "member", nil, "initial member ids to add (repeatable or comma-separated)")
 	chCreateCmd.Flags().StringVar(&chSrcConv, "source-conversation", "", "optional conversation id")
 	chCmd.AddCommand(chCreateCmd)
 
 	chCmd.AddCommand(&cobra.Command{
 		Use:   "members <target>",
-		Short: "List who can read a channel",
+		Short: "List who is in a channel",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, a []string) error {
 			convID, err := resolveConv(a[0])
@@ -648,7 +651,7 @@ func Run(args []string, stdout io.Writer) int {
 	})
 	chCmd.AddCommand(&cobra.Command{
 		Use:   "invite <target> <member_id>",
-		Short: "Add a member to a private channel (needs channel.manage_members)",
+		Short: "Add a member to a channel (needs channel.manage_members)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, a []string) error {
 			convID, err := resolveConv(a[0])

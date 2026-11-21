@@ -351,10 +351,10 @@ export const api = {
     }),
   listInbox: (spaceSlug: string, filter: "needs_me" | "unread" | "all") =>
     request<{ items: InboxItem[] }>(`/api/v1/spaces/${spaceSlug}/inbox?filter=${filter}`),
-  createChannel: (spaceSlug: string, slug: string, kind: "public" | "private", topic: string) =>
+  createChannel: (spaceSlug: string, slug: string, kind: "public" | "private", topic: string, member_ids?: string[]) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/channels`, {
       method: "POST",
-      body: JSON.stringify({ slug, kind, topic }),
+      body: JSON.stringify({ slug, kind, topic, member_ids }),
     }),
   createDM: (spaceSlug: string, peer_member_id: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/dm`, {

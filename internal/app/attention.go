@@ -150,12 +150,13 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		 LEFT JOIN members peer ON peer.id = pcm.member_id
 		 WHERE c.space_id = ?
 		   AND c.archived_at IS NULL
+		   AND pc.archived_at IS NULL
 		   AND c.next_seq > 1
 		   AND (
-		       COALESCE(pc.kind, c.kind) = 'public'
+		       (COALESCE(pc.kind, c.kind) = 'public' AND ? = 'human')
 		       OR cm.member_id IS NOT NULL
 		   )`,
-		viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID,
+		viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID, string(viewer.Kind),
 	)
 	if err != nil {
 		return nil, domain.WrapError(domain.CodeInternal, "list inbox", err)

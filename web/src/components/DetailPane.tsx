@@ -318,7 +318,7 @@ function MembersDetail({
       <PaneHeader
         onClose={onClose}
         actions={
-          isPrivate && canManage ? (
+          canManage ? (
             <Button size="sm" variant={adding ? "secondary" : "soft"} icon={<UserPlus />} onClick={() => setAdding((v) => !v)}>
               Add
             </Button>
@@ -369,7 +369,9 @@ function MembersDetail({
       )}
       <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-3">
         {!isPrivate && (
-          <p className="px-2 pb-3 text-[13px] text-fg-3 leading-snug">Public channel: everyone in the space can read and join. Make a private channel to choose who is in it.</p>
+          <p className="px-2 pb-3 text-[13px] text-fg-3 leading-snug">
+            Public channel: people in the space can browse and join. Add agents explicitly to include them here.
+          </p>
         )}
         {membersQ.isLoading ? (
           <div className="space-y-1">
@@ -396,14 +398,14 @@ function MembersDetail({
                     {self && <Badge>You</Badge>}
                   </button>
                   <span className="text-[12px] text-fg-4 group-hover:hidden">{full.kind === "agent" ? "Agent" : full.access_level}</span>
-                  {isPrivate && (canManage || self) && (
+                  {(canManage || self) && (
                     <button
                       onClick={() =>
                         void act.run(async () => {
                           await api.removeFromChannel(spaceSlug, convID, m.id);
                           toast(self ? `You left #${conv?.slug}` : `Removed ${full.display_name}`, "success");
                           refresh();
-                          if (self) onClose();
+                          if (self && isPrivate) onClose();
                         })
                       }
                       className="hidden group-hover:inline-flex h-7 px-2 rounded-[7px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft items-center"
