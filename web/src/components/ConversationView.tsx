@@ -110,10 +110,12 @@ function AgentStatusLine({
 
 function DayDivider({ iso }: { iso: string }) {
   return (
-    <div className="sticky top-0 z-10 py-2 flex justify-center pointer-events-none">
-      <span className="h-6 px-3 rounded-full bg-panel/90 backdrop-blur border border-line text-[12px] font-medium text-fg-3 inline-flex items-center shadow-sm">
+    <div className="sticky top-0 z-10 px-6 py-2.5 flex items-center gap-3 pointer-events-none">
+      <span className="flex-1 h-px bg-line/80" />
+      <span className="h-6 px-3 rounded-full bg-panel/95 backdrop-blur border border-line text-[11.5px] font-medium text-fg-3 inline-flex items-center shadow-sm">
         {formatDay(iso)}
       </span>
+      <span className="flex-1 h-px bg-line/80" />
     </div>
   );
 }
@@ -393,13 +395,13 @@ export function ConversationView({
                       </div>
                     ) : (
                       <article
-                        className={`relative px-6 ${grouped ? "py-0.5" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
-                          replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/70"
+                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3.5 pb-1"} flex items-start gap-3.5 group transition-colors duration-100 ${
+                          replyingTo === m.id ? "bg-accent-soft" : "hover:bg-subtle/60"
                         }`}
                       >
                         <div className="w-8 shrink-0">
                           {grouped ? (
-                            <span className="block pt-[3px] text-right tabular text-[11.5px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
                               {formatClock(m.created_at)}
                             </span>
                           ) : (
@@ -418,7 +420,7 @@ export function ConversationView({
                             </button>
                           )}
                         </div>
-                        <div className="min-w-0 flex-1 max-w-[760px]">
+                        <div className="min-w-0 flex-1 max-w-[740px]">
                           {!grouped && (
                             <div className="flex items-center gap-2 h-5">
                               <button
@@ -428,10 +430,15 @@ export function ConversationView({
                               >
                                 {m.author_display_name}
                               </button>
+                              {m.author_kind === "agent" && (
+                                <span className="h-[18px] px-1.5 rounded-[5px] bg-subtle border border-line text-[10.5px] font-medium text-fg-3 inline-flex items-center">
+                                  Agent
+                                </span>
+                              )}
                               <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>
                           )}
-                          <div className={`${grouped ? "" : "mt-1"} text-[14px] leading-[1.6] text-fg md`}>
+                          <div className={`${grouped ? "" : "mt-1"} text-[14.5px] leading-[1.65] text-fg md`}>
                             <MessageBody
                               body={m.body_markdown}
                               members={boot.members}

@@ -427,7 +427,7 @@ html.desktop {
   overflow-wrap: anywhere;
 }
 .md > * + * {
-  margin-top: 0.5em;
+  margin-top: 0.6em;
 }
 .md a {
   color: var(--accent-text);
@@ -440,43 +440,56 @@ html.desktop {
 }
 .md strong {
   font-weight: 600;
+  color: var(--text);
 }
 .md ul {
   list-style: disc;
-  padding-left: 1.3em;
+  padding-left: 1.4em;
 }
 .md ol {
   list-style: decimal;
-  padding-left: 1.3em;
+  padding-left: 1.4em;
 }
 .md li + li {
-  margin-top: 0.2em;
+  margin-top: 0.25em;
+}
+.md li > ul,
+.md li > ol {
+  margin-top: 0.25em;
+}
+.md input[type="checkbox"] {
+  margin-right: 0.45em;
+  accent-color: var(--accent);
+  vertical-align: middle;
 }
 .md code {
   font-family: var(--font-mono);
-  font-size: 0.86em;
-  padding: 0.12em 0.4em;
+  font-size: 0.85em;
+  padding: 0.14em 0.42em;
   border-radius: 5px;
   background: var(--subtle);
   border: 1px solid var(--line);
 }
 .md pre {
-  padding: 0.75em 0.9em;
-  border-radius: 8px;
+  padding: 0.85em 1em;
+  border-radius: 10px;
   background: var(--subtle);
   border: 1px solid var(--line);
   overflow-x: auto;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 .md pre code {
   padding: 0;
   border: 0;
   background: transparent;
+  font-size: inherit;
 }
 .md blockquote {
-  padding-left: 0.85em;
+  padding: 0.45em 0.9em;
   border-left: 3px solid var(--line-strong);
+  border-radius: 0 7px 7px 0;
+  background: color-mix(in srgb, var(--subtle) 70%, transparent);
   color: var(--text-2);
 }
 .md h1,
@@ -484,22 +497,59 @@ html.desktop {
 .md h3,
 .md h4 {
   font-weight: 600;
-  font-size: 1.05em;
+  color: var(--text);
+  line-height: 1.35;
+}
+.md h1 {
+  font-size: 1.2em;
+  margin-top: 0.95em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--line);
+}
+.md h2 {
+  font-size: 1.12em;
+  margin-top: 0.85em;
+}
+.md h3 {
+  font-size: 1.04em;
+  margin-top: 0.7em;
+}
+.md h4 {
+  font-size: 0.98em;
+  margin-top: 0.6em;
+}
+.md > h1:first-child,
+.md > h2:first-child,
+.md > h3:first-child,
+.md > h4:first-child {
+  margin-top: 0;
 }
 .md table {
+  width: 100%;
   border-collapse: collapse;
-  font-size: 0.93em;
+  font-size: 0.92em;
 }
 .md th,
 .md td {
-  border: 1px solid var(--line);
-  padding: 0.3em 0.65em;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+.md th:last-child,
+.md td:last-child {
+  border-right: 0;
+}
+.md tr:last-child td {
+  border-bottom: 0;
 }
 .md th {
   background: var(--subtle);
   font-weight: 600;
+  white-space: nowrap;
 }
 .md hr {
+  margin: 0.9em 0;
   border-color: var(--line);
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { isValidElement, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -103,9 +103,16 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
   };
 }
 
+function codeLanguage(children?: ReactNode): string {
+  if (!isValidElement<{ className?: string }>(children)) return "";
+  const m = children.props.className?.match(/language-([A-Za-z0-9_+-]+)/);
+  return m ? m[1] : "";
+}
+
 function CodeBlock({ children }: { children?: ReactNode }) {
   const preRef = useRef<HTMLPreElement | null>(null);
   const [copied, setCopied] = useState(false);
+  const lang = codeLanguage(children);
 
   function copy() {
     const text = preRef.current?.textContent ?? "";
@@ -117,18 +124,25 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   }
 
   return (
-    <div className="relative group/code my-1.5">
+    <div className="relative group/code my-2">
       <pre ref={preRef}>{children}</pre>
-      <button
-        type="button"
-        onClick={copy}
-        aria-label={copied ? "Copied code" : "Copy code"}
-        title={copied ? "Copied" : "Copy"}
-        className="absolute top-2 right-2 h-7 px-2 rounded-[7px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
-      >
-        {copied ? <Check className="size-3.5 text-work" /> : <Copy className="size-3.5" />}
-        <span>{copied ? "Copied" : "Copy"}</span>
-      </button>
+      <div className="absolute top-2 right-2 flex items-center gap-1.5">
+        {lang && (
+          <span className="h-6 px-1.5 rounded-[6px] bg-card/80 border border-line font-mono text-[11px] text-fg-4 inline-flex items-center select-none">
+            {lang}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={copied ? "Copied code" : "Copy code"}
+          title={copied ? "Copied" : "Copy"}
+          className="h-7 px-2 rounded-[7px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
+        >
+          {copied ? <Check className="size-3.5 text-work" /> : <Copy className="size-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -177,6 +191,13 @@ export function MessageBody({
     () => ({
       pre({ children }) {
         return <CodeBlock>{children}</CodeBlock>;
+      },
+      table({ children }) {
+        return (
+          <div className="my-2 overflow-x-auto rounded-[9px] border border-line bg-card/50">
+            <table>{children}</table>
+          </div>
+        );
       },
       span({ node: _node, children, ...props }) {
         const record = props as Record<string, unknown>;
