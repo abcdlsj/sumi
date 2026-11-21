@@ -221,7 +221,7 @@ export const MessageBody = memo(function MessageBody({
           return (
             <span
               data-mention="all"
-              className="inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text ring-1 ring-inset ring-accent/30"
+              className="inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft/65 text-fg ring-1 ring-inset ring-accent/20"
             >
               {children}
             </span>
@@ -232,13 +232,16 @@ export const MessageBody = memo(function MessageBody({
         if (!member) return <span {...props}>{children}</span>;
 
         const isSelf = member.id === selfID;
-        const base =
-          "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text transition-colors";
-        const emphasis = isSelf ? " ring-1 ring-inset ring-accent/30" : "";
+        const base = isSelf
+          ? "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft/65 text-fg ring-1 ring-inset ring-accent/20 transition-colors"
+          : "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[4px] text-[0.9em] leading-[1.35] font-medium bg-subtle text-fg-2 transition-colors";
+        const hover = isSelf
+          ? " hover:bg-accent-soft hover:underline underline-offset-2"
+          : " hover:bg-hover hover:text-fg hover:underline underline-offset-2";
 
         if (!clickableMember) {
           return (
-            <span data-mention={member.display_name} className={base + emphasis}>
+            <span data-mention={member.display_name} className={base}>
               {children}
             </span>
           );
@@ -250,7 +253,7 @@ export const MessageBody = memo(function MessageBody({
             data-mention={member.display_name}
             title={member.kind === "agent" ? `Inspect agent ${member.display_name}` : `View ${member.display_name}`}
             onClick={() => onSelectMemberRef.current?.(member)}
-            className={`${base}${emphasis} hover:underline underline-offset-2`}
+            className={`${base}${hover}`}
           >
             {children}
           </button>

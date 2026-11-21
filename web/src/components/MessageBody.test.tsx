@@ -35,8 +35,13 @@ describe("MessageBody @mentions", () => {
     const lin2Btn = screen.getByRole("button", { name: "@Lin_2" });
     const lisiBtn = screen.getByRole("button", { name: "@lisi" });
 
-    expect(linBtn.className).toContain("bg-accent-soft");
+    expect(linBtn.className).toContain("bg-subtle");
+    expect(linBtn.className).toContain("text-fg-2");
+    expect(linBtn.className).not.toContain("text-accent-text");
+    expect(lisiBtn.className).toContain("bg-accent-soft/65");
+    expect(lisiBtn.className).toContain("text-fg");
     expect(lisiBtn.className).toContain("ring-1");
+    expect(lisiBtn.className).not.toContain("text-accent-text");
 
     fireEvent.click(linBtn);
     expect(onSelect).toHaveBeenCalledWith(lin);
@@ -75,7 +80,9 @@ describe("MessageBody @mentions", () => {
     expect(screen.queryByRole("button")).toBeNull();
     const allChip = container.querySelector('[data-mention="all"]');
     expect(allChip?.textContent).toBe("@all");
-    expect(allChip?.className).toContain("bg-accent-soft");
+    expect(allChip?.className).toContain("bg-accent-soft/65");
+    expect(allChip?.className).toContain("text-fg");
+    expect(allChip?.className).not.toContain("text-accent-text");
   });
 
   it("highlights known #N task refs, skips code/unknown refs, and copies fenced code blocks", async () => {
