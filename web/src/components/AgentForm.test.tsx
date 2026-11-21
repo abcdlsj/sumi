@@ -31,10 +31,13 @@ describe("AgentForm", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
-  it("creates an ACP agent with a custom command override", async () => {
+  it("creates an ACP agent with a custom command override under Advanced", async () => {
     const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
     render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
-    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "ak acp claude" } });
+    // Custom command is hidden behind Advanced by default.
+    expect(screen.queryByLabelText(/Custom command/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
+    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "my-acp --stdio" } });
     // Entering a custom command unlocks providers whose default binary is absent on PATH.
     const claude = screen.getByRole("radio", { name: /Claude Code/ }) as HTMLButtonElement;
     expect(claude.disabled).toBe(false);
@@ -43,7 +46,7 @@ describe("AgentForm", () => {
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(
         "s",
-        expect.objectContaining({ driver_kind: "acp", driver_config: { provider: "claude", command: ["ak", "acp", "claude"] }, computer_id: "c1" }),
+        expect.objectContaining({ driver_kind: "acp", driver_config: { provider: "claude", command: ["my-acp", "--stdio"] }, computer_id: "c1" }),
       ),
     );
   });
@@ -71,9 +74,10 @@ describe("AgentForm", () => {
   it("pins an agent to a pi provider and forwards only requested packages", async () => {
     const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
     render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
-    fireEvent.change(screen.getByLabelText(/pi provider/), { target: { value: " ak-opendesign-pi " } });
-    fireEvent.change(screen.getByLabelText(/pi model/), { target: { value: "deepseek-v4.1-flash" } });
-    fireEvent.change(screen.getByLabelText(/pi packages/), { target: { value: "npm:pi-commandcode-provider , ," } });
+    fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
+    fireEvent.change(screen.getByLabelText(/pi provider/), { target: { value: " custom-pi " } });
+    fireEvent.change(screen.getByLabelText(/pi model/), { target: { value: "model-fast" } });
+    fireEvent.change(screen.getByLabelText(/pi packages/), { target: { value: "npm:custom-pi-provider , ," } });
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(
@@ -81,9 +85,9 @@ describe("AgentForm", () => {
         expect.objectContaining({
           driver_config: {
             provider: "pi",
-            pi_provider: "ak-opendesign-pi",
-            pi_model: "deepseek-v4.1-flash",
-            pi_packages: ["npm:pi-commandcode-provider"],
+            pi_provider: "custom-pi",
+            pi_model: "model-fast",
+            pi_packages: ["npm:custom-pi-provider"],
           },
         }),
       ),

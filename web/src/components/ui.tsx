@@ -4,16 +4,16 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
-  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Check, CheckCircle2, Copy, Loader2, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Loader2, Search, X } from "lucide-react";
 import type { TaskStatus } from "../api";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
@@ -173,20 +173,285 @@ export function TextArea({
   );
 }
 
-export function Select({
+export interface SelectOption<T extends string = string> {
+  value: T;
+  label: string;
+  description?: string;
+  icon?: ReactNode;
+  trailing?: ReactNode;
+  disabled?: boolean;
+}
+
+/** Custom accessible dropdown select; replaces native <select> across the UI. */
+export function Select<T extends string = string>({
   label,
   hint,
+  optional,
+  value,
+  onChange,
+  options,
+  placeholder = "Select…",
+  searchable = false,
+  searchPlaceholder = "Search…",
+  size = "md",
+  disabled = false,
+  align = "left",
+  ariaLabel,
   className = "",
-  children,
-  ...rest
-}: SelectHTMLAttributes<HTMLSelectElement> & { label?: string; hint?: ReactNode }) {
-  const auto = useId();
-  const id = rest.id ?? auto;
+  menuWidth,
+}: {
+  label?: string;
+  hint?: ReactNode;
+  optional?: boolean;
+  value: T;
+  onChange: (value: T) => void;
+  options: SelectOption<T>[];
+  placeholder?: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  size?: "sm" | "md";
+  disabled?: boolean;
+  align?: "left" | "right";
+  ariaLabel?: string;
+  className?: string;
+  menuWidth?: number;
+}) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const selected = useMemo(() => options.find((o) => o.value === value), [options, value]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q) || (o.description ?? "").toLowerCase().includes(q));
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+    const selIdx = filtered.findIndex((o) => o.value === value && !o.disabled);
+    setActiveIdx(selIdx >= 0 ? selIdx : 0);
+    if (searchable) {
+      window.setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open, searchable]);
+
+  useEffect(() => {
+    setActiveIdx((idx) => (filtered.length === 0 ? 0 : Math.min(idx, filtered.length - 1)));
+  }, [filtered.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIdx((i) => (filtered.length ? (i + 1) % filtered.length : 0));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIdx((i) => (filtered.length ? (i - 1 + filtered.length) % filtered.length : 0));
+      } else if (e.key === "Enter" && filtered[activeIdx] && !filtered[activeIdx].disabled) {
+        e.preventDefault();
+        onChange(filtered[activeIdx].value);
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, filtered, activeIdx, onChange]);
+
+  const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[8px]" : "h-10 px-3 text-[14px] rounded-[9px]";
+
+  const trigger = (
+    <div ref={rootRef} className={`relative ${className}`}>
+      <button
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full ${heightCls} border bg-card flex items-center gap-2 text-left transition-[border-color,box-shadow,background-color] duration-150 disabled:opacity-55 ${
+          open ? "border-accent shadow-[var(--ring)]" : "border-line-strong hover:border-fg-4"
+        }`}
+      >
+        {selected?.icon && <span className="shrink-0 flex items-center [&>svg]:size-4">{selected.icon}</span>}
+        <span className={`min-w-0 flex-1 truncate ${selected ? "text-fg font-medium" : "text-fg-4"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown className={`size-3.5 text-fg-3 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label={ariaLabel ?? label ?? "Options"}
+          style={menuWidth ? { width: menuWidth } : undefined}
+          className={`absolute z-40 top-full mt-1.5 ${align === "right" ? "right-0" : "left-0"} ${
+            menuWidth ? "" : "min-w-full"
+          } max-w-[320px] bg-card border border-line rounded-[12px] shadow-lg p-1.5 animate-pop-in`}
+        >
+          {searchable && (
+            <div className="relative px-1 pb-1.5">
+              <Search className="size-3.5 text-fg-4 absolute left-3 top-[9px] pointer-events-none" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full h-8 pl-7 pr-2.5 rounded-[7px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+              />
+            </div>
+          )}
+          <div className="max-h-[240px] overflow-y-auto scroll-thin space-y-0.5">
+            {filtered.length === 0 ? (
+              <div className="px-2.5 py-3 text-center text-[13px] text-fg-3">No matches</div>
+            ) : (
+              filtered.map((opt, idx) => {
+                const isSelected = opt.value === value;
+                const isActive = idx === activeIdx;
+                return (
+                  <button
+                    key={opt.value || "__empty__"}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    disabled={opt.disabled}
+                    onMouseEnter={() => setActiveIdx(idx)}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-[8px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
+                      isActive ? "bg-hover" : "hover:bg-hover"
+                    }`}
+                  >
+                    {opt.icon && <span className="shrink-0 flex items-center [&>svg]:size-4">{opt.icon}</span>}
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-[13.5px] leading-5 ${isSelected ? "font-semibold text-fg" : "text-fg"}`}>{opt.label}</span>
+                      {opt.description && <span className="block truncate text-[12px] text-fg-3 leading-tight">{opt.description}</span>}
+                    </span>
+                    {opt.trailing && <span className="shrink-0 text-[11.5px] text-fg-4">{opt.trailing}</span>}
+                    <span className="size-4 shrink-0 flex items-center justify-center text-accent">{isSelected && <Check className="size-3.5" />}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (!label && !hint) return trigger;
   return (
-    <FieldShell id={id} label={label} hint={hint}>
-      <select {...rest} id={id} className={`${inputBase} h-10 px-3 border-line-strong hover:border-fg-4 ${className}`}>
-        {children}
-      </select>
+    <FieldShell id={id} label={label} hint={hint} optional={optional}>
+      {trigger}
+    </FieldShell>
+  );
+}
+
+/** Custom searchable multi-select checklist for picking members/items inside dialogs. */
+export function MultiSelectList<T extends string = string>({
+  label,
+  hint,
+  optional,
+  values,
+  onChange,
+  options,
+  emptyText = "No items available.",
+  searchPlaceholder = "Filter…",
+}: {
+  label?: string;
+  hint?: ReactNode;
+  optional?: boolean;
+  values: T[];
+  onChange: (next: T[]) => void;
+  options: SelectOption<T>[];
+  emptyText?: string;
+  searchPlaceholder?: string;
+}) {
+  const id = useId();
+  const [q, setQ] = useState("");
+  const selected = useMemo(() => new Set(values), [values]);
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(term) || (o.description ?? "").toLowerCase().includes(term));
+  }, [options, q]);
+
+  function toggle(v: T) {
+    if (selected.has(v)) onChange(values.filter((x) => x !== v));
+    else onChange([...values, v]);
+  }
+
+  return (
+    <FieldShell id={id} label={label} hint={hint} optional={optional}>
+      <div className="rounded-[10px] border border-line-strong bg-card overflow-hidden">
+        {options.length > 5 && (
+          <div className="relative px-2.5 py-2 border-b border-line">
+            <Search className="size-3.5 text-fg-4 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full h-7 pl-6 pr-2 rounded-[6px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
+            />
+          </div>
+        )}
+        <div className="max-h-[180px] overflow-y-auto scroll-thin p-1 space-y-0.5">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-4 text-center text-[13px] text-fg-3">{options.length === 0 ? emptyText : "No matches"}</div>
+          ) : (
+            filtered.map((opt) => {
+              const checked = selected.has(opt.value);
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={checked}
+                  disabled={opt.disabled}
+                  onClick={() => toggle(opt.value)}
+                  className={`w-full px-2.5 py-1.5 rounded-[7px] flex items-center gap-2.5 text-left transition-colors ${
+                    checked ? "bg-accent-soft/70" : "hover:bg-subtle"
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`size-4 rounded-[5px] border flex items-center justify-center shrink-0 transition-colors ${
+                      checked ? "bg-accent border-accent text-accent-fg" : "border-line-strong bg-card"
+                    }`}
+                  >
+                    {checked && <Check className="size-3 stroke-[2.5]" />}
+                  </span>
+                  {opt.icon && <span className="shrink-0 flex items-center">{opt.icon}</span>}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium text-fg leading-5">{opt.label}</span>
+                    {opt.description && <span className="block truncate text-[11.5px] text-fg-3 leading-tight">{opt.description}</span>}
+                  </span>
+                  {opt.trailing && <span className="shrink-0 text-[11.5px] text-fg-4">{opt.trailing}</span>}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
     </FieldShell>
   );
 }

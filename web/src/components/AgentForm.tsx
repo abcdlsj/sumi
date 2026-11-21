@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Bot, Cpu, Eye, EyeOff, KeyRound, Link2, Terminal } from "lucide-react";
+import { Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal } from "lucide-react";
 import {
   api,
   ApiError,
@@ -73,11 +73,13 @@ export function splitCommandArgs(raw: string): { args: string[]; error?: string 
   return { args };
 }
 
-export function draftFromAgent(m?: Member): DriverDraft {
+export function draftFromAgent(m?: Member, computer?: Computer): DriverDraft {
   const cfg = m?.agent?.driver_config;
+  const defaultProvider: ACPProvider =
+    cfg?.provider ?? (computer?.acp_providers && computer.acp_providers.length > 0 ? computer.acp_providers[0] : "pi");
   return {
     kind: m?.agent?.driver_kind ?? "acp",
-    provider: cfg?.provider ?? "pi",
+    provider: defaultProvider,
     command: cfg?.command?.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ") ?? "",
     piProvider: cfg?.pi_provider ?? "",
     piModel: cfg?.pi_model ?? "",
@@ -167,6 +169,10 @@ export function DriverFields({
   apiKeySet?: boolean;
 }) {
   const [showKey, setShowKey] = useState(false);
+  const hasAdvancedValues = Boolean(
+    draft.command.trim() || draft.piProvider.trim() || draft.piModel.trim() || draft.piPackages.trim(),
+  );
+  const [showAdvanced, setShowAdvanced] = useState(hasAdvancedValues);
   const available = computer?.acp_providers;
   const hasCustomCommand = draft.command.trim().length > 0;
   const set = (p: Partial<DriverDraft>) => onChange({ ...draft, ...p });
@@ -219,58 +225,74 @@ export function DriverFields({
               );
             })}
           </div>
-          <Field
-            label="Custom command"
-            optional
-            leading={<Terminal />}
-            value={draft.command}
-            onChange={(e) => set({ command: e.target.value })}
-            placeholder="ak acp claude"
-            hint="Overrides the default ACP launcher (e.g. ak acp claude). Leave empty for the provider default."
-            error={errors.command}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          {draft.provider === "pi" ? (
-            <div className="space-y-3.5 rounded-[10px] border border-line-strong bg-card p-3.5">
-              <p className="text-[12.5px] text-fg-3 leading-snug">
-                Isolate this agent onto a specific pi provider. Leave empty to follow the host pi settings.
-              </p>
+          <div className="pt-0.5">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-3 hover:text-fg transition-colors"
+            >
+              <ChevronRight className={`size-3.5 transition-transform duration-150 ${showAdvanced ? "rotate-90" : ""}`} />
+              <span>Advanced</span>
+              {hasAdvancedValues && !showAdvanced && <span className="size-1.5 rounded-full bg-accent" />}
+            </button>
+          </div>
+          {showAdvanced && (
+            <div className="space-y-3.5 rounded-[10px] border border-line bg-subtle/40 p-3.5 animate-fade-in">
               <Field
-                label="pi provider"
-                optional
-                leading={<Bot />}
-                value={draft.piProvider}
-                onChange={(e) => set({ piProvider: e.target.value })}
-                placeholder="ak-opendesign-pi"
-                hint="Written as defaultProvider in this agent's isolated pi settings."
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Field
-                label="pi model"
-                optional
-                leading={<Cpu />}
-                value={draft.piModel}
-                onChange={(e) => set({ piModel: e.target.value })}
-                placeholder="deepseek-v4.1-flash"
-                hint="Written as defaultModel."
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Field
-                label="pi packages"
+                label="Custom command"
                 optional
                 leading={<Terminal />}
-                value={draft.piPackages}
-                onChange={(e) => set({ piPackages: e.target.value })}
-                placeholder="npm:pi-commandcode-provider"
-                hint="Comma-separated npm: specs. Only these provider plugins load in the isolated dir; host npm is linked from the host pi dir."
+                value={draft.command}
+                onChange={(e) => set({ command: e.target.value })}
+                placeholder="npx -y my-acp-agent --stdio"
+                hint="Overrides the default ACP launcher command. Leave empty to use the provider default."
+                error={errors.command}
                 autoComplete="off"
                 spellCheck={false}
               />
+              {draft.provider === "pi" && (
+                <div className="space-y-3 pt-2 border-t border-line">
+                  <p className="text-[12.5px] text-fg-3 leading-snug">
+                    Optional pi isolation overrides. Leave empty to follow the host pi settings.
+                  </p>
+                  <Field
+                    label="pi provider"
+                    optional
+                    leading={<Bot />}
+                    value={draft.piProvider}
+                    onChange={(e) => set({ piProvider: e.target.value })}
+                    placeholder="openai"
+                    hint="Written as defaultProvider in this agent's isolated pi settings."
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <Field
+                    label="pi model"
+                    optional
+                    leading={<Cpu />}
+                    value={draft.piModel}
+                    onChange={(e) => set({ piModel: e.target.value })}
+                    placeholder="gpt-5-mini"
+                    hint="Written as defaultModel."
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <Field
+                    label="pi packages"
+                    optional
+                    leading={<Terminal />}
+                    value={draft.piPackages}
+                    onChange={(e) => set({ piPackages: e.target.value })}
+                    placeholder="npm:my-pi-provider"
+                    hint="Comma-separated npm: specs loaded in the isolated pi directory."
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+              )}
             </div>
-          ) : null}
+          )}
         </div>
       ) : (
         <div className="space-y-3.5 animate-fade-in">
@@ -342,7 +364,8 @@ export function AgentForm({
   const [computerID, setComputerID] = useState(
     () => computers.find((c) => c.connection_status === "online")?.id ?? computers[0]?.id ?? "",
   );
-  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent());
+  const initialComputer = computers.find((c) => c.id === computerID);
+  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(undefined, initialComputer));
   const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
   const [serverError, setServerError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -410,13 +433,23 @@ export function AgentForm({
       </div>
 
       {computers.length > 1 && (
-        <Select label="Runs on" value={computerID} onChange={(e) => setComputerID(e.target.value)}>
-          {computers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} · {c.connection_status}
-            </option>
-          ))}
-        </Select>
+        <Select
+          label="Runs on"
+          value={computerID}
+          onChange={setComputerID}
+          options={computers.map((c) => ({
+            value: c.id,
+            label: c.name,
+            description: `${c.hostname} · ${c.os === "macos" ? "macOS" : "Linux"}`,
+            icon: <Monitor className="size-4 text-fg-3" />,
+            trailing: (
+              <span className="inline-flex items-center gap-1.5">
+                <span className={`size-1.5 rounded-full ${c.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                {c.connection_status}
+              </span>
+            ),
+          }))}
+        />
       )}
 
       <div className="space-y-2">

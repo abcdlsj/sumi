@@ -92,24 +92,24 @@ func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
 		"packages": ["npm:host-only-plugin"],
 		"extensions": ["/tmp/ext.ts"]
 	}`)
-	if err := os.MkdirAll(filepath.Join(hostPi, "npm", "node_modules", "pi-commandcode-provider"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(hostPi, "npm", "node_modules", "custom-provider"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(hostPi, "npm", "node_modules", "pi-commandcode-provider", "index.js"), "module.exports = 1")
+	mustWrite(t, filepath.Join(hostPi, "npm", "node_modules", "custom-provider", "index.js"), "module.exports = 1")
 	t.Setenv("PI_CODING_AGENT_DIR", hostPi)
 
 	agentHome := filepath.Join(t.TempDir(), "agent-override")
 	cfg := domain.DriverConfig{
 		Provider:   domain.ACPProviderPi,
-		PiProvider: "ak-opendesign-pi",
-		PiModel:    "deepseek-v4.1-flash",
+		PiProvider: "custom-pi",
+		PiModel:    "model-fast",
 	}
 	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
 		t.Fatalf("prepare pi runtime dir: %v", err)
 	}
 	rtDir := acpRuntimeDir(agentHome, domain.ACPProviderPi)
 	got := readPiSettings(t, rtDir)
-	if got["defaultProvider"] != "ak-opendesign-pi" || got["defaultModel"] != "deepseek-v4.1-flash" {
+	if got["defaultProvider"] != "custom-pi" || got["defaultModel"] != "model-fast" {
 		t.Fatalf("override not applied: %v", got)
 	}
 	if _, ok := got["packages"]; ok {
@@ -120,7 +120,7 @@ func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
 	}
 
 	// Requesting a provider plugin links host npm and forwards exactly that package list.
-	cfg.PiPackages = []string{"npm:pi-commandcode-provider"}
+	cfg.PiPackages = []string{"npm:custom-provider"}
 	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
 		t.Fatalf("prepare pi runtime dir with packages: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
 	}
 	got = readPiSettings(t, rtDir)
 	pkgs, _ := got["packages"].([]any)
-	if len(pkgs) != 1 || pkgs[0] != "npm:pi-commandcode-provider" {
+	if len(pkgs) != 1 || pkgs[0] != "npm:custom-provider" {
 		t.Fatalf("packages = %v, want only the requested plugin", got["packages"])
 	}
 

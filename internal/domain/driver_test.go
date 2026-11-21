@@ -34,10 +34,10 @@ func TestNormalizeDriverConfig(t *testing.T) {
 		{"acp empty", DriverACP, DriverConfig{}, "driver_config.provider", DriverConfig{}},
 		{"acp blank argv", DriverACP, DriverConfig{Command: []string{"x", " "}}, "driver_config.command", DriverConfig{}},
 		{"acp pi provider override", DriverACP,
-			DriverConfig{Provider: "pi", PiProvider: " ak-opendesign-pi ", PiModel: " deepseek-v4.1-flash ", PiPackages: []string{" npm:pi-commandcode-provider "}}, "",
-			DriverConfig{Provider: "pi", PiProvider: "ak-opendesign-pi", PiModel: "deepseek-v4.1-flash", PiPackages: []string{"npm:pi-commandcode-provider"}}},
+			DriverConfig{Provider: "pi", PiProvider: " custom-pi ", PiModel: " model-fast ", PiPackages: []string{" npm:custom-provider "}}, "",
+			DriverConfig{Provider: "pi", PiProvider: "custom-pi", PiModel: "model-fast", PiPackages: []string{"npm:custom-provider"}}},
 		{"acp pi override needs pi provider", DriverACP,
-			DriverConfig{Provider: "claude", PiProvider: "ak-opendesign-pi"}, "require provider pi", DriverConfig{}},
+			DriverConfig{Provider: "claude", PiProvider: "custom-pi"}, "require provider pi", DriverConfig{}},
 		{"acp pi override needs provider", DriverACP,
 			DriverConfig{Command: []string{"my-acp"}, PiModel: "m"}, "require provider pi", DriverConfig{}},
 		{"acp pi provider charset", DriverACP,
@@ -87,8 +87,8 @@ func TestDriverConfigRedactShapes(t *testing.T) {
 	if string(raw) != `{"provider":"pi","command":["a"]}` {
 		t.Fatalf("acp command view = %s", raw)
 	}
-	raw, _ = json.Marshal(DriverConfig{Provider: "pi", PiProvider: "ak-opendesign-pi", PiModel: "deepseek-v4.1-flash", PiPackages: []string{"npm:p"}}.Redact(DriverACP))
-	if string(raw) != `{"provider":"pi","pi_provider":"ak-opendesign-pi","pi_model":"deepseek-v4.1-flash","pi_packages":["npm:p"]}` {
+	raw, _ = json.Marshal(DriverConfig{Provider: "pi", PiProvider: "custom-pi", PiModel: "model-fast", PiPackages: []string{"npm:p"}}.Redact(DriverACP))
+	if string(raw) != `{"provider":"pi","pi_provider":"custom-pi","pi_model":"model-fast","pi_packages":["npm:p"]}` {
 		t.Fatalf("acp pi override view = %s", raw)
 	}
 }
