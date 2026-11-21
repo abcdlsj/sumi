@@ -350,3 +350,14 @@ describe("thread reply summary", () => {
     expect(within(summary).queryAllByRole("img")).toHaveLength(0);
   });
 });
+
+describe("message author header", () => {
+  it("omits the Agent tag next to agent author names", async () => {
+    messages = [msg(1, lin, "ready to ship")];
+    renderView();
+    await screen.findByText("ready to ship");
+    const row = screen.getByText("ready to ship").closest("article") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Lin" })).toBeTruthy();
+    expect(within(row).queryByText("Agent")).toBeNull();
+  });
+});

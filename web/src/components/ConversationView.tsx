@@ -521,11 +521,6 @@ export function ConversationView({
                               >
                                 {m.author_display_name}
                               </button>
-                              {m.author_kind === "agent" && (
-                                <span className="h-[18px] px-1.5 rounded-[5px] bg-subtle border border-line text-[10.5px] font-medium text-fg-3 inline-flex items-center">
-                                  Agent
-                                </span>
-                              )}
                               <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>
                           )}

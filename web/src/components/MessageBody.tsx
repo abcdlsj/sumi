@@ -234,7 +234,7 @@ export function MessageBody({
           return (
             <span
               data-mention="all"
-              className="inline-flex items-baseline px-1 py-[0.5px] -my-[0.5px] rounded-[5px] font-medium bg-accent-soft text-accent-text ring-1 ring-inset ring-accent/30"
+              className="inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[5px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text ring-1 ring-inset ring-accent/30"
             >
               {children}
             </span>
@@ -246,7 +246,7 @@ export function MessageBody({
 
         const isSelf = member.id === selfID;
         const base =
-          "inline-flex items-baseline px-1 py-[0.5px] -my-[0.5px] rounded-[5px] font-medium bg-accent-soft text-accent-text transition-colors";
+          "inline-flex items-baseline px-[5px] py-[0.5px] -my-[0.5px] rounded-[5px] text-[0.9em] leading-[1.35] font-medium bg-accent-soft text-accent-text transition-colors";
         const emphasis = isSelf ? " ring-1 ring-inset ring-accent/30" : "";
 
         if (!clickableMember) {

@@ -7,7 +7,7 @@ export interface EmojiDef {
   src: string;
 }
 
-// Artwork is Twemoji (github.com/jdecked/twemoji), CC-BY 4.0.
+// Artwork is Fluent Emoji Color (github.com/microsoft/fluentui-emoji), MIT.
 export const REACTION_EMOJIS: EmojiDef[] = [
   { code: "thumbsup", label: "Agree / LGTM", src: "/emoji/1f44d.svg" },
   { code: "eyes", label: "Looking into it", src: "/emoji/1f440.svg" },

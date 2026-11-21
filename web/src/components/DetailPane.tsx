@@ -484,9 +484,8 @@ function TaskDetail({
     ...assigneePool.map((m) => ({
       value: m.id,
       label: m.display_name,
-      description: m.kind === "agent" ? m.agent?.role_text || "Agent" : undefined,
+      description: m.kind === "agent" ? m.agent?.role_text || undefined : undefined,
       icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.agent?.runtime_state} />,
-      trailing: m.kind === "agent" ? <Badge>Agent</Badge> : undefined,
     })),
   ];
 

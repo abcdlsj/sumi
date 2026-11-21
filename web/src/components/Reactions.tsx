@@ -5,7 +5,7 @@ import { api, type Member, type Message, type ReactionGroup } from "../api";
 import { getReactionEmoji, REACTION_EMOJIS, type ReactionEmoji } from "../emojis";
 import { useAction } from "./ui";
 
-export function EmojiIcon({ emoji, size = 16, className = "" }: { emoji: string; size?: number; className?: string }) {
+export function EmojiIcon({ emoji, size = 13, className = "" }: { emoji: string; size?: number; className?: string }) {
   const meta = getReactionEmoji(emoji);
   return (
     <img
@@ -90,7 +90,7 @@ function ReactionPopover({
       ref={ref}
       role="dialog"
       aria-label="Pick a reaction"
-      className={`absolute top-full mt-1.5 z-40 p-1.5 rounded-[11px] bg-card border border-line shadow-lg flex items-center gap-0.5 animate-pop-in ${
+      className={`absolute top-full mt-1.5 z-40 p-1 rounded-[10px] bg-card border border-line shadow-lg flex items-center gap-0.5 animate-pop-in ${
         align === "right" ? "right-0" : "left-0"
       }`}
     >
@@ -107,11 +107,11 @@ function ReactionPopover({
               onPick(item.code);
               onClose();
             }}
-            className={`size-8 rounded-[9px] flex items-center justify-center transition-colors ${
+            className={`group/emoji size-7 rounded-[7px] flex items-center justify-center transition-colors ${
               active ? "bg-accent-soft shadow-[var(--ring)]" : "hover:bg-hover"
             }`}
           >
-            <EmojiIcon emoji={item.code} size={20} />
+            <EmojiIcon emoji={item.code} size={17} className="transition-transform duration-100 group-hover/emoji:scale-110" />
           </button>
         );
       })}
@@ -185,7 +185,7 @@ export function MessageReactions({
   const reactedSet = new Set(reactions.filter((r) => r.reacted).map((r) => r.emoji));
 
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
       {reactions.map((g) => (
         <button
           key={g.emoji}
@@ -194,14 +194,14 @@ export function MessageReactions({
           aria-label={`${g.emoji} reaction, ${g.count}`}
           aria-pressed={g.reacted}
           onClick={() => onToggle(g.emoji, g.reacted)}
-          className={`h-7 pl-1.5 pr-2 rounded-full border inline-flex items-center gap-1 text-[12px] transition-colors ${
+          className={`h-6 pl-1.5 pr-2 rounded-full border inline-flex items-center gap-1 text-[11.5px] transition-colors ${
             g.reacted
               ? "bg-accent-soft border-accent/40 text-accent-text font-medium"
               : "bg-subtle border-line text-fg-2 hover:bg-hover hover:border-line-strong"
           }`}
         >
-          <EmojiIcon emoji={g.emoji} size={16} />
-          <span className="tabular text-[11.5px] leading-none">{g.count}</span>
+          <EmojiIcon emoji={g.emoji} size={13} />
+          <span className="tabular text-[11px] leading-none">{g.count}</span>
         </button>
       ))}
       <div className="relative">
@@ -211,9 +211,9 @@ export function MessageReactions({
           aria-expanded={inlineOpen}
           title="Add reaction"
           onClick={() => setInlineOpen((v) => !v)}
-          className="h-7 px-2 rounded-full border border-transparent text-fg-3 hover:bg-hover hover:border-line hover:text-fg inline-flex items-center justify-center transition-colors"
+          className="h-6 px-1.5 rounded-full border border-transparent text-fg-3 hover:bg-hover hover:border-line hover:text-fg inline-flex items-center justify-center transition-colors"
         >
-          <SmilePlus className="size-3.5" />
+          <SmilePlus className="size-3" />
         </button>
         {inlineOpen && (
           <ReactionPopover
