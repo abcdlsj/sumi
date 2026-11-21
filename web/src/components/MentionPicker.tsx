@@ -38,6 +38,8 @@ export function rankMentionCandidates(members: Member[], query: string): Member[
 
 export interface MentionPickerOptions {
   members: Member[];
+  /** Space members outside this channel; shown in a secondary section only when filtering by name. */
+  extraMembers?: Member[];
   /** The viewer is never a candidate. */
   selfID?: string;
   value: string;
@@ -48,6 +50,8 @@ export interface MentionPickerOptions {
 export interface MentionPicker {
   /** Candidates to draw; empty means no popup. */
   candidates: Member[];
+  /** Number of leading candidates belonging to the current channel. */
+  inChannelCount: number;
   index: number;
   highlight: (i: number) => void;
   /** Re-reads the caret; call from `onChange`, `onClick` and `onKeyUp`. */
@@ -61,19 +65,28 @@ export interface MentionPicker {
 }
 
 /** The `@` picker shared by every composer: opens on `@`, filters, moves, inserts. */
-export function useMentionPicker({ members, selfID, value, onChange, inputRef }: MentionPickerOptions): MentionPicker {
+export function useMentionPicker({ members, extraMembers = [], selfID, value, onChange, inputRef }: MentionPickerOptions): MentionPicker {
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null);
   const [index, setIndex] = useState(0);
   const caret = useRef<number | null>(null);
   const listID = useId();
 
-  const candidates = useMemo(() => {
-    if (!trigger) return [];
-    return rankMentionCandidates(
+  const { candidates, inChannelCount } = useMemo(() => {
+    if (!trigger) return { candidates: [], inChannelCount: 0 };
+    const inChannel = rankMentionCandidates(
       members.filter((m) => m.id !== selfID),
       trigger.query,
     );
-  }, [members, selfID, trigger]);
+    if (!trigger.query || extraMembers.length === 0) {
+      return { candidates: inChannel, inChannelCount: inChannel.length };
+    }
+    const inIDs = new Set(members.map((m) => m.id));
+    const extras = rankMentionCandidates(
+      extraMembers.filter((m) => m.id !== selfID && !inIDs.has(m.id)),
+      trigger.query,
+    );
+    return { candidates: [...inChannel, ...extras], inChannelCount: inChannel.length };
+  }, [members, extraMembers, selfID, trigger]);
 
   useEffect(() => setIndex((i) => (i >= candidates.length ? 0 : i)), [candidates.length]);
 
@@ -142,6 +155,7 @@ export function useMentionPicker({ members, selfID, value, onChange, inputRef }:
 
   return {
     candidates: trigger ? candidates : [],
+    inChannelCount: trigger ? inChannelCount : 0,
     index,
     highlight: setIndex,
     detect,
@@ -162,25 +176,37 @@ export function MentionPopup({ picker }: { picker: MentionPicker }) {
       aria-label="Mention candidates"
       className="absolute left-2 bottom-full mb-2 z-30 w-[300px] max-h-[248px] overflow-y-auto scroll-thin bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
     >
-      {picker.candidates.map((m, i) => (
-        <div
-          key={m.id}
-          id={picker.optionID(i)}
-          role="option"
-          aria-selected={i === picker.index}
-          tabIndex={-1}
-          onMouseEnter={() => picker.highlight(i)}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => picker.accept(m)}
-          className={`h-9 px-2 rounded-[6px] flex items-center gap-2 cursor-pointer select-none ${
-            i === picker.index ? "bg-accent-soft" : "hover:bg-subtle"
-          }`}
-        >
-          <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.kind === "agent" ? m.agent?.runtime_state : undefined} />
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg">{m.display_name}</span>
-          <span className="shrink-0 text-[11.5px] text-fg-4">{m.kind === "agent" ? "Agent" : m.access_level}</span>
-        </div>
-      ))}
+      {picker.candidates.map((m, i) => {
+        const outside = i >= picker.inChannelCount;
+        const showOutsideHeader = outside && i === picker.inChannelCount;
+        return (
+          <div key={m.id}>
+            {showOutsideHeader && (
+              <div className={`px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-4 ${i > 0 ? "mt-1 border-t border-line" : ""}`}>
+                Not in this channel
+              </div>
+            )}
+            <div
+              id={picker.optionID(i)}
+              role="option"
+              aria-selected={i === picker.index}
+              tabIndex={-1}
+              onMouseEnter={() => picker.highlight(i)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => picker.accept(m)}
+              className={`h-9 px-2 rounded-[6px] flex items-center gap-2 cursor-pointer select-none ${
+                i === picker.index ? "bg-accent-soft" : "hover:bg-subtle"
+              }`}
+            >
+              <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.kind === "agent" ? m.agent?.runtime_state : undefined} />
+              <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg">{m.display_name}</span>
+              <span className="shrink-0 text-[11.5px] text-fg-4">
+                {outside ? "Outside" : m.kind === "agent" ? "Agent" : m.access_level}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

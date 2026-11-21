@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, CheckCircle2, ChevronDown, ChevronRight, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
+import { isComposerSendEvent, useSendKey } from "../preferences";
 import { AgentReadFaces, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
@@ -13,14 +14,15 @@ import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { mergeMessageIntoCache, NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, ErrorState, IconButton, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Segmented, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
   | { kind: "agent"; memberID: string }
   | { kind: "human"; memberID: string }
-  | { kind: "members"; convID: string };
+  | { kind: "members"; convID: string }
+  | { kind: "channel_tasks"; convID: string };
 
 export function memberDetailTarget(member: Pick<Member, "id" | "kind">): DetailTarget {
   return member.kind === "agent" ? { kind: "agent", memberID: member.id } : { kind: "human", memberID: member.id };
@@ -162,6 +164,7 @@ function ReplyBox({
   onSend: (body: string, attachmentIDs: string[]) => Promise<void>;
 }) {
   const [reply, setReply] = useState("");
+  const [sendKey] = useSendKey();
   const draft = useAttachmentDraft(spaceSlug);
   const { busy, run } = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -211,7 +214,7 @@ function ReplyBox({
             onBlur={mentions.close}
             onKeyDown={(e) => {
               if (mentions.handleKeyDown(e)) return;
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (isComposerSendEvent(e, sendKey)) {
                 e.preventDefault();
                 void submit();
               }
@@ -258,6 +261,7 @@ export function DetailPane({
         <ThreadDetail spaceSlug={spaceSlug} boot={boot} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} onSelectTarget={onSelectTarget} />
       )}
       {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
+      {target.kind === "channel_tasks" && <ChannelTasksDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "agent" && (
         <AgentDetail
           key={target.memberID}
@@ -280,6 +284,180 @@ export function DetailPane({
         />
       )}
     </aside>
+  );
+}
+
+const CHANNEL_TASK_ORDER: TaskStatus[] = ["in_progress", "in_review", "todo", "done", "closed"];
+
+function ChannelTasksDetail({
+  spaceSlug,
+  boot,
+  convID,
+  onClose,
+  onSelectTarget,
+}: {
+  spaceSlug: string;
+  boot: BootstrapData;
+  convID: string;
+  onClose: () => void;
+  onSelectTarget: (t: DetailTarget) => void;
+}) {
+  const qc = useQueryClient();
+  const act = useAction();
+  const [scope, setScope] = useState<"all" | "mine">("all");
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState("");
+  const [collapsed, setCollapsed] = useState<Record<TaskStatus, boolean>>({
+    in_progress: false,
+    in_review: false,
+    todo: false,
+    done: true,
+    closed: true,
+  });
+
+  const conv = boot.conversations.find((c) => c.id === convID);
+  const isArchived = !conv || Boolean(conv.archived_at);
+  const tasksQ = useQuery({
+    queryKey: ["channel-tasks", spaceSlug, convID],
+    queryFn: () => api.listTasks(spaceSlug, "all").then((r) => r.tasks.filter((t) => t.channel_id === convID)),
+  });
+  const allChannelTasks = useMemo(
+    () => tasksQ.data ?? boot.tasks.filter((t) => t.channel_id === convID),
+    [tasksQ.data, boot.tasks, convID],
+  );
+  const myID = boot.current_member.id;
+  const visible = useMemo(
+    () => (scope === "mine" ? allChannelTasks.filter((t) => t.assignee_member_id === myID) : allChannelTasks),
+    [allChannelTasks, scope, myID],
+  );
+  const activeCount = useMemo(
+    () => allChannelTasks.filter((t) => t.status !== "done" && t.status !== "closed").length,
+    [allChannelTasks],
+  );
+  const mineActiveCount = useMemo(
+    () => allChannelTasks.filter((t) => t.assignee_member_id === myID && t.status !== "done" && t.status !== "closed").length,
+    [allChannelTasks, myID],
+  );
+  const groups = useMemo(
+    () =>
+      CHANNEL_TASK_ORDER.map((status) => ({
+        status,
+        tasks: visible.filter((t) => t.status === status).sort((a, b) => b.number - a.number),
+      })).filter((g) => g.tasks.length > 0),
+    [visible],
+  );
+
+  async function submitNewTask(e: FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || isArchived) return;
+    await act.run(async () => {
+      const res = await api.createTask(spaceSlug, { channel_id: convID, title: title.trim() });
+      setTitle("");
+      setCreating(false);
+      void qc.invalidateQueries({ queryKey: ["channel-tasks", spaceSlug, convID] });
+      void qc.invalidateQueries({ queryKey: ["tasks", spaceSlug] });
+      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      onSelectTarget({ kind: "task", taskID: res.task.id });
+    });
+  }
+
+  return (
+    <>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          !isArchived ? (
+            <Button size="sm" variant={creating ? "secondary" : "soft"} icon={<Plus />} onClick={() => setCreating((v) => !v)}>
+              New
+            </Button>
+          ) : undefined
+        }
+      >
+        <CheckCircle2 className="size-4 text-fg-3 shrink-0" />
+        <span className="font-semibold text-fg truncate">#{conv?.slug}</span>
+        <span className="text-fg-3">· Tasks</span>
+      </PaneHeader>
+
+      <div className="px-4 py-2.5 border-b border-line shrink-0 space-y-2.5 bg-panel">
+        <Segmented
+          full
+          value={scope}
+          onChange={setScope}
+          options={[
+            { value: "all", label: activeCount > 0 ? `All (${activeCount})` : "All" },
+            { value: "mine", label: mineActiveCount > 0 ? `For me (${mineActiveCount})` : "For me" },
+          ]}
+        />
+        {creating && (
+          <form onSubmit={(e) => void submitNewTask(e)} className="flex items-center gap-1.5 animate-fade-in">
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
+              placeholder={`New task in #${conv?.slug ?? "channel"}…`}
+              aria-label="New channel task title"
+              className="flex-1 h-8 px-2.5 rounded-[6px] border border-accent bg-card text-[13.5px] outline-none shadow-[var(--ring)] placeholder:text-fg-4"
+            />
+            <Button type="submit" size="sm" loading={act.busy} disabled={!title.trim()}>
+              Add
+            </Button>
+          </form>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-3 space-y-3">
+        {groups.length === 0 ? (
+          <EmptyState
+            icon={<CheckCircle2 />}
+            title={scope === "mine" ? "Nothing assigned to you here" : `No tasks in #${conv?.slug ?? "channel"}`}
+            body="Create a task here or hover any message in the channel to track it."
+          />
+        ) : (
+          groups.map((g) => {
+            const isClosed = collapsed[g.status];
+            return (
+              <div key={g.status}>
+                <button
+                  type="button"
+                  aria-expanded={!isClosed}
+                  onClick={() => setCollapsed((prev) => ({ ...prev, [g.status]: !prev[g.status] }))}
+                  className="w-full h-7 px-1.5 rounded-[5px] hover:bg-subtle flex items-center gap-1.5 text-[12.5px] font-semibold text-fg-2 transition-colors"
+                >
+                  {isClosed ? <ChevronRight className="size-3.5 text-fg-4" /> : <ChevronDown className="size-3.5 text-fg-4" />}
+                  <TaskStatusIcon status={g.status} size={13} />
+                  <span>{taskStatusLabel(g.status)}</span>
+                  <span className="tabular font-normal text-fg-4 ml-0.5">{g.tasks.length}</span>
+                </button>
+                {!isClosed && (
+                  <div className="mt-1 rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden">
+                    {g.tasks.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => onSelectTarget({ kind: "task", taskID: t.id })}
+                        className="w-full px-3 py-2 hover:bg-subtle flex items-center gap-2 text-left transition-colors"
+                      >
+                        <span className="font-mono tabular text-[12px] text-fg-4 shrink-0">#{t.number}</span>
+                        <span className="text-[13.5px] font-medium text-fg truncate flex-1">{t.title}</span>
+                        {t.assignee_member_id && (
+                          <MemberAvatar
+                            id={t.assignee_member_id}
+                            name={t.assignee_display_name ?? "?"}
+                            kind={t.assignee_kind ?? "human"}
+                            size="xs"
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </>
   );
 }
 

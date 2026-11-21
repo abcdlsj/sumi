@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, ChevronRight, FolderPlus, Hash, Inbox, Lock, Monitor, Moon, Pencil, Plus, Search, Settings, Sparkles, Sun, Trash2, Users } from "lucide-react";
 import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
+import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
@@ -50,7 +51,9 @@ function detailKey(d: DetailTarget) {
         ? `a:${d.memberID}`
         : d.kind === "human"
           ? `h:${d.memberID}`
-          : `m:${d.convID}`;
+          : d.kind === "channel_tasks"
+            ? `ct:${d.convID}`
+            : `m:${d.convID}`;
 }
 
 function NavItem({
@@ -146,6 +149,7 @@ export function Workbench({
   const landed = useRef(false);
   const boot = bootQ.data;
   const panes = usePaneWidths();
+  const draftConvIDs = useDraftConvIDs();
   const accent = boot?.space.accent;
   useEffect(() => applyAccent(accent), [accent]);
 
@@ -460,6 +464,7 @@ export function Workbench({
 
   const renderChannelRow = (c: Conversation) => {
     const muted = c.notify_level === "mute";
+    const hasDraft = draftConvIDs.has(c.id) && activeConvID !== c.id;
     return (
       <div
         key={c.id}
@@ -475,7 +480,10 @@ export function Workbench({
           dim={muted}
           bold={c.unread_count > 0 && !muted}
           trailing={
-            c.mention_count > 0 ? <Count n={c.mention_count} /> : c.unread_count > 0 && !muted ? <span className="size-2 rounded-full bg-nav-fg-strong shrink-0 mr-1.5" /> : null
+            <span className="flex items-center gap-1.5 shrink-0">
+              {hasDraft && <Pencil className="size-3 text-nav-fg-3" aria-label="Has draft" />}
+              {c.mention_count > 0 ? <Count n={c.mention_count} /> : c.unread_count > 0 && !muted ? <span className="size-2 rounded-full bg-nav-fg-strong shrink-0 mr-1" /> : null}
+            </span>
           }
         >
           {c.slug}

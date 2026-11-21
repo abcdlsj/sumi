@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type RuntimeState, type Task, type TaskStatus } from "../api";
+import { isMacPlatform, useSendKey } from "../preferences";
 import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar } from "./Avatar";
@@ -740,6 +741,7 @@ export function AdminPanel({
 }) {
   const humans = boot.members.filter((m) => m.kind === "human");
   const agents = boot.members.filter((m) => m.kind === "agent");
+  const [sendKey, setSendKey] = useSendKey();
 
   return (
     <section className="flex flex-col h-full min-h-0 bg-bg">
@@ -875,6 +877,17 @@ export function AdminPanel({
                     { value: "system", label: <><SunMoon />System</> },
                     { value: "light", label: <><Sun />Light</> },
                     { value: "dark", label: <><Moon />Dark</> },
+                  ]}
+                />
+              </div>
+              <div>
+                <SectionTitle title="Composer" body="Choose which key sends messages in channels, DMs, and threads." />
+                <Segmented
+                  value={sendKey}
+                  onChange={setSendKey}
+                  options={[
+                    { value: "enter", label: "Enter" },
+                    { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
                   ]}
                 />
               </div>

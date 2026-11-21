@@ -75,6 +75,7 @@ export function useAttachmentDraft(spaceSlug: string) {
   }
 
   return {
+    spaceSlug,
     pending,
     uploading,
     dragging,
@@ -128,9 +129,17 @@ export function AttachmentDraftRow({
       {draft.pending.map((a) => (
         <span
           key={a.id}
-          className="inline-flex items-center gap-1.5 h-8 pl-2 pr-1 rounded-[6px] border border-line bg-subtle text-[13px] text-fg-2 max-w-[260px] animate-pop-in"
+          className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-1 rounded-[6px] border border-line bg-subtle text-[13px] text-fg-2 max-w-[260px] animate-pop-in"
         >
-          <FileText className="size-4 text-fg-3 shrink-0" />
+          {isImage(a.media_type) ? (
+            <img
+              src={api.attachmentURL(draft.spaceSlug, a.id)}
+              alt=""
+              className="size-6 rounded-[4px] object-cover border border-line bg-card shrink-0"
+            />
+          ) : (
+            <FileText className="size-4 text-fg-3 shrink-0 ml-0.5" />
+          )}
           <span className="truncate">{a.name}</span>
           <span className="tabular text-[12px] text-fg-4 shrink-0">{formatBytes(a.size_bytes)}</span>
           <button

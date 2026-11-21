@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, formatClock, type BootstrapData, type Conversation, type Member, type Message } from "../api";
+import { clearAllDraftsForTests } from "../drafts";
 import { ConversationView } from "./ConversationView";
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
@@ -93,6 +94,7 @@ async function arrive(qc: QueryClient, el: HTMLElement, next: Message[], height:
 }
 
 beforeEach(() => {
+  clearAllDraftsForTests();
   messages = [msg(1), msg(2)];
   readSeq = 0;
   vi.spyOn(api, "listMessages").mockImplementation(async () => ({ messages, read_seq: readSeq, following: false }));
@@ -396,5 +398,36 @@ describe("error resilience", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("message 2")).toBeTruthy();
+  });
+});
+
+describe("channel workflow and out-of-channel mentions", () => {
+  it("opens channel tasks panel from the header button", async () => {
+    const { onOpenDetail } = renderView();
+    await screen.findByText("message 2");
+    fireEvent.click(screen.getByRole("button", { name: "Channel tasks" }));
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "channel_tasks", convID: conv.id });
+  });
+
+  it("warns and offers one-click invite when mentioning an agent outside the channel", async () => {
+    const kira: Member = {
+      id: "m-kira",
+      space_id: "s",
+      kind: "agent",
+      display_name: "Kira",
+      access_level: "member",
+      agent: { role_text: "Reviewer", driver_kind: "acp", runtime_state: "idle" },
+      created_at: "2026-11-19T10:00:00Z",
+    };
+    const inviteSpy = vi.spyOn(api, "inviteToChannel").mockResolvedValue({ ok: true });
+    renderView(conv, { ...boot, members: [lisi, lin, sam, kira] });
+    await screen.findByText("message 2");
+
+    const box = screen.getByRole("textbox", { name: "Message #engineering" });
+    fireEvent.change(box, { target: { value: "Hey @Kira please check" } });
+
+    expect(await screen.findByText(/isn't in #engineering/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    await waitFor(() => expect(inviteSpy).toHaveBeenCalledWith("studio", conv.id, kira.id));
   });
 });

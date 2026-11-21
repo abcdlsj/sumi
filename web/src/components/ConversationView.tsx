@@ -7,6 +7,7 @@ import {
   AtSign,
   Bell,
   BellOff,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -20,10 +21,13 @@ import {
   MoreHorizontal,
   PanelRight,
   Sparkles,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
+import { readDraft, writeDraft } from "../drafts";
+import { isComposerSendEvent, isMacPlatform, useSendKey } from "../preferences";
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
 import { AgentFaceStack, AgentReadFaces, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
@@ -48,8 +52,26 @@ function sameDay(a: string, b: string) {
   return new Date(a).toDateString() === new Date(b).toDateString();
 }
 
-/** Composer drafts survive conversation switches; the view is remounted per conversation. */
-const drafts = new Map<string, { text: string; replyTo: string | null }>();
+function findMentionedOutsideMembers(text: string, spaceMembers: Member[], channelMembers: Member[], selfID: string): Member[] {
+  if (!text.includes("@")) return [];
+  const inChannelIDs = new Set(channelMembers.map((m) => m.id));
+  const byName = new Map<string, Member>();
+  for (const m of spaceMembers) {
+    if (m.id !== selfID && !inChannelIDs.has(m.id)) {
+      byName.set(m.display_name.toLowerCase(), m);
+    }
+  }
+  if (byName.size === 0) return [];
+  const re = /(?:^|[^A-Za-z0-9_])@([\p{L}\p{N}_]+)/gu;
+  const found = new Map<string, Member>();
+  let match = re.exec(text);
+  while (match) {
+    const m = byName.get(match[1].toLowerCase());
+    if (m) found.set(m.id, m);
+    match = re.exec(text);
+  }
+  return Array.from(found.values());
+}
 
 /** IDs present on first render are not animated; later arrivals rise in. */
 function useArrivals(convID: string, messages: Message[] | undefined) {
@@ -267,9 +289,12 @@ function MessageComposer({
   focusRef: React.MutableRefObject<(() => void) | null>;
 }) {
   const qc = useQueryClient();
-  const [composer, setComposer] = useState(() => drafts.get(conv.id)?.text ?? "");
+  const toast = useToast();
+  const [composer, setComposer] = useState(() => readDraft(conv.id)?.text ?? "");
+  const [sendKey] = useSendKey();
   const draft = useAttachmentDraft(spaceSlug);
   const send = useAction();
+  const inviteAct = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -281,7 +306,7 @@ function MessageComposer({
   }, [conv.id, focusRef]);
 
   useEffect(() => {
-    drafts.set(conv.id, { text: composer, replyTo: replyingTo });
+    writeDraft(conv.id, { text: composer, replyTo: replyingTo });
   }, [conv.id, composer, replyingTo]);
 
   useLayoutEffect(() => {
@@ -294,8 +319,19 @@ function MessageComposer({
   }, [composer]);
 
   const mentionMembers = useMentionMembers(spaceSlug, boot, conv.id, conv.kind === "dm" ? conv.peer_member_id : undefined);
+  const isChannel = conv.kind === "public" || conv.kind === "private";
+  const canManageMembers =
+    boot.current_member.access_level !== "member" || (boot.current_member.permissions ?? []).includes("channel.manage_members");
+  const outsideMentions = useMemo(
+    () =>
+      isChannel && mentionMembers.length > 0
+        ? findMentionedOutsideMembers(composer, boot.members, mentionMembers, boot.current_member.id)
+        : [],
+    [isChannel, composer, boot.members, mentionMembers, boot.current_member.id],
+  );
   const mentions = useMentionPicker({
     members: mentionMembers,
+    extraMembers: isChannel ? boot.members : [],
     selfID: boot.current_member.id,
     value: composer,
     onChange: setComposer,
@@ -340,6 +376,35 @@ function MessageComposer({
         }`}
       >
         <MentionPopup picker={mentions} />
+        {outsideMentions.length > 0 && (
+          <div className="mx-2 mt-2 px-3 py-2 rounded-[6px] bg-busy-soft/60 border border-busy/25 flex items-center gap-2 text-[12.5px] text-fg-2 animate-fade-in">
+            <UserPlus className="size-3.5 text-busy shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-semibold text-fg">{outsideMentions.map((m) => `@${m.display_name}`).join(", ")}</span>{" "}
+              {outsideMentions.length === 1 ? "isn't" : "aren't"} in #{title} and won&apos;t see or wake from this message.
+            </span>
+            {canManageMembers && (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                loading={inviteAct.busy}
+                onClick={() =>
+                  void inviteAct.run(async () => {
+                    for (const m of outsideMentions) {
+                      await api.inviteToChannel(spaceSlug, conv.id, m.id);
+                    }
+                    toast(`Added ${outsideMentions.map((m) => m.display_name).join(", ")} to #${title}`, "success");
+                    await qc.invalidateQueries({ queryKey: ["conv-members", spaceSlug, conv.id] });
+                    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                  })
+                }
+              >
+                Invite
+              </Button>
+            )}
+          </div>
+        )}
         {replyTarget && (
           <div className="mx-2 mt-2 px-3 py-2 rounded-[6px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
             <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
@@ -365,7 +430,7 @@ function MessageComposer({
           onBlur={mentions.close}
           onKeyDown={(e) => {
             if (mentions.handleKeyDown(e)) return;
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (isComposerSendEvent(e, sendKey)) {
               e.preventDefault();
               void handleSend();
             }
@@ -380,7 +445,15 @@ function MessageComposer({
           <AttachmentPicker draft={draft} />
           <div className="flex items-center gap-3">
             <span className="text-[12px] text-fg-4 hidden md:inline">
-              <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
+              {sendKey === "mod_enter" ? (
+                <>
+                  <kbd className="font-sans">{isMacPlatform() ? "⌘" : "Ctrl"} + Enter</kbd> to send · <kbd className="font-sans">Enter</kbd> for a new line
+                </>
+              ) : (
+                <>
+                  <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
+                </>
+              )}
             </span>
             <button
               type="submit"
@@ -418,7 +491,7 @@ export function ConversationView({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [replyingTo, setReplyingTo] = useState<string | null>(() => drafts.get(conv.id)?.replyTo ?? null);
+  const [replyingTo, setReplyingTo] = useState<string | null>(() => readDraft(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
@@ -496,6 +569,10 @@ export function ConversationView({
     enabled: conv.kind === "public" || conv.kind === "private",
   });
   const memberCount = membersQ.data?.members.length;
+  const activeChannelTasks = useMemo(
+    () => boot.tasks.filter((t) => t.channel_id === conv.id && t.status !== "done" && t.status !== "closed").length,
+    [boot.tasks, conv.id],
+  );
   const clearReply = useCallback(() => setReplyingTo(null), []);
 
   async function handleCreateTask(e: FormEvent, sourceMsgID: string) {
@@ -596,6 +673,17 @@ export function ConversationView({
                 ))
               }
             </Menu>
+          )}
+          {isChannel && (
+            <button
+              onClick={() => onOpenDetail({ kind: "channel_tasks", convID: conv.id })}
+              aria-label="Channel tasks"
+              title="Channel tasks"
+              className="h-8 pl-2 pr-2.5 rounded-[6px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
+            >
+              <CheckCircle2 className="size-4 text-fg-3" />
+              <span className="tabular min-w-[1ch] text-center">{activeChannelTasks}</span>
+            </button>
           )}
           {isChannel && (
             <button
