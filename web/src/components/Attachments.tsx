@@ -209,6 +209,39 @@ function ImageLightbox({
   );
 }
 
+function InlineImage({
+  spaceSlug,
+  attachment,
+  onPreview,
+}: {
+  spaceSlug: string;
+  attachment: Attachment;
+  onPreview: (a: Attachment) => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => onPreview(attachment)}
+      aria-label={`Preview ${attachment.name}`}
+      className={`block border border-line rounded-[10px] overflow-hidden bg-subtle hover:shadow-md transition-shadow ${
+        loaded ? "" : "min-w-[180px] min-h-[120px]"
+      }`}
+    >
+      <img
+        src={api.attachmentURL(spaceSlug, attachment.id)}
+        alt={attachment.name}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        onError={() => setLoaded(true)}
+        className={`max-h-[280px] max-w-[360px] object-contain block transition-opacity duration-150 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+      />
+    </button>
+  );
+}
+
 /** Renders already-sent attachments: inline images with lightbox preview, other files as download rows. */
 export function MessageAttachments({
   spaceSlug,
@@ -227,20 +260,7 @@ export function MessageAttachments({
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {images.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => setPreview(a)}
-              aria-label={`Preview ${a.name}`}
-              className="block border border-line rounded-[10px] overflow-hidden bg-subtle hover:shadow-md transition-shadow"
-            >
-              <img
-                src={api.attachmentURL(spaceSlug, a.id)}
-                alt={a.name}
-                loading="lazy"
-                className="max-h-[280px] max-w-[360px] object-contain block"
-              />
-            </button>
+            <InlineImage key={a.id} spaceSlug={spaceSlug} attachment={a} onPreview={setPreview} />
           ))}
         </div>
       )}

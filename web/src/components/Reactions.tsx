@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { SmilePlus } from "lucide-react";
 import { api, type Member, type Message, type ReactionGroup } from "../api";
 import { getReactionEmoji, REACTION_EMOJIS, type ReactionEmoji } from "../emojis";
-import { useAction } from "./ui";
+import { useAction, useFloatingPosition } from "./ui";
 
 export function EmojiIcon({ emoji, size = 13, className = "" }: { emoji: string; size?: number; className?: string }) {
   const meta = getReactionEmoji(emoji);
@@ -20,79 +21,133 @@ export function EmojiIcon({ emoji, size = 13, className = "" }: { emoji: string;
   );
 }
 
-/** Toggles a reaction and updates the conversation message cache immediately from the server response. */
+function applyOptimisticReaction(
+  groups: ReactionGroup[] | undefined,
+  emoji: ReactionEmoji,
+  removing: boolean,
+  selfID?: string,
+): ReactionGroup[] {
+  const list = (groups ?? []).map((g) => ({ ...g, member_ids: [...g.member_ids] }));
+  const idx = list.findIndex((g) => g.emoji === emoji);
+  if (removing) {
+    if (idx < 0) return list;
+    const g = list[idx];
+    const nextCount = Math.max(0, g.count - 1);
+    const nextMembers = selfID ? g.member_ids.filter((id) => id !== selfID) : g.member_ids;
+    if (nextCount === 0) list.splice(idx, 1);
+    else list[idx] = { ...g, count: nextCount, member_ids: nextMembers, reacted: false };
+    return list;
+  }
+  if (idx >= 0) {
+    const g = list[idx];
+    const nextMembers = selfID && !g.member_ids.includes(selfID) ? [...g.member_ids, selfID] : g.member_ids;
+    list[idx] = { ...g, count: g.count + 1, member_ids: nextMembers, reacted: true };
+  } else {
+    list.push({ emoji, count: 1, member_ids: selfID ? [selfID] : [], reacted: true });
+  }
+  return list;
+}
+
+/** Toggles a reaction optimistically and reconciles with the server response. */
 export function useReactionToggle(
   spaceSlug: string,
   convID?: string,
   onPatched?: (messageID: string, reactions: ReactionGroup[]) => void,
+  selfID?: string,
 ) {
   const qc = useQueryClient();
   const act = useAction();
 
   const toggle = useCallback(
     async (messageID: string, emoji: ReactionEmoji, currentlyReacted: boolean) => {
+      type CachePage = { messages: Message[]; read_seq: number; following: boolean; has_more?: boolean };
+      const key = convID ? ["messages", spaceSlug, convID] : null;
+      const prevPage = key ? qc.getQueryData<CachePage>(key) : undefined;
+      const prevMsg = prevPage?.messages.find((m) => m.id === messageID);
+      const optimistic = applyOptimisticReaction(prevMsg?.reactions, emoji, currentlyReacted, selfID);
+
+      if (key && prevPage && prevMsg) {
+        qc.setQueryData<CachePage>(key, {
+          ...prevPage,
+          messages: prevPage.messages.map((m) => (m.id === messageID ? { ...m, reactions: optimistic } : m)),
+        });
+      }
+      onPatched?.(messageID, optimistic);
+
       await act.run(async () => {
-        const res = currentlyReacted
-          ? await api.removeReaction(spaceSlug, messageID, emoji)
-          : await api.addReaction(spaceSlug, messageID, emoji);
-        const next = res.reactions ?? [];
-        if (convID) {
-          qc.setQueryData<{ messages: Message[]; read_seq: number; following: boolean; has_more?: boolean }>(
-            ["messages", spaceSlug, convID],
-            (old) =>
+        try {
+          const res = currentlyReacted
+            ? await api.removeReaction(spaceSlug, messageID, emoji)
+            : await api.addReaction(spaceSlug, messageID, emoji);
+          const next = res.reactions ?? [];
+          if (key) {
+            qc.setQueryData<CachePage>(key, (old) =>
               old
                 ? {
                     ...old,
                     messages: old.messages.map((m) => (m.id === messageID ? { ...m, reactions: next } : m)),
                   }
                 : old,
-          );
+            );
+          }
+          onPatched?.(messageID, next);
+        } catch (err) {
+          if (key && prevPage) qc.setQueryData<CachePage>(key, prevPage);
+          if (prevMsg) onPatched?.(messageID, prevMsg.reactions ?? []);
+          throw err;
         }
-        onPatched?.(messageID, next);
       });
     },
-    [act, convID, onPatched, qc, spaceSlug],
+    [act, convID, onPatched, qc, selfID, spaceSlug],
   );
 
   return { toggle, busy: act.busy };
 }
 
 function ReactionPopover({
+  triggerRef,
   reactedSet,
   align = "right",
   onPick,
   onClose,
 }: {
+  triggerRef: RefObject<HTMLElement | null>;
   reactedSet: Set<string>;
   align?: "left" | "right";
   onPick: (emoji: ReactionEmoji) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const style = useFloatingPosition(true, triggerRef, ref, { align, width: 256, maxHeight: 60 });
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+      }
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       role="dialog"
       aria-label="Pick a reaction"
-      className={`absolute top-full mt-1.5 z-40 p-1 rounded-[10px] bg-card border border-line shadow-lg flex items-center gap-0.5 animate-pop-in ${
-        align === "right" ? "right-0" : "left-0"
-      }`}
+      style={style}
+      className="z-50 p-1 rounded-[10px] bg-card border border-line shadow-lg flex items-center justify-between gap-0.5 animate-pop-in"
     >
       {REACTION_EMOJIS.map((item) => {
         const active = reactedSet.has(item.code);
@@ -115,7 +170,8 @@ function ReactionPopover({
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -133,10 +189,12 @@ export function ReactionPickerButton({
   onToggle: (emoji: ReactionEmoji, currentlyReacted: boolean) => void;
   compact?: boolean;
 }) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const reactedSet = new Set((reactions ?? []).filter((r) => r.reacted).map((r) => r.emoji));
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Add reaction"
         aria-expanded={open}
@@ -153,6 +211,7 @@ export function ReactionPickerButton({
       </button>
       {open && (
         <ReactionPopover
+          triggerRef={triggerRef}
           reactedSet={reactedSet}
           align="right"
           onPick={(code) => onToggle(code, reactedSet.has(code))}
@@ -181,6 +240,7 @@ export function MessageReactions({
   onToggle: (emoji: ReactionEmoji, currentlyReacted: boolean) => void;
 }) {
   const [inlineOpen, setInlineOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   if (!reactions || reactions.length === 0) return null;
   const reactedSet = new Set(reactions.filter((r) => r.reacted).map((r) => r.emoji));
 
@@ -206,6 +266,7 @@ export function MessageReactions({
       ))}
       <div className="relative">
         <button
+          ref={triggerRef}
           type="button"
           aria-label="Add another reaction"
           aria-expanded={inlineOpen}
@@ -217,6 +278,7 @@ export function MessageReactions({
         </button>
         {inlineOpen && (
           <ReactionPopover
+            triggerRef={triggerRef}
             reactedSet={reactedSet}
             align="left"
             onPick={(code) => onToggle(code, reactedSet.has(code))}

@@ -1,4 +1,5 @@
 import {
+  Component,
   createContext,
   useCallback,
   useContext,
@@ -10,13 +11,14 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type ErrorInfo,
   type InputHTMLAttributes,
   type ReactNode,
   type RefObject,
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Loader2, Search, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Loader2, RefreshCw, Search, X } from "lucide-react";
 import type { TaskStatus } from "../api";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
@@ -191,7 +193,7 @@ const FOCUSABLE_SELECTOR =
 const modalStack: symbol[] = [];
 
 /** Computes viewport-safe fixed coordinates for a portaled popover, flipping upward when near the bottom edge. */
-function useFloatingPosition(
+export function useFloatingPosition(
   open: boolean,
   triggerRef: RefObject<HTMLElement | null>,
   floatingRef: RefObject<HTMLElement | null>,
@@ -567,7 +569,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6 py-10 animate-fade-in">
+    <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6 py-10">
       {icon && (
         <div className="size-12 rounded-[14px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
           {icon}
@@ -578,6 +580,77 @@ export function EmptyState({
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
+}
+
+/** Inline error state with retry, keeping failures visible in place instead of showing false empty states. */
+export function ErrorState({
+  title = "Something went wrong",
+  message,
+  onRetry,
+  retryLabel = "Try again",
+  compact = false,
+}: {
+  title?: string;
+  message?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      className={`h-full flex flex-col items-center justify-center text-center px-6 ${compact ? "min-h-[160px] py-6" : "min-h-[260px] py-10"}`}
+    >
+      <div className="size-10 rounded-[10px] bg-danger-soft border border-danger/20 text-danger flex items-center justify-center mb-3">
+        <AlertCircle className="size-5" />
+      </div>
+      <div className="text-[15px] font-semibold text-fg">{title}</div>
+      {message && <div className="mt-1 text-[13.5px] text-fg-3 max-w-[380px] leading-relaxed break-words">{message}</div>}
+      {onRetry && (
+        <div className="mt-4">
+          <Button size="sm" variant="secondary" icon={<RefreshCw />} onClick={onRetry}>
+            {retryLabel}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Catches unexpected render exceptions so a single pane failure never whitescreens the whole app. */
+export class ErrorBoundary extends Component<
+  { children: ReactNode; resetKey?: string; label?: string },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    // Keep error handling silent to avoid leaking message or prompt context into console logs.
+  }
+
+  componentDidUpdate(prevProps: { resetKey?: string }) {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <ErrorState
+          title={this.props.label ? `Unable to render ${this.props.label}` : "Unable to render view"}
+          message={this.state.error.message || "An unexpected UI error occurred."}
+          retryLabel="Reload view"
+          onRetry={() => this.setState({ error: null })}
+        />
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export function Segmented<T extends string>({

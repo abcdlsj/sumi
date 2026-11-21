@@ -12,7 +12,7 @@ import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { mergeMessageIntoCache, NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, IconButton, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
+import { Badge, Button, ErrorState, IconButton, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
@@ -85,7 +85,7 @@ function CompactMessage({
   }
   const author = boot.members.find((x) => x.id === m.author_member_id);
   return (
-    <article className="relative group flex items-start gap-2.5 animate-fade-in">
+    <article className="relative group flex items-start gap-2.5">
       <button
         type="button"
         onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
@@ -385,11 +385,19 @@ function MembersDetail({
               </div>
             ))}
           </div>
+        ) : membersQ.isError && !membersQ.data ? (
+          <ErrorState
+            compact
+            title="Couldn't load members"
+            message={membersQ.error instanceof Error ? membersQ.error.message : undefined}
+            onRetry={() => void membersQ.refetch()}
+          />
         ) : (
-          <div className="space-y-0.5 animate-fade-in">
+          <div className="space-y-0.5">
             {members.map((m) => {
               const full = byID.get(m.id) ?? m;
               const self = m.id === me.id;
+              const canRemove = canManage || self;
               return (
                 <div key={m.id} className="group h-10 px-2 rounded-[8px] flex items-center gap-2.5 hover:bg-subtle">
                   <button
@@ -400,22 +408,26 @@ function MembersDetail({
                     <span className="truncate text-[14px] text-fg">{full.display_name}</span>
                     {self && <Badge>You</Badge>}
                   </button>
-                  <span className="text-[12px] text-fg-4 group-hover:hidden">{full.kind === "agent" ? "Agent" : full.access_level}</span>
-                  {(canManage || self) && (
-                    <button
-                      onClick={() =>
-                        void act.run(async () => {
-                          await api.removeFromChannel(spaceSlug, convID, m.id);
-                          toast(self ? `You left #${conv?.slug}` : `Removed ${full.display_name}`, "success");
-                          refresh();
-                          if (self && isPrivate) onClose();
-                        })
-                      }
-                      className="hidden group-hover:inline-flex h-7 px-2 rounded-[7px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft items-center"
-                    >
-                      {self ? "Leave" : "Remove"}
-                    </button>
-                  )}
+                  <div className="relative shrink-0 h-7 flex items-center justify-end min-w-[60px]">
+                    <span className={`text-[12px] text-fg-4 ${canRemove ? "group-hover:opacity-0 group-focus-within:opacity-0 transition-opacity" : ""}`}>
+                      {full.kind === "agent" ? "Agent" : full.access_level}
+                    </span>
+                    {canRemove && (
+                      <button
+                        onClick={() =>
+                          void act.run(async () => {
+                            await api.removeFromChannel(spaceSlug, convID, m.id);
+                            toast(self ? `You left #${conv?.slug}` : `Removed ${full.display_name}`, "success");
+                            refresh();
+                            if (self && isPrivate) onClose();
+                          })
+                        }
+                        className="absolute right-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto h-7 px-2 rounded-[7px] text-[12.5px] text-fg-3 hover:text-danger hover:bg-danger-soft inline-flex items-center transition-opacity"
+                      >
+                        {self ? "Leave" : "Remove"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -452,7 +464,7 @@ function TaskDetail({
     queryFn: () => api.listMessages(spaceSlug, task!.conversation_id!, true),
     enabled: Boolean(task?.conversation_id),
   });
-  const reactions = useReactionToggle(spaceSlug, task?.conversation_id);
+  const reactions = useReactionToggle(spaceSlug, task?.conversation_id, undefined, boot.current_member.id);
   const taskMsgs = msgsQ.data?.messages;
   const lastTaskMsg = taskMsgs && taskMsgs.length > 0 ? taskMsgs[taskMsgs.length - 1] : undefined;
   const stream = useStickToBottom({
@@ -470,7 +482,24 @@ function TaskDetail({
     if (task?.conversation_id) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, task.conversation_id] });
   }
 
-  if (!task) return <DetailSkeleton />;
+  if (!task) {
+    if (taskQ.isError) {
+      return (
+        <>
+          <PaneHeader onClose={onClose}>
+            <span className="font-semibold text-fg">Task</span>
+          </PaneHeader>
+          <ErrorState
+            compact
+            title="Couldn't load task"
+            message={taskQ.error instanceof Error ? taskQ.error.message : undefined}
+            onRetry={() => void taskQ.refetch()}
+          />
+        </>
+      );
+    }
+    return <DetailSkeleton />;
+  }
   const open = task.status !== "done" && task.status !== "closed";
   const meID = boot.current_member.id;
   const canClaim = open && (!task.assignee_member_id || (task.assignee_member_id === meID && task.status === "todo"));
@@ -670,6 +699,13 @@ function TaskDetail({
         <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin px-5 py-4 space-y-4">
           {task.conversation_id && msgsQ.isLoading ? (
             <MessageListSkeleton rows={3} compact />
+          ) : task.conversation_id && msgsQ.isError && !msgsQ.data ? (
+            <ErrorState
+              compact
+              title="Couldn't load discussion"
+              message={msgsQ.error instanceof Error ? msgsQ.error.message : undefined}
+              onRetry={() => void msgsQ.refetch()}
+            />
           ) : !task.conversation_id || (msgsQ.data?.messages.length ?? 0) === 0 ? (
             <div className="py-12 text-center text-[14px] text-fg-3">No discussion yet. Replying starts the thread for #{task.number}.</div>
           ) : (
@@ -729,7 +765,7 @@ function ThreadDetail({
   const act = useAction();
   const [pickerMsgID, setPickerMsgID] = useState<string | null>(null);
   const msgsQ = useQuery({ queryKey: ["messages", spaceSlug, threadConvID], queryFn: () => api.listMessages(spaceSlug, threadConvID, true) });
-  const reactions = useReactionToggle(spaceSlug, threadConvID);
+  const reactions = useReactionToggle(spaceSlug, threadConvID, undefined, boot.current_member.id);
   const following = msgsQ.data?.following;
   const threadMsgs = msgsQ.data?.messages;
   const lastThreadMsg = threadMsgs && threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : undefined;
@@ -752,13 +788,22 @@ function ThreadDetail({
               variant={following ? "secondary" : "soft"}
               icon={following ? <Bell /> : <BellOff />}
               loading={act.busy}
-              onClick={() =>
+              onClick={() => {
+                const nextFollowing = !following;
+                const key = ["messages", spaceSlug, threadConvID];
+                const prev = qc.getQueryData<{ messages: Message[]; read_seq: number; following: boolean; has_more?: boolean }>(key);
+                if (prev) qc.setQueryData(key, { ...prev, following: nextFollowing });
                 void act.run(async () => {
-                  await api.setFollowing(spaceSlug, threadConvID, !following);
-                  await qc.invalidateQueries({ queryKey: ["messages", spaceSlug, threadConvID] });
+                  try {
+                    await api.setFollowing(spaceSlug, threadConvID, nextFollowing);
+                  } catch (err) {
+                    if (prev) qc.setQueryData(key, prev);
+                    throw err;
+                  }
+                  await qc.invalidateQueries({ queryKey: key });
                   void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
-                })
-              }
+                });
+              }}
             >
               {following ? "Following" : "Follow"}
             </Button>
@@ -776,26 +821,36 @@ function ThreadDetail({
       </PaneHeader>
       <div className="relative flex-1 min-h-0">
         <div ref={stream.ref} onScroll={stream.onScroll} className="h-full overflow-y-auto scroll-thin px-5 py-4 space-y-4">
-          {msgsQ.isLoading && <MessageListSkeleton rows={4} compact />}
-          {(msgsQ.data?.messages ?? []).map((m, i) => (
-            <div key={m.id}>
-              <CompactMessage
-                m={m}
-                spaceSlug={spaceSlug}
-                boot={boot}
-                onSelectTarget={onSelectTarget}
-                pickerOpen={pickerMsgID === m.id}
-                onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
-                onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
-              />
-              {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
-                <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
-                  <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
-                  <span className="flex-1 h-px bg-line" />
-                </div>
-              )}
-            </div>
-          ))}
+          {msgsQ.isLoading ? (
+            <MessageListSkeleton rows={4} compact />
+          ) : msgsQ.isError && !msgsQ.data ? (
+            <ErrorState
+              compact
+              title="Couldn't load thread"
+              message={msgsQ.error instanceof Error ? msgsQ.error.message : undefined}
+              onRetry={() => void msgsQ.refetch()}
+            />
+          ) : (
+            (msgsQ.data?.messages ?? []).map((m, i) => (
+              <div key={m.id}>
+                <CompactMessage
+                  m={m}
+                  spaceSlug={spaceSlug}
+                  boot={boot}
+                  onSelectTarget={onSelectTarget}
+                  pickerOpen={pickerMsgID === m.id}
+                  onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
+                  onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
+                />
+                {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
+                  <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
+                    <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
+                    <span className="flex-1 h-px bg-line" />
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
         <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
       </div>
@@ -1089,9 +1144,31 @@ function AgentDetail({
                     className="sr-only peer"
                     disabled={!canGovern}
                     checked={on}
-                    onChange={() =>
-                      void act.run(() => api.setPermission(spaceSlug, member.id, p.code, !on)).then(() => qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }))
-                    }
+                    onChange={() => {
+                      const nextOn = !on;
+                      const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                      if (prev) {
+                        qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                          ...prev,
+                          members: prev.members.map((item) => {
+                            if (item.id !== member.id) return item;
+                            const cur = new Set(item.permissions ?? []);
+                            if (nextOn) cur.add(p.code);
+                            else cur.delete(p.code);
+                            return { ...item, permissions: Array.from(cur) };
+                          }),
+                        });
+                      }
+                      void act.run(async () => {
+                        try {
+                          await api.setPermission(spaceSlug, member.id, p.code, nextOn);
+                        } catch (err) {
+                          if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+                          throw err;
+                        }
+                        void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                      });
+                    }}
                   />
                   <span
                     aria-hidden

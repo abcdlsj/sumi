@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveRestore,
   AtSign,
@@ -26,7 +26,7 @@ import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
+import { Badge, Button, EmptyState, ErrorState, Field, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
 
 export type InboxFilter = "needs_me" | "unread" | "all";
 export type TaskFilter = "active" | "mine" | "done" | "closed";
@@ -75,6 +75,7 @@ export function InboxView({
   const inboxQ = useQuery({
     queryKey: ["inbox", spaceSlug, filter],
     queryFn: () => api.listInbox(spaceSlug, filter).then((r) => r.items),
+    placeholderData: keepPreviousData,
   });
 
   function dismiss(it: InboxItem, fn: () => Promise<unknown>) {
@@ -114,6 +115,12 @@ export function InboxView({
       <div className="flex-1 overflow-y-auto scroll-thin">
         {inboxQ.isLoading ? (
           <InboxSkeleton />
+        ) : inboxQ.isError && !inboxQ.data ? (
+          <ErrorState
+            title="Couldn't load inbox"
+            message={inboxQ.error instanceof Error ? inboxQ.error.message : "Check your connection and try again."}
+            onRetry={() => void inboxQ.refetch()}
+          />
         ) : items.length === 0 ? (
           <EmptyState
             icon={<CheckCircle2 />}
@@ -121,7 +128,7 @@ export function InboxView({
             body={filter === "needs_me" ? "DMs, @mentions, followed threads and Tasks assigned to you land here." : "Nothing unread right now."}
           />
         ) : (
-          <div className="px-6 py-4 space-y-2 max-w-[920px] animate-fade-in">
+          <div className={`px-6 py-4 space-y-2 max-w-[920px] transition-opacity duration-100 ${inboxQ.isPlaceholderData ? "opacity-65" : ""}`}>
             {items.map((it) => {
               const gone = leaving.has(it.conversation_id);
               const reason = REASON[it.reason] ?? { label: it.reason, icon: <Hash /> };
@@ -325,6 +332,7 @@ export function TasksView({
   const tasksQ = useQuery({
     queryKey: ["tasks", spaceSlug, filter],
     queryFn: () => api.listTasks(spaceSlug, statusQuery, filter === "mine" ? "mine" : "").then((r) => r.tasks),
+    placeholderData: keepPreviousData,
   });
   const allTasks = tasksQ.data ?? [];
   const query = q.trim().toLowerCase();
@@ -401,6 +409,12 @@ export function TasksView({
         )}
         {tasksQ.isLoading ? (
           <RowListSkeleton />
+        ) : tasksQ.isError && !tasksQ.data ? (
+          <ErrorState
+            title="Couldn't load tasks"
+            message={tasksQ.error instanceof Error ? tasksQ.error.message : "Check your connection and try again."}
+            onRetry={() => void tasksQ.refetch()}
+          />
         ) : groups.length === 0 ? (
           allTasks.length > 0 ? (
             <div className="px-6 py-12 text-center text-[14px] text-fg-3">No tasks match the current filter.</div>
@@ -741,7 +755,7 @@ export function AdminPanel({
           ]}
         />
       </ViewHeader>
-      <div key={tab} className="flex-1 overflow-y-auto scroll-thin animate-fade-in">
+      <div className="flex-1 overflow-y-auto scroll-thin">
         <div className="px-6 py-6 max-w-[960px]">
           {tab === "agents" && (
             <>

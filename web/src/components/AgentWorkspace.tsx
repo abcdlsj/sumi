@@ -181,9 +181,13 @@ export function AgentWorkspace({
   }, [fullscreen]);
 
   function refresh() {
-    setExpanded({});
-    setDirEntries({});
+    const openDirs = Object.entries(expanded)
+      .filter(([, isOpen]) => isOpen)
+      .map(([dirPath]) => dirPath);
     void loadDir("", includeHidden, true);
+    for (const dirPath of openDirs) {
+      void loadDir(dirPath, includeHidden, false);
+    }
     if (selectedFile) void openFile(selectedFile);
   }
 

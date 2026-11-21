@@ -6,6 +6,7 @@ export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 420;
 const SIDEBAR_DEFAULT = 260;
 export const DETAIL_MIN = 340;
+const DETAIL_DEFAULT = 440;
 const DETAIL_CAP = 880;
 const MAIN_MIN = 440;
 
@@ -17,6 +18,11 @@ function load(): Saved {
   } catch {
     return {};
   }
+}
+
+/** Reads the persisted sidebar width so loading skeletons match the live layout without shifting. */
+export function readSavedSidebarWidth(): number {
+  return clamp(load().sidebar ?? SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
 }
 
 function save(v: Saved) {
@@ -40,15 +46,15 @@ function useViewportWidth() {
 }
 
 /**
- * Sidebar and detail-pane widths. The detail pane opens at its maximum (whatever leaves the
- * main pane MAIN_MIN wide, capped at DETAIL_CAP) until the user drags it; the dragged width is remembered.
+ * Sidebar and detail-pane widths. The detail pane opens at a calm default width so opening it
+ * doesn't violently reflow the main conversation; any dragged width is remembered.
  */
 export function usePaneWidths() {
   const vw = useViewportWidth();
   const [saved, setSaved] = useState<Saved>(load);
   const sidebar = clamp(saved.sidebar ?? SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
   const detailMax = Math.max(DETAIL_MIN, Math.min(DETAIL_CAP, vw - RAIL - sidebar - MAIN_MIN));
-  const detail = clamp(saved.detail ?? detailMax, DETAIL_MIN, detailMax);
+  const detail = clamp(saved.detail ?? DETAIL_DEFAULT, DETAIL_MIN, detailMax);
   const update = useCallback((patch: Saved) => {
     setSaved((prev) => {
       const next = { ...prev, ...patch };
@@ -88,6 +94,17 @@ export function ResizeHandle({
   const [dragging, setDragging] = useState(false);
   const start = useRef<{ x: number; w: number } | null>(null);
   const sign = edge === "right" ? 1 : -1;
+
+  const endDrag = useCallback(() => {
+    if (!start.current) return;
+    start.current = null;
+    setDragging(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
+  useEffect(() => endDrag, [endDrag]);
+
   return (
     <div
       role="separator"
@@ -112,12 +129,8 @@ export function ResizeHandle({
         if (!start.current) return;
         onResize(start.current.w + sign * (e.clientX - start.current.x));
       }}
-      onPointerUp={() => {
-        start.current = null;
-        setDragging(false);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
       onDoubleClick={onReset}
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft") onResize(value - 16 * sign);

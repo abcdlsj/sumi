@@ -14,7 +14,7 @@ import { DetailPane, type DetailTarget } from "./DetailPane";
 import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
-import { Button, Modal, useAction } from "./ui";
+import { Button, ErrorBoundary, ErrorState, Modal, useAction } from "./ui";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 import { ChannelGroupDialog, JumpDialog, NewChannelDialog, NewSpaceDialog } from "./WorkbenchDialogs";
 
@@ -86,7 +86,7 @@ function NavItem({
 function Count({ n, tone = "warm" }: { n: number; tone?: "warm" | "muted" }) {
   return (
     <span
-      className={`min-w-5 h-5 px-1.5 rounded-full text-[11.5px] font-semibold tabular inline-flex items-center justify-center animate-pop-in ${
+      className={`min-w-5 h-5 px-1.5 rounded-full text-[11.5px] font-semibold tabular inline-flex items-center justify-center ${
         tone === "warm" ? "bg-accent text-accent-fg" : "bg-nav-fill-2 text-nav-fg-2"
       }`}
     >
@@ -163,6 +163,7 @@ export function Workbench({
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });
     let dropped = false;
     let stateTimer: number | null = null;
+    let reconnectTimer: number | null = null;
 
     const invalidateAll = () => {
       for (const k of ["bootstrap", "inbox", "tasks", "messages", "task", "conv-members", "archived-channels"]) {
@@ -271,6 +272,10 @@ export function Workbench({
     };
 
     es.onopen = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (dropped) {
         dropped = false;
         setReconnecting(false);
@@ -279,11 +284,17 @@ export function Workbench({
     };
     es.onerror = () => {
       dropped = true;
-      setReconnecting(true);
+      if (reconnectTimer === null) {
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = null;
+          if (dropped) setReconnecting(true);
+        }, 1800);
+      }
     };
     for (const ev of SSE_EVENTS) es.addEventListener(ev, handleEvent(ev));
     return () => {
       if (stateTimer !== null) window.clearTimeout(stateTimer);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       setReconnecting(false);
       es.close();
     };
@@ -329,7 +340,20 @@ export function Workbench({
     });
   }
 
-  if (!boot) return <WorkbenchSkeleton />;
+  if (!boot) {
+    if (bootQ.isError) {
+      return (
+        <div className="h-full bg-bg flex items-center justify-center">
+          <ErrorState
+            title="Couldn't load space"
+            message={bootQ.error instanceof Error ? bootQ.error.message : "Check your connection and try again."}
+            onRetry={() => void bootQ.refetch()}
+          />
+        </div>
+      );
+    }
+    return <WorkbenchSkeleton />;
+  }
 
   const channels = boot.conversations.filter((c) => c.kind === "public" || c.kind === "private");
   const channelGroups = boot.channel_groups ?? [];
@@ -445,13 +469,12 @@ export function Workbench({
     const st = m.agent?.runtime_state;
     const statusSub = m.kind === "agent" && (st === "working" || st === "error") ? agentStatusText(boot, m) : "";
     const roleSub = m.kind === "agent" && !statusSub ? (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() : "";
-    const hasSub = Boolean(statusSub || roleSub);
     return (
       <button
         key={m.id}
         onClick={() => void openOrCreateDM(m.id)}
         aria-current={active ? "page" : undefined}
-        className={`w-full px-2 ${hasSub ? "py-1.5" : "h-9"} rounded-[8px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
+        className={`w-full px-2 ${m.kind === "agent" ? "h-11" : "h-9"} rounded-[8px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
           active ? "bg-nav-active" : "hover:bg-nav-hover"
         }`}
       >
@@ -579,6 +602,7 @@ export function Workbench({
           </button>
         </div>
 
+        <div className="relative flex-1 min-h-0 flex flex-col">
         <div className="flex-1 min-h-0 px-3 pb-3 space-y-5 overflow-y-auto scroll-nav">
           <div className="space-y-0.5 pt-1">
             <NavItem
@@ -734,8 +758,19 @@ export function Workbench({
           )}
         </div>
 
+        {reconnecting && (
+          <div
+            role="status"
+            className="pointer-events-none absolute bottom-2 inset-x-3 px-2.5 h-8 rounded-[8px] bg-busy-soft border border-busy/25 text-nav-busy shadow-sm flex items-center gap-2 text-[12.5px] font-medium animate-fade-in"
+          >
+            <span className="size-2 rounded-full bg-busy animate-breathe shrink-0" />
+            <span>Reconnecting…</span>
+          </div>
+        )}
+        </div>
+
         {needsSetup && (
-          <div className="px-3 pb-3 shrink-0 animate-fade-in">
+          <div className="px-3 pb-3 shrink-0">
             <button
               onClick={() => setDialog(myComputers.length === 0 ? "computer" : "agent")}
               className="w-full p-3 rounded-[12px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
@@ -748,13 +783,6 @@ export function Workbench({
                 <SetupLine done={agents.length > 0}>Create an agent</SetupLine>
               </div>
             </button>
-          </div>
-        )}
-
-        {reconnecting && (
-          <div role="status" className="mx-3 mb-2 px-2.5 h-8 rounded-[8px] bg-busy-soft text-nav-busy flex items-center gap-2 text-[12.5px] font-medium shrink-0 animate-fade-in">
-            <span className="size-2 rounded-full bg-busy animate-breathe shrink-0" />
-            <span>Reconnecting…</span>
           </div>
         )}
 
@@ -782,44 +810,49 @@ export function Workbench({
       {/* Main */}
       <main className="bg-panel flex flex-col min-w-0 min-h-0">
         <div className="h-full min-h-0">
-          {mainView.kind === "conversation" && activeConv && (
-            <ConversationView
-              key={activeConv.id}
-              spaceSlug={spaceSlug}
-              boot={boot}
-              conv={activeConv}
-              onOpenDetail={setDetail}
-              onArchived={(archived) => setMainView({ kind: "conversation", convID: archived.id, archivedConv: archived })}
-              onUnarchived={(restored) => setMainView({ kind: "conversation", convID: restored.id })}
-            />
-          )}
-          {mainView.kind === "inbox" && (
-            <InboxView
-              spaceSlug={spaceSlug}
-              filter={inboxFilter}
-              onFilter={setInboxFilter}
-              onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
-              onOpenDetail={setDetail}
-            />
-          )}
-          {mainView.kind === "tasks" && <TasksView spaceSlug={spaceSlug} boot={boot} filter={taskFilter} onFilter={setTaskFilter} onOpenDetail={setDetail} />}
-          {mainView.kind === "admin" && (
-            <AdminPanel
-              boot={boot}
-              tab={mainView.tab}
-              onTab={(tab) => setMainView({ kind: "admin", tab })}
-              onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
-              selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
-              onInspectHuman={(id) => setDetail({ kind: "human", memberID: id })}
-              selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
-              onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
-              onConnectComputer={() => setDialog("computer")}
-              onOpenArchivedChannel={(conv) => setMainView({ kind: "conversation", convID: conv.id, archivedConv: conv })}
-              theme={theme}
-              onTheme={setTheme}
-              onLogout={onLogout}
-            />
-          )}
+          <ErrorBoundary
+            resetKey={mainView.kind === "conversation" ? `c:${mainView.convID}` : mainView.kind === "admin" ? `a:${mainView.tab}` : mainView.kind}
+            label="main view"
+          >
+            {mainView.kind === "conversation" && activeConv && (
+              <ConversationView
+                key={activeConv.id}
+                spaceSlug={spaceSlug}
+                boot={boot}
+                conv={activeConv}
+                onOpenDetail={setDetail}
+                onArchived={(archived) => setMainView({ kind: "conversation", convID: archived.id, archivedConv: archived })}
+                onUnarchived={(restored) => setMainView({ kind: "conversation", convID: restored.id })}
+              />
+            )}
+            {mainView.kind === "inbox" && (
+              <InboxView
+                spaceSlug={spaceSlug}
+                filter={inboxFilter}
+                onFilter={setInboxFilter}
+                onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                onOpenDetail={setDetail}
+              />
+            )}
+            {mainView.kind === "tasks" && <TasksView spaceSlug={spaceSlug} boot={boot} filter={taskFilter} onFilter={setTaskFilter} onOpenDetail={setDetail} />}
+            {mainView.kind === "admin" && (
+              <AdminPanel
+                boot={boot}
+                tab={mainView.tab}
+                onTab={(tab) => setMainView({ kind: "admin", tab })}
+                onInspectAgent={(id) => setDetail({ kind: "agent", memberID: id })}
+                selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
+                onInspectHuman={(id) => setDetail({ kind: "human", memberID: id })}
+                selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
+                onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
+                onConnectComputer={() => setDialog("computer")}
+                onOpenArchivedChannel={(conv) => setMainView({ kind: "conversation", convID: conv.id, archivedConv: conv })}
+                theme={theme}
+                onTheme={setTheme}
+                onLogout={onLogout}
+              />
+            )}
+          </ErrorBoundary>
         </div>
       </main>
 
@@ -837,16 +870,19 @@ export function Workbench({
           />
         )}
         {detail && (
-          <div key={detailKey(detail)} className="h-full overflow-hidden animate-slide-in" style={{ width: panes.detail }}>
-            <DetailPane
-              spaceSlug={spaceSlug}
-              boot={boot}
-              target={detail}
-              onClose={() => setDetail(null)}
-              onSelectTarget={setDetail}
-              onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
-              onOpenDM={(memberID) => void openOrCreateDM(memberID)}
-            />
+          <div className="h-full overflow-hidden animate-slide-in" style={{ width: panes.detail }}>
+            <ErrorBoundary resetKey={detailKey(detail)} label="detail panel">
+              <DetailPane
+                key={detailKey(detail)}
+                spaceSlug={spaceSlug}
+                boot={boot}
+                target={detail}
+                onClose={() => setDetail(null)}
+                onSelectTarget={setDetail}
+                onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                onOpenDM={(memberID) => void openOrCreateDM(memberID)}
+              />
+            </ErrorBoundary>
           </div>
         )}
       </div>

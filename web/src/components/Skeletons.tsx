@@ -1,4 +1,5 @@
 import { isDesktopShell } from "../shell";
+import { readSavedSidebarWidth } from "./Resize";
 import { Skeleton } from "./ui";
 
 const W = ["w-[58%]", "w-[82%]", "w-[44%]", "w-[70%]", "w-[52%]", "w-[88%]"];
@@ -116,8 +117,9 @@ function SidebarSkeleton({ desktop }: { desktop: boolean }) {
 /** Same column geometry as the Workbench so the swap is layout-stable. */
 export function WorkbenchSkeleton() {
   const desktop = isDesktopShell();
+  const sidebarWidth = readSavedSidebarWidth();
   return (
-    <div className="h-full grid bg-bg animate-fade-in" style={{ gridTemplateColumns: "316px minmax(0, 1fr)" }}>
+    <div className="h-full grid bg-bg" style={{ gridTemplateColumns: `${56 + sidebarWidth}px minmax(0, 1fr)` }}>
       <div className="flex flex-col min-h-0 border-r border-nav-line bg-nav">
         {desktop && (
           <div className="h-[52px] pl-[92px] pr-4 border-b border-nav-line flex items-center shrink-0 titlebar-drag">

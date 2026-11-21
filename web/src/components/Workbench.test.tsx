@@ -100,7 +100,23 @@ const sampleBoot: BootstrapData = {
 };
 
 class MockEventSource {
-  addEventListener() {}
+  static latest: MockEventSource | null = null;
+  listeners = new Map<string, Set<(e: Event) => void>>();
+  constructor() {
+    MockEventSource.latest = this;
+  }
+  addEventListener(type: string, cb: (e: Event) => void) {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(cb);
+  }
+  emit(type: string, data: unknown) {
+    const ev = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const cb of this.listeners.get(type) ?? []) cb(ev);
+  }
   close() {}
 }
 
@@ -183,5 +199,29 @@ describe("Workbench", () => {
     expect(titlebar?.className).toContain("h-[52px]");
     expect(titlebar?.className).toContain("titlebar-drag");
     expect(within(titlebar!).getByText("Sumi Studio")).toBeTruthy();
+  });
+
+  it("patches agent.state_changed from SSE without refetching bootstrap", async () => {
+    const bootSpy = vi.spyOn(api, "bootstrap");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <Workbench spaceSlug="studio" onLogout={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+    expect(within(sidebar).getByText("Working in #engineering")).toBeTruthy();
+    const callsBefore = bootSpy.mock.calls.length;
+
+    MockEventSource.latest?.emit("agent.state_changed", {
+      member_id: "m-lin",
+      runtime_state: "idle",
+      focus_conversation_id: "",
+    });
+
+    await waitFor(() => expect(within(sidebar).queryByText("Working in #engineering")).toBeNull());
+    expect(within(sidebar).getByText("Backend engineer")).toBeTruthy();
+    expect(bootSpy.mock.calls.length).toBe(callsBefore);
   });
 });

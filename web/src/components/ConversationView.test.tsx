@@ -361,3 +361,17 @@ describe("message author header", () => {
     expect(within(row).queryByText("Agent")).toBeNull();
   });
 });
+
+describe("error resilience", () => {
+  it("shows an inline retry state when messages fail to load instead of an empty welcome", async () => {
+    vi.spyOn(api, "listMessages").mockRejectedValueOnce(new Error("server unavailable"));
+    renderView();
+
+    expect(await screen.findByText("Couldn't load messages")).toBeTruthy();
+    expect(screen.getByText("server unavailable")).toBeTruthy();
+    expect(screen.queryByText(/Welcome to #engineering/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("message 2")).toBeTruthy();
+  });
+});

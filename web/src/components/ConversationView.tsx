@@ -30,7 +30,7 @@ import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Rea
 import { ThreadReplySummary } from "./ThreadReplies";
 import { LoadEarlierButton, mergeMessageIntoCache, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, IconButton, Menu, MenuItem, Modal, TaskStatusIcon, useAction, useToast } from "./ui";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Menu, MenuItem, Modal, TaskStatusIcon, useAction, useToast } from "./ui";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NOTIFY: { value: NotifyLevel; label: string; short: string; hint: string; icon: React.ReactNode }[] = [
@@ -76,7 +76,7 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
   return kind;
 }
 
-/** Honest runtime line above the composer: who is working, where, or why not. */
+/** Honest runtime line above the composer: fixed height so status changes never shift the scroll viewport. */
 function AgentStatusLine({
   boot,
   conv,
@@ -90,7 +90,9 @@ function AgentStatusLine({
   const peer = conv.kind === "dm" ? agents.find((a) => a.id === conv.peer_member_id) : undefined;
   const busyHere = agents.filter((a) => a.agent?.runtime_state === "working" && a.agent.focus_conversation_id === conv.id);
   const subject: Member | undefined = peer ?? busyHere[0];
-  if (!subject?.agent) return null;
+  if (!subject?.agent) {
+    return <div className="h-7 px-5 shrink-0" aria-live="polite" />;
+  }
   const st = subject.agent.runtime_state;
   const focus = agentFocus(boot, subject);
   const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
@@ -104,12 +106,12 @@ function AgentStatusLine({
   else if (st === "error") text = `hit an error · ${subject.agent.last_error_code || "see details"}`;
 
   return (
-    <div className="px-5 pt-2.5 pb-1 flex items-center gap-2 text-[13px] animate-fade-in">
+    <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
       <StatusDot state={st} ring="var(--bg)" size={8} />
       <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
         <span className="font-semibold">{subject.display_name}</span> {text}
       </button>
-      {busyHere.length > 1 && <span className="text-fg-3">+{busyHere.length - 1} more working</span>}
+      {busyHere.length > 1 && <span className="text-fg-3 shrink-0">+{busyHere.length - 1} more working</span>}
     </div>
   );
 }
@@ -332,9 +334,14 @@ export function ConversationView({
     onAdjustScroll: syncScrollTop,
   });
   const messages = history.messages;
-  const reactions = useReactionToggle(spaceSlug, conv.id, (messageID, next) => {
-    history.patchMessage(messageID, (m) => ({ ...m, reactions: next }));
-  });
+  const reactions = useReactionToggle(
+    spaceSlug,
+    conv.id,
+    (messageID, next) => {
+      history.patchMessage(messageID, (m) => ({ ...m, reactions: next }));
+    },
+    boot.current_member.id,
+  );
 
   useEffect(() => {
     setCreatingTaskOnMsg(null);
@@ -441,8 +448,20 @@ export function ConversationView({
                     hint={n.hint}
                     onSelect={() => {
                       close();
+                      const prev = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                      if (prev) {
+                        qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                          ...prev,
+                          conversations: prev.conversations.map((c) => (c.id === conv.id ? { ...c, notify_level: n.value } : c)),
+                        });
+                      }
                       void notify.run(async () => {
-                        await api.setNotifyLevel(spaceSlug, conv.id, n.value);
+                        try {
+                          await api.setNotifyLevel(spaceSlug, conv.id, n.value);
+                        } catch (err) {
+                          if (prev) qc.setQueryData(["bootstrap", spaceSlug], prev);
+                          throw err;
+                        }
                         void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
                       });
                     }}
@@ -545,6 +564,12 @@ export function ConversationView({
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto scroll-thin">
           {msgsQ.isLoading ? (
             <MessageListSkeleton />
+          ) : msgsQ.isError && !messages ? (
+            <ErrorState
+              title="Couldn't load messages"
+              message={msgsQ.error instanceof Error ? msgsQ.error.message : "Check your connection and try again."}
+              onRetry={() => void msgsQ.refetch()}
+            />
           ) : !messages || messages.length === 0 ? (
             peer?.kind === "agent" ? (
               <EmptyState
@@ -564,7 +589,7 @@ export function ConversationView({
               />
             )
           ) : (
-            <div className="pb-4 animate-fade-in">
+            <div className="pb-4">
               <LoadEarlierButton hasMore={history.hasMore} loading={history.loading} onClick={() => void history.loadEarlier()} />
               {messages.map((m, idx) => {
                 const prev = messages[idx - 1];
