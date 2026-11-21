@@ -130,7 +130,9 @@ function CompactMessage({
       </div>
       <div
         className={`absolute right-0 -top-2 ${
-          pickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          pickerOpen
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
         } transition-opacity duration-100 bg-card border border-line rounded-[6px] p-0.5 shadow-sm z-20`}
       >
         <ReactionPickerButton
@@ -723,7 +725,7 @@ function TaskDetail({
             ))
           )}
         </div>
-        <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
+        <NewMessagesPill count={stream.newCount} farFromEnd={stream.farFromEnd} onClick={stream.jumpToEnd} />
       </div>
 
       <ReplyBox
@@ -852,7 +854,7 @@ function ThreadDetail({
             ))
           )}
         </div>
-        <NewMessagesPill count={stream.newCount} onClick={stream.jumpToEnd} />
+        <NewMessagesPill count={stream.newCount} farFromEnd={stream.farFromEnd} onClick={stream.jumpToEnd} />
       </div>
       <ReplyBox
         spaceSlug={spaceSlug}

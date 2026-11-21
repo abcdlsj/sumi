@@ -175,6 +175,58 @@ function ReactionPopover({
   );
 }
 
+const QUICK_EMOJI_KEY = "sumi.quick_reaction";
+
+function readQuickEmoji(): ReactionEmoji {
+  try {
+    const raw = localStorage.getItem(QUICK_EMOJI_KEY);
+    if (raw && REACTION_EMOJIS.some((e) => e.code === raw)) return raw as ReactionEmoji;
+  } catch {
+    // ignore storage failures
+  }
+  return "thumbsup";
+}
+
+function saveQuickEmoji(code: ReactionEmoji) {
+  try {
+    localStorage.setItem(QUICK_EMOJI_KEY, code);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** One-click button for the user's most recently used reaction emoji. */
+export function QuickReactionButton({
+  reactions,
+  onToggle,
+}: {
+  reactions?: ReactionGroup[];
+  onToggle: (emoji: ReactionEmoji, currentlyReacted: boolean) => void;
+}) {
+  const [favorite, setFavorite] = useState<ReactionEmoji>(readQuickEmoji);
+  useEffect(() => {
+    const onSync = () => setFavorite(readQuickEmoji());
+    window.addEventListener("sumi:quick-reaction", onSync);
+    return () => window.removeEventListener("sumi:quick-reaction", onSync);
+  }, []);
+  const reacted = Boolean(reactions?.some((r) => r.emoji === favorite && r.reacted));
+  const meta = getReactionEmoji(favorite);
+  return (
+    <button
+      type="button"
+      aria-label={`Quick react with ${favorite}`}
+      aria-pressed={reacted}
+      title={reacted ? `Remove :${favorite}:` : `React with :${favorite}: · ${meta.label}`}
+      onClick={() => onToggle(favorite, reacted)}
+      className={`size-7 rounded-[5px] flex items-center justify-center transition-colors ${
+        reacted ? "bg-accent-soft text-accent-text" : "text-fg-2 hover:bg-hover hover:text-fg"
+      }`}
+    >
+      <EmojiIcon emoji={favorite} size={15} />
+    </button>
+  );
+}
+
 /** Hover toolbar button that opens the reaction picker for a message. */
 export function ReactionPickerButton({
   reactions,
@@ -214,7 +266,11 @@ export function ReactionPickerButton({
           triggerRef={triggerRef}
           reactedSet={reactedSet}
           align="right"
-          onPick={(code) => onToggle(code, reactedSet.has(code))}
+          onPick={(code) => {
+            saveQuickEmoji(code);
+            window.dispatchEvent(new Event("sumi:quick-reaction"));
+            onToggle(code, reactedSet.has(code));
+          }}
           onClose={() => onOpenChange(false)}
         />
       )}

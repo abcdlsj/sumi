@@ -8,9 +8,12 @@ import {
   Bell,
   BellOff,
   ChevronDown,
+  ChevronRight,
+  Copy,
   CornerUpLeft,
   FolderInput,
   Hash,
+  Link2,
   ListPlus,
   Lock,
   MessageSquare,
@@ -24,9 +27,10 @@ import { api, formatClock, formatDay, type BootstrapData, type Conversation, typ
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
+import { CollapsibleMessage } from "./CollapsibleMessage";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
-import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
+import { MessageReactions, QuickReactionButton, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { ThreadReplySummary } from "./ThreadReplies";
 import { LoadEarlierButton, mergeMessageIntoCache, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
@@ -114,6 +118,78 @@ function AgentStatusLine({
       {busyHere.length > 1 && <span className="text-fg-3 shrink-0">+{busyHere.length - 1} more working</span>}
     </div>
   );
+}
+
+function ActionMessageGroup({ items }: { items: Message[] }) {
+  const [open, setOpen] = useState(false);
+  const authors = Array.from(new Set(items.map((m) => m.author_display_name).filter(Boolean)));
+  const summaryAuthors = authors.slice(0, 3).join(", ") + (authors.length > 3 ? ` +${authors.length - 3}` : "");
+  const lastAt = items[items.length - 1]?.created_at;
+  return (
+    <div className="px-6 py-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2.5 text-[12.5px] text-fg-3 hover:text-fg transition-colors py-0.5"
+      >
+        <span className="w-8 flex justify-center shrink-0">
+          <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
+            {open ? <ChevronDown className="size-3 text-fg-3" /> : <ChevronRight className="size-3 text-fg-3" />}
+          </span>
+        </span>
+        <span className="font-medium text-fg-2">{items.length} updates</span>
+        {summaryAuthors && <span className="text-fg-4 truncate">· {summaryAuthors}</span>}
+        {lastAt && <span className="tabular text-[11.5px] text-fg-4 shrink-0">{formatClock(lastAt)}</span>}
+      </button>
+      {open && (
+        <div className="mt-1 ml-11 pl-3 border-l border-line space-y-1 animate-fade-in">
+          {items.map((m) => (
+            <div key={m.id} className="text-[12.5px] text-fg-3 leading-relaxed">
+              <span className="font-medium text-fg-2">{m.author_display_name}</span>{" "}
+              {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
+              <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type StreamEntry =
+  | { kind: "message"; msg: Message; idx: number }
+  | { kind: "action_group"; key: string; items: Message[]; firstIdx: number };
+
+function buildStreamEntries(messages: Message[], boundary: number, selfID: string): StreamEntry[] {
+  const entries: StreamEntry[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i];
+    if (m.kind === "text") {
+      entries.push({ kind: "message", msg: m, idx: i });
+      i++;
+      continue;
+    }
+    const run: Message[] = [m];
+    let j = i + 1;
+    while (j < messages.length) {
+      const next = messages[j];
+      if (next.kind === "text") break;
+      if (!sameDay(run[run.length - 1].created_at, next.created_at)) break;
+      const crossesNew = boundary > 0 && next.seq > boundary && next.author_member_id !== selfID && run[run.length - 1].seq <= boundary;
+      if (crossesNew) break;
+      run.push(next);
+      j++;
+    }
+    if (run.length >= 2) {
+      entries.push({ kind: "action_group", key: `ag:${run[0].id}:${run.length}`, items: run, firstIdx: i });
+    } else {
+      entries.push({ kind: "message", msg: m, idx: i });
+    }
+    i = j;
+  }
+  return entries;
 }
 
 function DayDivider({ iso }: { iso: string }) {
@@ -302,6 +378,7 @@ export function ConversationView({
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
+  const [moreMenuMsgID, setMoreMenuMsgID] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const taskAction = useAction();
   const notify = useAction();
@@ -318,7 +395,7 @@ export function ConversationView({
   const tailMessages = msgsQ.data?.messages;
   const isNew = useArrivals(conv.id, tailMessages);
   const lastTailMsg = tailMessages && tailMessages.length > 0 ? tailMessages[tailMessages.length - 1] : undefined;
-  const { ref: scrollRef, onScroll, newCount, jumpToEnd, syncScrollTop } = useStickToBottom({
+  const { ref: scrollRef, onScroll, newCount, farFromEnd, jumpToEnd, syncScrollTop } = useStickToBottom({
     streamKey: conv.id,
     count: tailMessages?.length ?? 0,
     lastSeq: lastTailMsg?.seq,
@@ -591,8 +668,32 @@ export function ConversationView({
           ) : (
             <div className="pb-4">
               <LoadEarlierButton hasMore={history.hasMore} loading={history.loading} onClick={() => void history.loadEarlier()} />
-              {messages.map((m, idx) => {
-                const prev = messages[idx - 1];
+              {buildStreamEntries(messages, boundary, boot.current_member.id).map((entry) => {
+                if (entry.kind === "action_group") {
+                  const first = entry.items[0];
+                  const prev = messages[entry.firstIdx - 1];
+                  const showDay = !prev || !sameDay(prev.created_at, first.created_at);
+                  const showNew =
+                    boundary > 0 &&
+                    first.seq > boundary &&
+                    first.author_member_id !== boot.current_member.id &&
+                    (!prev || prev.seq <= boundary);
+                  return (
+                    <div key={entry.key}>
+                      {showDay && <DayDivider iso={first.created_at} />}
+                      {showNew && (
+                        <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-3 animate-fade-in">
+                          <div className="flex-1 h-px bg-warm/40" />
+                          <span className="text-[12px] font-semibold text-warm">New messages</span>
+                          <div className="flex-1 h-px bg-warm/40" />
+                        </div>
+                      )}
+                      <ActionMessageGroup items={entry.items} />
+                    </div>
+                  );
+                }
+                const m = entry.msg;
+                const prev = messages[entry.idx - 1];
                 const showDay = !prev || !sameDay(prev.created_at, m.created_at);
                 const showNew = boundary > 0 && m.seq > boundary && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= boundary);
                 const grouped =
@@ -604,8 +705,9 @@ export function ConversationView({
                   prev.author_member_id === m.author_member_id &&
                   new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
                 const author = boot.members.find((x) => x.id === m.author_member_id);
+                const toolbarPinned = reactionPickerMsgID === m.id || moreMenuMsgID === m.id;
                 return (
-                  <div key={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
+                  <div key={m.id} data-message-id={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
                     {showDay && <DayDivider iso={m.created_at} />}
                     {showNew && (
                       <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-3 animate-fade-in">
@@ -667,14 +769,16 @@ export function ConversationView({
                             </div>
                           )}
                           <div className={`${grouped ? "" : "mt-1"} text-[14.5px] leading-[1.65] text-fg md`}>
-                            <MessageBody
-                              body={m.body_markdown}
-                              members={boot.members}
-                              tasks={boot.tasks}
-                              selfID={boot.current_member.id}
-                              onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
-                              onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
-                            />
+                            <CollapsibleMessage messageID={m.id}>
+                              <MessageBody
+                                body={m.body_markdown}
+                                members={boot.members}
+                                tasks={boot.tasks}
+                                selfID={boot.current_member.id}
+                                onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
+                                onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
+                              />
+                            </CollapsibleMessage>
                           </div>
 
                           <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
@@ -743,9 +847,15 @@ export function ConversationView({
                         {!isArchived && (
                           <div
                             className={`absolute right-5 -top-3.5 ${
-                              reactionPickerMsgID === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                              toolbarPinned
+                                ? "opacity-100 pointer-events-auto"
+                                : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
                             } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[6px] p-0.5 shadow-md z-20`}
                           >
+                            <QuickReactionButton
+                              reactions={m.reactions}
+                              onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
+                            />
                             <ReactionPickerButton
                               reactions={m.reactions}
                               open={reactionPickerMsgID === m.id}
@@ -770,6 +880,47 @@ export function ConversationView({
                             >
                               <ListPlus className="size-3.5" /> Task
                             </button>
+                            <Menu
+                              width={184}
+                              onOpenChange={(open) => setMoreMenuMsgID(open ? m.id : null)}
+                              trigger={(open, toggle) => (
+                                <button
+                                  type="button"
+                                  aria-label="More message actions"
+                                  aria-expanded={open}
+                                  onClick={toggle}
+                                  className={`size-7 rounded-[5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center justify-center ${
+                                    open ? "bg-hover text-fg" : ""
+                                  }`}
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </button>
+                              )}
+                            >
+                              {(close) => (
+                                <>
+                                  <MenuItem
+                                    icon={<Copy />}
+                                    onSelect={() => {
+                                      close();
+                                      void navigator.clipboard?.writeText(m.body_markdown).then(() => toast("Copied message text", "success"));
+                                    }}
+                                  >
+                                    Copy text
+                                  </MenuItem>
+                                  <MenuItem
+                                    icon={<Link2 />}
+                                    onSelect={() => {
+                                      close();
+                                      const link = `${window.location.origin}${window.location.pathname}#${spaceSlug}/c/${conv.id}/m/${m.id}`;
+                                      void navigator.clipboard?.writeText(link).then(() => toast("Copied message link", "success"));
+                                    }}
+                                  >
+                                    Copy link
+                                  </MenuItem>
+                                </>
+                              )}
+                            </Menu>
                           </div>
                         )}
                       </article>
@@ -780,7 +931,7 @@ export function ConversationView({
             </div>
           )}
         </div>
-        <NewMessagesPill count={newCount} onClick={jumpToEnd} />
+        <NewMessagesPill count={newCount} farFromEnd={farFromEnd} onClick={jumpToEnd} />
       </div>
 
       {isArchived ? (

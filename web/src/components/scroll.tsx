@@ -22,6 +22,8 @@ export function mergeMessageIntoCache(qc: QueryClient, spaceSlug: string, convID
 
 /** Distance from the end that still counts as reading the newest message. */
 const NEAR_END_PX = 80;
+/** Distance scrolled up before showing a calm "Jump to latest" pill even with no new arrivals. */
+const JUMP_TO_LATEST_PX = 360;
 
 function distanceFromEnd(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -46,6 +48,8 @@ export interface StickToBottom {
   onScroll: () => void;
   /** Messages that arrived while the reader was above the end. */
   newCount: number;
+  /** True when the reader scrolled far above the latest message. */
+  farFromEnd: boolean;
   /** Jump to the end and clear the counter. */
   jumpToEnd: () => void;
   /** Records a programmatic scroll adjustment (e.g. prepending older pages) so it isn't misread as user scrolling. */
@@ -67,6 +71,7 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
   const lastTop = useRef(0);
   const moved = useRef(false);
   const [newCount, setNewCount] = useState(0);
+  const [farFromEnd, setFarFromEnd] = useState(false);
 
   /** Records our own scroll positions so they are not read as the reader moving. */
   const setTop = useCallback((el: HTMLElement, top: number) => {
@@ -83,6 +88,7 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
     if (el) setTop(el, el.scrollHeight);
     pinned.current = true;
     setNewCount(0);
+    setFarFromEnd(false);
   }, [setTop]);
 
   useLayoutEffect(() => {
@@ -94,6 +100,7 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
     lastTop.current = 0;
     moved.current = false;
     setNewCount(0);
+    setFarFromEnd(false);
   }, [streamKey]);
 
   useLayoutEffect(() => {
@@ -133,8 +140,10 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
     const el = ref.current;
     if (!el) return;
     if (Math.abs(el.scrollTop - lastTop.current) > 1) moved.current = true;
-    const atEnd = distanceFromEnd(el) < NEAR_END_PX;
+    const dist = distanceFromEnd(el);
+    const atEnd = dist < NEAR_END_PX;
     pinned.current = atEnd;
+    setFarFromEnd(dist > JUMP_TO_LATEST_PX);
     if (atEnd) setNewCount(0);
   }, []);
 
@@ -161,20 +170,33 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
   }, [streamKey, count]);
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  return { ref, onScroll, newCount, jumpToEnd, syncScrollTop };
+  return { ref, onScroll, newCount, farFromEnd, jumpToEnd, syncScrollTop };
 }
 
-/** Floating "N new messages" pill shown while the stream is parked above its end. */
-export function NewMessagesPill({ count, onClick }: { count: number; onClick: () => void }) {
-  if (count <= 0) return null;
+/** Floating pill shown while parked above the end: accented for new arrivals, calm for history browsing. */
+export function NewMessagesPill({
+  count,
+  farFromEnd = false,
+  onClick,
+}: {
+  count: number;
+  farFromEnd?: boolean;
+  onClick: () => void;
+}) {
+  if (count <= 0 && !farFromEnd) return null;
+  const hasNew = count > 0;
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center z-20">
       <button
         type="button"
         onClick={onClick}
-        className="pointer-events-auto h-8 pl-3 pr-2.5 rounded-[6px] bg-accent text-accent-fg shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in hover:bg-accent-hover transition-colors"
+        className={`pointer-events-auto h-8 pl-3 pr-2.5 rounded-[6px] shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in transition-colors ${
+          hasNew
+            ? "bg-accent text-accent-fg hover:bg-accent-hover"
+            : "bg-card text-fg-2 border border-line-strong hover:bg-subtle hover:text-fg"
+        }`}
       >
-        {count} new {count === 1 ? "message" : "messages"}
+        {hasNew ? `${count} new ${count === 1 ? "message" : "messages"}` : "Jump to latest"}
         <ArrowDown className="size-4" />
       </button>
     </div>

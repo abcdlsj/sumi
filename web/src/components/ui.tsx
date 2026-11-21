@@ -890,13 +890,25 @@ export function Menu({
   children,
   align = "right",
   width = 240,
+  onOpenChange,
 }: {
   trigger: (open: boolean, toggle: () => void) => ReactNode;
   children: (close: () => void) => ReactNode;
   align?: "left" | "right";
   width?: number;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      setOpenState((prev) => {
+        const value = typeof next === "function" ? next(prev) : next;
+        if (value !== prev) onOpenChange?.(value);
+        return value;
+      });
+    },
+    [onOpenChange],
+  );
   const triggerWrapRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const floatingStyle = useFloatingPosition(open, triggerWrapRef, menuRef, { align, width, maxHeight: 360 });

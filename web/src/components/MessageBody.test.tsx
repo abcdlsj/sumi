@@ -109,4 +109,10 @@ describe("MessageBody @mentions", () => {
     fireEvent.click(copyBtn);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("sumi task show t-14\n"));
   });
+
+  it("renders CJK bold emphasis adjacent to Chinese punctuation", () => {
+    const { container } = render(<MessageBody body="这是**重要（加粗）**说明。" members={members} selfID={lisi.id} />);
+    const strong = container.querySelector("strong");
+    expect(strong?.textContent).toBe("重要（加粗）");
+  });
 });

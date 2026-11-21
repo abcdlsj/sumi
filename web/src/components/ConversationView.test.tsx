@@ -190,6 +190,29 @@ describe("message stream", () => {
     expect(screen.queryByRole("button", { name: "Load earlier messages" })).toBeNull();
     expect(screen.queryByRole("button", { name: /new message/ })).toBeNull();
   });
+
+  it("groups consecutive action messages into an expandable disclosure and shows Jump to latest when scrolled far up", async () => {
+    messages = [
+      msg(1, sam, "hello"),
+      { ...msg(2, lin, ""), kind: "action", action_kind: "task_event", payload_json: JSON.stringify({ op: "claimed", task_number: 3 }) },
+      { ...msg(3, sam, ""), kind: "action", action_kind: "task_event", payload_json: JSON.stringify({ op: "status_changed", task_number: 3, from: "todo", to: "in_progress" }) },
+      msg(4, sam, "done"),
+    ];
+    const { box } = renderView();
+    sizeStream(box, 1200);
+    await screen.findByText("done");
+
+    const toggle = screen.getByRole("button", { name: /2 updates/ });
+    expect(screen.queryByText(/claimed #3/)).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByText(/claimed #3/)).toBeTruthy();
+
+    box.scrollTop = 100;
+    fireEvent.scroll(box);
+    const jump = await screen.findByRole("button", { name: "Jump to latest" });
+    fireEvent.click(jump);
+    expect(box.scrollTop).toBe(1200);
+  });
 });
 
 describe("composer", () => {

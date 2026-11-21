@@ -1,8 +1,25 @@
-import { isValidElement, memo, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, Copy } from "lucide-react";
+import { Component, memo, useMemo, useRef, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import type { Member, Task } from "../api";
+import { CodeBlock } from "./CodeHighlight";
+
+class MarkdownErrorBoundary extends Component<{ body: string; children: ReactNode }, { body: string; failed: boolean }> {
+  state = { body: this.props.body, failed: false };
+  static getDerivedStateFromProps(props: { body: string }, state: { body: string; failed: boolean }) {
+    return props.body !== state.body ? { body: props.body, failed: false } : null;
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) {
+      return <pre className="whitespace-pre-wrap break-words font-mono text-[13px] text-fg-2">{this.props.body}</pre>;
+    }
+    return this.props.children;
+  }
+}
 
 interface MdastNode {
   type: string;
@@ -103,50 +120,6 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
   };
 }
 
-function codeLanguage(children?: ReactNode): string {
-  if (!isValidElement<{ className?: string }>(children)) return "";
-  const m = children.props.className?.match(/language-([A-Za-z0-9_+-]+)/);
-  return m ? m[1] : "";
-}
-
-function CodeBlock({ children }: { children?: ReactNode }) {
-  const preRef = useRef<HTMLPreElement | null>(null);
-  const [copied, setCopied] = useState(false);
-  const lang = codeLanguage(children);
-
-  function copy() {
-    const text = preRef.current?.textContent ?? "";
-    if (!text) return;
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  }
-
-  return (
-    <div className="relative group/code my-2">
-      <pre ref={preRef}>{children}</pre>
-      <div className="absolute top-2 right-2 flex items-center gap-1.5">
-        {lang && (
-          <span className="h-6 px-1.5 rounded-[4px] bg-card/80 border border-line font-mono text-[11px] text-fg-4 inline-flex items-center select-none">
-            {lang}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={copy}
-          aria-label={copied ? "Copied code" : "Copy code"}
-          title={copied ? "Copied" : "Copy"}
-          className="h-7 px-2 rounded-[5px] bg-card/90 border border-line text-[12px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 opacity-0 group-hover/code:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
-        >
-          {copied ? <Check className="size-3.5 text-work" /> : <Copy className="size-3.5" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export const MessageBody = memo(function MessageBody({
   body,
   members,
@@ -186,7 +159,7 @@ export const MessageBody = memo(function MessageBody({
   const plugins = useMemo(() => {
     const names = membersRef.current.map((m) => m.display_name);
     const nums = tasksRef.current.map((t) => t.number);
-    return [remarkGfm, createRemarkRefs(names, nums)];
+    return [remarkGfm, remarkCjkFriendly, createRemarkRefs(names, nums)];
   }, [memberSig, taskSig]);
 
   const onSelectMemberRef = useRef(onSelectMember);
@@ -283,8 +256,10 @@ export const MessageBody = memo(function MessageBody({
   );
 
   return (
-    <ReactMarkdown remarkPlugins={plugins} components={components}>
-      {body}
-    </ReactMarkdown>
+    <MarkdownErrorBoundary body={body}>
+      <ReactMarkdown remarkPlugins={plugins} components={components}>
+        {body}
+      </ReactMarkdown>
+    </MarkdownErrorBoundary>
   );
 });
