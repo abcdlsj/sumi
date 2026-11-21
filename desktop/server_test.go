@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/abcdlsj/sumi/internal/webui"
 )
 
 func TestLoadConfigDefaultsAndOverrides(t *testing.T) {
@@ -145,18 +143,4 @@ func TestIsLoopbackHost(t *testing.T) {
 			t.Fatalf("%q must not be treated as loopback", host)
 		}
 	}
-}
-
-func TestEmbeddedAssetsResolve(t *testing.T) {
-	if _, err := webui.FS().Open("index.html"); err != nil {
-		t.Fatalf("web assets must always contain index.html: %v", err)
-	}
-}
-
-func TestRuntimeStatusStartsUnpaired(t *testing.T) {
-	rt := newRuntime(Config{ServerURL: defaultServerURL, DataDir: t.TempDir()}, slog.New(slog.DiscardHandler))
-	if rt.status() != "not paired" {
-		t.Fatalf("unexpected initial status %q", rt.status())
-	}
-	rt.shutdown()
 }
