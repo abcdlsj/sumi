@@ -264,7 +264,7 @@ export function ConversationView({
 
   return (
     <section className="flex flex-col h-full min-h-0 bg-panel">
-      <header className="h-[52px] px-5 border-b border-line flex items-center justify-between gap-4 shrink-0">
+      <header className="h-[52px] px-5 border-b border-line flex items-center justify-between gap-4 shrink-0 titlebar-drag">
         <div className="flex items-center gap-2.5 min-w-0">
           {conv.kind === "dm" ? (
             <MemberAvatar

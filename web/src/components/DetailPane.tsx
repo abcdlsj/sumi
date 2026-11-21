@@ -34,7 +34,7 @@ const STATUSES: TaskStatus[] = ["todo", "in_progress", "in_review", "done", "clo
 
 function PaneHeader({ children, onClose, actions }: { children: ReactNode; onClose: () => void; actions?: ReactNode }) {
   return (
-    <header className="h-[52px] px-4 border-b border-line flex items-center justify-between gap-2 shrink-0">
+    <header className="h-[52px] px-4 border-b border-line flex items-center justify-between gap-2 shrink-0 titlebar-drag">
       <div className="flex items-center gap-2 min-w-0 text-[14px]">{children}</div>
       <div className="flex items-center gap-1 shrink-0">
         {actions}

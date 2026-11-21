@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { AtSign, Check, Eye, EyeOff, Laptop, Lock, Mail, User as UserIcon } from "lucide-react";
 import { api, ApiError, sanitizeDisplayName, slugInput, slugify, type User } from "../api";
 import { readPendingPairing } from "../pairing";
+import { isDesktopShell } from "../shell";
 import { agentSprite, PixelAvatar } from "./Avatar";
 import { DesktopServerTrigger } from "./DesktopServer";
 import { AgentStep, ComputerStep, StepHeading } from "./Setup";
@@ -56,10 +57,10 @@ function crewSeeds(): string[] {
   return seeds;
 }
 
-function BrandPanel({ step }: { step: OnboardingStep }) {
+function BrandPanel({ step, desktop }: { step: OnboardingStep; desktop: boolean }) {
   const [seeds] = useState(crewSeeds);
   return (
-    <aside className="hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between p-10 relative overflow-hidden">
+    <aside className={`hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between px-10 pb-10 ${desktop ? "pt-[72px]" : "pt-10"} relative overflow-hidden`}>
       <div
         aria-hidden
         className="absolute -top-32 -right-24 size-[380px] rounded-full opacity-25 dark:opacity-40 blur-3xl"
@@ -324,6 +325,7 @@ export function Onboarding({
   onFinish: (agentMemberID?: string) => void;
   onLogout: () => void;
 }) {
+  const desktop = isDesktopShell();
   let body: ReactNode = null;
   if (step === "account") body = <AccountStep onAuthenticated={onAuthenticated} />;
   if (step === "space" && user) body = <SpaceStep user={user} onCreated={onSpaceCreated} />;
@@ -331,10 +333,11 @@ export function Onboarding({
   if (step === "agent") body = <AgentStep spaceSlug={spaceSlug} onDone={(a) => onFinish(a.id)} onSkip={() => onFinish()} />;
 
   return (
-    <div className="h-full flex bg-bg">
-      <BrandPanel step={step} />
+    <div className="relative h-full flex bg-bg">
+      {desktop && <div aria-hidden className="fixed inset-x-0 top-0 h-[52px] z-20 titlebar-drag" />}
+      <BrandPanel step={step} desktop={desktop} />
       <main className="flex-1 min-w-0 overflow-y-auto scroll-thin">
-        <div className="min-h-full flex flex-col px-6 py-10">
+        <div className={`min-h-full flex flex-col px-6 pb-10 ${desktop ? "pt-[68px]" : "pt-10"}`}>
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-[460px]">
               <MobileSteps step={step} />

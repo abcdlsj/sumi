@@ -1,3 +1,4 @@
+import { isDesktopShell } from "../shell";
 import { Skeleton } from "./ui";
 
 const W = ["w-[58%]", "w-[82%]", "w-[44%]", "w-[70%]", "w-[52%]", "w-[88%]"];
@@ -82,13 +83,15 @@ export function DetailSkeleton() {
   );
 }
 
-function SidebarSkeleton() {
+function SidebarSkeleton({ desktop }: { desktop: boolean }) {
   return (
-    <aside className="bg-nav border-r border-nav-line flex flex-col">
-      <div className="h-[52px] px-4 flex items-center">
-        <Skeleton nav className="h-4 w-32" />
-      </div>
-      <div className="px-3 space-y-6 pt-2">
+    <aside className="bg-nav flex flex-col">
+      {!desktop && (
+        <div className="h-[52px] px-4 flex items-center">
+          <Skeleton nav className="h-4 w-32" />
+        </div>
+      )}
+      <div className={`px-3 space-y-6 ${desktop ? "pt-3" : "pt-2"}`}>
         <Skeleton nav className="h-9 w-full rounded-[9px]" />
         <div className="space-y-3 px-1">
           <Skeleton nav className="h-4 w-24" />
@@ -112,14 +115,24 @@ function SidebarSkeleton() {
 
 /** Same column geometry as the Workbench so the swap is layout-stable. */
 export function WorkbenchSkeleton() {
+  const desktop = isDesktopShell();
   return (
-    <div className="h-full grid bg-bg animate-fade-in" style={{ gridTemplateColumns: "56px 260px minmax(0, 1fr)" }}>
-      <nav className="bg-nav-rail flex flex-col items-center py-3 gap-2">
-        <Skeleton nav className="size-9 rounded-[10px]" />
-      </nav>
-      <SidebarSkeleton />
+    <div className="h-full grid bg-bg animate-fade-in" style={{ gridTemplateColumns: "316px minmax(0, 1fr)" }}>
+      <div className="flex flex-col min-h-0 border-r border-nav-line bg-nav">
+        {desktop && (
+          <div className="h-[52px] pl-[92px] pr-4 border-b border-nav-line flex items-center shrink-0 titlebar-drag">
+            <Skeleton nav className="h-4 w-32" />
+          </div>
+        )}
+        <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
+          <nav className="bg-nav-rail flex flex-col items-center py-3 gap-2">
+            <Skeleton nav className="size-9 rounded-[10px]" />
+          </nav>
+          <SidebarSkeleton desktop={desktop} />
+        </div>
+      </div>
       <main className="flex flex-col min-w-0 bg-panel">
-        <div className="h-[52px] px-6 border-b border-line flex items-center gap-3">
+        <div className="h-[52px] px-6 border-b border-line flex items-center gap-3 titlebar-drag">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-3.5 w-48" />
         </div>

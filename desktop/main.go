@@ -184,11 +184,10 @@ func main() {
 		MinHeight:        600,
 		BackgroundColour: application.NewRGBA(244, 244, 247, 255),
 		URL:              startURL,
-		// Content runs under a transparent title bar. The drag strip is kept thin so it
-		// never covers header buttons; only the rail reserves room for the traffic lights.
+		// Unified 52pt transparent toolbar centers macOS traffic lights on the same
+		// horizontal axis as the 52px pane headers; CSS --wails-draggable drives drag.
 		Mac: application.MacWindow{
-			TitleBar:                application.MacTitleBarHidden,
-			InvisibleTitleBarHeight: 8,
+			TitleBar: application.MacTitleBarHiddenInsetUnified,
 		},
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {

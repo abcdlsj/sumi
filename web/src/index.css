@@ -260,7 +260,7 @@
   --titlebar: 0px;
 }
 html.desktop {
-  --titlebar: 28px;
+  --titlebar: 52px;
 }
 
 @layer base {
@@ -307,9 +307,24 @@ html.desktop {
   letter-spacing: -0.022em;
 }
 
-/* Desktop shell: only the rail clears the traffic lights; the 52px headers stay aligned with them. */
+/* Desktop shell: 52px unified macOS toolbar aligns traffic lights with every pane header. */
 .titlebar-pad {
   padding-top: var(--titlebar);
+}
+html.desktop .titlebar-drag {
+  --wails-draggable: drag;
+}
+html.desktop .titlebar-drag button,
+html.desktop .titlebar-drag a,
+html.desktop .titlebar-drag input,
+html.desktop .titlebar-drag select,
+html.desktop .titlebar-drag textarea,
+html.desktop .titlebar-drag [role="button"],
+html.desktop .titlebar-drag [role="tab"],
+html.desktop .titlebar-drag [role="tablist"],
+html.desktop .titlebar-drag [role="separator"],
+html.desktop .titlebar-drag .titlebar-no-drag {
+  --wails-draggable: no-drag;
 }
 
 /* Resize handles for the sidebar and the detail pane. */

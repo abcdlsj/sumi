@@ -44,7 +44,7 @@ const REASON: Record<string, { label: string; icon: ReactNode }> = {
 
 export function ViewHeader({ title, icon, children, actions }: { title: string; icon?: ReactNode; children?: ReactNode; actions?: ReactNode }) {
   return (
-    <header className="h-[52px] px-6 border-b border-line flex items-center gap-4 shrink-0 bg-panel">
+    <header className="h-[52px] px-6 border-b border-line flex items-center gap-4 shrink-0 bg-panel titlebar-drag">
       <h1 className="flex items-center gap-2 text-[15px] font-semibold text-fg [&>svg]:size-4 [&>svg]:text-fg-3">
         {icon}
         {title}

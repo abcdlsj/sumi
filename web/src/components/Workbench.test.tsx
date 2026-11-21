@@ -134,6 +134,7 @@ describe("Workbench", () => {
   });
 
   afterEach(() => {
+    sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -166,4 +167,21 @@ describe("Workbench", () => {
     await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("studio", "t-14"), { timeout: 10000 });
     expect(await screen.findByText("Discussion", {}, { timeout: 10000 })).toBeTruthy();
   }, 30000);
+
+  it("renders a unified draggable 52px titlebar header for macOS traffic lights in desktop shell", async () => {
+    sessionStorage.setItem("sumi.shell", "desktop");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <Workbench spaceSlug="studio" onLogout={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Sumi Studio");
+    const titlebar = container.querySelector("[data-desktop-titlebar]") as HTMLElement | null;
+    expect(titlebar).toBeTruthy();
+    expect(titlebar?.className).toContain("h-[52px]");
+    expect(titlebar?.className).toContain("titlebar-drag");
+    expect(within(titlebar!).getByText("Sumi Studio")).toBeTruthy();
+  });
 });

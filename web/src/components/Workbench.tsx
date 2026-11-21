@@ -4,6 +4,7 @@ import { Bot, CheckCircle2, ChevronRight, FolderPlus, Hash, Inbox, Lock, Monitor
 import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { readPendingPairing } from "../pairing";
+import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
 import { agentStatusText, MemberAvatar } from "./Avatar";
@@ -302,6 +303,7 @@ export function Workbench({
   const needsSetup = canGovern && (myComputers.length === 0 || agents.length === 0);
   const needsMe = boot.inbox.filter((i) => i.needs_attention).length;
   const pairing = readPendingPairing();
+  const desktop = isDesktopShell();
   const dark = theme === "dark" || (theme === "system" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   function handleChannelDragStart(e: DragEvent, convID: string) {
@@ -450,55 +452,10 @@ export function Workbench({
   return (
     <div
       className="h-full grid bg-bg"
-      style={{ gridTemplateColumns: `56px ${panes.sidebar}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
+      style={{ gridTemplateColumns: `${56 + panes.sidebar}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
     >
-      {/* Rail */}
-      <nav aria-label="Spaces" className="bg-nav-rail titlebar-pad flex flex-col items-center justify-between pb-3 select-none">
-        <div className="flex flex-col items-center gap-2 pt-3">
-          {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
-            const active = sp.slug === spaceSlug;
-            return (
-              <button
-                key={sp.id}
-                onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(sp.slug))}
-                title={sp.name}
-                aria-label={`Space ${sp.name}`}
-                className="relative size-9 flex items-center justify-center group"
-              >
-                <span
-                  className={`absolute -left-3 w-1 rounded-r-full bg-nav-fg-strong transition-all duration-200 ${active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
-                />
-                <span
-                  className={`size-9 rounded-[11px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
-                    active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[9px] text-white"
-                  }`}
-                  style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
-                >
-                  {(sp.name[0] ?? "S").toUpperCase()}
-                </span>
-              </button>
-            );
-          })}
-          <button
-            onClick={() => setDialog("space")}
-            title="New space"
-            aria-label="New space"
-            className="size-9 rounded-[11px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
-          >
-            <Plus className="size-4" />
-          </button>
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          {railBtn("agents", <Bot />, "Agents")}
-          {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, onlineComputers > 0)}
-          {railBtn("people", <Users />, "People")}
-          {railBtn("settings", <Settings />, "Settings")}
-          <DesktopServerTrigger variant="rail" />
-        </div>
-      </nav>
-
-      {/* Sidebar */}
-      <aside aria-label="Sidebar" className="relative bg-nav border-r border-nav-line flex flex-col min-h-0 select-none">
+      {/* Navigation shell: in desktop mode a unified 52px header spans rail + sidebar so macOS traffic lights sit on one continuous surface. */}
+      <div className="relative flex flex-col min-w-0 min-h-0 border-r border-nav-line bg-nav select-none">
         <ResizeHandle
           label="Resize sidebar"
           edge="right"
@@ -508,10 +465,68 @@ export function Workbench({
           onResize={panes.setSidebar}
           onReset={panes.resetSidebar}
         />
-        <div className="h-[52px] px-4 flex items-center shrink-0">
-          <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
-        </div>
-        <div className="px-3 pb-2 shrink-0">
+        {desktop && (
+          <div
+            data-desktop-titlebar
+            className="h-[52px] pl-[92px] pr-4 border-b border-nav-line flex items-center shrink-0 titlebar-drag"
+          >
+            <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
+          </div>
+        )}
+        <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
+          {/* Rail */}
+          <nav aria-label="Spaces" className="bg-nav-rail flex flex-col items-center justify-between pb-3">
+            <div className="flex flex-col items-center gap-2 pt-3">
+              {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
+                const active = sp.slug === spaceSlug;
+                return (
+                  <button
+                    key={sp.id}
+                    onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(sp.slug))}
+                    title={sp.name}
+                    aria-label={`Space ${sp.name}`}
+                    className="relative size-9 flex items-center justify-center group"
+                  >
+                    <span
+                      className={`absolute -left-3 w-1 rounded-r-full bg-nav-fg-strong transition-all duration-200 ${active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
+                    />
+                    <span
+                      className={`size-9 rounded-[11px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
+                        active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[9px] text-white"
+                      }`}
+                      style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
+                    >
+                      {(sp.name[0] ?? "S").toUpperCase()}
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setDialog("space")}
+                title="New space"
+                aria-label="New space"
+                className="size-9 rounded-[11px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
+              >
+                <Plus className="size-4" />
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              {railBtn("agents", <Bot />, "Agents")}
+              {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, onlineComputers > 0)}
+              {railBtn("people", <Users />, "People")}
+              {railBtn("settings", <Settings />, "Settings")}
+              <DesktopServerTrigger variant="rail" />
+            </div>
+          </nav>
+
+          {/* Sidebar */}
+          <aside aria-label="Sidebar" className="bg-nav flex flex-col min-w-0 min-h-0">
+            {!desktop && (
+              <div className="h-[52px] px-4 flex items-center shrink-0">
+                <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
+              </div>
+            )}
+            <div className={`px-3 pb-2 shrink-0 ${desktop ? "pt-3" : ""}`}>
           <button
             onClick={() => setDialog("jump")}
             className="w-full h-9 px-3 rounded-[9px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line text-nav-fg-3 flex items-center gap-2 text-[13.5px] transition-colors"
@@ -718,7 +733,9 @@ export function Workbench({
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>
         </div>
-      </aside>
+          </aside>
+        </div>
+      </div>
 
       {/* Main */}
       <main className="bg-panel flex flex-col min-w-0 min-h-0">
