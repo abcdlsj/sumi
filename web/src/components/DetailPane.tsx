@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, BookmarkPlus, CheckCircle2, ChevronDown, ChevronRight, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey } from "../preferences";
@@ -15,7 +15,7 @@ import { MessageBody } from "./MessageBody";
 import { MessageReactions, ReactionPickerButton, useReactionToggle } from "./Reactions";
 import { mergeMessageIntoCache, NewMessagesPill, useStickToBottom } from "./scroll";
 import { DetailSkeleton, MessageListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, ErrorState, IconButton, Segmented, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Menu, MenuItem, Segmented, Select, TaskStatusIcon, taskStatusLabel, useAction, useToast, type SelectOption } from "./ui";
 
 export type DetailTarget =
   | { kind: "task"; taskID: string }
@@ -739,7 +739,7 @@ function TaskDetail({
         onClose={onClose}
         actions={
           !editing ? (
-            <Button size="sm" variant="ghost" icon={<Pencil />} onClick={startEdit}>
+            <Button size="sm" variant="secondary" icon={<Pencil />} onClick={startEdit}>
               Edit
             </Button>
           ) : undefined
@@ -1194,27 +1194,48 @@ function AgentDetail({
         onClose={onClose}
         actions={
           <>
-            {canGovern && onCopyAgent && (
-              <Button size="sm" variant="ghost" icon={<Copy />} title="Copy config to new agent" onClick={() => onCopyAgent(member)}>
-                Copy
-              </Button>
-            )}
-            {canGovern && (
-              <IconButton
-                label="Save as template"
-                active={savingTemplate}
-                onClick={() => {
-                  setTplName(member.display_name);
-                  setSavingTemplate((v) => !v);
-                }}
-              >
-                <BookmarkPlus />
-              </IconButton>
-            )}
             {onOpenDM && (
               <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
                 Message
               </Button>
+            )}
+            {canGovern && (
+              <Menu
+                width={224}
+                trigger={(open, toggle) => (
+                  <IconButton label="Agent actions" active={open} onClick={toggle}>
+                    <MoreHorizontal />
+                  </IconButton>
+                )}
+              >
+                {(close) => (
+                  <>
+                    {onCopyAgent && (
+                      <MenuItem
+                        icon={<Copy />}
+                        hint="Create a new agent from this config"
+                        onSelect={() => {
+                          close();
+                          onCopyAgent(member);
+                        }}
+                      >
+                        Copy to new agent
+                      </MenuItem>
+                    )}
+                    <MenuItem
+                      icon={<Bookmark />}
+                      hint="Reuse this role and driver later"
+                      onSelect={() => {
+                        close();
+                        setTplName(member.display_name);
+                        setSavingTemplate(true);
+                      }}
+                    >
+                      Save as template
+                    </MenuItem>
+                  </>
+                )}
+              </Menu>
             )}
           </>
         }
@@ -1254,6 +1275,9 @@ function AgentDetail({
             maxLength={48}
             className="flex-1 h-8 px-2.5 rounded-[6px] border border-accent bg-card text-[13.5px] text-fg outline-none shadow-[var(--ring)] placeholder:text-fg-4"
           />
+          <Button type="button" size="sm" variant="ghost" onClick={() => setSavingTemplate(false)}>
+            Cancel
+          </Button>
           <Button type="submit" size="sm" disabled={!tplName.trim()}>
             Save
           </Button>
@@ -1481,7 +1505,16 @@ function HumanDetail({
 
   return (
     <>
-      <PaneHeader onClose={onClose}>
+      <PaneHeader
+        onClose={onClose}
+        actions={
+          !isSelf && onOpenDM ? (
+            <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
+              Message
+            </Button>
+          ) : undefined
+        }
+      >
         <span className="font-semibold text-fg">Person</span>
       </PaneHeader>
       <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
@@ -1493,13 +1526,6 @@ function HumanDetail({
               <Badge className="capitalize">{member.access_level}</Badge>
               {isSelf && <Badge tone="accent">You</Badge>}
             </div>
-            {!isSelf && onOpenDM && (
-              <div className="mt-3">
-                <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
-                  Message
-                </Button>
-              </div>
-            )}
           </div>
         </div>
 

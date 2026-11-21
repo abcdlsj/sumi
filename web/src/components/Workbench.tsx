@@ -186,7 +186,7 @@ function SectionLabel({ children, action }: { children: ReactNode; action?: Reac
 function SectionAdd({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button onClick={onClick} title={label} aria-label={label} className="size-6 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center">
-      <Plus className="size-4" />
+      <Plus className="size-3.5" />
     </button>
   );
 }

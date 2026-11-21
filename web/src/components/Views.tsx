@@ -584,15 +584,19 @@ function AgentList({
                         <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
                         <span className="truncate">{comp?.name ?? "No computer"}</span>
                       </span>
-                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                     </button>
-                    {onCopyAgent && (
-                      <div className="pr-2.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                        <IconButton label={`Copy ${m.display_name} to new agent`} onClick={() => onCopyAgent(m)}>
+                    <div className="pr-3 flex items-center gap-1 shrink-0">
+                      {onCopyAgent && (
+                        <IconButton
+                          label={`Copy ${m.display_name} to new agent`}
+                          onClick={() => onCopyAgent(m)}
+                          className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                        >
                           <Copy />
                         </IconButton>
-                      </div>
-                    )}
+                      )}
+                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pointer-events-none" />
+                    </div>
                   </div>
                 );
               })}

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { BookmarkPlus, Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal, X } from "lucide-react";
+import { Bookmark, Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal, X } from "lucide-react";
 import {
   suggestCopyName,
   templateDriverSummary,
@@ -679,7 +679,7 @@ export function AgentForm({
             }}
             className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-3 hover:text-fg transition-colors"
           >
-            <BookmarkPlus className="size-3.5" />
+            <Bookmark className="size-3.5" />
             <span>Save as template</span>
           </button>
         )}
