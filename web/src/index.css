@@ -346,6 +346,12 @@ html.desktop {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+.fade-truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
 
 /* Human initials: a single letter on one calm tone, white in both themes.
    Tones stay clear of violet/magenta and keep >=4.6:1 against the letter. */

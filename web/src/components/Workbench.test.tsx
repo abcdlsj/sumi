@@ -26,6 +26,21 @@ const sampleBoot: BootstrapData = {
       },
       created_at: "2026-11-19T10:00:00Z",
     },
+    {
+      id: "m-kira",
+      space_id: "sp-1",
+      kind: "agent",
+      display_name: "Kira",
+      access_level: "member",
+      agent: {
+        computer_id: "c-1",
+        role_text: "Code reviewer focusing on API ergonomics and edge cases",
+        driver_kind: "acp",
+        driver_config: { provider: "pi" },
+        runtime_state: "idle",
+      },
+      created_at: "2026-11-19T10:00:00Z",
+    },
   ],
   conversations: [
     {
@@ -135,9 +150,13 @@ describe("Workbench", () => {
     fireEvent.click(doneBtn);
     await waitFor(() => expect(api.markDone).toHaveBeenCalledWith("studio", "conv-eng"));
 
-    // The sidebar shows which conversation a working agent is focused on.
+    // The sidebar shows which conversation a working agent is focused on (replacing role),
+    // and shows the role on the second line for an idle agent with fade truncation.
     const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
     expect(within(sidebar).getByText("Working in #engineering")).toBeTruthy();
+    expect(within(sidebar).queryByText("Backend engineer")).toBeNull();
+    const roleEl = within(sidebar).getByText("Code reviewer focusing on API ergonomics and edge cases");
+    expect(roleEl.className).toContain("fade-truncate");
 
     // Navigate to #engineering and click attached task #14 to open Right Detail Pane.
     fireEvent.click(within(sidebar).getByRole("button", { name: /^engineering$/i }));

@@ -227,20 +227,28 @@ export function Workbench({
     const conv = dms.find((d) => d.peer_member_id === m.id);
     const active = Boolean(conv && activeConvID === conv.id);
     const st = m.agent?.runtime_state;
-    const sub = m.kind === "agent" && (st === "working" || st === "error") ? agentStatusText(boot, m) : "";
+    const statusSub = m.kind === "agent" && (st === "working" || st === "error") ? agentStatusText(boot, m) : "";
+    const roleSub = m.kind === "agent" && !statusSub ? (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() : "";
+    const hasSub = Boolean(statusSub || roleSub);
     return (
       <button
         key={m.id}
         onClick={() => void openOrCreateDM(m.id)}
         aria-current={active ? "page" : undefined}
-        className={`w-full px-2 ${sub ? "py-1.5" : "h-9"} rounded-[8px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
+        className={`w-full px-2 ${hasSub ? "py-1.5" : "h-9"} rounded-[8px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
           active ? "bg-nav-active" : "hover:bg-nav-hover"
         }`}
       >
         <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" state={m.kind === "agent" ? st : undefined} ring="var(--nav)" />
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[14px] leading-5 ${active || (conv && conv.unread_count > 0) ? "text-nav-fg-strong font-semibold" : "text-nav-fg-2"}`}>{m.display_name}</span>
-          {sub && <span className={`block truncate text-[12px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{sub}</span>}
+          {statusSub ? (
+            <span className={`block truncate text-[12px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{statusSub}</span>
+          ) : roleSub ? (
+            <span className="block fade-truncate text-[11.5px] leading-4 text-nav-fg-3" title={roleSub}>
+              {roleSub}
+            </span>
+          ) : null}
         </span>
         {conv && conv.unread_count > 0 && <Count n={conv.unread_count} />}
       </button>
