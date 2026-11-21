@@ -39,6 +39,8 @@ type Server struct {
 	pairingLimiter *ipLimiter
 }
 
+type actorHandler func(w http.ResponseWriter, r *http.Request, actor domain.Member)
+
 func New(svc *app.Service, cfg Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -78,6 +80,28 @@ func (s *Server) Shutdown(ctx context.Context) {
 	s.hub.ShutdownAll(ctx, "server shutting down")
 }
 
+func (s *Server) asHuman(fn actorHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, actor, err := s.requireSpaceMember(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		fn(w, r, actor)
+	}
+}
+
+func (s *Server) asAgent(fn actorHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, agent, err := s.requireComputerAgent(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		fn(w, r, agent)
+	}
+}
+
 func (s *Server) registerRoutes() {
 	r := s.router
 	r.Get("/api/v1/health", s.handleHealth)
@@ -102,55 +126,55 @@ func (s *Server) registerRoutes() {
 	// Space-scoped Human APIs
 	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
 		r.Get("/bootstrap", s.handleBootstrap)
-		r.Patch("/", s.handleUpdateSpace)
+		r.Patch("/", s.asHuman(s.handleUpdateSpace))
 		r.Get("/events", s.handleSSE)
 
-		r.Get("/members", s.handleListMembers)
-		r.Put("/members/{memberID}/permissions/{perm}", s.handleSetPermission)
+		r.Get("/members", s.asHuman(s.handleListMembers))
+		r.Put("/members/{memberID}/permissions/{perm}", s.asHuman(s.handleSetPermission))
 
 		r.Get("/computers", s.handleListComputers)
 
-		r.Post("/agents", s.handleCreateAgent)
-		r.Post("/agents/{agentID}/control", s.handleControlAgent)
-		r.Put("/agents/{agentID}/driver", s.handleUpdateAgentDriver)
-		r.Get("/agents/{agentID}/workspace", s.handleListAgentWorkspace)
-		r.Get("/agents/{agentID}/workspace/file", s.handleReadAgentWorkspaceFile)
+		r.Post("/agents", s.asHuman(s.handleCreateAgent))
+		r.Post("/agents/{agentID}/control", s.asHuman(s.handleControlAgent))
+		r.Put("/agents/{agentID}/driver", s.asHuman(s.handleUpdateAgentDriver))
+		r.Get("/agents/{agentID}/workspace", s.asHuman(s.handleListAgentWorkspace))
+		r.Get("/agents/{agentID}/workspace/file", s.asHuman(s.handleReadAgentWorkspaceFile))
 
-		r.Get("/conversations", s.handleListConversations)
-		r.Get("/channels/archived", s.handleListArchivedChannels)
+		r.Get("/conversations", s.asHuman(s.handleListConversations))
+		r.Get("/channels/archived", s.asHuman(s.handleListArchivedChannels))
 		r.Post("/attachments", s.handleUploadAttachment)
 		r.Get("/attachments/{attachmentID}", s.handleDownloadAttachment)
-		r.Post("/channels", s.handleCreateChannel)
-		r.Post("/channel-groups", s.handleCreateChannelGroup)
-		r.Patch("/channel-groups/{groupID}", s.handleUpdateChannelGroup)
-		r.Delete("/channel-groups/{groupID}", s.handleDeleteChannelGroup)
-		r.Put("/conversations/{convID}/group", s.handleSetConversationGroup)
-		r.Post("/conversations/{convID}/archive", s.handleArchiveChannel)
-		r.Post("/conversations/{convID}/unarchive", s.handleUnarchiveChannel)
-		r.Post("/dm", s.handleCreateDM)
-		r.Get("/conversations/{convID}/messages", s.handleListMessages)
-		r.Post("/conversations/{convID}/messages", s.handleSendMessage)
-		r.Put("/messages/{messageID}/reactions/{emoji}", s.handleAddReaction)
-		r.Delete("/messages/{messageID}/reactions/{emoji}", s.handleRemoveReaction)
-		r.Post("/conversations/{convID}/read", s.handleMarkRead)
-		r.Post("/conversations/{convID}/done", s.handleMarkDone)
-		r.Put("/conversations/{convID}/notify", s.handleSetNotifyLevel)
-		r.Put("/conversations/{convID}/follow", s.handleSetFollowing)
-		r.Get("/conversations/{convID}/members", s.handleListConversationMembers)
-		r.Post("/conversations/{convID}/members", s.handleInviteToChannel)
-		r.Delete("/conversations/{convID}/members/{memberID}", s.handleRemoveFromChannel)
+		r.Post("/channels", s.asHuman(s.handleCreateChannel))
+		r.Post("/channel-groups", s.asHuman(s.handleCreateChannelGroup))
+		r.Patch("/channel-groups/{groupID}", s.asHuman(s.handleUpdateChannelGroup))
+		r.Delete("/channel-groups/{groupID}", s.asHuman(s.handleDeleteChannelGroup))
+		r.Put("/conversations/{convID}/group", s.asHuman(s.handleSetConversationGroup))
+		r.Post("/conversations/{convID}/archive", s.asHuman(s.handleArchiveChannel))
+		r.Post("/conversations/{convID}/unarchive", s.asHuman(s.handleUnarchiveChannel))
+		r.Post("/dm", s.asHuman(s.handleCreateDM))
+		r.Get("/conversations/{convID}/messages", s.asHuman(s.handleListMessages))
+		r.Post("/conversations/{convID}/messages", s.asHuman(s.handleSendMessage))
+		r.Put("/messages/{messageID}/reactions/{emoji}", s.asHuman(s.handleAddReaction))
+		r.Delete("/messages/{messageID}/reactions/{emoji}", s.asHuman(s.handleRemoveReaction))
+		r.Post("/conversations/{convID}/read", s.asHuman(s.handleMarkRead))
+		r.Post("/conversations/{convID}/done", s.asHuman(s.handleMarkDone))
+		r.Put("/conversations/{convID}/notify", s.asHuman(s.handleSetNotifyLevel))
+		r.Put("/conversations/{convID}/follow", s.asHuman(s.handleSetFollowing))
+		r.Get("/conversations/{convID}/members", s.asHuman(s.handleListConversationMembers))
+		r.Post("/conversations/{convID}/members", s.asHuman(s.handleInviteToChannel))
+		r.Delete("/conversations/{convID}/members/{memberID}", s.asHuman(s.handleRemoveFromChannel))
 
-		r.Get("/inbox", s.handleListInbox)
+		r.Get("/inbox", s.asHuman(s.handleListInbox))
 
-		r.Get("/tasks", s.handleListTasks)
-		r.Post("/tasks", s.handleCreateTask)
-		r.Get("/tasks/{taskID}", s.handleGetTask)
-		r.Post("/tasks/{taskID}/conversation", s.handleEnsureTaskConv)
-		r.Post("/tasks/{taskID}/claim", s.handleClaimTask)
-		r.Post("/tasks/{taskID}/unclaim", s.handleUnclaimTask)
-		r.Post("/tasks/{taskID}/assign", s.handleAssignTask)
-		r.Put("/tasks/{taskID}/status", s.handleUpdateTaskStatus)
-		r.Patch("/tasks/{taskID}", s.handleAmendTask)
+		r.Get("/tasks", s.asHuman(s.handleListTasks))
+		r.Post("/tasks", s.asHuman(s.handleCreateTask))
+		r.Get("/tasks/{taskID}", s.asHuman(s.handleGetTask))
+		r.Post("/tasks/{taskID}/conversation", s.asHuman(s.handleEnsureTaskConv))
+		r.Post("/tasks/{taskID}/claim", s.asHuman(s.handleClaimTask))
+		r.Post("/tasks/{taskID}/unclaim", s.asHuman(s.handleUnclaimTask))
+		r.Post("/tasks/{taskID}/assign", s.asHuman(s.handleAssignTask))
+		r.Put("/tasks/{taskID}/status", s.asHuman(s.handleUpdateTaskStatus))
+		r.Patch("/tasks/{taskID}", s.asHuman(s.handleAmendTask))
 	})
 
 	// Computer WebSocket + Computer-brokered Agent APIs
@@ -158,32 +182,32 @@ func (s *Server) registerRoutes() {
 	r.Post("/api/v1/computer/pairings", s.handleCreatePairing)
 	r.Get("/api/v1/computer/pairings/{pairingID}", s.handlePollPairing)
 	r.Route("/api/v1/computer/agents/{agentID}", func(r chi.Router) {
-		r.Get("/inbox", s.handleAgentInbox)
+		r.Get("/inbox", s.asAgent(s.handleListInbox))
 		r.Post("/attachments", s.handleAgentUploadAttachment)
 		r.Get("/attachments/{attachmentID}", s.handleAgentDownloadAttachment)
-		r.Get("/conversations", s.handleAgentConversations)
-		r.Get("/conversations/{convID}/messages", s.handleAgentReadMessages)
-		r.Post("/conversations/{convID}/messages", s.handleAgentSendMessage)
-		r.Put("/messages/{messageID}/reactions/{emoji}", s.handleAgentAddReaction)
-		r.Delete("/messages/{messageID}/reactions/{emoji}", s.handleAgentRemoveReaction)
-		r.Get("/conversations/{convID}/members", s.handleAgentListConversationMembers)
-		r.Post("/conversations/{convID}/members", s.handleAgentInviteToChannel)
-		r.Delete("/conversations/{convID}/members/{memberID}", s.handleAgentRemoveFromChannel)
-		r.Put("/conversations/{convID}/follow", s.handleAgentSetFollowing)
-		r.Put("/conversations/{convID}/notify", s.handleAgentSetNotifyLevel)
-		r.Post("/dm", s.handleAgentDM)
-		r.Get("/members", s.handleAgentMembers)
+		r.Get("/conversations", s.asAgent(s.handleAgentConversations))
+		r.Get("/conversations/{convID}/messages", s.asAgent(s.handleAgentReadMessages))
+		r.Post("/conversations/{convID}/messages", s.asAgent(s.handleSendMessage))
+		r.Put("/messages/{messageID}/reactions/{emoji}", s.asAgent(s.handleAddReaction))
+		r.Delete("/messages/{messageID}/reactions/{emoji}", s.asAgent(s.handleRemoveReaction))
+		r.Get("/conversations/{convID}/members", s.asAgent(s.handleListConversationMembers))
+		r.Post("/conversations/{convID}/members", s.asAgent(s.handleInviteToChannel))
+		r.Delete("/conversations/{convID}/members/{memberID}", s.asAgent(s.handleRemoveFromChannel))
+		r.Put("/conversations/{convID}/follow", s.asAgent(s.handleSetFollowing))
+		r.Put("/conversations/{convID}/notify", s.asAgent(s.handleSetNotifyLevel))
+		r.Post("/dm", s.asAgent(s.handleCreateDM))
+		r.Get("/members", s.asAgent(s.handleListMembers))
 		r.Post("/agents", s.handleAgentCreateAgent)
-		r.Post("/channels", s.handleAgentCreateChannel)
-		r.Get("/tasks", s.handleAgentListTasks)
-		r.Post("/tasks", s.handleAgentCreateTask)
-		r.Get("/tasks/{taskID}", s.handleAgentGetTask)
-		r.Post("/tasks/{taskID}/conversation", s.handleAgentEnsureTaskConv)
-		r.Post("/tasks/{taskID}/claim", s.handleAgentClaimTask)
-		r.Post("/tasks/{taskID}/unclaim", s.handleAgentUnclaimTask)
-		r.Post("/tasks/{taskID}/assign", s.handleAgentAssignTask)
-		r.Put("/tasks/{taskID}/status", s.handleAgentUpdateTaskStatus)
-		r.Patch("/tasks/{taskID}", s.handleAgentAmendTask)
+		r.Post("/channels", s.asAgent(s.handleCreateChannel))
+		r.Get("/tasks", s.asAgent(s.handleListTasks))
+		r.Post("/tasks", s.asAgent(s.handleCreateTask))
+		r.Get("/tasks/{taskID}", s.asAgent(s.handleGetTask))
+		r.Post("/tasks/{taskID}/conversation", s.asAgent(s.handleEnsureTaskConv))
+		r.Post("/tasks/{taskID}/claim", s.asAgent(s.handleClaimTask))
+		r.Post("/tasks/{taskID}/unclaim", s.asAgent(s.handleUnclaimTask))
+		r.Post("/tasks/{taskID}/assign", s.asAgent(s.handleAssignTask))
+		r.Put("/tasks/{taskID}/status", s.asAgent(s.handleUpdateTaskStatus))
+		r.Patch("/tasks/{taskID}", s.asAgent(s.handleAmendTask))
 	})
 
 	if s.cfg.StaticFS != nil {
@@ -200,6 +224,14 @@ func writeSendResult(w http.ResponseWriter, res app.SendMessageResult) {
 	default:
 		writeJSON(w, http.StatusCreated, res)
 	}
+}
+
+func writeTaskWriteResult(w http.ResponseWriter, res app.TaskWriteResult) {
+	if res.Held {
+		writeJSON(w, http.StatusConflict, res)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -277,176 +309,6 @@ func (s *Server) requireSpaceMember(r *http.Request) (domain.Space, domain.Membe
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": 2})
-}
-
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Email       string `json:"email"`
-		Password    string `json:"password"`
-		DisplayName string `json:"display_name"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	res, err := s.svc.Register(r.Context(), body.Email, body.Password, body.DisplayName)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.setSessionCookie(w, res.SessionToken)
-	writeJSON(w, http.StatusCreated, map[string]any{"user": res.User})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	res, err := s.svc.Login(r.Context(), body.Email, body.Password)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.setSessionCookie(w, res.SessionToken)
-	writeJSON(w, http.StatusOK, map[string]any{"user": res.User})
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookieName); err == nil {
-		_ = s.svc.Logout(r.Context(), c.Value)
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	u, err := s.requireUser(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	spaces, err := s.svc.ListUserSpaces(r.Context(), u.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": u, "spaces": spaces})
-}
-
-func (s *Server) handleListSpaces(w http.ResponseWriter, r *http.Request) {
-	u, err := s.requireUser(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	spaces, err := s.svc.ListUserSpaces(r.Context(), u.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"spaces": spaces})
-}
-
-func (s *Server) handleCreateSpace(w http.ResponseWriter, r *http.Request) {
-	u, err := s.requireUser(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Slug string `json:"slug"`
-		Name string `json:"name"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	sp, member, err := s.svc.CreateSpace(r.Context(), u, body.Slug, body.Name)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"space": sp, "member": member})
-}
-
-func (s *Server) handleUpdateSpace(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Name   string `json:"name"`
-		Accent string `json:"accent"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	sp, err := s.svc.UpdateSpace(r.Context(), actor, body.Name, body.Accent)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"space": sp})
-}
-
-func (s *Server) handleListConversationMembers(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	members, err := s.svc.ListConversationMembers(r.Context(), actor, chi.URLParam(r, "convID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": members})
-}
-
-func (s *Server) handleInviteToChannel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		MemberID string `json:"member_id"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.InviteToChannel(r.Context(), actor, chi.URLParam(r, "convID"), body.MemberID); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleRemoveFromChannel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.RemoveFromChannel(r.Context(), actor, chi.URLParam(r, "convID"), chi.URLParam(r, "memberID")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -590,719 +452,4 @@ func (s *Server) canReceiveSSEEvent(ctx context.Context, viewer domain.Member, e
 
 func writeSSEEvent(w http.ResponseWriter, ev domain.SpaceEvent) {
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Kind, ev.PayloadJSON)
-}
-
-func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
-	sp, _, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	members, err := s.svc.ListMembers(r.Context(), sp.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": members})
-}
-
-func (s *Server) handleSetPermission(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Granted bool `json:"granted"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	err = s.svc.SetMemberPermission(r.Context(), actor, chi.URLParam(r, "memberID"), domain.Permission(chi.URLParam(r, "perm")), body.Granted)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleListAgentWorkspace(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	relPath := r.URL.Query().Get("path")
-	includeHidden := r.URL.Query().Get("include_hidden") == "true"
-	listing, err := s.svc.ListAgentWorkspace(r.Context(), actor, chi.URLParam(r, "agentID"), relPath, includeHidden)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, listing)
-}
-
-func (s *Server) handleReadAgentWorkspaceFile(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	filePath := r.URL.Query().Get("path")
-	file, err := s.svc.ReadAgentWorkspaceFile(r.Context(), actor, chi.URLParam(r, "agentID"), filePath)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, file)
-}
-
-func (s *Server) handleListComputers(w http.ResponseWriter, r *http.Request) {
-	sp, _, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	comps, err := s.svc.ListComputers(r.Context(), sp.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"computers": comps})
-}
-
-func (s *Server) handlePairComputer(w http.ResponseWriter, r *http.Request) {
-	user, err := s.requireUser(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Name     string `json:"name"`
-		Hostname string `json:"hostname"`
-		OS       string `json:"os"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	comp, token, err := s.svc.PairComputerDirect(r.Context(), user.ID, body.Name, body.Hostname, body.OS)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"computer": comp, "token": token})
-}
-
-func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		DisplayName          string              `json:"display_name"`
-		RoleText             string              `json:"role_text"`
-		ComputerID           string              `json:"computer_id"`
-		DriverKind           domain.DriverKind   `json:"driver_kind"`
-		DriverConfig         domain.DriverConfig `json:"driver_config"`
-		SourceConversationID string              `json:"source_conversation_id"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	agent, err := s.svc.CreateAgent(r.Context(), actor, app.CreateAgentInput{
-		DisplayName:          body.DisplayName,
-		RoleText:             body.RoleText,
-		ComputerID:           body.ComputerID,
-		DriverKind:           body.DriverKind,
-		DriverConfig:         body.DriverConfig,
-		SourceConversationID: body.SourceConversationID,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"agent": agent})
-}
-
-func (s *Server) handleUpdateAgentDriver(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		DriverKind   domain.DriverKind   `json:"driver_kind"`
-		DriverConfig domain.DriverConfig `json:"driver_config"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	agent, err := s.svc.UpdateAgentDriver(r.Context(), actor, chi.URLParam(r, "agentID"), body.DriverKind, body.DriverConfig)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"agent": agent})
-}
-
-func (s *Server) handleControlAgent(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Action string `json:"action"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.ControlAgent(r.Context(), actor, chi.URLParam(r, "agentID"), body.Action); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	convs, err := s.svc.ListConversations(r.Context(), member)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": convs})
-}
-
-func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Slug      string                  `json:"slug"`
-		Kind      domain.ConversationKind `json:"kind"`
-		Topic     string                  `json:"topic"`
-		MemberIDs []string                `json:"member_ids"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if body.Kind == "" {
-		body.Kind = domain.ConversationPublic
-	}
-	conv, err := s.svc.CreateChannel(r.Context(), actor, app.CreateChannelInput{
-		Slug:      body.Slug,
-		Kind:      body.Kind,
-		Topic:     body.Topic,
-		MemberIDs: body.MemberIDs,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"conversation": conv})
-}
-
-func (s *Server) handleListArchivedChannels(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	convs, err := s.svc.ListArchivedChannels(r.Context(), member)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": convs})
-}
-
-func (s *Server) handleArchiveChannel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	conv, err := s.svc.ArchiveChannel(r.Context(), actor, chi.URLParam(r, "convID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
-}
-
-func (s *Server) handleUnarchiveChannel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	conv, err := s.svc.UnarchiveChannel(r.Context(), actor, chi.URLParam(r, "convID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
-}
-
-func (s *Server) handleCreateChannelGroup(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	g, err := s.svc.CreateChannelGroup(r.Context(), actor, body.Name)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"group": g})
-}
-
-func (s *Server) handleUpdateChannelGroup(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Name      *string `json:"name"`
-		Collapsed *bool   `json:"collapsed"`
-		Position  *int    `json:"position"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	g, err := s.svc.UpdateChannelGroup(r.Context(), actor, chi.URLParam(r, "groupID"), app.UpdateChannelGroupInput{
-		Name:      body.Name,
-		Collapsed: body.Collapsed,
-		Position:  body.Position,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"group": g})
-}
-
-func (s *Server) handleDeleteChannelGroup(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.DeleteChannelGroup(r.Context(), actor, chi.URLParam(r, "groupID")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleSetConversationGroup(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		GroupID string `json:"group_id"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.SetConversationGroup(r.Context(), actor, chi.URLParam(r, "convID"), body.GroupID); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleCreateDM(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		PeerMemberID string `json:"peer_member_id"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	conv, err := s.svc.GetOrCreateDM(r.Context(), actor, body.PeerMemberID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
-}
-
-func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	afterSeq, _ := strconv.ParseInt(r.URL.Query().Get("after_seq"), 10, 64)
-	beforeSeq, _ := strconv.ParseInt(r.URL.Query().Get("before_seq"), 10, 64)
-	latest := r.URL.Query().Get("latest") == "true"
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	markRead := r.URL.Query().Get("mark_read") == "true"
-	page, err := s.svc.ListMessages(r.Context(), member, app.ListMessagesInput{
-		ConversationID: chi.URLParam(r, "convID"),
-		AfterSeq:       afterSeq,
-		BeforeSeq:      beforeSeq,
-		Latest:         latest,
-		Limit:          limit,
-		MarkRead:       markRead,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, page)
-}
-
-func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		BodyMarkdown     string   `json:"body_markdown"`
-		ReplyToMessageID string   `json:"reply_to_message_id"`
-		AttachmentIDs    []string `json:"attachment_ids"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	res, err := s.svc.SendMessage(r.Context(), actor, app.SendMessageInput{
-		ConversationID:   chi.URLParam(r, "convID"),
-		ReplyToMessageID: body.ReplyToMessageID,
-		BodyMarkdown:     body.BodyMarkdown,
-		AttachmentIDs:    body.AttachmentIDs,
-		IdempotencyKey:   r.Header.Get("Idempotency-Key"),
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeSendResult(w, res)
-}
-
-func (s *Server) handleAddReaction(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	reactions, err := s.svc.AddReaction(r.Context(), actor, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
-}
-
-func (s *Server) handleRemoveReaction(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	reactions, err := s.svc.RemoveReaction(r.Context(), actor, chi.URLParam(r, "messageID"), chi.URLParam(r, "emoji"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"reactions": reactions})
-}
-
-func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Seq int64 `json:"seq"`
-	}
-	_ = decodeJSON(r, &body)
-	if err := s.svc.MarkRead(r.Context(), actor, chi.URLParam(r, "convID"), body.Seq); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleMarkDone(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.MarkDone(r.Context(), actor, chi.URLParam(r, "convID")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleSetNotifyLevel(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Level domain.NotifyLevel `json:"level"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.SetNotifyLevel(r.Context(), actor, chi.URLParam(r, "convID"), body.Level); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleSetFollowing(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Following bool `json:"following"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.svc.SetFollowing(r.Context(), actor, chi.URLParam(r, "convID"), body.Following); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) handleListInbox(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	items, err := s.svc.ListInbox(r.Context(), member, r.URL.Query().Get("filter"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	tasks, err := s.svc.ListTasks(r.Context(), member, r.URL.Query().Get("status"), r.URL.Query().Get("assignee"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
-}
-
-func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		ChannelID        string            `json:"channel_id"`
-		SourceMessageID  string            `json:"source_message_id"`
-		Title            string            `json:"title"`
-		Description      string            `json:"description"`
-		AssigneeMemberID string            `json:"assignee_member_id"`
-		Status           domain.TaskStatus `json:"status"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.CreateTask(r.Context(), actor, app.CreateTaskInput{
-		ChannelID:        body.ChannelID,
-		SourceMessageID:  body.SourceMessageID,
-		Title:            body.Title,
-		Description:      body.Description,
-		AssigneeMemberID: body.AssigneeMemberID,
-		Status:           body.Status,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"task": task})
-}
-
-func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
-	_, member, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.GetTask(r.Context(), member, chi.URLParam(r, "taskID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
-}
-
-func (s *Server) handleEnsureTaskConv(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.EnsureTaskConversation(r.Context(), actor, chi.URLParam(r, "taskID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
-}
-
-func (s *Server) handleClaimTask(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	res, err := s.svc.ClaimTask(r.Context(), actor, chi.URLParam(r, "taskID"), false)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *Server) handleUnclaimTask(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.UnclaimTask(r.Context(), actor, chi.URLParam(r, "taskID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
-}
-
-func (s *Server) handleAssignTask(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		AssigneeMemberID string `json:"assignee_member_id"`
-		Reason           string `json:"reason"`
-		ExpectedRevision int64  `json:"expected_revision"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	res, err := s.svc.AssignTask(r.Context(), actor, app.AssignTaskInput{
-		TaskID:           chi.URLParam(r, "taskID"),
-		AssigneeMemberID: body.AssigneeMemberID,
-		Reason:           body.Reason,
-		ExpectedRevision: body.ExpectedRevision,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *Server) handleUpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Status domain.TaskStatus `json:"status"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.UpdateTaskStatus(r.Context(), actor, chi.URLParam(r, "taskID"), body.Status)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
-}
-
-func (s *Server) handleAmendTask(w http.ResponseWriter, r *http.Request) {
-	_, actor, err := s.requireSpaceMember(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var body struct {
-		Title            *string `json:"title"`
-		Description      *string `json:"description"`
-		ExpectedRevision int64   `json:"expected_revision"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, err)
-		return
-	}
-	task, err := s.svc.AmendTask(r.Context(), actor, app.AmendTaskInput{
-		TaskID:           chi.URLParam(r, "taskID"),
-		Title:            body.Title,
-		Description:      body.Description,
-		ExpectedRevision: body.ExpectedRevision,
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
