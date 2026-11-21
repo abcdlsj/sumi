@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, CheckCircle2, ChevronDown, ChevronRight, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, BookmarkPlus, CheckCircle2, ChevronDown, ChevronRight, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey } from "../preferences";
 import { AgentReadFaces, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
@@ -245,6 +246,7 @@ export function DetailPane({
   onSelectTarget,
   onOpenConversation,
   onOpenDM,
+  onCopyAgent,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -253,6 +255,7 @@ export function DetailPane({
   onSelectTarget: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
+  onCopyAgent?: (agent: Member) => void;
 }) {
   return (
     <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
@@ -272,6 +275,7 @@ export function DetailPane({
           onSelectTarget={onSelectTarget}
           onOpenConversation={onOpenConversation}
           onOpenDM={onOpenDM}
+          onCopyAgent={onCopyAgent}
         />
       )}
       {target.kind === "human" && (
@@ -1136,6 +1140,7 @@ function AgentDetail({
   onSelectTarget,
   onOpenConversation,
   onOpenDM,
+  onCopyAgent,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -1144,11 +1149,15 @@ function AgentDetail({
   onSelectTarget: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
+  onCopyAgent?: (agent: Member) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const toast = useToast();
   const [pending, setPending] = useState<"restart" | "reset_session" | null>(null);
   const [editing, setEditing] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [tplName, setTplName] = useState("");
   const [tab, setTab] = useState<"overview" | "workspace">("overview");
   const member = boot.members.find((m) => m.id === memberID);
   if (!member?.agent) return <DetailSkeleton />;
@@ -1167,6 +1176,16 @@ function AgentDetail({
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
+  function submitTemplate(e: FormEvent) {
+    e.preventDefault();
+    const clean = tplName.trim();
+    if (!clean) return;
+    const saved = saveAgentTemplate(templateFromAgent(member!, clean));
+    setSavingTemplate(false);
+    setTplName("");
+    toast(`Saved template “${saved.name}”`, "success");
+  }
+
   const stateTone = st === "working" ? "busy" : st === "error" ? "danger" : "neutral";
 
   return (
@@ -1174,11 +1193,30 @@ function AgentDetail({
       <PaneHeader
         onClose={onClose}
         actions={
-          onOpenDM ? (
-            <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
-              Message
-            </Button>
-          ) : undefined
+          <>
+            {canGovern && onCopyAgent && (
+              <Button size="sm" variant="ghost" icon={<Copy />} title="Copy config to new agent" onClick={() => onCopyAgent(member)}>
+                Copy
+              </Button>
+            )}
+            {canGovern && (
+              <IconButton
+                label="Save as template"
+                active={savingTemplate}
+                onClick={() => {
+                  setTplName(member.display_name);
+                  setSavingTemplate((v) => !v);
+                }}
+              >
+                <BookmarkPlus />
+              </IconButton>
+            )}
+            {onOpenDM && (
+              <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
+                Message
+              </Button>
+            )}
+          </>
         }
       >
         <span className="font-semibold text-fg">Agent</span>
@@ -1204,6 +1242,23 @@ function AgentDetail({
           Workspace
         </button>
       </div>
+      {savingTemplate && (
+        <form onSubmit={submitTemplate} className="px-4 py-2.5 border-b border-line bg-subtle/40 flex items-center gap-1.5 shrink-0 animate-fade-in">
+          <input
+            autoFocus
+            value={tplName}
+            onChange={(e) => setTplName(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setSavingTemplate(false)}
+            placeholder="Template name…"
+            aria-label="Template name"
+            maxLength={48}
+            className="flex-1 h-8 px-2.5 rounded-[6px] border border-accent bg-card text-[13.5px] text-fg outline-none shadow-[var(--ring)] placeholder:text-fg-4"
+          />
+          <Button type="submit" size="sm" disabled={!tplName.trim()}>
+            Save
+          </Button>
+        </form>
+      )}
       {tab === "workspace" ? (
         <AgentWorkspace key={member.id} spaceSlug={spaceSlug} member={member} computer={comp} boot={boot} />
       ) : (
@@ -1309,6 +1364,21 @@ function AgentDetail({
                   {cfg?.command && cfg.command.length > 0 && (
                     <KV label="Command">
                       <span className="font-mono text-[13px] break-all">{cfg.command.join(" ")}</span>
+                    </KV>
+                  )}
+                  {cfg?.pi_provider && (
+                    <KV label="pi provider">
+                      <span className="font-mono text-[13px]">{cfg.pi_provider}</span>
+                    </KV>
+                  )}
+                  {cfg?.pi_model && (
+                    <KV label="pi model">
+                      <span className="font-mono text-[13px]">{cfg.pi_model}</span>
+                    </KV>
+                  )}
+                  {cfg?.pi_packages && cfg.pi_packages.length > 0 && (
+                    <KV label="pi packages">
+                      <span className="font-mono text-[13px] break-all">{cfg.pi_packages.join(", ")}</span>
                     </KV>
                   )}
                 </>

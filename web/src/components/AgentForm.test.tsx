@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearAgentTemplatesForTests, listAgentTemplates, suggestCopyName } from "../agentTemplates";
 import { api, type Computer, type Member } from "../api";
 import { AgentForm } from "./AgentForm";
 import { agentSprite } from "./Avatar";
@@ -15,8 +16,50 @@ const computer: Computer = {
   created_at: "",
 };
 const created = { id: "a1", display_name: "Lin", kind: "agent" } as Member;
+const existingPiAgent: Member = {
+  id: "a-lin",
+  space_id: "s",
+  kind: "agent",
+  display_name: "Lin",
+  access_level: "member",
+  agent: {
+    computer_id: "c1",
+    role_text: "Backend reviewer",
+    driver_kind: "acp",
+    driver_config: {
+      provider: "pi",
+      pi_provider: "openai",
+      pi_model: "gpt-5-mini",
+      pi_packages: ["npm:custom-pi"],
+    },
+    runtime_state: "idle",
+  },
+  created_at: "",
+};
+const existingModelAgent: Member = {
+  id: "a-api",
+  space_id: "s",
+  kind: "agent",
+  display_name: "Sora",
+  access_level: "member",
+  agent: {
+    computer_id: "c1",
+    role_text: "Research analyst",
+    driver_kind: "builtin",
+    driver_config: {
+      base_url: "http://127.0.0.1:4000/v1",
+      model: "gpt-5-mini",
+      api_key_set: true,
+    },
+    runtime_state: "idle",
+  },
+  created_at: "",
+};
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  clearAgentTemplatesForTests();
+  vi.restoreAllMocks();
+});
 
 describe("AgentForm", () => {
   it("creates an ACP agent with the chosen provider and disables missing ones", async () => {
@@ -92,6 +135,108 @@ describe("AgentForm", () => {
         }),
       ),
     );
+  });
+
+  it("prefills from an existing agent copy with a unique name and copies driver settings", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(
+      <AgentForm
+        spaceSlug="s"
+        computers={[computer]}
+        initialAgent={existingPiAgent}
+        existingMembers={[existingPiAgent, { ...existingPiAgent, id: "a-lin2", display_name: "Lin_2" }]}
+        onCreated={() => {}}
+      />,
+    );
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Lin_3");
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Backend reviewer");
+    expect((screen.getByLabelText(/pi provider/) as HTMLInputElement).value).toBe("openai");
+    expect((screen.getByLabelText(/pi model/) as HTMLInputElement).value).toBe("gpt-5-mini");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith("s", {
+        display_name: "Lin_3",
+        role_text: "Backend reviewer",
+        computer_id: "c1",
+        driver_kind: "acp",
+        driver_config: {
+          provider: "pi",
+          pi_provider: "openai",
+          pi_model: "gpt-5-mini",
+          pi_packages: ["npm:custom-pi"],
+        },
+      }),
+    );
+  });
+
+  it("copies a Model API agent in-form without copying its secret API key", () => {
+    render(<AgentForm spaceSlug="s" computers={[computer]} existingMembers={[existingPiAgent, existingModelAgent]} onCreated={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy from agent/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Sora/ }));
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Sora_2");
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Research analyst");
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:4000/v1");
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("gpt-5-mini");
+    expect((screen.getByPlaceholderText("sk-…") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText(/API key from/i)).toBeTruthy();
+  });
+
+  it("saves a creation config as a template without API keys, applies it in a fresh form, and deletes it", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    const first = render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Security auditor" } });
+    fireEvent.click(screen.getByRole("button", { name: /Model API/ }));
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "http://127.0.0.1:4000/v1" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "gpt-5-mini" } });
+    fireEvent.change(screen.getByPlaceholderText("sk-…"), { target: { value: "sk-never-store" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as template" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Template name" }), { target: { value: "Auditor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const saved = listAgentTemplates();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].name).toBe("Auditor");
+    expect(JSON.stringify(saved[0])).not.toContain("sk-never-store");
+
+    first.unmount();
+
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Auditor/ }));
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Security auditor");
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:4000/v1");
+    expect((screen.getByPlaceholderText("sk-…") as HTMLInputElement).value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({
+          role_text: "Security auditor",
+          driver_kind: "builtin",
+          driver_config: { base_url: "http://127.0.0.1:4000/v1", model: "gpt-5-mini" },
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete template Auditor" }));
+    expect(listAgentTemplates()).toHaveLength(0);
+  });
+});
+
+describe("suggestCopyName", () => {
+  it("increments suffixes, avoids case-insensitive collisions, and respects the 32-char limit", () => {
+    expect(suggestCopyName("Lin", ["Lin"])).toBe("Lin_2");
+    expect(suggestCopyName("Lin_2", ["lin", "LIN_2"])).toBe("Lin_3");
+    const longName = "a".repeat(32);
+    const copy = suggestCopyName(longName, [longName]);
+    expect(copy.length).toBeLessThanOrEqual(32);
+    expect(copy.endsWith("_2")).toBe(true);
   });
 });
 

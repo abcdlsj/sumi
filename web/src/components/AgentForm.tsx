@@ -1,5 +1,11 @@
-import { useState, type FormEvent, type ReactNode } from "react";
-import { Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal } from "lucide-react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { BookmarkPlus, Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal, X } from "lucide-react";
+import {
+  suggestCopyName,
+  templateDriverSummary,
+  useAgentTemplates,
+  type AgentTemplate,
+} from "../agentTemplates";
 import {
   api,
   ApiError,
@@ -10,8 +16,8 @@ import {
   type DriverKind,
   type Member,
 } from "../api";
-import { PixelAvatar } from "./Avatar";
-import { Button, Field, Select, TextArea } from "./ui";
+import { MemberAvatar, PixelAvatar } from "./Avatar";
+import { Button, Field, Select, TextArea, useToast } from "./ui";
 
 const PROVIDERS: { id: ACPProvider; name: string; desc: string }[] = [
   { id: "pi", name: "pi", desc: "Pi coding agent, uses your pi login" },
@@ -86,6 +92,23 @@ export function draftFromAgent(m?: Member, computer?: Computer): DriverDraft {
     piPackages: cfg?.pi_packages?.join(", ") ?? "",
     baseURL: cfg?.base_url ?? "",
     model: cfg?.model ?? "",
+    apiKey: "",
+  };
+}
+
+export function draftFromTemplate(tpl: AgentTemplate, computer?: Computer): DriverDraft {
+  const cfg = tpl.driver_config;
+  const defaultProvider: ACPProvider =
+    cfg.provider ?? (computer?.acp_providers && computer.acp_providers.length > 0 ? computer.acp_providers[0] : "pi");
+  return {
+    kind: tpl.driver_kind,
+    provider: defaultProvider,
+    command: cfg.command?.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ") ?? "",
+    piProvider: cfg.pi_provider ?? "",
+    piModel: cfg.pi_model ?? "",
+    piPackages: cfg.pi_packages?.join(", ") ?? "",
+    baseURL: cfg.base_url ?? "",
+    model: cfg.model ?? "",
     apiKey: "",
   };
 }
@@ -173,6 +196,9 @@ export function DriverFields({
     draft.command.trim() || draft.piProvider.trim() || draft.piModel.trim() || draft.piPackages.trim(),
   );
   const [showAdvanced, setShowAdvanced] = useState(hasAdvancedValues);
+  useEffect(() => {
+    if (hasAdvancedValues) setShowAdvanced(true);
+  }, [hasAdvancedValues]);
   const available = computer?.acp_providers;
   const hasCustomCommand = draft.command.trim().length > 0;
   const set = (p: Partial<DriverDraft>) => onChange({ ...draft, ...p });
@@ -351,25 +377,101 @@ function fieldFromError(err: unknown): string {
 export function AgentForm({
   spaceSlug,
   computers,
+  initialAgent,
+  existingMembers = [],
   onCreated,
   footer,
 }: {
   spaceSlug: string;
   computers: Computer[];
+  initialAgent?: Member;
+  existingMembers?: Member[];
   onCreated: (agent: Member) => void;
   footer?: (submit: ReactNode) => ReactNode;
 }) {
-  const [name, setName] = useState("Lin");
-  const [role, setRole] = useState(ROLE_PRESETS[0].text);
-  const [computerID, setComputerID] = useState(
-    () => computers.find((c) => c.connection_status === "online")?.id ?? computers[0]?.id ?? "",
-  );
+  const toast = useToast();
+  const { templates, save: saveTemplate, remove: removeTemplate } = useAgentTemplates();
+  const existingAgents = existingMembers.filter((m) => m.kind === "agent" && m.agent);
+  const existingNames = existingMembers.map((m) => m.display_name);
+
+  const resolveComputerID = (preferred?: string) =>
+    (preferred && computers.some((c) => c.id === preferred) ? preferred : "") ||
+    computers.find((c) => c.connection_status === "online")?.id ||
+    computers[0]?.id ||
+    "";
+
+  const [name, setName] = useState(() => (initialAgent ? suggestCopyName(initialAgent.display_name, existingNames) : "Lin"));
+  const [nameTouched, setNameTouched] = useState(false);
+  const [role, setRole] = useState(() => initialAgent?.agent?.role_text ?? ROLE_PRESETS[0].text);
+  const [computerID, setComputerID] = useState(() => resolveComputerID(initialAgent?.agent?.computer_id));
   const initialComputer = computers.find((c) => c.id === computerID);
-  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(undefined, initialComputer));
+  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(initialAgent, initialComputer));
+  const [sourceAgentID, setSourceAgentID] = useState(() => initialAgent?.id ?? "");
+  const [activeTemplateID, setActiveTemplateID] = useState("");
+  const [apiKeyNotice, setApiKeyNotice] = useState(() =>
+    initialAgent?.agent?.driver_kind === "builtin" && initialAgent.agent.driver_config?.api_key_set ? initialAgent.display_name : "",
+  );
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
   const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
   const [serverError, setServerError] = useState("");
   const [busy, setBusy] = useState(false);
   const computer = computers.find((c) => c.id === computerID);
+
+  function applyAgentCopy(agentID: string) {
+    setSourceAgentID(agentID);
+    setActiveTemplateID("");
+    setErrors({});
+    setServerError("");
+    const src = existingAgents.find((m) => m.id === agentID);
+    if (!src) {
+      setApiKeyNotice("");
+      return;
+    }
+    const nextCompID = resolveComputerID(src.agent?.computer_id);
+    const nextComp = computers.find((c) => c.id === nextCompID);
+    setComputerID(nextCompID);
+    setRole(src.agent?.role_text ?? "");
+    setDraft(draftFromAgent(src, nextComp));
+    if (!nameTouched) setName(suggestCopyName(src.display_name, existingNames));
+    setApiKeyNotice(src.agent?.driver_kind === "builtin" && src.agent.driver_config?.api_key_set ? src.display_name : "");
+  }
+
+  function applyTemplate(tpl: AgentTemplate) {
+    setActiveTemplateID(tpl.id);
+    setSourceAgentID("");
+    setApiKeyNotice("");
+    setErrors({});
+    setServerError("");
+    const nextCompID = resolveComputerID(tpl.computer_id);
+    const nextComp = computers.find((c) => c.id === nextCompID);
+    setComputerID(nextCompID);
+    setRole(tpl.role_text);
+    setDraft(draftFromTemplate(tpl, nextComp));
+  }
+
+  function handleSaveTemplate() {
+    const clean = templateName.trim();
+    if (!clean) return;
+    if (draft.kind === "acp") {
+      const parsed = splitCommandArgs(draft.command);
+      if (parsed.error) {
+        setErrors({ command: parsed.error });
+        return;
+      }
+    }
+    const saved = saveTemplate({
+      name: clean,
+      role_text: role,
+      computer_id: computerID || undefined,
+      driver_kind: draft.kind,
+      driver_config: driverInput(draft),
+    });
+    setActiveTemplateID(saved.id);
+    setSavingTemplate(false);
+    setTemplateName("");
+    toast(`Saved template “${saved.name}”`, "success");
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -401,13 +503,90 @@ export function AgentForm({
 
   return (
     <form id="agent-form" onSubmit={submit} className="space-y-5">
+      {(existingAgents.length > 0 || templates.length > 0) && (
+        <div className="space-y-3 pb-4 border-b border-line">
+          {existingAgents.length > 0 && (
+            <Select
+              size="sm"
+              label="Copy from agent"
+              optional
+              searchable={existingAgents.length > 5}
+              searchPlaceholder="Filter agents…"
+              placeholder="Choose an existing agent…"
+              value={sourceAgentID}
+              onChange={applyAgentCopy}
+              options={existingAgents.map((m) => ({
+                value: m.id,
+                label: m.display_name,
+                description: m.agent?.role_text?.replace(/\s+/g, " ").trim() || undefined,
+                icon: <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="xs" state={m.agent?.runtime_state} />,
+                trailing:
+                  m.agent?.driver_kind === "acp"
+                    ? m.agent.driver_config?.provider ?? "acp"
+                    : m.agent?.driver_config?.model || "Model API",
+              }))}
+            />
+          )}
+          {templates.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[12.5px] font-medium text-fg-3">Templates</div>
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((tpl) => {
+                  const active = activeTemplateID === tpl.id;
+                  return (
+                    <div
+                      key={tpl.id}
+                      className={`inline-flex items-center h-7 rounded-[5px] border text-[12.5px] transition-colors ${
+                        active
+                          ? "border-accent text-accent-text bg-accent-soft"
+                          : "border-line text-fg-2 bg-subtle/50 hover:border-line-strong hover:text-fg"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => applyTemplate(tpl)}
+                        title={tpl.role_text || templateDriverSummary(tpl)}
+                        className="h-full pl-2.5 pr-1.5 inline-flex items-center gap-1.5"
+                      >
+                        <span className="truncate max-w-[140px] font-medium">{tpl.name}</span>
+                        <span className="font-mono text-[11px] opacity-65">{templateDriverSummary(tpl)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete template ${tpl.name}`}
+                        onClick={() => {
+                          if (active) setActiveTemplateID("");
+                          removeTemplate(tpl.id);
+                        }}
+                        className="h-full px-1.5 text-fg-4 hover:text-danger transition-colors inline-flex items-center"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {apiKeyNotice && (
+        <div className="px-3 py-2 rounded-[6px] border border-line bg-subtle/60 text-[12.5px] text-fg-2 leading-snug animate-fade-in">
+          API key from <span className="font-medium text-fg">{apiKeyNotice}</span> is not copied for security — enter one below if needed.
+        </div>
+      )}
+
       <div className="flex items-end gap-3">
         <PixelAvatar seed={name || "agent"} size="xl" />
         <div className="flex-1">
           <Field
             label="Name"
             value={name}
-            onChange={(e) => setName(nameInput(e.target.value))}
+            onChange={(e) => {
+              setNameTouched(true);
+              setName(nameInput(e.target.value));
+            }}
             hint="Teammates @mention it by this name. Letters, digits, underscores."
             required
           />
@@ -455,6 +634,55 @@ export function AgentForm({
       <div className="space-y-2">
         <div className="text-[13px] font-medium text-fg-2">Driver</div>
         <DriverFields draft={draft} onChange={setDraft} computer={computer} errors={errors} />
+      </div>
+
+      <div>
+        {savingTemplate ? (
+          <div className="rounded-[7px] border border-line bg-subtle/40 p-3 space-y-2 animate-fade-in">
+            <div className="text-[12.5px] font-medium text-fg-2">Save current role &amp; driver as a template</div>
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveTemplate();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSavingTemplate(false);
+                  }
+                }}
+                placeholder="e.g. Backend Reviewer"
+                aria-label="Template name"
+                maxLength={48}
+                className="flex-1 h-8 px-2.5 rounded-[6px] border border-line-strong bg-card text-[13.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+              />
+              <Button type="button" size="sm" variant="ghost" onClick={() => setSavingTemplate(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" variant="secondary" disabled={!templateName.trim()} onClick={handleSaveTemplate}>
+                Save
+              </Button>
+            </div>
+            {draft.kind === "builtin" && draft.apiKey && (
+              <p className="text-[12px] text-fg-3">API keys are never saved in templates.</p>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setTemplateName(name || "Agent template");
+              setSavingTemplate(true);
+            }}
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-3 hover:text-fg transition-colors"
+          >
+            <BookmarkPlus className="size-3.5" />
+            <span>Save as template</span>
+          </button>
+        )}
       </div>
 
       {serverError && (

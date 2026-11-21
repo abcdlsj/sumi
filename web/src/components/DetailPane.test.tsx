@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearAgentTemplatesForTests, listAgentTemplates } from "../agentTemplates";
 import { api, type BootstrapData, type Member, type Message, type Task } from "../api";
 import { DetailPane } from "./DetailPane";
 
@@ -73,7 +74,10 @@ beforeEach(() => {
   vi.spyOn(api, "sendMessage").mockResolvedValue({ message: reply(9, lisi, "sent") });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  clearAgentTemplatesForTests();
+  vi.restoreAllMocks();
+});
 
 describe("ThreadDetail", () => {
   it("starts from the server following state and toggles it", async () => {
@@ -265,6 +269,58 @@ describe("AgentDetail activity", () => {
     fireEvent.click(await screen.findByRole("button", { name: /notes\.md/ }));
     await waitFor(() => expect(readSpy).toHaveBeenCalledWith("s", "a1", "notes.md"));
     expect(await screen.findByText("Hello world!")).toBeTruthy();
+  });
+
+  it("copies an agent config and saves a template directly from AgentDetail", () => {
+    const onCopyAgent = vi.fn();
+    const member: Member = {
+      id: "a1",
+      space_id: "s",
+      kind: "agent",
+      display_name: "Lin",
+      access_level: "member",
+      agent: {
+        computer_id: "c1",
+        role_text: "Backend engineer",
+        driver_kind: "acp",
+        driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini" },
+        runtime_state: "idle",
+      },
+      created_at: "",
+    };
+    const data = { ...boot, members: [member] } as unknown as BootstrapData;
+    const qc = new QueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <DetailPane
+          spaceSlug="s"
+          boot={data}
+          target={{ kind: "agent", memberID: "a1" }}
+          onClose={() => {}}
+          onSelectTarget={() => {}}
+          onCopyAgent={onCopyAgent}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(onCopyAgent).toHaveBeenCalledWith(member);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as template" }));
+    const input = screen.getByRole("textbox", { name: "Template name" }) as HTMLInputElement;
+    expect(input.value).toBe("Lin");
+    fireEvent.change(input, { target: { value: "Pi Backend" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const templates = listAgentTemplates();
+    expect(templates).toHaveLength(1);
+    expect(templates[0]).toMatchObject({
+      name: "Pi Backend",
+      role_text: "Backend engineer",
+      computer_id: "c1",
+      driver_kind: "acp",
+      driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini" },
+    });
   });
 });
 

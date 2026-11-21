@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
+  Copy,
   Hash,
   Inbox,
   Lock,
@@ -21,13 +22,13 @@ import {
   Users,
 } from "lucide-react";
 import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
-import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type RuntimeState, type Task, type TaskStatus } from "../api";
+import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useSendKey } from "../preferences";
 import type { ThemePref } from "../theme";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
-import { Badge, Button, EmptyState, ErrorState, Field, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
+import { Badge, Button, EmptyState, ErrorState, Field, IconButton, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
 
 export type InboxFilter = "needs_me" | "unread" | "all";
 export type TaskFilter = "active" | "mine" | "done" | "closed";
@@ -481,7 +482,17 @@ const STATE_WORD: Record<RuntimeState, string> = { idle: "Idle", working: "Worki
 const STATE_TEXT: Record<RuntimeState, string> = { idle: "text-online", working: "text-busy", error: "text-danger", offline: "text-fg-3" };
 
 /** Raft-style agent table: identity on the left, aligned status / runtime / computer columns on the right. */
-function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selectedID?: string; onInspect: (id: string) => void }) {
+function AgentList({
+  boot,
+  selectedID,
+  onInspect,
+  onCopyAgent,
+}: {
+  boot: BootstrapData;
+  selectedID?: string;
+  onInspect: (id: string) => void;
+  onCopyAgent?: (agent: Member) => void;
+}) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState<"none" | "computer">("none");
   const query = q.trim().toLowerCase();
@@ -535,42 +546,54 @@ function AgentList({ boot, selectedID, onInspect }: { boot: BootstrapData; selec
                 const model = ag?.driver_kind === "builtin" ? ag.driver_config?.model ?? "" : "";
                 const selected = m.id === selectedID;
                 return (
-                  <button
+                  <div
                     key={m.id}
-                    onClick={() => onInspect(m.id)}
-                    aria-current={selected || undefined}
-                    className={`group w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
+                    className={`group w-full flex items-center transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
                   >
-                    <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="md" state={st} ring={selected ? "var(--accent-soft)" : "var(--card)"} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline gap-2 min-w-0">
-                        <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
-                        {st === "working" || st === "error" ? (
-                          <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
-                            {agentStatusText(boot, m)}
-                          </span>
-                        ) : null}
+                    <button
+                      type="button"
+                      onClick={() => onInspect(m.id)}
+                      aria-current={selected || undefined}
+                      className="min-w-0 flex-1 px-4 py-2.5 flex items-center gap-3 text-left"
+                    >
+                      <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="md" state={st} ring={selected ? "var(--accent-soft)" : "var(--card)"} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-2 min-w-0">
+                          <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
+                          {st === "working" || st === "error" ? (
+                            <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
+                              {agentStatusText(boot, m)}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="block text-[13px] text-fg-3 truncate font-body" title={ag?.role_text}>
+                          {ag?.role_text || "No role defined."}
+                        </span>
+                        <span className="@[640px]:hidden block font-mono text-[12px] text-fg-4 truncate">
+                          {[STATE_WORD[st], runtime, model, comp?.name].filter(Boolean).join(" · ")}
+                        </span>
                       </span>
-                      <span className="block text-[13px] text-fg-3 truncate font-body" title={ag?.role_text}>
-                        {ag?.role_text || "No role defined."}
+                      <span className={`hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] shrink-0 ${STATE_TEXT[st]}`}>
+                        <StatusDot state={st} size={7} ring="transparent" />
+                        {STATE_WORD[st]}
                       </span>
-                      <span className="@[640px]:hidden block font-mono text-[12px] text-fg-4 truncate">
-                        {[STATE_WORD[st], runtime, model, comp?.name].filter(Boolean).join(" · ")}
+                      <span className="hidden @[640px]:block w-[104px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={model || runtime}>
+                        {model || runtime}
                       </span>
-                    </span>
-                    <span className={`hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] shrink-0 ${STATE_TEXT[st]}`}>
-                      <StatusDot state={st} size={7} ring="transparent" />
-                      {STATE_WORD[st]}
-                    </span>
-                    <span className="hidden @[640px]:block w-[104px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={model || runtime}>
-                      {model || runtime}
-                    </span>
-                    <span className="hidden @[640px]:flex items-center gap-1.5 w-[136px] text-[13px] text-fg-3 shrink-0 min-w-0" title={comp?.hostname}>
-                      <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
-                      <span className="truncate">{comp?.name ?? "No computer"}</span>
-                    </span>
-                    <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                  </button>
+                      <span className="hidden @[640px]:flex items-center gap-1.5 w-[136px] text-[13px] text-fg-3 shrink-0 min-w-0" title={comp?.hostname}>
+                        <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                        <span className="truncate">{comp?.name ?? "No computer"}</span>
+                      </span>
+                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                    </button>
+                    {onCopyAgent && (
+                      <div className="pr-2.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                        <IconButton label={`Copy ${m.display_name} to new agent`} onClick={() => onCopyAgent(m)}>
+                          <Copy />
+                        </IconButton>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -718,6 +741,7 @@ export function AdminPanel({
   onInspectHuman,
   selectedHumanID,
   onNewAgent,
+  onCopyAgent,
   onConnectComputer,
   onOpenArchivedChannel,
   theme,
@@ -732,6 +756,7 @@ export function AdminPanel({
   onInspectHuman?: (memberID: string) => void;
   selectedHumanID?: string;
   onNewAgent: () => void;
+  onCopyAgent?: (agent: Member) => void;
   onConnectComputer: () => void;
   onOpenArchivedChannel?: (conv: Conversation) => void;
   theme: ThemePref;
@@ -774,7 +799,7 @@ export function AdminPanel({
                   <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
                 </div>
               ) : (
-                <AgentList boot={boot} selectedID={selectedAgentID} onInspect={onInspectAgent} />
+                <AgentList boot={boot} selectedID={selectedAgentID} onInspect={onInspectAgent} onCopyAgent={onCopyAgent} />
               )}
             </>
           )}

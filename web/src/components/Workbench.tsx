@@ -215,6 +215,7 @@ export function Workbench({
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
   const [dialog, setDialog] = useState<Dialog>(() => (readPendingPairing() ? "pairing" : null));
+  const [copyAgent, setCopyAgent] = useState<Member | null>(null);
   const [editingGroup, setEditingGroup] = useState<ChannelGroup | null>(null);
   const [dragChannelID, setDragChannelID] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -555,6 +556,10 @@ export function Workbench({
   const onlineComputers = boot.computers.filter((c) => c.connection_status === "online").length;
   const canGovern = boot.current_member.access_level !== "member";
   const myComputers = ownComputers(boot);
+  const openNewAgentDialog = (source?: Member) => {
+    setCopyAgent(source ?? null);
+    setDialog(myComputers.length ? "agent" : "computer");
+  };
   const needsSetup = canGovern && (myComputers.length === 0 || agents.length === 0);
   const needsMe = boot.inbox.filter((i) => i.needs_attention).length;
   const pairing = readPendingPairing();
@@ -1020,14 +1025,14 @@ export function Workbench({
           })}
 
           <div>
-            <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => setDialog(myComputers.length ? "agent" : "computer")} /> : undefined}>
+            <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => openNewAgentDialog()} /> : undefined}>
               Agents
             </SectionLabel>
             <div className="space-y-0.5">
               {agents.map(memberRow)}
               {agents.length === 0 && (
                 <button
-                  onClick={() => setDialog(myComputers.length ? "agent" : "computer")}
+                  onClick={() => openNewAgentDialog()}
                   className="w-full h-9 px-2 rounded-[6px] flex items-center gap-2.5 text-[13.5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg"
                 >
                   <span className="size-6 rounded-[5px] border border-dashed border-nav-line-strong flex items-center justify-center">
@@ -1061,7 +1066,7 @@ export function Workbench({
         {needsSetup && (
           <div className="px-3 pb-3 shrink-0">
             <button
-              onClick={() => setDialog(myComputers.length === 0 ? "computer" : "agent")}
+              onClick={() => openNewAgentDialog()}
               className="w-full p-3 rounded-[8px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
             >
               <div className="flex items-center gap-2 text-[14px] font-semibold text-nav-fg-strong">
@@ -1078,10 +1083,7 @@ export function Workbench({
         <div className="h-14 px-3 border-t border-nav-line flex items-center gap-2.5 shrink-0">
           <button onClick={() => setMainView({ kind: "admin", tab: "settings" })} className="flex items-center gap-2.5 min-w-0 flex-1 rounded-[6px] p-1 -m-1 hover:bg-nav-hover">
             <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="sm" />
-            <span className="min-w-0 text-left">
-              <span className="block text-[14px] leading-5 font-medium text-nav-fg-strong truncate">{boot.current_member.display_name}</span>
-              <span className="block text-[12px] leading-4 text-nav-fg-3 capitalize">{boot.current_member.access_level}</span>
-            </span>
+            <span className="min-w-0 flex-1 text-left text-[14px] leading-5 font-medium text-nav-fg-strong truncate">{boot.current_member.display_name}</span>
           </button>
           <button
             onClick={() => setTheme(dark ? "light" : "dark")}
@@ -1137,8 +1139,12 @@ export function Workbench({
                 selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
                 onInspectHuman={(id) => setDetail({ kind: "human", memberID: id })}
                 selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
-                onNewAgent={() => setDialog(myComputers.length ? "agent" : "computer")}
-                onConnectComputer={() => setDialog("computer")}
+                onNewAgent={() => openNewAgentDialog()}
+                onCopyAgent={canGovern ? (agent) => openNewAgentDialog(agent) : undefined}
+                onConnectComputer={() => {
+                  setCopyAgent(null);
+                  setDialog("computer");
+                }}
                 onOpenArchivedChannel={(conv) => setMainView({ kind: "conversation", convID: conv.id, archivedConv: conv })}
                 theme={theme}
                 onTheme={setTheme}
@@ -1174,6 +1180,7 @@ export function Workbench({
                 onSelectTarget={setDetail}
                 onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
                 onOpenDM={(memberID) => void openOrCreateDM(memberID)}
+                onCopyAgent={canGovern ? (agent) => openNewAgentDialog(agent) : undefined}
               />
             </ErrorBoundary>
           </div>
@@ -1208,23 +1215,60 @@ export function Workbench({
           onSpaceCreated?.(slug);
         }}
       />
-      <Modal open={dialog === "computer"} onClose={() => setDialog(null)} label="Connect a computer" width={520}>
+      <Modal
+        open={dialog === "computer"}
+        onClose={() => {
+          setDialog(null);
+          setCopyAgent(null);
+        }}
+        label="Connect a computer"
+        width={520}
+      >
         <div className="p-6">
-          <ComputerStep spaceSlug={spaceSlug} nextLabel={agents.length === 0 ? "Next: create an agent" : "Done"} onNext={() => setDialog(agents.length === 0 ? "agent" : null)} />
+          <ComputerStep
+            spaceSlug={spaceSlug}
+            nextLabel={copyAgent || agents.length === 0 ? "Next: create an agent" : "Done"}
+            onNext={() => setDialog(copyAgent || agents.length === 0 ? "agent" : null)}
+          />
         </div>
       </Modal>
-      <Modal open={dialog === "agent"} onClose={() => setDialog(null)} label="New agent" title="New agent" description="A persistent teammate with its own role, memory and workspace." width={540}>
+      <Modal
+        open={dialog === "agent"}
+        onClose={() => {
+          setDialog(null);
+          setCopyAgent(null);
+        }}
+        label="New agent"
+        title="New agent"
+        description={
+          copyAgent
+            ? `Starting from ${copyAgent.display_name}'s configuration.`
+            : "A persistent teammate with its own role, memory and workspace."
+        }
+        width={540}
+      >
         <div className="px-6 pb-6 pt-4">
           <AgentForm
+            key={copyAgent?.id ?? "new"}
             spaceSlug={spaceSlug}
             computers={myComputers}
+            initialAgent={copyAgent ?? undefined}
+            existingMembers={boot.members}
             onCreated={(agent) => {
               setDialog(null);
+              setCopyAgent(null);
               void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }).then(() => openOrCreateDM(agent.id));
             }}
             footer={(submit) => (
               <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="ghost" onClick={() => setDialog(null)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setDialog(null);
+                    setCopyAgent(null);
+                  }}
+                >
                   Cancel
                 </Button>
                 {submit}

@@ -174,6 +174,8 @@ describe("Workbench", () => {
     expect(within(sidebar).queryByText("Backend engineer")).toBeNull();
     const roleEl = within(sidebar).getByText("Code reviewer focusing on API ergonomics and edge cases");
     expect(roleEl.className).toContain("fade-truncate");
+    expect(within(sidebar).getByText("Lisi")).toBeTruthy();
+    expect(within(sidebar).queryByText(/^owner$/i)).toBeNull();
 
     // Navigate to #engineering and click attached task #14 to open Right Detail Pane.
     fireEvent.click(within(sidebar).getByRole("button", { name: /^engineering$/i }));
@@ -265,5 +267,59 @@ describe("Workbench", () => {
     fireEvent.change(within(palette).getByPlaceholderText(/Search channels/i), { target: { value: "Split" } });
     await waitFor(() => expect(searchSpy).toHaveBeenCalledWith("studio", "Split", { limit: 8 }));
     expect(await within(palette).findByText("Messages")).toBeTruthy();
+  });
+
+  it("opens the same New agent form prefilled when copying an existing agent", async () => {
+    const createSpy = vi.spyOn(api, "createAgent").mockResolvedValue({
+      agent: {
+        id: "m-lin-2",
+        space_id: "sp-1",
+        kind: "agent",
+        display_name: "Lin_2",
+        access_level: "member",
+        agent: { computer_id: "c-1", role_text: "Backend engineer", driver_kind: "acp", driver_config: { provider: "pi" }, runtime_state: "idle" },
+        created_at: "2026-11-19T10:30:00Z",
+      },
+    });
+    vi.spyOn(api, "createDM").mockResolvedValue({
+      conversation: {
+        id: "dm-lin-2",
+        space_id: "sp-1",
+        kind: "dm",
+        peer_member_id: "m-lin-2",
+        peer_display_name: "Lin_2",
+        peer_kind: "agent",
+        next_seq: 1,
+        read_seq: 0,
+        unread_count: 0,
+        mention_count: 0,
+        following: false,
+      },
+    });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <Workbench spaceSlug="studio" onLogout={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Agents" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy Lin to new agent" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    expect((within(dialog).getByLabelText("Name") as HTMLInputElement).value).toBe("Lin_2");
+    expect((within(dialog).getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Backend engineer");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith("studio", {
+        display_name: "Lin_2",
+        role_text: "Backend engineer",
+        computer_id: "c-1",
+        driver_kind: "acp",
+        driver_config: { provider: "pi" },
+      }),
+    );
   });
 });
