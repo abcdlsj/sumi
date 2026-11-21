@@ -107,6 +107,20 @@ describe("AgentVisibility", () => {
     expect(faces.getAttribute("aria-label")).toContain("Lin");
   });
 
+  it("omits an agent's read face on its own message while keeping other agents who read it", () => {
+    const msgs = [makeMsg(1, lisi, "one"), makeMsg(2, lin, "reply from lin")];
+    const map = buildAgentReadMap(
+      msgs,
+      [
+        { member_id: lin.id, read_seq: 2 },
+        { member_id: kira.id, read_seq: 2 },
+      ],
+      [lisi, lin, kira],
+    );
+    expect(map.get("m-1")).toBeUndefined();
+    expect(map.get("m-2")?.map((m) => m.id)).toEqual([kira.id]);
+  });
+
   it("renders ThreadOutlineRail for threads with multiple human checkpoints and jumps on click", () => {
     const msgs = [
       makeMsg(1, lisi, "Initial question"),

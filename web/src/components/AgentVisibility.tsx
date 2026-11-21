@@ -216,7 +216,7 @@ export function WorkingNowSummary({
   );
 }
 
-/** Maps each rendered message id to the agents whose read watermark stops on that message. */
+/** Maps each rendered text message id to the agents whose read watermark stops on that message (excluding the author). */
 export function buildAgentReadMap(
   messages: Message[] | undefined,
   agentReads: AgentReadProgress[] | undefined,
@@ -230,12 +230,12 @@ export function buildAgentReadMap(
     if (!member || member.kind !== "agent") continue;
     let target: Message | undefined;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].seq <= r.read_seq) {
+      if (messages[i].kind === "text" && messages[i].seq <= r.read_seq) {
         target = messages[i];
         break;
       }
     }
-    if (!target) continue;
+    if (!target || target.author_member_id === member.id) continue;
     const list = map.get(target.id);
     if (list) list.push(member);
     else map.set(target.id, [member]);
