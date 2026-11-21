@@ -1044,7 +1044,7 @@ export function ConversationView({
                               <ListPlus className="size-3.5" /> Task
                             </button>
                             <Menu
-                              width={184}
+                              width={160}
                               onOpenChange={(open) => setMoreMenuMsgID(open ? m.id : null)}
                               trigger={(open, toggle) => (
                                 <button

@@ -967,19 +967,21 @@ export function MenuItem({
   children: ReactNode;
   hint?: ReactNode;
 }) {
+  const selectable = active !== undefined;
   return (
     <button
-      role="menuitemradio"
-      aria-checked={active}
+      type="button"
+      role={selectable ? "menuitemradio" : "menuitem"}
+      aria-checked={selectable ? active : undefined}
       onClick={onSelect}
       className="w-full px-2.5 py-2 rounded-[6px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
     >
-      <span className="size-5 shrink-0 flex items-center justify-center text-fg-3 [&>svg]:size-4">{icon}</span>
+      {icon != null && <span className="size-5 shrink-0 flex items-center justify-center text-fg-3 [&>svg]:size-4">{icon}</span>}
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] text-fg leading-5">{children}</span>
         {hint && <span className="block text-[12.5px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
       </span>
-      <span className="size-5 shrink-0 flex items-center justify-center text-accent">{active && <Check className="size-4" />}</span>
+      {selectable && <span className="size-5 shrink-0 flex items-center justify-center text-accent">{active && <Check className="size-4" />}</span>}
     </button>
   );
 }

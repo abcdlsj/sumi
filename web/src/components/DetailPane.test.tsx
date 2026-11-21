@@ -304,11 +304,11 @@ describe("AgentDetail activity", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Agent actions" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Copy to new agent/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Copy to new agent/ }));
     expect(onCopyAgent).toHaveBeenCalledWith(member);
 
     fireEvent.click(screen.getByRole("button", { name: "Agent actions" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Save as template/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Save as template/ }));
     const input = screen.getByRole("textbox", { name: "Template name" }) as HTMLInputElement;
     expect(input.value).toBe("Lin");
     fireEvent.change(input, { target: { value: "Pi Backend" } });

@@ -886,7 +886,7 @@ export function Workbench({
               action={
                 <div className="flex items-center gap-0.5">
                   <Menu
-                    width={176}
+                    width={160}
                     trigger={(open, toggle) => (
                       <button
                         type="button"
