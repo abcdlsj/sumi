@@ -16,6 +16,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/agenthost"
 	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/server"
+	"github.com/abcdlsj/sumi/internal/version"
 	"github.com/abcdlsj/sumi/internal/webui"
 )
 
@@ -200,7 +201,7 @@ func RunAgentHost(args []string) int {
 	srv := agenthost.NewServer(agenthost.ServerConfig{
 		SocketPath:  *sockPath,
 		MetaPath:    *metaPath,
-		HostVersion: Version,
+		HostVersion: version.Value(),
 	})
 	if err := srv.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "start agent-host:", err)

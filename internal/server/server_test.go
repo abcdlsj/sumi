@@ -19,6 +19,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/protocol"
 	"github.com/abcdlsj/sumi/internal/store"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 func doJSON(t *testing.T, client *http.Client, method, url string, body any, bearer string) (*http.Response, map[string]any) {
@@ -319,4 +320,40 @@ func TestSSEFiltersPrivateChannelsAndPersonalGroups(t *testing.T) {
 		}
 	}
 	t.Fatalf("never received expected public channel SSE event")
+}
+
+func TestHealthReportsProtocolAndAppVersion(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	svc := app.NewService(st, app.NewEventHub(), nil)
+
+	cases := []struct {
+		name       string
+		appVersion string
+		want       string
+	}{
+		{name: "stamped release", appVersion: "6.0.4", want: "6.0.4"},
+		{name: "unstamped build falls back", appVersion: "", want: version.Dev},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := New(svc, Config{AppVersion: tc.appVersion}, nil)
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+
+			resp, body := doJSON(t, http.DefaultClient, http.MethodGet, ts.URL+"/api/v1/health", nil, "")
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("health status=%d", resp.StatusCode)
+			}
+			if got := body["app_version"]; got != tc.want {
+				t.Fatalf("app_version=%v, want %s", got, tc.want)
+			}
+			if got, ok := body["version"].(float64); !ok || int(got) != protocol.Version {
+				t.Fatalf("version=%v, want protocol %d", body["version"], protocol.Version)
+			}
+		})
+	}
 }

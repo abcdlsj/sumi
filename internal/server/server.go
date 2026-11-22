@@ -18,7 +18,9 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/app"
 	"github.com/abcdlsj/sumi/internal/domain"
+	"github.com/abcdlsj/sumi/internal/protocol"
 	"github.com/abcdlsj/sumi/internal/store"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 const sessionCookieName = "sumi_session"
@@ -27,6 +29,7 @@ type Config struct {
 	WebOrigin     string
 	SecureCookies bool
 	StaticFS      http.Handler // Optional embedded/static web UI handler.
+	AppVersion    string       // Release version reported by /api/v1/health.
 }
 
 type Server struct {
@@ -315,7 +318,16 @@ func (s *Server) requireSpaceMember(r *http.Request) (domain.Space, domain.Membe
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": 2})
+	appVersion := s.cfg.AppVersion
+	if appVersion == "" {
+		appVersion = version.Dev
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		// version is the wire protocol revision; app_version is the release build.
+		"version":     protocol.Version,
+		"app_version": appVersion,
+	})
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {

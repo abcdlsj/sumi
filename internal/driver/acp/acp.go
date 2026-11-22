@@ -19,6 +19,7 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 const (
@@ -230,7 +231,7 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, workDir string, env []
 	res, err := p.call(initCtx, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientCapabilities": map[string]any{},
-		"clientInfo":         map[string]any{"name": "sumi", "version": "2.0.0"},
+		"clientInfo":         map[string]any{"name": "sumi", "version": version.Value()},
 	})
 	if err != nil {
 		d.stopLocked()

@@ -20,7 +20,7 @@ import (
 func buildTestSumiBinary(t *testing.T, ver string) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "sumi-"+ver)
-	cmd := exec.Command("go", "build", "-ldflags", "-X github.com/abcdlsj/sumi/internal/lifecycle.Version="+ver, "-o", out, "../../cmd/sumi")
+	cmd := exec.Command("go", "build", "-ldflags", "-X github.com/abcdlsj/sumi/internal/version.Version="+ver, "-o", out, "../../cmd/sumi")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build sumi binary (%s): %v\n%s", ver, err, string(b))
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/driver/acp"
 	"github.com/abcdlsj/sumi/internal/driver/builtin"
 	"github.com/abcdlsj/sumi/internal/protocol"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 // DriverBuilder constructs the underlying SessionDriver for a configured agent spec.
@@ -112,7 +113,7 @@ type Server struct {
 
 func NewServer(cfg ServerConfig) *Server {
 	if cfg.HostVersion == "" {
-		cfg.HostVersion = "2.0.0"
+		cfg.HostVersion = version.Value()
 	}
 	if cfg.DriverBuilder == nil {
 		cfg.DriverBuilder = DefaultDriverBuilder

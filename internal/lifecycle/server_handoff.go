@@ -125,8 +125,9 @@ func (r *ServerRunner) startServing(ln net.Listener) error {
 	}
 	svc := app.NewService(st, app.NewEventHub(), nil)
 	srv := server.New(svc, server.Config{
-		WebOrigin: r.cfg.WebOrigin,
-		StaticFS:  r.cfg.StaticFS,
+		WebOrigin:  r.cfg.WebOrigin,
+		StaticFS:   r.cfg.StaticFS,
+		AppVersion: r.info.Version,
 	}, r.logger)
 	httpSrv := &http.Server{
 		Addr:              r.cfg.Addr,

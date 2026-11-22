@@ -15,6 +15,10 @@ DESKTOP_BIN     ?= bin/Sumi.app
 INSTALL_APP_DIR ?= $(HOME)/Applications
 GO              ?= go
 NODE_PKG    ?= pnpm
+# Single source of truth for the release version. Release automation overrides this,
+# and `make build VERSION=6.0.5` produces an identically stamped binary locally.
+VERSION         ?= 6.0.4
+LDFLAGS         := -X github.com/abcdlsj/sumi/internal/version.Version=$(VERSION)
 
 # Pairing inputs for `make pair`: EMAIL=... PASSWORD=... [SPACE=studio] [DESKTOP_CONFIG=...]
 EMAIL             ?=
@@ -28,7 +32,7 @@ help: ## Show every target
 	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) \
 		| sort \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
-	@printf '\nOverrides: PORT=%s DATA_DIR=%s SERVE_URL=%s\n' '$(PORT)' '$(DATA_DIR)' '$(SERVE_URL)'
+	@printf '\nOverrides: PORT=%s DATA_DIR=%s SERVE_URL=%s VERSION=%s\n' '$(PORT)' '$(DATA_DIR)' '$(SERVE_URL)' '$(VERSION)'
 	@printf 'Pairing:   make pair EMAIL=you@example.com PASSWORD=secret\n'
 
 # ---- Environment ----
@@ -67,7 +71,7 @@ web-assets: web ## Copy the built Web UI into internal/webui for go:embed
 .PHONY: bin
 bin: ## Build the sumi binary into bin/sumi
 	@mkdir -p bin
-	$(GO) build -o $(BIN) ./cmd/sumi
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/sumi
 
 .PHONY: build
 build: web-assets bin ## Build Web UI and the sumi binary with embedded UI
@@ -76,7 +80,7 @@ build: web-assets bin ## Build Web UI and the sumi binary with embedded UI
 # Wails keeps its own module under desktop/, so the shell builds independently of the server module.
 # Stage into a fresh bundle and ad-hoc sign before swapping so running instances never hit
 # macOS Taskgated Invalid Signature from in-place Mach-O overwrites.
-SHELL_BUILD := cd desktop && CGO_LDFLAGS="-framework UniformTypeIdentifiers" $(GO) build -tags production -trimpath
+SHELL_BUILD := cd desktop && CGO_LDFLAGS="-framework UniformTypeIdentifiers" $(GO) build -tags production -trimpath -ldflags "$(LDFLAGS)"
 desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
 	@mkdir -p bin
 	$(SHELL_BUILD) -o ../bin/sumi-desktop .
@@ -85,6 +89,8 @@ desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
 		mkdir -p "$$staging/Contents/MacOS" "$$staging/Contents/Resources"; \
 		cp bin/sumi-desktop "$$staging/Contents/MacOS/Sumi"; \
 		cp desktop/Info.plist "$$staging/Contents/Info.plist"; \
+		plutil -replace CFBundleShortVersionString -string "$(VERSION)" "$$staging/Contents/Info.plist"; \
+		plutil -replace CFBundleVersion -string "$(VERSION)" "$$staging/Contents/Info.plist"; \
 		cp desktop/AppIcon.icns "$$staging/Contents/Resources/AppIcon.icns"; \
 		codesign --force --deep --sign - "$$staging"; \
 		rm -rf "$(DESKTOP_BIN)"; \

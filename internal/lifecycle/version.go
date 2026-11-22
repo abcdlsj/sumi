@@ -17,10 +17,8 @@ import (
 	"time"
 
 	"github.com/abcdlsj/sumi/internal/datadir"
+	"github.com/abcdlsj/sumi/internal/version"
 )
-
-// Version is the semantic version of this binary; override with -ldflags if needed.
-var Version = "2.0.0"
 
 // BuildInfo uniquely identifies a Sumi executable by both semver and binary content hash,
 // so even local rebuilds with the same semver attest cleanly during handoff.
@@ -44,7 +42,7 @@ func CurrentBuildInfo() (BuildInfo, error) {
 		return BuildInfo{}, err
 	}
 	return BuildInfo{
-		Version:    Version,
+		Version:    version.Value(),
 		BinaryHash: hash,
 		Executable: exe,
 	}, nil

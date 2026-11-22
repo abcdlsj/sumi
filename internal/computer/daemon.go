@@ -26,6 +26,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/driver"
 	"github.com/abcdlsj/sumi/internal/driver/acp"
 	"github.com/abcdlsj/sumi/internal/protocol"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 type Config struct {
@@ -140,7 +141,7 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 		logger = slog.Default()
 	}
 	if cfg.DaemonVersion == "" {
-		cfg.DaemonVersion = "2.0.0"
+		cfg.DaemonVersion = version.Value()
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = datadir.ComputerDir(datadir.RootOrHome())
