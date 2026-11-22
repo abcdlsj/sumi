@@ -123,7 +123,12 @@ jobs:
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-X github.com/abcdlsj/sumi/internal/version.Version=$VERSION" \
             -o "dist/sumi-$VERSION-$TARGET" ./cmd/sumi
-          "dist/sumi-$VERSION-$TARGET" version
+          # Self-check only where the artifact can actually execute on this runner.
+          if [ "$GOOS" = "$(go env GOOS)" ] && [ "$GOARCH" = "$(go env GOARCH)" ]; then
+            "dist/sumi-$VERSION-$TARGET" version
+          else
+            file "dist/sumi-$VERSION-$TARGET"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: sumi-${{ matrix.target }}
