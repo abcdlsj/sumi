@@ -85,6 +85,7 @@ func TestFakePiRPC(t *testing.T) {
 	in := bufio.NewScanner(os.Stdin)
 	out := json.NewEncoder(os.Stdout)
 	turns := 0
+	compacted := false
 	for in.Scan() {
 		var cmd struct {
 			ID                 string `json:"id"`
@@ -108,6 +109,7 @@ func TestFakePiRPC(t *testing.T) {
 			})
 		case "prompt":
 			turns++
+			compacted = false
 			_ = os.MkdirAll(filepath.Dir(sessionFile), 0o700)
 			_ = os.WriteFile(sessionFile, []byte("{\"type\":\"session\"}\n"), 0o600)
 			logLine("PROMPT:" + strings.ReplaceAll(cmd.Message, "\n", "\\n"))
@@ -154,8 +156,17 @@ func TestFakePiRPC(t *testing.T) {
 			_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": true})
 		case "get_session_stats":
 			ctxTokens := 4000
-			if mode == "over_budget" {
+			switch mode {
+			case "over_budget", "over_budget_sticky":
 				ctxTokens = 200_000
+			case "over_budget_shrinks":
+				if compacted {
+					ctxTokens = 30_000
+				} else {
+					ctxTokens = 200_000
+				}
+			case "large_idle":
+				ctxTokens = 80_000
 			}
 			_ = out.Encode(map[string]any{
 				"id":      cmd.ID,
@@ -177,6 +188,7 @@ func TestFakePiRPC(t *testing.T) {
 				},
 			})
 		case "compact":
+			compacted = true
 			logLine("COMPACT:" + cmd.CustomInstructions)
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "compact", "success": true, "data": map[string]any{}})
 		}
@@ -468,5 +480,143 @@ func TestSystemPromptUpdateRestartsProcessWhileKeepingSession(t *testing.T) {
 	}
 	if !strings.Contains(joined, "OPEN:resume") {
 		t.Fatalf("expected existing session to resume across system prompt reload:\n%s", joined)
+	}
+}
+
+func TestCompactionArmingPreventsRetryLoop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	countCompacts := func(lines []string) int {
+		n := 0
+		for _, l := range lines {
+			if strings.HasPrefix(l, "COMPACT:") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// If compaction leaves context above threshold, arming disarms and does not retry on the next turn.
+	dSticky, inSticky, logSticky := newFakeDriver(t, "over_budget_sticky", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+	})
+	defer dSticky.Close()
+	if _, err := dSticky.RunTurn(ctx, inSticky); err != nil {
+		t.Fatalf("sticky turn 1: %v", err)
+	}
+	if _, err := dSticky.RunTurn(ctx, inSticky); err != nil {
+		t.Fatalf("sticky turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logSticky)); got != 1 {
+		t.Fatalf("expected exactly 1 compaction when context stays above threshold, got %d", got)
+	}
+
+	// When compaction drops context below threshold, arming re-arms so a later breach compacts again.
+	dShrink, inShrink, logShrink := newFakeDriver(t, "over_budget_shrinks", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+	})
+	defer dShrink.Close()
+	if _, err := dShrink.RunTurn(ctx, inShrink); err != nil {
+		t.Fatalf("shrink turn 1: %v", err)
+	}
+	if _, err := dShrink.RunTurn(ctx, inShrink); err != nil {
+		t.Fatalf("shrink turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logShrink)); got != 2 {
+		t.Fatalf("expected 2 compactions after shrinking re-armed, got %d", got)
+	}
+}
+
+func TestColdWakeRecycleOnLiveProcessAndRestart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cur := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return cur }
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "pi.log")
+	baseCfg := Config{
+		Binary:               os.Args[0],
+		PrefixArgs:           []string{"-test.run=^TestFakePiRPC$", "--"},
+		SessionDir:           filepath.Join(dir, "runtime", "pi", "sessions"),
+		SessionFile:          filepath.Join(dir, "pi-session.json"),
+		SystemPromptFile:     filepath.Join(dir, "runtime", "pi", "SYSTEM.md"),
+		Fingerprint:          "fp",
+		ColdRecycleIdle:      60 * time.Minute,
+		ColdRecycleMinTokens: 64_000,
+		Now:                  clock,
+	}
+	in := driver.TurnInput{
+		SystemPrompt:   "SUMI RULES",
+		StartupContext: "MEMORY SNAPSHOT",
+		UserPrompt:     "wake",
+		WorkDir:        dir,
+		Env:            append(os.Environ(), "SUMI_FAKE_PI=large_idle", "SUMI_FAKE_PI_LOG="+logPath),
+	}
+
+	d := New(baseCfg)
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+
+	// Idle 30m (< 60m): stay on the warm session without re-sending StartupContext.
+	_ = os.Remove(logPath)
+	cur = cur.Add(30 * time.Minute)
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	joined := strings.Join(readLogLines(logPath), "\n")
+	if strings.Contains(joined, "OPEN:new") || strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("short idle must keep warm session:\n%s", joined)
+	}
+
+	// Idle 61m (>= 60m) with 80k tokens (> 64k): recycle live process into fresh session with MEMORY.
+	_ = os.Remove(logPath)
+	cur = cur.Add(61 * time.Minute)
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 3: %v", err)
+	}
+	joined = strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("cold idle on live process must recycle into fresh session:\n%s", joined)
+	}
+	_ = d.GracefulClose(2)
+
+	// Restarted driver after another 61m idle with 80k tokens on disk also recycles instead of resuming.
+	_ = os.Remove(logPath)
+	cur = cur.Add(61 * time.Minute)
+	d2 := New(baseCfg)
+	defer d2.Close()
+	if _, err := d2.RunTurn(ctx, in); err != nil {
+		t.Fatalf("restarted turn: %v", err)
+	}
+	joined = strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("cold idle across restart must recycle into fresh session:\n%s", joined)
+	}
+
+	// Small session (4k <= 64k) idle for 2h must NOT recycle.
+	dSmall, inSmall, logSmall := newFakeDriver(t, "ok", Config{
+		Fingerprint:          "fp",
+		ColdRecycleIdle:      60 * time.Minute,
+		ColdRecycleMinTokens: 64_000,
+		Now:                  clock,
+	})
+	defer dSmall.Close()
+	if _, err := dSmall.RunTurn(ctx, inSmall); err != nil {
+		t.Fatalf("small turn 1: %v", err)
+	}
+	_ = os.Remove(logSmall)
+	cur = cur.Add(2 * time.Hour)
+	if _, err := dSmall.RunTurn(ctx, inSmall); err != nil {
+		t.Fatalf("small turn 2: %v", err)
+	}
+	joined = strings.Join(readLogLines(logSmall), "\n")
+	if strings.Contains(joined, "OPEN:new") || strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("small session must keep continuity even after long idle:\n%s", joined)
 	}
 }
