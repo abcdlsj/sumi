@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -446,6 +447,11 @@ func (s *Server) handleAgentReadMessages(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, page)
 }
 
+func allowAgentSilentCreate() bool {
+	v := strings.TrimSpace(os.Getenv("SUMI_ALLOW_AGENT_SILENT_CREATE"))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 func (s *Server) handleAgentCreateAgent(w http.ResponseWriter, r *http.Request) {
 	comp, agent, err := s.requireComputerAgent(r)
 	if err != nil {
@@ -467,17 +473,32 @@ func (s *Server) handleAgentCreateAgent(w http.ResponseWriter, r *http.Request) 
 	if body.ComputerID == "" {
 		body.ComputerID = comp.ID
 	}
-	created, err := s.svc.CreateAgent(r.Context(), agent, app.CreateAgentInput{
+	in := app.CreateAgentInput{
 		DisplayName:          body.DisplayName,
 		RoleText:             body.RoleText,
 		ComputerID:           body.ComputerID,
 		DriverKind:           body.DriverKind,
 		DriverConfig:         body.DriverConfig,
 		SourceConversationID: body.SourceConversationID,
-	})
+	}
+	if allowAgentSilentCreate() {
+		created, err := s.svc.CreateAgent(r.Context(), agent, in)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"agent": created})
+		return
+	}
+	msg, err := s.svc.ProposeAgentCreate(r.Context(), agent, in)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"agent": created})
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":                 "pending_confirmation",
+		"action_card_message_id": msg.ID,
+		"conversation_id":        msg.ConversationID,
+		"message":                msg,
+	})
 }

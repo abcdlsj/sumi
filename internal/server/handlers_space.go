@@ -197,6 +197,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request, actor
 		DriverKind           domain.DriverKind   `json:"driver_kind"`
 		DriverConfig         domain.DriverConfig `json:"driver_config"`
 		SourceConversationID string              `json:"source_conversation_id"`
+		ActionCardMessageID  string              `json:"action_card_message_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, err)
@@ -209,12 +210,22 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request, actor
 		DriverKind:           body.DriverKind,
 		DriverConfig:         body.DriverConfig,
 		SourceConversationID: body.SourceConversationID,
+		ActionCardMessageID:  body.ActionCardMessageID,
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"agent": agent})
+}
+
+func (s *Server) handleDismissActionCard(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	card, err := s.svc.DismissActionCard(r.Context(), actor, chi.URLParam(r, "messageID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"action_card": card})
 }
 
 func (s *Server) handleUpdateAgentDriver(w http.ResponseWriter, r *http.Request, actor domain.Member) {

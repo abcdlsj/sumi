@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -71,7 +72,50 @@ const (
 	ActionChannelUnarchived ActionKind = "channel_unarchived"
 	ActionAgentCreated      ActionKind = "agent_created"
 	ActionTaskEvent         ActionKind = "task_event"
+	ActionActionCard        ActionKind = "action_card"
 )
+
+type ActionCardType string
+
+const (
+	ActionCardAgentCreate ActionCardType = "agent.create"
+)
+
+type ActionCardStatus string
+
+const (
+	ActionCardPending   ActionCardStatus = "pending"
+	ActionCardExecuted  ActionCardStatus = "executed"
+	ActionCardDismissed ActionCardStatus = "dismissed"
+)
+
+// ActionCardPayload is the generic envelope stored in payload_json for action_kind="action_card" messages.
+// Type-specific inputs and outcomes live in Params and Result so future card types need no schema changes.
+type ActionCardPayload struct {
+	Version            int              `json:"version"`
+	CardType           ActionCardType   `json:"card_type"`
+	Status             ActionCardStatus `json:"status"`
+	Title              string           `json:"title"`
+	Description        string           `json:"description,omitempty"`
+	Params             json.RawMessage  `json:"params,omitempty"`
+	Result             json.RawMessage  `json:"result,omitempty"`
+	ExecutedByMemberID string           `json:"executed_by_member_id,omitempty"`
+	ExecutedByName     string           `json:"executed_by_name,omitempty"`
+	ExecutedAt         *time.Time       `json:"executed_at,omitempty"`
+}
+
+type AgentCreateCardParams struct {
+	DisplayName  string           `json:"display_name,omitempty"`
+	RoleText     string           `json:"role_text,omitempty"`
+	ComputerID   string           `json:"computer_id,omitempty"`
+	DriverKind   DriverKind       `json:"driver_kind,omitempty"`
+	DriverConfig DriverConfigView `json:"driver_config,omitempty"`
+}
+
+type AgentCreateCardResult struct {
+	AgentID     string `json:"agent_id"`
+	DisplayName string `json:"display_name"`
+}
 
 type TaskStatus string
 

@@ -22,6 +22,7 @@ type CreateAgentInput struct {
 	DriverKind           domain.DriverKind
 	DriverConfig         domain.DriverConfig
 	SourceConversationID string // Optional: emits an agent_created Action Message in this conversation.
+	ActionCardMessageID  string // Optional: atomically marks this pending agent.create Action Card as executed.
 }
 
 func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in CreateAgentInput) (domain.Member, error) {
@@ -102,7 +103,31 @@ func (s *Service) CreateAgent(ctx context.Context, actor domain.Member, in Creat
 			)
 		}
 
-		if in.SourceConversationID != "" {
+		if in.ActionCardMessageID != "" {
+			cardConvID, cardEv, err := markActionCardExecutedTx(
+				ctx,
+				tx,
+				actor,
+				in.ActionCardMessageID,
+				domain.ActionCardAgentCreate,
+				domain.AgentCreateCardResult{AgentID: memberID, DisplayName: in.DisplayName},
+				now,
+			)
+			if err != nil {
+				return err
+			}
+			events = append(events, cardEv)
+			// Auto-join the newly created agent to the channel hosting the proposal card.
+			if cardMeta, err := canAccessConversation(ctx, tx, actor, cardConvID); err == nil {
+				if boundary, err := resolveVisibilityBoundary(ctx, tx, cardMeta); err == nil &&
+					(boundary.Kind == domain.ConversationPublic || boundary.Kind == domain.ConversationPrivate) {
+					_, _ = tx.ExecContext(ctx,
+						`INSERT OR IGNORE INTO conversation_members (conversation_id, space_id, member_id, joined_at) VALUES (?, ?, ?, ?)`,
+						boundary.ID, actor.SpaceID, memberID, store.FormatTime(now),
+					)
+				}
+			}
+		} else if in.SourceConversationID != "" {
 			srcMeta, err := canAccessConversation(ctx, tx, actor, in.SourceConversationID)
 			if err != nil {
 				return err

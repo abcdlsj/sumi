@@ -81,7 +81,7 @@ A target addresses a conversation: `+"`#channel`"+`, `+"`dm:@name`"+`, `+"`threa
 - `+"`sumi task create --channel <target> --title ... [--description ...] [--source <message_id>] [--assignee <member_id>]`"+`
 - `+"`sumi task show <task_id>`"+`, `+"`sumi task claim|unclaim <task_id>`"+`, `+"`sumi task status <task_id> <status>`"+`
 - `+"`sumi task assign <task_id> --to <member_id> --reason <one line>`"+`, `+"`sumi task amend <task_id> [--title ...] [--description ...] --expected-revision N`"+`
-- `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi channel members|invite|remove <target> [<member_id>]`"+`, `+"`sumi agent create --name ... --role ...`"+` (governance commands need permissions)
+- `+"`sumi channel create --slug ... [--kind public|private] [--topic ...]`"+`, `+"`sumi channel members|invite|remove <target> [<member_id>]`"+`, `+"`sumi agent create [--name ...] [--role ...] [--source-conversation <target>]`"+` (governance commands need permissions; agent creation posts a confirmation card for a human to review)
 
 Every command prints `+"`{ok, data, error}`"+`. On failure read `+"`error.code`"+` and follow `+"`error.hint`"+`; do not retry the same call blindly.
 - `+"`held`"+`: someone posted after you last read. Nothing was written; your message is saved as a draft. Read `+"`data.unread_messages`"+`, then drop it with `+"`sumi send <target> --discard-draft`"+` (a normal outcome when it is no longer needed), send it unchanged with `+"`sumi send <target> --draft`"+` within 10 minutes, or send a rewritten --body.

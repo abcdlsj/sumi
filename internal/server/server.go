@@ -135,6 +135,7 @@ func (s *Server) registerRoutes() {
 		r.Get("/computers", s.handleListComputers)
 
 		r.Post("/agents", s.asHuman(s.handleCreateAgent))
+		r.Post("/action-cards/{messageID}/dismiss", s.asHuman(s.handleDismissActionCard))
 		r.Post("/agents/{agentID}/control", s.asHuman(s.handleControlAgent))
 		r.Put("/agents/{agentID}/driver", s.asHuman(s.handleUpdateAgentDriver))
 		r.Get("/agents/{agentID}/workspace", s.asHuman(s.handleListAgentWorkspace))

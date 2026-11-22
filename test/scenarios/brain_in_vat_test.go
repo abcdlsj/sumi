@@ -24,6 +24,8 @@ import (
 //   - Freshness Guard hold + self-correction
 //   - Permission-gated child agent creation (and denial for unprivileged child)
 func TestBrainInVat(t *testing.T) {
+	// Brain-in-a-vat runs unattended end-to-end, so opt into silent CLI child-agent creation.
+	t.Setenv("SUMI_ALLOW_AGENT_SILENT_CREATE", "1")
 	var binPath string
 	var childDeniedChecked atomic.Bool
 	var parentCompleted atomic.Bool
