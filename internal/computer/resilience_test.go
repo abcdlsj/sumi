@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,5 +150,43 @@ func TestCapabilitySocketPathDeterministicWhenDeep(t *testing.T) {
 
 	if p1 != p2 {
 		t.Fatalf("socket path changed across restarts: %q vs %q", p1, p2)
+	}
+}
+
+func TestReleaseCapabilitySocketDoesNotRemoveSuccessorsSocket(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		close func(*Daemon)
+	}{
+		{name: "detach", close: func(d *Daemon) { d.Detach() }},
+		{name: "stop_graceful", close: func(d *Daemon) { d.StopGraceful(1) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			d1 := NewDaemon(Config{DataDir: dataDir}, nil)
+			if err := d1.startCapabilitySocket(); err != nil {
+				t.Fatalf("start d1: %v", err)
+			}
+			sockPath := d1.SocketPath()
+
+			// Hand off socket path to successor daemon, then finalize old daemon exit.
+			d1.ReleaseCapabilitySocket()
+			d2 := NewDaemon(Config{DataDir: dataDir}, nil)
+			if err := d2.startCapabilitySocket(); err != nil {
+				t.Fatalf("start d2: %v", err)
+			}
+			defer d2.Stop()
+
+			tc.close(d1)
+
+			if _, err := os.Stat(sockPath); err != nil {
+				t.Fatalf("successor capability.sock disappeared after old daemon %s: %v", tc.name, err)
+			}
+			conn, err := net.DialTimeout("unix", sockPath, time.Second)
+			if err != nil {
+				t.Fatalf("dial successor capability.sock after old daemon %s: %v", tc.name, err)
+			}
+			_ = conn.Close()
+		})
 	}
 }

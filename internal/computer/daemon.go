@@ -302,13 +302,18 @@ func (d *Daemon) Detach() {
 
 func (d *Daemon) closeSocketLocked() {
 	d.mu.Lock()
-	srv, sock := d.socketServer, d.socketPath
+	srv, ln, sock := d.socketServer, d.socketLn, d.socketPath
 	d.socketServer, d.socketLn = nil, nil
 	d.mu.Unlock()
 	if srv != nil {
 		_ = srv.Close()
+	} else if ln != nil {
+		_ = ln.Close()
 	}
-	if sock != "" {
+	// Only unlink capability.sock while this daemon still owns the listener;
+	// during hot upgrade ReleaseCapabilitySocket already released it before the
+	// candidate bound the same path, so Detach/Stop must not delete the successor's socket.
+	if (srv != nil || ln != nil) && sock != "" {
 		_ = os.Remove(sock)
 	}
 }

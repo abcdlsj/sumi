@@ -123,8 +123,8 @@ func (c *ControlServer) ReleaseListener() {
 	c.mu.Unlock()
 	if ln != nil {
 		_ = ln.Close()
+		_ = os.Remove(c.sockPath)
 	}
-	_ = os.Remove(c.sockPath)
 }
 
 // Close shuts down the control server and removes sockPath if owned by this listener.

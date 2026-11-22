@@ -268,5 +268,39 @@ func TestComputerHotUpgradePreservesAgentHostSidecar(t *testing.T) {
 	if st2.PID != upResp.NewPID || st2.Version != "2.0.2" {
 		t.Fatalf("expected v2 computer status, got %+v", st2)
 	}
+
+	// Wait until the old computer daemon finishes exiting so its Detach() cleanup has completed,
+	// then verify the new daemon's capability.sock is still present and serving requests.
+	exitDeadline := time.Now().Add(5 * time.Second)
+	for ProcessAlive(upResp.OldPID) && time.Now().Before(exitDeadline) {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if ProcessAlive(upResp.OldPID) {
+		t.Fatalf("old computer PID %d still alive after hot upgrade", upResp.OldPID)
+	}
+	capSock := st2.Daemon.SocketPath
+	if capSock == "" {
+		t.Fatal("v2 computer reported empty capability socket path")
+	}
+	if _, err := os.Stat(capSock); err != nil {
+		t.Fatalf("capability.sock missing after old computer exited: %v", err)
+	}
+	capClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(dctx, "unix", capSock)
+			},
+		},
+		Timeout: 2 * time.Second,
+	}
+	capResp, err := capClient.Get("http://unix/inbox")
+	if err != nil {
+		t.Fatalf("capability.sock unreachable after hot upgrade: %v", err)
+	}
+	_ = capResp.Body.Close()
+	if capResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 from capability proxy without driver token, got %d", capResp.StatusCode)
+	}
 	fmt.Printf("verified hot upgrade: computer %d->%d, agent-host PID %d untouched\n", upResp.OldPID, upResp.NewPID, hostSt2.PID)
 }
