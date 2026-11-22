@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -46,14 +47,15 @@ type hostedAgent struct {
 	mu sync.Mutex
 	// spec and drv are replaced on re-provision; drv is nil when the last provision failed,
 	// in which case failCode/failDetail describe why.
-	spec       protocol.AssignedAgentSpec
-	drv        driver.SessionDriver
-	failCode   string
-	failDetail string
-	busy       bool
-	dirty      bool
-	lastReason string
-	lastConvID string
+	spec        protocol.AssignedAgentSpec
+	drv         driver.SessionDriver
+	failCode    string
+	failDetail  string
+	busy        bool
+	dirty       bool
+	focusConvID string
+	lastReason  string
+	lastConvID  string
 
 	// Failure breaker: after failurePauseThreshold consecutive failed turns the Agent stops
 	// taking wakes until a probe timer, Restart, Reset session or a new spec. Unread triggers stay
@@ -80,17 +82,20 @@ func (ag *hostedAgent) resetBreakerLocked() {
 }
 
 type Daemon struct {
-	cfg             Config
-	breaker         breakerPolicy
-	activity        activityPolicy
-	logger          *slog.Logger
-	daemonSessionID string
-	httpClient      *http.Client
+	cfg              Config
+	breaker          breakerPolicy
+	activity         activityPolicy
+	proxyRetryDelays []time.Duration
+	logger           *slog.Logger
+	daemonSessionID  string
+	httpClient       *http.Client
 
 	mu           sync.RWMutex
 	agents       map[string]*hostedAgent
 	tokenToAgent map[string]string
 	wsSendCh     chan protocol.Envelope
+	connected    bool
+	connectedAt  time.Time
 	serverCaps   []string
 	socketPath   string
 	socketServer *http.Server
@@ -113,6 +118,9 @@ var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Min
 
 // errTurnStalled is the cancel cause when a silent turn is cut so queued work can run.
 var errTurnStalled = errors.New("turn produced no runtime events while new work was waiting")
+
+// errServerRestarting indicates the Server announced an intentional restart and expects a fast reconnect.
+var errServerRestarting = errors.New("server restarting")
 
 func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 	if logger == nil {
@@ -249,10 +257,13 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		}
 		connectedAt := time.Now()
 		err := d.runConnection(ctx)
-		if err != nil {
+		fastReconnect := errors.Is(err, errServerRestarting)
+		if err != nil && !fastReconnect {
 			d.logger.Warn("Computer connection ended", "error", err.Error())
 		}
-		if time.Since(connectedAt) > 60*time.Second {
+		if fastReconnect {
+			backoff = 100*time.Millisecond + time.Duration(mrand.IntN(250))*time.Millisecond
+		} else if time.Since(connectedAt) > 60*time.Second {
 			backoff = 500 * time.Millisecond
 		}
 		select {
@@ -261,7 +272,9 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		case <-d.stopCh:
 			return
 		case <-time.After(backoff):
-			if backoff < 15*time.Second {
+			if fastReconnect {
+				backoff = 500 * time.Millisecond
+			} else if backoff < 15*time.Second {
 				backoff *= 2
 			}
 		}
@@ -315,12 +328,15 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 	sendCh := make(chan protocol.Envelope, 64)
 	d.mu.Lock()
 	d.wsSendCh = sendCh
+	d.connected = true
+	d.connectedAt = time.Now().UTC()
 	d.serverCaps = ack.HelloAck.Capabilities
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
 		if d.wsSendCh == sendCh {
 			d.wsSendCh = nil
+			d.connected = false
 		}
 		d.mu.Unlock()
 		close(sendCh)
@@ -399,6 +415,9 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 				go d.handleWorkspaceRead(req)
 			}
 		case protocol.TypeShutdown:
+			if env.Shutdown != nil && env.Shutdown.Reason == "server_restarting" {
+				return errServerRestarting
+			}
 			return nil
 		}
 	}

@@ -160,6 +160,22 @@ func TestCloseInterruptsInFlightTurn(t *testing.T) {
 	}
 }
 
+func TestGracefulCloseAllowsCleanExit(t *testing.T) {
+	d, in := fakeDriver("ok")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	start := time.Now()
+	if err := d.GracefulClose(2); err != nil {
+		t.Fatalf("graceful close: %v", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("graceful close should finish promptly when child exits on stdin EOF/SIGTERM")
+	}
+}
+
 func TestSessionResumesAcrossDriversAndResetForgetsIt(t *testing.T) {
 	dir := t.TempDir()
 	logPath := dir + "/methods.log"

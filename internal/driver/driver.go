@@ -46,6 +46,12 @@ type SessionDriver interface {
 	Close() error
 }
 
+// GracefulCloser is optionally implemented by drivers whose child processes benefit from
+// a bounded graceful shutdown window to flush session state before SIGKILL.
+type GracefulCloser interface {
+	GracefulClose(timeoutSeconds int) error
+}
+
 // Failure tags a driver error with a stable agent error code (domain.AgentErr*).
 // Its message must describe the driver/HTTP failure only, never prompts or message bodies.
 type Failure struct {

@@ -149,6 +149,27 @@ func (d *Driver) Close() error {
 	return nil
 }
 
+// GracefulClose closes stdin and sends SIGTERM to the process group so the provider can flush
+// its persisted session before falling back to SIGKILL after timeoutSeconds.
+func (d *Driver) GracefulClose(timeoutSeconds int) error {
+	timeout := time.Duration(timeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	d.mu.Lock()
+	p := d.proc
+	d.sessionID = ""
+	d.canLoad = false
+	d.resumed = false
+	d.proc = nil
+	d.mu.Unlock()
+	if p != nil {
+		p.gracefulStop(timeout)
+	}
+	d.closeOnce.Do(func() { close(d.closed) })
+	return nil
+}
+
 func (d *Driver) stopLocked() {
 	d.sessionID = ""
 	d.canLoad = false
@@ -430,6 +451,28 @@ func (p *process) kill() {
 			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 		}
 		go func() { _ = p.cmd.Wait() }()
+	})
+}
+
+func (p *process) gracefulStop(timeout time.Duration) {
+	p.killed.Do(func() {
+		_ = p.stdin.Close()
+		if p.cmd.Process != nil {
+			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGTERM)
+		}
+		waited := make(chan struct{})
+		go func() {
+			_ = p.cmd.Wait()
+			close(waited)
+		}()
+		select {
+		case <-waited:
+		case <-time.After(timeout):
+			if p.cmd.Process != nil {
+				_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+			}
+			<-waited
+		}
 	})
 }
 

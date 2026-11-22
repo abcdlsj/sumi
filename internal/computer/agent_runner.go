@@ -26,15 +26,45 @@ import (
 func (d *Daemon) provisionAndWake(ctx context.Context, spec protocol.AssignedAgentSpec, reason string) {
 	ag := d.provisionAgent(spec)
 	ag.mu.Lock()
-	failCode, failDetail, ok := ag.failCode, ag.failDetail, ag.drv != nil
+	failCode, failDetail, ok, busy, focusConvID := ag.failCode, ag.failDetail, ag.drv != nil, ag.busy, ag.focusConvID
+	if ok && busy {
+		// Preserve in-flight turn state across WS reconnects; mark dirty so unread items
+		// accumulated during the disconnect are fetched right after the current turn ends.
+		ag.dirty = true
+	}
 	ag.mu.Unlock()
 	if !ok {
 		d.logger.Warn("Agent provision failed", "agent_id", spec.MemberID, "error_code", failCode)
 		d.reportAgentState(spec.MemberID, domain.RuntimeError, "", failCode, failDetail)
 		return
 	}
+	if busy {
+		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focusConvID, "", "")
+		return
+	}
 	d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 	d.scheduleWake(ctx, spec.MemberID, "", reason)
+}
+
+// loadOrCreateDriverToken persists the per-agent capability token on disk (0600) so an
+// agent-host sidecar and its child processes stay authenticated across Computer restarts.
+func loadOrCreateDriverToken(homeDir string) string {
+	tokenPath := filepath.Join(homeDir, "driver.token")
+	if raw, err := os.ReadFile(tokenPath); err == nil {
+		if tok := strings.TrimSpace(string(raw)); len(tok) >= 16 {
+			return tok
+		}
+	}
+	tokBuf := make([]byte, 24)
+	_, _ = rand.Read(tokBuf)
+	tok := hex.EncodeToString(tokBuf)
+	if err := os.MkdirAll(homeDir, 0o700); err == nil {
+		tmp := tokenPath + ".tmp"
+		if os.WriteFile(tmp, []byte(tok+"\n"), 0o600) == nil {
+			_ = os.Rename(tmp, tokenPath)
+		}
+	}
+	return tok
 }
 
 // provisionAgent registers the agent or, when its spec changed, closes the old driver and
@@ -44,13 +74,11 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	ag := d.agents[spec.MemberID]
 	if ag == nil {
 		homeDir := filepath.Join(d.cfg.DataDir, "agents", spec.MemberID)
-		tokBuf := make([]byte, 24)
-		_, _ = rand.Read(tokBuf)
 		ag = &hostedAgent{
 			homeDir:     homeDir,
 			workDir:     filepath.Join(homeDir, "workspace"),
 			memoryDir:   filepath.Join(homeDir, "memory"),
-			driverToken: hex.EncodeToString(tokBuf),
+			driverToken: loadOrCreateDriverToken(homeDir),
 		}
 		d.agents[spec.MemberID] = ag
 		d.tokenToAgent[ag.driverToken] = spec.MemberID
@@ -322,6 +350,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		if !released {
 			ag.mu.Lock()
 			ag.busy = false
+			ag.focusConvID = ""
 			ag.mu.Unlock()
 		}
 	}()
@@ -349,6 +378,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 				continue
 			}
 			ag.busy = false
+			ag.focusConvID = ""
 			released = true
 			ag.mu.Unlock()
 			d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
@@ -356,6 +386,9 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 
 		focus := items[0]
+		ag.mu.Lock()
+		ag.focusConvID = focus.ConversationID
+		ag.mu.Unlock()
 		turnStart := time.Now()
 		d.logger.Info("Agent turn started", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "inbox_items", len(items), "reason", focus.Reason)
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
@@ -410,6 +443,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 		ag.mu.Lock()
 		ag.resetBreakerLocked()
+		ag.focusConvID = ""
 		ag.mu.Unlock()
 		d.logger.Info("Agent turn completed", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "duration_ms", time.Since(turnStart).Milliseconds())
 		d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
@@ -418,6 +452,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		ag.mu.Lock()
 		if !ag.dirty || ag.paused {
 			ag.busy = false
+			ag.focusConvID = ""
 			released = true
 			ag.mu.Unlock()
 			return

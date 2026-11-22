@@ -27,6 +27,17 @@ type Client struct {
 	socketPath  string
 	driverToken string
 	httpClient  *http.Client
+	retryDelays []time.Duration
+}
+
+var defaultCLIRetryDelays = []time.Duration{
+	50 * time.Millisecond,
+	100 * time.Millisecond,
+	200 * time.Millisecond,
+	400 * time.Millisecond,
+	800 * time.Millisecond,
+	1500 * time.Millisecond,
+	2000 * time.Millisecond,
 }
 
 func NewFromEnv() (*Client, error) {
@@ -71,25 +82,75 @@ func (c *Client) do(method, path string, r io.Reader, contentType string) (int, 
 	return c.doKeyed(method, path, r, contentType, "")
 }
 
+func isRetryableCLIRequest(method, idemKey string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return strings.TrimSpace(idemKey) != ""
+	}
+}
+
 func (c *Client) doKeyed(method, path string, r io.Reader, contentType, idemKey string) (int, []byte, error) {
-	req, err := http.NewRequest(method, "http://unix"+path, r)
-	if err != nil {
-		return 0, nil, err
+	var bodyBytes []byte
+	canReplay := r == nil
+	if r != nil && isRetryableCLIRequest(method, idemKey) {
+		var err error
+		bodyBytes, err = io.ReadAll(r)
+		if err != nil {
+			return 0, nil, err
+		}
+		canReplay = true
 	}
-	req.Header.Set("Authorization", "Bearer "+c.driverToken)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	delays := c.retryDelays
+	if delays == nil {
+		delays = defaultCLIRetryDelays
 	}
-	if idemKey != "" {
-		req.Header.Set("Idempotency-Key", idemKey)
+	attempts := 1
+	if canReplay && isRetryableCLIRequest(method, idemKey) {
+		attempts += len(delays)
 	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, nil, err
+
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delays[attempt-1])
+		}
+		var reqBody io.Reader
+		if bodyBytes != nil {
+			reqBody = bytes.NewReader(bodyBytes)
+		} else if attempt == 0 {
+			reqBody = r
+		}
+		req, err := http.NewRequest(method, "http://unix"+path, reqBody)
+		if err != nil {
+			return 0, nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.driverToken)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		if idemKey != "" {
+			req.Header.Set("Idempotency-Key", idemKey)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		out, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable) && attempt+1 < attempts {
+			lastErr = fmt.Errorf("capability proxy status %d", resp.StatusCode)
+			continue
+		}
+		return resp.StatusCode, out, nil
 	}
-	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	return resp.StatusCode, out, err
+	return 0, nil, lastErr
 }
 
 // Upload streams a local file as a multipart attachment.
