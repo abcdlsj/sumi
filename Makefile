@@ -151,6 +151,10 @@ stop: ## Stop the background Server started by `make start`
 		echo "no background server pid file"; \
 	fi
 
+.PHONY: upgrade
+upgrade: build ## Build and hot-upgrade running local Server and Computer without stopping Agents
+	$(BIN) upgrade --binary $(BIN) --data-root $(DATA_DIR)
+
 .PHONY: app
 app: desktop start ## Build everything and launch the desktop shell
 	@if [ ! -f "$(DESKTOP_CONFIG)" ]; then \

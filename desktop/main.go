@@ -13,6 +13,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/abcdlsj/sumi/internal/cli"
+	"github.com/abcdlsj/sumi/internal/lifecycle"
 )
 
 //go:embed assets/appicon.png
@@ -22,10 +23,16 @@ var appIconPNG []byte
 var trayTemplatePNG []byte
 
 func main() {
-	// The daemon exposes this binary to agents as <data_dir>/bin/sumi; run as the Agent CLI then.
+	// Service commands run headless (used when this binary is staged at ~/.sumi/releases/.../sumi
+	// to host detached server, computer, agent-host, version, status, and upgrade processes).
+	if code, handled := lifecycle.DispatchServiceCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+	// When invoked through the agent PATH symlink (<data_dir>/bin/sumi), run the Agent CLI.
 	if filepath.Base(os.Args[0]) == "sumi" {
 		os.Exit(cli.Run(os.Args[1:], os.Stdout))
 	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	adoptLoginShellPath()
 
@@ -37,9 +44,9 @@ func main() {
 
 	rt := newRuntime(cfg, logger)
 	bootCtx := context.Background()
-	// Boot dependencies before the first paint so the window opens straight onto the Server origin.
+	// Boot or hot-upgrade detached dependencies before first paint so the window opens straight onto the Server origin.
 	if err := rt.ensureServer(bootCtx); err != nil {
-		logger.Error("Cannot start embedded server", "error", err.Error())
+		logger.Error("Cannot start local server", "error", err.Error())
 	}
 	rt.startDaemon(bootCtx)
 
@@ -211,10 +218,16 @@ func main() {
 		statusItem.SetLabel("Computer: " + rt.status())
 	})
 	menu.AddSeparator()
-	menu.Add("Quit").OnClick(func(*application.Context) {
+	menu.Add("Quit Sumi (Keep Agents Running)").OnClick(func(*application.Context) {
 		stopPairing()
 		ctrl.shutdown()
-		rt.shutdown()
+		rt.detach()
+		app.Quit()
+	})
+	menu.Add("Stop Local Services & Quit").OnClick(func(*application.Context) {
+		stopPairing()
+		ctrl.shutdown()
+		rt.stopAll()
 		app.Quit()
 	})
 	tray.SetMenu(menu)
@@ -232,6 +245,7 @@ func main() {
 	}
 	stopPairing()
 	ctrl.shutdown()
-	rt.shutdown()
+	// Default shell exit detaches cleanly so background services and agents stay alive across UI updates.
+	rt.detach()
 	os.Exit(code)
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/abcdlsj/sumi/internal/lifecycle"
 )
 
 func TestLoadConfigDefaultsAndOverrides(t *testing.T) {
@@ -103,7 +105,11 @@ func TestSwitchServerPreservesTokensAndGuardsUnreachable(t *testing.T) {
 		},
 	}, slog.New(slog.DiscardHandler))
 	rt.healthCheck = func(_ context.Context, u string) bool { return reachable[u] }
-	defer rt.shutdown()
+	rt.stageSelfFn = func(_ context.Context, _ string) (string, lifecycle.BuildInfo, error) {
+		return "", lifecycle.BuildInfo{}, errors.New("test-no-stage")
+	}
+	rt.stopComputer = func(context.Context, string) error { return nil }
+	defer rt.detach()
 
 	// Unreachable target must fail without altering current ServerURL or token.
 	if _, err := rt.switchServer(context.Background(), "https://offline.team"); !errors.Is(err, errServerUnreachable) {
@@ -142,5 +148,28 @@ func TestIsLoopbackHost(t *testing.T) {
 		if isLoopbackHost(host) {
 			t.Fatalf("%q must not be treated as loopback", host)
 		}
+	}
+}
+
+func TestDetachKeepsBackgroundServicesRunningWhileStopAllStopsThem(t *testing.T) {
+	stopped := 0
+	rt := newRuntime(Config{
+		ServerURL:     defaultServerURL,
+		ComputerToken: "tok",
+		DataDir:       t.TempDir(),
+	}, slog.New(slog.DiscardHandler))
+	rt.stopComputer = func(context.Context, string) error {
+		stopped++
+		return nil
+	}
+
+	rt.detach()
+	if stopped != 0 {
+		t.Fatalf("detach must never stop background computer daemon, stopped=%d", stopped)
+	}
+
+	rt.stopAll()
+	if stopped != 1 {
+		t.Fatalf("stopAll must stop background computer daemon, stopped=%d", stopped)
 	}
 }

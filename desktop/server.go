@@ -5,37 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/abcdlsj/sumi/internal/app"
-	"github.com/abcdlsj/sumi/internal/computer"
 	"github.com/abcdlsj/sumi/internal/datadir"
-	"github.com/abcdlsj/sumi/internal/server"
-	"github.com/abcdlsj/sumi/internal/store"
-	"github.com/abcdlsj/sumi/internal/webui"
+	"github.com/abcdlsj/sumi/internal/lifecycle"
 )
 
 var errServerUnreachable = errors.New("server unreachable")
 
-// runtime owns the loopback Server and the local Computer daemon for the shell's lifetime.
+// runtime supervises detached `sumi server` and `sumi computer` background processes over their
+// local control sockets so quitting or updating the desktop shell never interrupts running agents.
 type runtime struct {
-	logger      *slog.Logger
-	healthCheck func(context.Context, string) bool
+	logger       *slog.Logger
+	healthCheck  func(context.Context, string) bool
+	stageSelfFn  func(context.Context, string) (string, lifecycle.BuildInfo, error)
+	stopComputer func(context.Context, string) error
 
 	mu           sync.Mutex
 	cfg          Config
-	httpSrv      *http.Server
-	store        *store.Store
-	embeddedURL  string
-	daemon       *computer.Daemon
-	daemonC      context.CancelFunc
+	stagedPath   string
+	stagedInfo   lifecycle.BuildInfo
 	daemonStatus string
 	closed       bool
 }
@@ -45,77 +39,112 @@ func newRuntime(cfg Config, logger *slog.Logger) *runtime {
 		cfg:          cfg.clone(),
 		logger:       logger,
 		healthCheck:  healthy,
+		stageSelfFn:  defaultStageSelf,
+		stopComputer: stopDetachedComputer,
 		daemonStatus: "not paired",
 	}
 }
 
-// ensureServer starts an in-process Server when the configured one is unreachable.
-// A reachable external Server is always preferred so the shell never forks state.
+func defaultStageSelf(ctx context.Context, dataRoot string) (string, lifecycle.BuildInfo, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", lifecycle.BuildInfo{}, err
+	}
+	return lifecycle.StageBinary(ctx, dataRoot, exe)
+}
+
+func stopDetachedComputer(ctx context.Context, dataRoot string) error {
+	c := lifecycle.NewControlClient(datadir.ComputerControlSocket(dataRoot))
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.PostJSON(stopCtx, "/stop?graceful=true", nil, nil)
+}
+
+func (r *runtime) ensureStaged(ctx context.Context) (string, lifecycle.BuildInfo, error) {
+	r.mu.Lock()
+	if r.stagedPath != "" {
+		p, info := r.stagedPath, r.stagedInfo
+		r.mu.Unlock()
+		return p, info, nil
+	}
+	dataDir := r.cfg.DataDir
+	r.mu.Unlock()
+
+	p, info, err := r.stageSelfFn(ctx, dataDir)
+	if err != nil {
+		return "", lifecycle.BuildInfo{}, err
+	}
+	r.mu.Lock()
+	r.stagedPath = p
+	r.stagedInfo = info
+	r.mu.Unlock()
+	return p, info, nil
+}
+
+// ensureServer starts or seamlessly hands off the detached local Server for the configured URL.
+// An externally managed Server already serving the URL is left untouched unless controlled via server.ctl.sock.
 func (r *runtime) ensureServer(ctx context.Context) error {
 	return r.ensureServerFor(ctx, r.serverURL())
 }
 
 func (r *runtime) ensureServerFor(ctx context.Context, serverURL string) error {
-	if r.healthCheck(ctx, serverURL) {
-		return nil
-	}
 	parsed, err := url.Parse(serverURL)
 	if err != nil {
 		return fmt.Errorf("parse server_url: %w", err)
 	}
-	if parsed.Scheme != "http" || !isLoopbackHost(parsed.Hostname()) || parsed.Port() == "" {
-		return errors.New("server_url must be http://127.0.0.1:<port> for the embedded server")
+	isLocal := parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()) && parsed.Port() != ""
+	if !isLocal {
+		if r.healthCheck(ctx, serverURL) {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", errServerUnreachable, serverURL)
 	}
 
 	r.mu.Lock()
 	dataDir := r.cfg.DataDir
 	r.mu.Unlock()
 
-	dbPath := datadir.DBPath(dataDir)
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		return fmt.Errorf("create data dir: %w", err)
-	}
-	st, err := store.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-
-	svc := app.NewService(st, app.NewEventHub(), nil)
-	srv := server.New(svc, server.Config{StaticFS: server.SPAHandler(webui.FS())}, r.logger)
-	httpSrv := &http.Server{
-		Addr:              parsed.Host,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	ln, err := net.Listen("tcp", parsed.Host)
-	if err != nil {
-		_ = st.Close()
-		return fmt.Errorf("listen on %s: %w", parsed.Host, err)
-	}
-
-	go func() {
-		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			r.logger.Error("Embedded server stopped", "error", err.Error())
-		}
-	}()
-	r.logger.Info("Embedded Sumi server started", "addr", parsed.Host, "db", dbPath)
-
-	// Wait for the server to accept connections before the window navigates.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	stagedPath, info, stageErr := r.ensureStaged(ctx)
+	if stageErr != nil {
+		// If staging fails in a test/dev environment, accept an already healthy server.
 		if r.healthCheck(ctx, serverURL) {
-			r.mu.Lock()
-			r.httpSrv = httpSrv
-			r.store = st
-			r.embeddedURL = serverURL
-			r.mu.Unlock()
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		return fmt.Errorf("stage binary: %w", stageErr)
 	}
-	_ = httpSrv.Close()
-	_ = st.Close()
-	return errors.New("embedded server did not become healthy")
+
+	srvCtl := lifecycle.NewControlClient(datadir.ServerControlSocket(dataDir))
+	probeCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	var st lifecycle.ServerStatus
+	ctlErr := srvCtl.GetJSON(probeCtx, "/status", &st)
+	cancel()
+	if ctlErr == nil {
+		if st.BinaryHash != info.BinaryHash {
+			r.logger.Info("Upgrading local server via seamless handoff", "old_pid", st.PID)
+			hoCtx, hoCancel := context.WithTimeout(ctx, 20*time.Second)
+			var resp lifecycle.HandoffResponse
+			err := srvCtl.PostJSON(hoCtx, "/handoff", lifecycle.HandoffRequest{TargetBinary: stagedPath}, &resp)
+			hoCancel()
+			if err != nil {
+				r.logger.Warn("Server handoff failed; continuing with existing server", "error", err.Error())
+			} else {
+				r.logger.Info("Local server handed off", "old_pid", resp.OldPID, "new_pid", resp.NewPID)
+			}
+		}
+		return nil
+	}
+
+	// An external Server (e.g. `make dev`) may already serve this address without our control socket.
+	if r.healthCheck(ctx, serverURL) {
+		return nil
+	}
+
+	st, err = lifecycle.SpawnDetachedServer(ctx, stagedPath, dataDir, parsed.Host, datadir.DBPath(dataDir))
+	if err != nil {
+		return err
+	}
+	r.logger.Info("Detached Sumi server started", "addr", st.Addr, "pid", st.PID)
+	return nil
 }
 
 // switchServer validates and activates a new server URL without tearing down
@@ -133,10 +162,16 @@ func (r *runtime) switchServer(ctx context.Context, rawURL string) (Config, erro
 		return Config{}, fmt.Errorf("%w: %s", errServerUnreachable, targetURL)
 	}
 
-	r.stopDaemon()
+	r.mu.Lock()
+	dataDir := r.cfg.DataDir
+	prevURL := r.cfg.ServerURL
+	r.mu.Unlock()
+
+	if prevURL != targetURL {
+		_ = r.stopComputer(ctx, dataDir)
+	}
 
 	r.mu.Lock()
-	stopEmbedded := r.httpSrv != nil && r.embeddedURL != targetURL
 	r.cfg = r.cfg.withServer(targetURL)
 	if r.cfg.ComputerToken == "" {
 		r.daemonStatus = "waiting for confirmation"
@@ -145,77 +180,119 @@ func (r *runtime) switchServer(ctx context.Context, rawURL string) (Config, erro
 	}
 	next := r.cfg.clone()
 	r.mu.Unlock()
-
-	if stopEmbedded {
-		r.stopEmbeddedServer()
-	}
 	return next, nil
 }
 
-// startDaemon launches the Computer daemon when a token is configured.
+// startDaemon ensures a detached `sumi computer` daemon is running for the active Server.
+// When a newer binary is staged, it performs a hot upgrade so running agent-host sidecars stay alive.
 func (r *runtime) startDaemon(parent context.Context) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || r.daemon != nil || r.cfg.ComputerToken == "" {
+	if r.closed || r.cfg.ComputerToken == "" {
+		r.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(parent)
-	d := computer.NewDaemon(computer.Config{
-		ServerURL:     r.cfg.ServerURL,
-		ComputerToken: r.cfg.ComputerToken,
-		DataDir:       datadir.ComputerDir(r.cfg.DataDir),
-	}, r.logger)
-	if err := d.Start(ctx); err != nil {
-		r.daemonStatus = "error"
-		r.logger.Error("Computer daemon failed to start", "error", err.Error())
-		cancel()
+	serverURL := r.cfg.ServerURL
+	token := r.cfg.ComputerToken
+	dataDir := r.cfg.DataDir
+	r.mu.Unlock()
+
+	stagedPath, info, err := r.ensureStaged(parent)
+	if err != nil {
+		r.setStatus("error")
+		r.logger.Error("Cannot stage binary for computer daemon", "error", err.Error())
 		return
 	}
-	r.daemon = d
-	r.daemonC = cancel
-	r.daemonStatus = "online"
+
+	cmpCtl := lifecycle.NewControlClient(datadir.ComputerControlSocket(dataDir))
+	probeCtx, cancel := context.WithTimeout(parent, 1*time.Second)
+	var st lifecycle.ComputerStatus
+	ctlErr := cmpCtl.GetJSON(probeCtx, "/status", &st)
+	cancel()
+
+	if ctlErr == nil {
+		if st.ServerURL == serverURL {
+			if st.BinaryHash != info.BinaryHash {
+				r.logger.Info("Hot-upgrading local computer daemon", "old_pid", st.PID)
+				upCtx, upCancel := context.WithTimeout(parent, 20*time.Second)
+				var resp lifecycle.ComputerUpgradeResponse
+				err := cmpCtl.PostJSON(upCtx, "/upgrade", lifecycle.ComputerUpgradeRequest{
+					TargetBinary: stagedPath,
+					Mode:         "hot",
+				}, &resp)
+				upCancel()
+				if err != nil {
+					r.logger.Warn("Computer hot upgrade failed; keeping incumbent daemon", "error", err.Error())
+				} else {
+					r.logger.Info("Computer daemon hot-upgraded", "old_pid", resp.OldPID, "new_pid", resp.NewPID)
+				}
+			}
+			r.setStatus("online")
+			return
+		}
+		// Running daemon targets a different server; stop it before starting for the new server.
+		_ = r.stopComputer(parent, dataDir)
+	}
+
+	launched, err := lifecycle.SpawnDetachedComputer(parent, stagedPath, dataDir, serverURL, token, datadir.ComputerDir(dataDir))
+	if err != nil {
+		r.setStatus("error")
+		r.logger.Error("Detached computer daemon failed to start", "error", err.Error())
+		return
+	}
+	r.logger.Info("Detached computer daemon started", "pid", launched.PID, "server", serverURL)
+	r.setStatus("online")
 }
 
-// restartDaemon stops and starts the daemon; used by the tray menu.
+// restartDaemon hot-restarts the detached Computer daemon without interrupting running agents,
+// or starts it if not currently running.
 func (r *runtime) restartDaemon(parent context.Context) {
-	r.stopDaemon()
+	r.mu.Lock()
+	dataDir := r.cfg.DataDir
+	hasToken := r.cfg.ComputerToken != ""
+	r.mu.Unlock()
+	if !hasToken {
+		return
+	}
+	stagedPath, _, err := r.ensureStaged(parent)
+	if err != nil {
+		r.setStatus("error")
+		return
+	}
+	cmpCtl := lifecycle.NewControlClient(datadir.ComputerControlSocket(dataDir))
+	upCtx, cancel := context.WithTimeout(parent, 20*time.Second)
+	var resp lifecycle.ComputerUpgradeResponse
+	err = cmpCtl.PostJSON(upCtx, "/upgrade", lifecycle.ComputerUpgradeRequest{
+		TargetBinary: stagedPath,
+		Mode:         "hot",
+	}, &resp)
+	cancel()
+	if err == nil {
+		r.logger.Info("Computer daemon hot-restarted", "old_pid", resp.OldPID, "new_pid", resp.NewPID)
+		r.setStatus("online")
+		return
+	}
 	r.startDaemon(parent)
 }
 
-func (r *runtime) stopDaemon() {
-	r.mu.Lock()
-	d, cancel := r.daemon, r.daemonC
-	r.daemon, r.daemonC = nil, nil
-	r.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	if d != nil {
-		d.Stop()
-	}
-}
-
-func (r *runtime) stopEmbeddedServer() {
-	r.mu.Lock()
-	srv, st := r.httpSrv, r.store
-	r.httpSrv, r.store, r.embeddedURL = nil, nil, ""
-	r.mu.Unlock()
-	if srv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = srv.Shutdown(ctx)
-		cancel()
-	}
-	if st != nil {
-		_ = st.Close()
-	}
-}
-
-func (r *runtime) shutdown() {
+// detach marks the desktop shell closed while leaving detached server, computer, and agents running.
+func (r *runtime) detach() {
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
-	r.stopDaemon()
-	r.stopEmbeddedServer()
+}
+
+// stopAll explicitly stops the detached computer daemon (gracefully) and local server.
+func (r *runtime) stopAll() {
+	r.mu.Lock()
+	r.closed = true
+	dataDir := r.cfg.DataDir
+	r.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = r.stopComputer(ctx, dataDir)
+	srvCtl := lifecycle.NewControlClient(datadir.ServerControlSocket(dataDir))
+	_ = srvCtl.PostJSON(ctx, "/stop", nil, nil)
 }
 
 func (r *runtime) serverURL() string {

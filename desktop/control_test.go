@@ -21,7 +21,8 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 	rt.healthCheck = func(_ context.Context, u string) bool {
 		return u == defaultServerURL || u == "https://sumi.team"
 	}
-	defer rt.shutdown()
+	rt.stopComputer = func(context.Context, string) error { return nil }
+	defer rt.detach()
 
 	var cs *controlServer
 	onSwitch := func(ctx context.Context, rawURL string) (desktopServerState, error) {
