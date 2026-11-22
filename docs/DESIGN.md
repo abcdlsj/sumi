@@ -163,6 +163,10 @@ flowchart TD
 4. **触发边界**
    - 升级控制仅通过本机控制 socket（`~/.sumi/run/*.ctl.sock`，权限 `0600`）由本地 CLI（`sumi upgrade`）或本机桌面壳触发；不向 Web 端开放远程升级入口，收敛攻击面。
 
+5. **版本真值与发布**
+   - 版本只有一处来源：`internal/version.Version`，构建时以 `-ldflags` 注入，并同时写入 `sumi version`、控制面 `/status`、`/api/v1/health` 的 `app_version`（`version` 始终是协议版本）以及 `Info.plist`。裸 `go build` 得到 `0.0.0-dev`，绝不冒充发布版。
+   - 升级校验以二进制内容哈希为主、语义版本为辅：即使同版本号重建，也必须自证哈希匹配才能接管服务。发布产物（二进制与 `Sumi.app`）因此只由打了版本戳的统一构建路径产出，不支持手工拼装。
+
 ---
 
 ## 五、界面原则

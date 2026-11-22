@@ -63,7 +63,10 @@ web-dev: ## Run the Vite dev server (proxies /api to SERVE_URL)
 	$(NODE_PKG) --dir web dev
 
 .PHONY: web-assets
-web-assets: web ## Copy the built Web UI into internal/webui for go:embed
+web-assets: web web-embed ## Build the Web UI and embed it for go:embed
+
+.PHONY: web-embed
+web-embed: ## Embed an already built web/dist (used by CI after a cached build)
 	@rm -rf internal/webui/assets/dist
 	@mkdir -p internal/webui/assets
 	@cp -R web/dist internal/webui/assets/dist
@@ -80,22 +83,10 @@ build: web-assets bin ## Build Web UI and the sumi binary with embedded UI
 # Wails keeps its own module under desktop/, so the shell builds independently of the server module.
 # Stage into a fresh bundle and ad-hoc sign before swapping so running instances never hit
 # macOS Taskgated Invalid Signature from in-place Mach-O overwrites.
-SHELL_BUILD := cd desktop && CGO_LDFLAGS="-framework UniformTypeIdentifiers" $(GO) build -tags production -trimpath -ldflags "$(LDFLAGS)"
+DESKTOP_GOARCH ?= $(shell $(GO) env GOARCH)
 desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
 	@mkdir -p bin
-	$(SHELL_BUILD) -o ../bin/sumi-desktop .
-	@staging="$(DESKTOP_BIN).staging"; \
-		rm -rf "$$staging"; \
-		mkdir -p "$$staging/Contents/MacOS" "$$staging/Contents/Resources"; \
-		cp bin/sumi-desktop "$$staging/Contents/MacOS/Sumi"; \
-		cp desktop/Info.plist "$$staging/Contents/Info.plist"; \
-		plutil -replace CFBundleShortVersionString -string "$(VERSION)" "$$staging/Contents/Info.plist"; \
-		plutil -replace CFBundleVersion -string "$(VERSION)" "$$staging/Contents/Info.plist"; \
-		cp desktop/AppIcon.icns "$$staging/Contents/Resources/AppIcon.icns"; \
-		codesign --force --deep --sign - "$$staging"; \
-		rm -rf "$(DESKTOP_BIN)"; \
-		mv "$$staging" "$(DESKTOP_BIN)"
-	@echo "desktop app: $(DESKTOP_BIN)"
+	@scripts/package-macos-app.sh --version "$(VERSION)" --goarch $(DESKTOP_GOARCH) --out $(DESKTOP_BIN)
 
 .PHONY: install-app
 install-app: desktop ## Install Sumi.app into INSTALL_APP_DIR (default ~/Applications)

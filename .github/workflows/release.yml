@@ -1,0 +1,205 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish, e.g. v6.0.4
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Verify sources and build the Web UI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install Web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test Go
+        run: go test ./...
+      - name: Typecheck Web
+        run: pnpm --dir web typecheck
+      - name: Test Web
+        run: pnpm --dir web test
+      - name: Build Web UI
+        run: pnpm --dir web build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  binaries:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: arm64
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+            target: aarch64-apple-darwin
+          - runner: macos-14
+            goos: darwin
+            goarch: amd64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Resolve version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "invalid release tag: $tag" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: make web-embed
+      - name: Build sumi
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-X github.com/abcdlsj/sumi/internal/version.Version=$VERSION" \
+            -o "dist/sumi-$VERSION-$TARGET" ./cmd/sumi
+          "dist/sumi-$VERSION-$TARGET" version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sumi-${{ matrix.target }}
+          path: dist/*
+          retention-days: 7
+
+  desktop:
+    name: Build macOS app
+    needs: verify
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Resolve version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "invalid release tag: $tag" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: make web-embed
+      - name: Test desktop module
+        run: cd desktop && go vet ./... && go test ./...
+      - name: Package Sumi.app
+        run: |
+          mkdir -p dist
+          # One runner produces both slices; an arm64 host cross-builds darwin/amd64
+          # by targeting the same SDK with -arch x86_64.
+          scripts/package-macos-app.sh --version "$VERSION" --goarch arm64 \
+            --out dist/Sumi.app --zip "dist/Sumi-$VERSION-aarch64-apple-darwin.app.zip"
+          scripts/package-macos-app.sh --version "$VERSION" --goarch amd64 \
+            --out dist/Sumi.app --zip "dist/Sumi-$VERSION-x86_64-apple-darwin.app.zip"
+          rm -rf dist/Sumi.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sumi-desktop
+          path: dist/*
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - binaries
+      - desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sumi-*
+          path: dist
+          merge-multiple: true
+      - name: Checksum the release assets
+        working-directory: dist
+        run: sha256sum $(ls | grep -v '^SHA256SUMS$') > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release create "$tag" dist/* \
+            --verify-tag \
+            --title "${tag#v}" \
+            --generate-notes
