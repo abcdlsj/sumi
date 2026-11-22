@@ -1,54 +1,193 @@
-# Sumi DESIGN
+# Sumi Architecture & Design
 
-Sumi 是一个 Human 与 Agent 在同一个 Space 中持续协作的平台。Agent 有持久身份、Role、Memory 与本地 workspace，由一台 Computer 承载。
+Sumi 是一个面向 Human 与持久化 AI Agent 的协同工作空间。在这里，Agent 不是随问随弃的聊天机器人，而是拥有持久身份、Role、Memory 与本地 Workspace 的长期协作者，由用户可控的 Computer 承载，与人类在同一个 Space 中持续协作。
 
-本文只记录设计思想、不变量与边界；表结构、接口、参数与像素以代码为准。实现与本文冲突时改实现，不加兼容层。
+本文记录 Sumi 的**核心设计原则、系统不变量、关键权衡与边界**；具体表结构、接口字段与像素细节以代码为唯一真值。实现与本文冲突时修改代码以对齐设计，不保留旧协议或历史数据的兼容层。
 
-## 一、协作模型
+---
 
-- **Space 与 Member**：Space 是协作边界。Human 与 Agent 是同一个 `Member` 模型的两种 kind，共享 Display Name、权限与注意力状态——平权体现在结构上，不靠特判。
-- **Conversation 是唯一的对话原语**：Channel、DM、Thread、Task 讨论流都是 `Conversation`；消息、附件、Reaction、Mention、已读、关注与 UI 渲染只有一套实现。出现"在哪说话"的新概念时，先问它是不是 Conversation。
-- **显式频道成员**：新建频道默认只包含创建者与显式选择的初始成员，不会默认拉入所有 Agent；后续 Agent 必须单独邀请进群才可见、可读写与被唤醒。Public 频道允许空间内 Human 浏览并加入，Private 频道对 Human 同样按显式成员隔离。
-- **频道归档与分组**：Channel 可归档（Archive），归档后 Human 与 Agent 均不可写入（发消息、Reaction、Task 变更），也不会产生唤醒或 Inbox 通知，可在设置页单独查看并恢复（Unarchive）；成员可在侧边栏自定义可折叠分组并将频道拖入管理。
-- **Task 是纯协作工作项**：不绑定执行会话、不绑定队列；Human 与 Agent 用同一套 `claim` / `assign` / `amend`，状态只由成员显式切换，系统永不自动推进。每个 Task 有懒创建的独立讨论流，避免主频道噪音污染工作上下文。
-- **可见性不等于打扰**：能读到不意味着要被叫醒。默认只有 DM、`@mention`、followed 的 Thread/Task 新消息、assign 给自己四类事件构成唤醒信号，其余只进未读水位。
-- **单一已读真值**：已读水位只存在服务端，前端不做孤立的未读推断，Agent 也没有另外一份队列副本。
+## 一、协作模型与核心不变量
 
-## 二、Agent 作为协作者
+### 1.1 平权主体：Space 与 Member
 
-- **上下文即全部**：每个 Agent 同时只有一个活跃 Turn 与一个 Runtime Session，保住 prompt cache 与跨对话连贯；唤醒只送极简触发摘要，具体内容由 Agent 主动读取。
-- **有话直说**：一次请求一条有信息量的回复，不发确认噪音；运行态由 UI 诚实呈现（working / busy elsewhere / offline / error），不伪装也不刷屏。
-- **先读后写**：写入前若目标对话在其已读水位之后出现了他人新消息，服务端拒绝并回吐未读，逼 Agent 重新对齐上下文。宁可被拦，不许凭旧上下文发言。
-- **权限是原子能力**：`access_level` 与 `member_permissions` 分离，Agent 的治理动作要显式授权；产生的副作用以结构化 Action Message 落回对话流。拥有 `agent.create` 权限的 Agent 通过 CLI 发起创建新 Agent 时，默认在对话流落一张通用 Action Card，由人类点击打开预填表单确认或微调配置后创建；无权限时连提案也不能发起；仅在显式开启 `SUMI_ALLOW_AGENT_SILENT_CREATE=1`（如缸中之脑自动化验收）时才允许 CLI 静默直接创建。
+**问题**：许多工具把 Bot/Agent 做成外挂在聊天系统上的 Webhook，导致权限、提及、在线状态、任务指派处处出现 `if isBot` 特判。
 
-## 三、系统结构
+**设计**：Space 是协作与隔离的最高边界；Human 与 Agent 在数据模型上同为 `Member`（仅以 `kind` 区分），共享 Display Name、频道成员资格、任务指派、已读水位与注意力模型。平权体现在结构上，而不是靠上层逻辑打补丁。
 
-依赖方向固定：adapters（`server` / `computer` / `cli` / `web`）→ `app` → `domain` / `store`。上层可以有多个，下层不知道上层存在。
+### 1.2 单一对话原语：Conversation
 
-- **单二进制**：`sumi server`、`sumi computer` 与 Agent CLI 是同一个 Go 程序；Web UI 内嵌进二进制；桌面薄壳只做托盘、开窗与托管本机 Daemon，不含业务逻辑。
-- **SQLite 单写者**：WAL 加单写连接串行化写入；schema 通过内嵌的版本化 SQL migration 顺序向前演进（每步单事务落盘并记录在 `schema_meta`），低于基线或高于当前二进制支持版本的库直接拒绝启动。
-- **单一本地根目录**：所有本地状态都在 `~/.sumi`（数据库、附件对象、Daemon 状态、桌面配置），不按版本分子目录。代码不认别的布局，也不替使用者搬数据。
-- **三认证面隔离**：Browser Cookie、Computer token、Agent driver token 互不通用，服务端只存 hash；模型凭据只下发给承载该 Agent 的 Computer，永不回给浏览器。
-- **Computer ↔ Server**：一条 WebSocket 加能力协商；唤醒是轻量通知而不是重型队列。未读始终在服务端，重连即补齐；失败按退避重试，连续失败后熔断，暂停期间不丢消息。支持经由同一连接按需只读浏览 Agent 的本地 workspace 文件（强制路径限域、绝不跟随软链或硬链、屏蔽敏感凭据文件）。
-- **Agent 隔离**：每个 Agent 有独立 Agent Home、独立 driver token 与 capability socket，同机 Agent 互相读不到目录与对话；外部 coding agent（ACP）跑在按 provider 隔离的配置目录里，不继承宿主的 skills / hooks / 会话。隔离只带入跑得起来所需的东西：宿主凭据与模型目录软链，模型与 provider 偏好按 Agent 覆盖，另有按 Agent 显式点名的 provider 插件（`driver_config.pi_packages`，仅 `npm:` 规格）——不点名就不加载任何宿主扩展。Runtime Session 只在 provider 与模型未变时才能被恢复：换了凭据就重开，不拿旧会话假装续上。provider 与模型怎么选以隔离目录的 pi settings 为准（pi 不认 `PI_PROVIDER` 这类环境覆盖），ACP 启动命令（含自定义 command）只负责把凭据带进去。
-- **失败要可见**：错误以稳定错误码加有界描述上报；日志、错误与协议帧都不带消息正文、prompt、memory 内容与 secret。
+**问题**：Channel、DM、Thread、Task 评论区如果各自建表和渲染，会导致消息送达、已读、@mention、附件与搜索迅速分裂。
 
-## 四、界面
+**设计**：Channel、DM、Thread、Task 讨论流全部统一为 `Conversation`。消息、附件、Reaction、Mention、已读水位、关注（Follow）与前端渲染只有一套实现。任何「在哪里说话」的新需求，首先审视它是否就是一种 `Conversation`。
 
-- 一屏之内回答四件事：在聊什么、谁在忙、需要我处理什么、工作在哪；输入区上方的协作状态行与消息末尾的 Agent 已读标记都直接消费服务端真值。
-- 结构靠层级与 1px 线，不靠漂浮卡片；强调色由 Space 决定，语义色只用于「需要我」、Agent 运行态与 Task 状态。
-- 身份稳定可辨：Human 是字母头像，Agent 是像素小生物，都由 member id 播种，不随主题、顺序或在线状态改变。
-- 不打断阅读：贴底跟随加新消息/回底药丸，不拽走正在读的人、不跳动；长消息默认渐隐折叠、连续系统事件归组折叠；Thread 边缘提供人类消息大纲轨；加载用同几何骨架；错误就地显示，不用系统弹窗。
-- 回复要看得见：Thread 的根消息在频道里外显最新几条回复的作者与正文摘要，整块可点进 Thread；回复计数以服务端为准，摘要只是展示。
-- 检索不越权：Space 级消息搜索严格复用同一对话可见性边界，绝不泄露未加入的 Private 频道、他人 DM 或其下的 Thread/Task 内容。
-- 低打扰：未读分权重——被点名才醒目，静音就退到背景。
+- **显式频道成员隔离**：新建频道默认只包含创建者与显式选择的初始成员，绝不自动拉入所有 Agent；Agent 必须被显式邀请入群才可见、可读写与被唤醒。Public 频道允许空间内 Human 浏览并加入，Private 频道对 Human 与 Agent 一律按显式成员隔离。
+- **归档与组织**：Channel 可归档（Archive）；归档后 Human 与 Agent 均不可写入（消息、Reaction、Task 变更），且不触发唤醒或 Inbox 通知，支持在设置中恢复（Unarchive）。成员可在侧边栏自定义可折叠分组管理频道。
+- **空间级搜索不越权**：消息检索严格复用同一对话可见性边界，绝不泄露未加入的 Private 频道、他人 DM 及其下属 Thread/Task 内容。
 
-## 五、验收
+### 1.3 纯协作工作项：Task
 
-- 领域不变量、并发与安全边界必须有能失败的测试。
-- 两项活体协作测试是最终检验：**缸中之脑**用同一份自然语言任务同时验证 ACP 与内置 Harness（读上下文、改 workspace、建子 Agent、走 Task 流程、按结构化错误自纠）；**狼人杀**验证多 Agent 并发沟通（DM 秘密通道、并发唤醒不丢消息、Freshness 防抢话、单活 Session 不串台）。观察者只观察、不干预。
-- 观测走产品自身的可见性边界，不为测试开后门；需要全量事实时以只读方式打开测试实例的数据库。
+**权衡**：将任务系统与执行引擎强绑定（例如「建一个 Task 就自动派发一个一次性 Agent 容器」）会破坏多轮讨论与持续上下文。
 
-## 不做
+**设计**：Task 是纯粹的协作工作项，不绑定执行会话、不绑定自动调度队列。Human 与 Agent 通过同一套 `claim` / `assign` / `amend` 协作；状态流转只由成员显式触发，系统永不自动推进。每个 Task 按需懒创建一条独立讨论流（`Conversation`），避免工作细节噪音污染主频道。
 
-子任务、依赖、截止时间、优先级与自定义标签；分布式 Server 集群；旧数据与 API 兼容层；Agent 关系图谱与用量面板。
+### 1.4 注意力模型与单一已读真值
+
+- **可见性不等于打扰**：能读到不代表要被叫醒。默认仅 DM、`@mention`、Followed 的 Thread/Task 新消息、Assign 给自己四类事件产生唤醒信号（`needs_me`），其余消息只推进未读水位；静音频道退居背景。
+- **单一已读真值（Single Read Watermark）**：已读水位只存在服务端 SQLite。前端不做孤立的未读推断，Computer 与 Agent 也不维护第二份消息队列。这条不变量不仅消除了多端未读漂移，更是后文「热更新与重启不丢消息」的基石。
+
+---
+
+## 二、Agent 执行模型与并发护栏
+
+### 2.1 上下文连续性：单活 Turn + 单活 Runtime Session
+
+**权衡**：为每条消息或每个频道并发起多个会话虽然吞吐高，但会击穿 prompt cache，并让同一 Agent 在不同对话中自相矛盾。
+
+**设计**：每个 Agent 同一时刻最多只有一个活跃 Turn 和一个持久化 Runtime Session，在保住 prompt cache 的同时维持跨对话的记忆连贯性。服务端下发的唤醒帧（`wake`）只携带极简触发摘要，Agent 醒来后自行通过 CLI 拉取所需上下文。
+
+### 2.2 并发写防错：先读后写（Freshness Guard）
+
+**问题**：多 Human、多 Agent 并发发言时，Agent 可能基于数秒前的旧上下文草拟回复，发出后与最新结论冲突甚至抢话。
+
+**设计**：写入前服务端校验目标对话在 Agent 的 `read_seq` 之后是否出现他人新消息；若有，服务端拒绝本次发送并回吐未读摘要，CLI 自动暂存草稿，迫使 Agent 重读对齐后再决定重发或修改。**宁可被拦截，不许凭过期上下文发言。**
+
+### 2.3 诚实表达与原子授权
+
+- **有话直说，状态诚实**：一次请求产出一份有信息量的回复，不刷「收到/好的」噪音；运行态（`idle` / `working` / `offline` / `error` 及工具活动）由服务端真值诚实呈现。
+- **权限与副作用显式化**：`access_level` 与原子 `member_permissions` 分离。Agent 发起治理动作需显式授权，结果以结构化 Action Message 落回对话流。拥有 `agent.create` 权限的 Agent 通过 CLI 创建新 Agent 时，默认在对话流落一张 Action Card，由人类审阅预填配置后确认创建（无权限者连提案也不能发起）；仅在显式设置 `SUMI_ALLOW_AGENT_SILENT_CREATE=1`（如自动化验收环境）时允许静默直建。
+
+---
+
+## 三、系统架构与安全边界
+
+### 3.1 单向依赖与单二进制
+
+依赖方向严格固定为：
+
+```text
+adapters (server / computer / cli / web / desktop) ──▶ app ──▶ domain / store
+```
+
+上层适配器可以并存多个，下层不感知上层存在。`sumi server`、`sumi computer`、`sumi agent-host` 与 Agent CLI 全部编译进同一个 Go 单二进制，Web UI 内嵌其中；桌面端（`Sumi.app`）仅作薄壳（系统托盘、WebView 窗口与本机后台进程托管），不包含业务逻辑。
+
+### 3.2 存储与本地目录不变量
+
+- **SQLite 单写者**：开启 WAL 模式并以单写连接串行化写入；Schema 通过内嵌的版本化 SQL Migration 顺序向前演进（单事务落盘并记录于 `schema_meta`）。遇到低于基线或高于当前二进制支持版本的数据库时，直接拒绝启动，避免静默损坏。
+- **单一本地根目录（`~/.sumi`）**：数据库、附件对象、版本化二进制、运行时控制文件与桌面配置统一落在 `~/.sumi`，不按版本拆分数据目录，也不替用户迁移隐式布局：
+
+```text
+~/.sumi/
+  sumi.db                    # Server SQLite（WAL）
+  objects/                   # 内容寻址附件对象
+  desktop.json               # Desktop 壳配置（Server URL 与各 Server 的 Computer token）
+  bin/sumi                   # 指向当前激活版本的原子 symlink
+  releases/<build-id>/sumi   # 不可变版本二进制（绝不原地覆写运行中可执行文件）
+  backups/                   # 升级前自动生成的 SQLite 在线快照
+  run/                       # 常驻进程 PID 与本地控制 Unix socket（server.ctl.sock / computer.ctl.sock）
+  computer/
+    capability.sock          # Computer 本地能力代理 socket（固定路径）
+    agents/<agent-id>/
+      driver.token           # 持久化 per-agent driver token（0600）
+      host.sock / host.json  # Per-agent host sidecar socket 与元数据
+      acp-session.json       # ACP 会话持久化记录（含 provider/model 指纹）
+      session.jsonl          # Builtin harness 会话历史
+      workspace/             # Agent 本地工作目录（只读浏览限域于此）
+      memory/MEMORY.md       # 持久化长期记忆
+      runtime/<provider>/    # 按 provider 隔离的 ACP 配置目录
+```
+
+### 3.3 三认证面隔离与运行时沙箱
+
+- **三认证面互不通用**：Browser Session Cookie、Computer Bearer Token、Agent Driver Token 严格隔离；服务端只存 token hash；模型凭据仅下发给承载对应 Agent 的 Computer，永不回传浏览器。
+- **Computer ↔ Server 通道**：单条 WebSocket 加版本与能力协商（`Capabilities`）。唤醒帧是轻量通知而非重型队列；失败按指数退避重试，连续失败触发熔断暂停，期间不丢消息。通过同一条连接提供按需只读浏览 Agent Workspace 文件的能力（强制路径限域、拒绝跟随软链与硬链、屏蔽敏感凭据文件）。
+- **Agent 强隔离**：同机 Agent 各自拥有独立的 Agent Home、独立 `driver.token` 与隔离环境，彼此不可读目录与对话；外部 coding agent（ACP）运行在按 provider 隔离的目录中，不继承宿主全局 skills / hooks / 会话，仅最小化带入运行所需的凭据与按 Agent 显式声明的插件（`driver_config.pi_packages`，仅允许 `npm:` 规格）。Runtime Session 仅在 provider 与模型指纹未变时通过 `session/load` 恢复；更换凭据或模型后强制开启新会话。
+- **错误可见且无泄漏**：所有错误以稳定错误码加有界描述上报；日志、错误与协议帧严禁携带消息正文、附件、Prompt、Memory 内容或 Secret。
+
+---
+
+## 四、零中断更新与 Agent 保活架构
+
+### 4.1 问题与设计目标
+
+传统单体桌面应用将 UI、本地 Server、Daemon 与子进程耦合在同一进程内，导致任何一次界面更新或服务重启都会通过信号或管道断裂直接腰斩正在执行长任务的 Agent。
+
+Sumi 的更新机制围绕一个核心原则设计：**按变动频率与生命周期分层解耦进程，将高频更新层（Desktop UI / Web UI / Server / Computer 控制面）与长生命周期的 Agent 运行时彻底隔离。**
+
+```mermaid
+flowchart TD
+    subgraph UI["高频更新层：UI 薄壳（随时退出/更新，0 影响后台）"]
+        Desktop["Sumi.app (Wails 薄壳)"]
+        Browser["Web Browser"]
+    end
+
+    subgraph Control["常驻后台控制层（独立 detached 进程）"]
+        Server["sumi server<br/>SQLite WAL + HTTP/SSE + WS<br/>(FD 继承无缝热切)"]
+        Computer["sumi computer<br/>WS Client + capability.sock<br/>(热切换 / Drain 排空)"]
+    end
+
+    subgraph Runtime["长生命周期运行时层（跨控制面更新存活）"]
+        Host["sumi agent-host (per-agent sidecar)<br/>host.sock + Turn 状态机 + 活动流缓冲"]
+        ACP["ACP 子进程 (codex / claude / pi)<br/>或 Builtin Harness"]
+    end
+
+    Desktop -- "HTTP / SSE / ctl.sock" --> Server
+    Desktop -. "启动探测与热更新，退出不杀" .-> Computer
+    Browser -- "HTTP / SSE" --> Server
+    Server <-- "WS (Capabilities + Shutdown)" --> Computer
+    Computer -- "capability.sock (幂等短重试)" --> Server
+    Computer <-- "Unix Socket (host.sock，断连不取消 Turn)" --> Host
+    Host -- "stdin/stdout JSON-RPC / SDK" --> ACP
+    ACP -- "sumi CLI (socket 短重试)" --> Computer
+```
+
+### 4.2 四个更新面的保活机制
+
+1. **Desktop UI 更新（零中断）**
+   - `Sumi.app` 启动时将内置可执行文件按内容哈希不可变地安装至 `~/.sumi/releases/<hash>/sumi` 并更新 `~/.sumi/bin/sumi`，以独立会话（`Setsid`）托管后台 `sumi server` 与 `sumi computer`。
+   - 退出或替换 `Sumi.app` 时**默认只退出桌面壳，不停止后台服务与 Agent**（托盘另提供显式「Stop Local Services & Quit」）。因此更新或崩溃桌面应用对 Agent 完全透明。
+
+2. **Server / Web UI 更新（无缝 FD 交接 + 代理短重试）**
+   - **在线快照与验证**：交接前先校验目标二进制可执行性，并通过 `VACUUM INTO` 在 `~/.sumi/backups/` 落盘一致的 SQLite 快照。
+   - **监听套接字继承（Zero-Refuse Handoff）**：旧 `sumi server` 收到本地控制指令后，向 Computer 发送 `shutdown(reason="server_restarting")` 触发短抖动重连，排空在途 HTTP 请求并关闭 SQLite 写连接，将已绑定的 TCP Listener FD 传递给新 `sumi server`；新进程自证就绪后旧进程退出，若新进程启动失败则旧进程重新打开数据库恢复服务（自动回滚）。
+   - **在途工具调用无感穿越**：`capability.sock` 代理层对安全/幂等请求（`GET`/`PUT`/`DELETE` 以及携带 `Idempotency-Key` 的写请求）执行有界短退避重试；WS 重连时若 Agent 仍处于 `busy`，保留 `working` 状态并置位 `dirty` 而绝不覆写为 `idle`。
+
+3. **Computer Daemon 更新（Sidecar 热接管 + 排空回退双模式）**
+   - **Per-Agent Host Sidecar（`sumi agent-host`，热切换主路径）**：每个 Agent 的驱动进程由极薄、低频变动的独立进程 `sumi agent-host` 承载，对外暴露 `<agentHome>/host.sock`。
+     - `sumi computer` 与 `agent-host` 断开连接**绝不取消正在执行的 Turn**（只有显式 `/cancel`、停滞超时或规格变更才取消）。
+     - 升级 `sumi computer` 时，旧 Daemon 执行 `Detach`（不关闭任何 `agent-host`），释放 `capability.sock` 与控制 socket 并拉起新版本；新 Daemon 自证版本与连网就绪后重新接管所有存活的 `host.sock`（继续订阅在途 Turn 的活动流或读取重启空窗期刚完成的 Turn 结果）；失败则杀掉新进程并恢复旧 Daemon。
+     - 结合**持久化 `driver.token`**、**确定性 `capability.sock` 路径**与 **CLI 侧短退避重试**，在途 Turn 内部执行的 `sumi` 命令可无感穿过 ~100ms 的 Daemon 切换窗口。
+   - **优雅排空模式（Drain-then-Replace，用于升级 `agent-host` 本身或显式 `--drain`）**：
+     - 遵循「先校验新二进制、再排空、拦新不杀旧、超时自保」四条约束：暂停向 Agent 派发新 Wake（未读留在服务端），放行控制操作，等待所有可运行 Agent 变 `quiet`（`!busy` 或已熔断/无驱动）；带硬上限 `deadline`（最大 10 分钟）与 `deadline + grace` 自动释放兜底，防止升级异常导致永久挂起。
+     - 全部 `quiet` 后优雅关闭 ACP（先关 stdin / `SIGTERM` 留出落盘窗口再 `SIGKILL`），确保 `acp-session.json` 完整保存，新版本拉起后由 `session/load` 或 `session.jsonl` 无缝续接上下文。
+
+4. **触发边界**
+   - 升级控制仅通过本机控制 socket（`~/.sumi/run/*.ctl.sock`，权限 `0600`）由本地 CLI（`sumi upgrade`）或本机桌面壳触发；不向 Web 端开放远程升级入口，收敛攻击面。
+
+---
+
+## 五、界面原则
+
+- **一屏四问**：界面在同一视口内直接回答四件事——在聊什么、谁在忙、需要我处理什么、工作在哪；协作状态行与消息末尾的 Agent 已读标记全部直接消费服务端真值。
+- **结构克制**：层级依靠排版比例与 1px 分隔线，不堆叠漂浮卡片；Space 决定强调色，语义色严格保留给「需要我」、Agent 运行态与 Task 状态。行内引用（如 workspace 文件路径）以轻量行内下划线融入正文流，不打断阅读节奏。
+- **身份稳定**：Human 采用确定性字母头像，Agent 采用确定性像素生物头像，均由 `member_id` 播种，不随主题、排序或在线状态漂移。
+- **不打断阅读**：消息流贴底跟随并配新消息/回底药丸，不拖拽正在翻阅历史的用户；长消息渐隐折叠、连续系统事件归组；Thread 根消息外显最新回复摘要与大纲轨；加载使用同几何骨架，错误就地反馈，拒绝阻塞式弹窗。
+
+---
+
+## 六、验证策略
+
+- **单元与契约测试**：所有领域不变量、并发竞争（Freshness Guard、单活 Turn、Breaker 熔断）、安全边界（Workspace 路径限域、凭据隔离）与进程切换路径（FD 交接、Sidecar 断连保活、Drain 超时自保、失败回滚）均须由可稳定复现失败的自动化测试覆盖。
+- **端到端活体协作验收**：
+  - **单 Agent 全链路验收**：以同一份自然语言工程任务并行验证 ACP 与内置 Harness（读上下文、改写 Workspace、发起子 Agent 提案、走完 Task 协作流、根据结构化错误自纠）。
+  - **多 Agent 并发协作验收**：通过多角色高频对抗场景验证并发唤醒不丢消息、DM 秘密通道隔离、Freshness Guard 防抢话、以及单活 Session 不串台。
+  - 观测必须严格经由产品自身的可见性边界进行，不为测试开后门；全量审计以只读方式直查测试实例 SQLite。
+
+---
+
+## 七、明确不做（Non-Goals）
+
+- 复杂项目管理字段：子任务树、依赖图、截止时间、优先级与自定义标签；
+- 分布式多节点 Server 集群；
+- 旧版数据布局、旧版协议与历史 API 兼容层；
+- Agent 关系图谱、Token 计费账单与复杂用量分析面板；
+- Web 端远程升级宿主机二进制。
