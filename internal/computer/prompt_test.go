@@ -64,3 +64,31 @@ func TestSystemPromptGuidesLongTaskProgressSync(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemPromptUsesColleagueIdentityAndNameAddressing(t *testing.T) {
+	p := buildSystemPrompt(protocol.AssignedAgentSpec{
+		DisplayName: "Lin",
+		MemberID:    "m-lin",
+		DriverKind:  domain.DriverACP,
+	}, "/tmp/workspace", "/tmp/memory")
+	for _, want := range []string{
+		"Think of yourself as a colleague who is always available",
+		"These sections are your initialization defaults",
+		"Refer to everyone by their display name",
+		"write their name without the `@`",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("system prompt missing %q", want)
+		}
+	}
+	for _, avoid := range []string{
+		"Humans and other Agents are your peers",
+		"ask the human",
+		"Ask a human owner",
+		"When a human asks",
+	} {
+		if strings.Contains(p, avoid) {
+			t.Fatalf("system prompt should not contain %q", avoid)
+		}
+	}
+}
