@@ -1,5 +1,4 @@
 import { Component, memo, useMemo, useRef, type ReactNode } from "react";
-import { FileText } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
@@ -364,16 +363,18 @@ export const MessageBody = memo(function MessageBody({
         const wsFile = record["data-workspace-file"];
         if (typeof wsFile === "string" && clickableFile) {
           return (
-            <button
-              type="button"
+            <a
+              href={`#workspace:${encodeURIComponent(wsFile)}`}
               data-workspace-file={wsFile}
               title={`Open ${wsFile} in workspace`}
-              onClick={() => onOpenWorkspaceFileRef.current?.(wsFile)}
-              className="inline-flex items-baseline gap-1 px-1.5 py-[0.5px] -my-[0.5px] rounded-[4px] font-mono text-[0.88em] bg-subtle text-fg border border-line hover:border-accent hover:text-accent-text transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenWorkspaceFileRef.current?.(wsFile);
+              }}
+              className="font-mono text-[0.9em] underline underline-offset-2"
             >
-              <FileText className="size-3 text-fg-3 self-center shrink-0" aria-hidden />
-              <span>{children}</span>
-            </button>
+              {children}
+            </a>
           );
         }
 

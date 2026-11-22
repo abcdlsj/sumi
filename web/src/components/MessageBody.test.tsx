@@ -154,19 +154,24 @@ describe("MessageBody @mentions", () => {
 
     const { rerender } = render(<MessageBody body={md} members={members} selfID={lisi.id} onOpenWorkspaceFile={onOpen} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "docs/plan.md:12" }));
+    const codeLink = screen.getByRole("link", { name: "docs/plan.md:12" });
+    expect(codeLink.className).toContain("underline");
+    expect(codeLink.className).not.toContain("border");
+    expect(codeLink.className).not.toContain("bg-subtle");
+    expect(codeLink.className).not.toContain("inline-flex");
+    fireEvent.click(codeLink);
     expect(onOpen).toHaveBeenLastCalledWith("docs/plan.md");
 
-    fireEvent.click(screen.getByRole("button", { name: "reports/summary.md" }));
+    fireEvent.click(screen.getByRole("link", { name: "reports/summary.md" }));
     expect(onOpen).toHaveBeenLastCalledWith("reports/summary.md");
 
     fireEvent.click(screen.getByRole("link", { name: "notes" }));
     expect(onOpen).toHaveBeenLastCalledWith("notes.md");
 
-    expect(screen.queryByRole("button", { name: "console.log" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "console.log" })).toBeNull();
     expect(onOpen).toHaveBeenCalledTimes(3);
 
     rerender(<MessageBody body="Check `docs/plan.md` and reports/summary.md" members={members} selfID={lisi.id} />);
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });
