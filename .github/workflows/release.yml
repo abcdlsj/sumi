@@ -124,7 +124,13 @@ jobs:
             -ldflags "-X github.com/abcdlsj/sumi/internal/version.Version=$VERSION" \
             -o "dist/sumi-$VERSION-$TARGET" ./cmd/sumi
           # Self-check only where the artifact can actually execute on this runner.
-          if [ "$GOOS" = "$(go env GOOS)" ] && [ "$GOARCH" = "$(go env GOARCH)" ]; then
+          host_arch="$(uname -m)"
+          case "$host_arch" in
+            x86_64) host_arch=amd64 ;;
+            aarch64|arm64) host_arch=arm64 ;;
+          esac
+          host_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          if [ "$GOOS" = "$host_os" ] && [ "$GOARCH" = "$host_arch" ]; then
             "dist/sumi-$VERSION-$TARGET" version
           else
             file "dist/sumi-$VERSION-$TARGET"
