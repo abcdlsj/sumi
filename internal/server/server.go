@@ -77,7 +77,12 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
-	s.hub.ShutdownAll(ctx, "server shutting down")
+	s.ShutdownWithReason(ctx, "server shutting down")
+}
+
+// ShutdownWithReason notifies connected Computers before closing their WebSockets.
+func (s *Server) ShutdownWithReason(ctx context.Context, reason string) {
+	s.hub.ShutdownAll(ctx, reason)
 }
 
 func (s *Server) asHuman(fn actorHandler) http.HandlerFunc {

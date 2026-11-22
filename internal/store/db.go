@@ -150,6 +150,22 @@ func (s *Store) Close() error {
 	return firstErr
 }
 
+// BackupTo writes a consistent SQLite snapshot to dstPath using VACUUM INTO while serialized
+// with the single writer connection.
+func (s *Store) BackupTo(ctx context.Context, dstPath string) error {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
+		return fmt.Errorf("create backup dir: %w", err)
+	}
+	_ = os.Remove(dstPath)
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := s.writeDB.ExecContext(ctx, "VACUUM INTO ?", dstPath); err != nil {
+		return fmt.Errorf("sqlite vacuum backup: %w", err)
+	}
+	_ = os.Chmod(dstPath, 0o600)
+	return nil
+}
+
 // ReadDB returns the concurrent read pool.
 func (s *Store) ReadDB() *sql.DB {
 	return s.readDB
