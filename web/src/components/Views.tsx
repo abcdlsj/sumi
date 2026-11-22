@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import {
   ArchiveRestore,
   AtSign,
+  Bookmark,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -15,16 +16,20 @@ import {
   MessageSquare,
   Monitor,
   Moon,
+  Pencil,
   Plus,
   Search,
   Sun,
   SunMoon,
+  Trash2,
   Users,
 } from "lucide-react";
 import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
+import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useSendKey } from "../preferences";
 import type { ThemePref } from "../theme";
+import { AgentTemplateDialog } from "./AgentForm";
 import type { DetailTarget } from "./DetailPane";
 import { agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
@@ -769,6 +774,8 @@ export function AdminPanel({
 }) {
   const humans = boot.members.filter((m) => m.kind === "human");
   const agents = boot.members.filter((m) => m.kind === "agent");
+  const { templates, remove: removeTemplate } = useAgentTemplates();
+  const [editingTemplate, setEditingTemplate] = useState<AgentTemplate | null>(null);
   const [sendKey, setSendKey] = useSendKey();
 
   return (
@@ -805,6 +812,53 @@ export function AdminPanel({
               ) : (
                 <AgentList boot={boot} selectedID={selectedAgentID} onInspect={onInspectAgent} onCopyAgent={onCopyAgent} />
               )}
+              {templates.length > 0 && (
+                <div className="mt-8">
+                  <div className="mb-3 flex items-center gap-2">
+                    <h2 className="text-[14px] font-semibold text-fg">Templates</h2>
+                    <span className="font-mono text-[12px] text-fg-4">{templates.length}</span>
+                  </div>
+                  <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
+                    {templates.map((tpl) => {
+                      const comp = tpl.computer_id ? boot.computers.find((c) => c.id === tpl.computer_id) : undefined;
+                      return (
+                        <div key={tpl.id} className="group px-4 py-2.5 flex items-center gap-3 hover:bg-subtle transition-colors">
+                          <span className="size-8 rounded-[6px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
+                            <Bookmark className="size-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[14px] font-semibold text-fg truncate">{tpl.name}</div>
+                            <div className="text-[13px] text-fg-3 truncate font-body">{tpl.role_text || "No role defined."}</div>
+                          </div>
+                          <span className="hidden sm:block font-mono text-[12.5px] text-fg-3 truncate max-w-[160px] shrink-0" title={templateDriverSummary(tpl)}>
+                            {templateDriverSummary(tpl)}
+                          </span>
+                          {comp && (
+                            <span className="hidden md:inline-flex items-center gap-1.5 text-[12.5px] text-fg-3 truncate max-w-[120px] shrink-0">
+                              <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                              <span className="truncate">{comp.name}</span>
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <IconButton label={`Edit template ${tpl.name}`} onClick={() => setEditingTemplate(tpl)}>
+                              <Pencil />
+                            </IconButton>
+                            <IconButton label={`Delete template ${tpl.name}`} onClick={() => removeTemplate(tpl.id)} className="hover:text-danger">
+                              <Trash2 />
+                            </IconButton>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <AgentTemplateDialog
+                open={Boolean(editingTemplate)}
+                template={editingTemplate}
+                computers={boot.computers}
+                onClose={() => setEditingTemplate(null)}
+              />
             </>
           )}
 

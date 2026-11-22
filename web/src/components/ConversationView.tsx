@@ -25,11 +25,12 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, formatClock, formatDay, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
+import { api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import { readDraft, writeDraft } from "../drafts";
 import { isComposerSendEvent, isMacPlatform, useSendKey } from "../preferences";
+import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
-import { AgentFaceStack, AgentReadFaces, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
+import { AgentReadReceipts, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
 import { agentFocus, agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { CollapsibleMessage } from "./CollapsibleMessage";
@@ -103,7 +104,7 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
   return kind;
 }
 
-/** Honest runtime line above the composer: shows stacked working agents with a popover or DM peer state. */
+/** Honest runtime line above the composer: shows working agents (with popover when multiple) or DM peer state. */
 function AgentStatusLine({
   boot,
   conv,
@@ -131,14 +132,20 @@ function AgentStatusLine({
           : `${names[0]}, ${names[1]} and ${names.length - 2} ${names.length - 2 === 1 ? "other" : "others"} are working here`;
     return (
       <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
+        <StatusDot state="working" ring="var(--panel)" size={8} />
         <button
           ref={triggerRef}
           type="button"
           onClick={() => (busyHere.length === 1 ? onOpenDetail({ kind: "agent", memberID: busyHere[0].id }) : setPopOpen((v) => !v))}
-          className="min-w-0 inline-flex items-center gap-1.5 text-busy hover:underline underline-offset-2"
+          className="min-w-0 truncate text-busy hover:underline underline-offset-2"
         >
-          <AgentFaceStack agents={busyHere} ring="var(--panel)" />
-          <span className="truncate font-medium">{label}</span>
+          {busyHere.length === 1 ? (
+            <>
+              <span className="font-semibold">{names[0]}</span> is working on a reply…
+            </>
+          ) : (
+            <span className="font-medium">{label}</span>
+          )}
         </button>
         {busyHere.length > 1 && (
           <WorkingAgentsPopover
@@ -228,7 +235,7 @@ function buildStreamEntries(messages: Message[], boundary: number, selfID: strin
   let i = 0;
   while (i < messages.length) {
     const m = messages[i];
-    if (m.kind === "text") {
+    if (m.kind === "text" || isActionCardMessage(m)) {
       entries.push({ kind: "message", msg: m, idx: i });
       i++;
       continue;
@@ -237,7 +244,7 @@ function buildStreamEntries(messages: Message[], boundary: number, selfID: strin
     let j = i + 1;
     while (j < messages.length) {
       const next = messages[j];
-      if (next.kind === "text") break;
+      if (next.kind === "text" || isActionCardMessage(next)) break;
       if (!sameDay(run[run.length - 1].created_at, next.created_at)) break;
       const crossesNew = boundary > 0 && next.seq > boundary && next.author_member_id !== selfID && run[run.length - 1].seq <= boundary;
       if (crossesNew) break;
@@ -478,6 +485,7 @@ export function ConversationView({
   onOpenDetail,
   onOpenConversation,
   onOpenDM,
+  onReviewAgentProposal,
   onArchived,
   onUnarchived,
 }: {
@@ -488,6 +496,7 @@ export function ConversationView({
   onOpenDetail: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
   onArchived?: (conv: Conversation) => void;
   onUnarchived?: (conv: Conversation) => void;
 }) {
@@ -865,7 +874,45 @@ export function ConversationView({
                         <div className="flex-1 h-px bg-warm/40" />
                       </div>
                     )}
-                    {m.kind !== "text" ? (
+                    {isActionCardMessage(m) ? (
+                      <article className="px-6 pt-3 pb-1.5 flex items-start gap-3.5">
+                        <div className="w-8 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                            className="block mt-0.5"
+                            aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
+                          >
+                            <MemberAvatar
+                              id={m.author_member_id}
+                              name={m.author_display_name ?? "?"}
+                              kind={m.author_kind ?? "human"}
+                              size="md"
+                              state={author?.agent?.runtime_state}
+                            />
+                          </button>
+                        </div>
+                        <div className="min-w-0 flex-1 max-w-[740px]">
+                          <div className="flex items-center gap-2 h-5">
+                            <button
+                              type="button"
+                              onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                              className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                            >
+                              {m.author_display_name}
+                            </button>
+                            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                          </div>
+                          <ActionCard
+                            spaceSlug={spaceSlug}
+                            message={m}
+                            canGovern={canGovern}
+                            onReviewAgentProposal={onReviewAgentProposal}
+                            onInspectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
+                          />
+                        </div>
+                      </article>
+                    ) : m.kind !== "text" ? (
                       <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
                         <span className="w-8 flex justify-center">
                           <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
@@ -934,6 +981,18 @@ export function ConversationView({
                                 selfID={boot.current_member.id}
                                 onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
                                 onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
+                                onOpenWorkspaceFile={
+                                  m.author_kind === "agent"
+                                    ? (filePath) =>
+                                        onOpenDetail({
+                                          kind: "agent",
+                                          memberID: m.author_member_id,
+                                          tab: "workspace",
+                                          filePath,
+                                          openNonce: Date.now(),
+                                        })
+                                    : undefined
+                                }
                               />
                             </CollapsibleMessage>
                           </div>
@@ -1000,7 +1059,7 @@ export function ConversationView({
                             />
                           ) : null}
 
-                          <AgentReadFaces
+                          <AgentReadReceipts
                             agents={agentReadMap.get(m.id)}
                             boot={boot}
                             onSelectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}

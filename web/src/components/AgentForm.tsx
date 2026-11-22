@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Bookmark, Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Terminal, X } from "lucide-react";
+import { Bookmark, Bot, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Link2, Monitor, Pencil, Terminal, X } from "lucide-react";
 import {
   suggestCopyName,
   templateDriverSummary,
+  updateAgentTemplate,
   useAgentTemplates,
   type AgentTemplate,
 } from "../agentTemplates";
@@ -11,13 +12,14 @@ import {
   ApiError,
   nameInput,
   type ACPProvider,
+  type AgentCreateProposal,
   type Computer,
   type DriverConfigInput,
   type DriverKind,
   type Member,
 } from "../api";
 import { MemberAvatar, PixelAvatar } from "./Avatar";
-import { Button, Field, Select, TextArea, useToast } from "./ui";
+import { Button, Field, Modal, Select, TextArea, useToast } from "./ui";
 
 const PROVIDERS: { id: ACPProvider; name: string; desc: string }[] = [
   { id: "pi", name: "pi", desc: "Pi coding agent, uses your pi login" },
@@ -184,12 +186,14 @@ export function DriverFields({
   computer,
   errors = {},
   apiKeySet,
+  showApiKey = true,
 }: {
   draft: DriverDraft;
   onChange: (d: DriverDraft) => void;
   computer?: Computer;
   errors?: Partial<Record<"baseURL" | "model" | "provider" | "command", string>>;
   apiKeySet?: boolean;
+  showApiKey?: boolean;
 }) {
   const [showKey, setShowKey] = useState(false);
   const hasAdvancedValues = Boolean(
@@ -342,28 +346,32 @@ export function DriverFields({
             autoComplete="off"
             spellCheck={false}
           />
-          <Field
-            label="API key"
-            optional
-            leading={<KeyRound />}
-            type={showKey ? "text" : "password"}
-            value={draft.apiKey}
-            onChange={(e) => set({ apiKey: e.target.value })}
-            placeholder={apiKeySet ? "•••••••• saved — leave empty to keep" : "sk-…"}
-            hint="Stored on the server and sent only to the computer that runs this agent. Never shown again."
-            autoComplete="off"
-            spellCheck={false}
-            trailing={
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? "Hide API key" : "Show API key"}
-                className="size-7 rounded-[6px] text-fg-3 hover:text-fg hover:bg-hover flex items-center justify-center"
-              >
-                {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
-            }
-          />
+          {showApiKey ? (
+            <Field
+              label="API key"
+              optional
+              leading={<KeyRound />}
+              type={showKey ? "text" : "password"}
+              value={draft.apiKey}
+              onChange={(e) => set({ apiKey: e.target.value })}
+              placeholder={apiKeySet ? "•••••••• saved — leave empty to keep" : "sk-…"}
+              hint="Stored on the server and sent only to the computer that runs this agent. Never shown again."
+              autoComplete="off"
+              spellCheck={false}
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  aria-label={showKey ? "Hide API key" : "Show API key"}
+                  className="size-7 rounded-[6px] text-fg-3 hover:text-fg hover:bg-hover flex items-center justify-center"
+                >
+                  {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              }
+            />
+          ) : (
+            <p className="text-[12.5px] text-fg-3">API keys are never stored in templates — enter one when creating an agent.</p>
+          )}
         </div>
       )}
     </div>
@@ -374,10 +382,122 @@ function fieldFromError(err: unknown): string {
   return err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Could not create agent";
 }
 
+/** Modal editor for updating a saved agent template's name, role, preferred computer, and driver. */
+export function AgentTemplateDialog({
+  open,
+  template,
+  computers,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  template: AgentTemplate | null;
+  computers: Computer[];
+  onClose: () => void;
+  onSaved?: (updated: AgentTemplate) => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [computerID, setComputerID] = useState("");
+  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(undefined, computers[0]));
+  const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
+
+  useEffect(() => {
+    if (!open || !template) return;
+    const compID = template.computer_id && computers.some((c) => c.id === template.computer_id) ? template.computer_id : "";
+    const comp = computers.find((c) => c.id === compID) ?? computers[0];
+    setName(template.name);
+    setRole(template.role_text);
+    setComputerID(compID);
+    setDraft(draftFromTemplate(template, comp));
+    setErrors({});
+  }, [open, template, computers]);
+
+  const computer = computers.find((c) => c.id === computerID) ?? computers[0];
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!template) return;
+    const cleanName = name.trim();
+    const errs = validateDriver(draft);
+    setErrors(errs);
+    if (!cleanName || Object.keys(errs).length > 0) return;
+    const updated = updateAgentTemplate(template.id, {
+      name: cleanName,
+      role_text: role,
+      computer_id: computerID || undefined,
+      driver_kind: draft.kind,
+      driver_config: driverInput(draft),
+    });
+    if (updated) {
+      toast(`Updated template “${updated.name}”`, "success");
+      onSaved?.(updated);
+    }
+    onClose();
+  }
+
+  return (
+    <Modal open={open && Boolean(template)} onClose={onClose} label="Edit template" title="Edit template" description="Update this saved agent preset for future agents." width={560}>
+      <form onSubmit={submit} className="px-6 pb-6 pt-4 space-y-5">
+        <Field label="Template name" autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={48} required />
+        <div className="space-y-2">
+          <TextArea label="Role" rows={3} value={role} onChange={(e) => setRole(e.target.value)} />
+          <div className="flex flex-wrap gap-1.5">
+            {ROLE_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setRole(p.text)}
+                className={`h-7 px-2.5 rounded-[5px] border text-[12.5px] transition-colors ${
+                  role === p.text ? "border-accent text-accent-text bg-accent-soft" : "border-line text-fg-3 hover:border-line-strong hover:text-fg"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {computers.length > 1 && (
+          <Select
+            label="Default computer"
+            optional
+            value={computerID}
+            onChange={setComputerID}
+            options={[
+              { value: "", label: "Any available computer" },
+              ...computers.map((c) => ({
+                value: c.id,
+                label: c.name,
+                description: `${c.hostname} · ${c.os === "macos" ? "macOS" : "Linux"}`,
+                icon: <Monitor className="size-4 text-fg-3" />,
+              })),
+            ]}
+          />
+        )}
+        <div className="space-y-2">
+          <div className="text-[13px] font-medium text-fg-2">Driver</div>
+          <DriverFields draft={draft} onChange={setDraft} computer={computer} errors={errors} showApiKey={false} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!name.trim()}>
+            Save changes
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function AgentForm({
   spaceSlug,
   computers,
   initialAgent,
+  initialProposal,
   existingMembers = [],
   onCreated,
   footer,
@@ -385,12 +505,13 @@ export function AgentForm({
   spaceSlug: string;
   computers: Computer[];
   initialAgent?: Member;
+  initialProposal?: AgentCreateProposal;
   existingMembers?: Member[];
   onCreated: (agent: Member) => void;
   footer?: (submit: ReactNode) => ReactNode;
 }) {
   const toast = useToast();
-  const { templates, save: saveTemplate, remove: removeTemplate } = useAgentTemplates();
+  const { templates, save: saveTemplate, update: updateTemplate, remove: removeTemplate } = useAgentTemplates();
   const existingAgents = existingMembers.filter((m) => m.kind === "agent" && m.agent);
   const existingNames = existingMembers.map((m) => m.display_name);
 
@@ -400,23 +521,50 @@ export function AgentForm({
     computers[0]?.id ||
     "";
 
-  const [name, setName] = useState(() => (initialAgent ? suggestCopyName(initialAgent.display_name, existingNames) : "Lin"));
-  const [nameTouched, setNameTouched] = useState(false);
-  const [role, setRole] = useState(() => initialAgent?.agent?.role_text ?? ROLE_PRESETS[0].text);
-  const [computerID, setComputerID] = useState(() => resolveComputerID(initialAgent?.agent?.computer_id));
+  const proposalParams = initialProposal?.params;
+  const [name, setName] = useState(() => {
+    if (proposalParams?.display_name) return nameInput(proposalParams.display_name) || "Lin";
+    if (initialAgent) return suggestCopyName(initialAgent.display_name, existingNames);
+    return "Lin";
+  });
+  const [nameTouched, setNameTouched] = useState(() => Boolean(proposalParams?.display_name));
+  const [role, setRole] = useState(() =>
+    proposalParams?.role_text !== undefined
+      ? proposalParams.role_text
+      : (initialAgent?.agent?.role_text ?? ROLE_PRESETS[0].text),
+  );
+  const [computerID, setComputerID] = useState(() => resolveComputerID(proposalParams?.computer_id ?? initialAgent?.agent?.computer_id));
   const initialComputer = computers.find((c) => c.id === computerID);
-  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(initialAgent, initialComputer));
+  const [draft, setDraft] = useState<DriverDraft>(() => {
+    if (proposalParams?.driver_kind) {
+      return draftFromTemplate(
+        {
+          id: "",
+          name: "",
+          role_text: proposalParams.role_text ?? "",
+          computer_id: proposalParams.computer_id,
+          driver_kind: proposalParams.driver_kind,
+          driver_config: proposalParams.driver_config ?? {},
+          created_at: "",
+        },
+        initialComputer,
+      );
+    }
+    return draftFromAgent(initialAgent, initialComputer);
+  });
   const [sourceAgentID, setSourceAgentID] = useState(() => initialAgent?.id ?? "");
   const [activeTemplateID, setActiveTemplateID] = useState("");
   const [apiKeyNotice, setApiKeyNotice] = useState(() =>
     initialAgent?.agent?.driver_kind === "builtin" && initialAgent.agent.driver_config?.api_key_set ? initialAgent.display_name : "",
   );
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<AgentTemplate | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
   const [serverError, setServerError] = useState("");
   const [busy, setBusy] = useState(false);
   const computer = computers.find((c) => c.id === computerID);
+  const activeTemplate = templates.find((t) => t.id === activeTemplateID) ?? null;
 
   function applyAgentCopy(agentID: string) {
     setSourceAgentID(agentID);
@@ -448,6 +596,25 @@ export function AgentForm({
     setComputerID(nextCompID);
     setRole(tpl.role_text);
     setDraft(draftFromTemplate(tpl, nextComp));
+  }
+
+  function handleUpdateActiveTemplate() {
+    if (!activeTemplate) return;
+    if (draft.kind === "acp") {
+      const parsed = splitCommandArgs(draft.command);
+      if (parsed.error) {
+        setErrors({ command: parsed.error });
+        return;
+      }
+    }
+    const updated = updateTemplate(activeTemplate.id, {
+      name: activeTemplate.name,
+      role_text: role,
+      computer_id: computerID || undefined,
+      driver_kind: draft.kind,
+      driver_config: driverInput(draft),
+    });
+    if (updated) toast(`Updated template “${updated.name}”`, "success");
   }
 
   function handleSaveTemplate() {
@@ -487,6 +654,7 @@ export function AgentForm({
         computer_id: computerID,
         driver_kind: draft.kind,
         driver_config: driverInput(draft),
+        action_card_message_id: initialProposal?.message_id,
       });
       onCreated(res.agent);
     } catch (err) {
@@ -502,6 +670,7 @@ export function AgentForm({
   );
 
   return (
+    <>
     <form id="agent-form" onSubmit={submit} className="space-y-5">
       {(existingAgents.length > 0 || templates.length > 0) && (
         <div className="space-y-3 pb-4 border-b border-line">
@@ -553,12 +722,22 @@ export function AgentForm({
                       </button>
                       <button
                         type="button"
+                        aria-label={`Edit template ${tpl.name}`}
+                        title={`Edit ${tpl.name}`}
+                        onClick={() => setEditingTemplate(tpl)}
+                        className="h-full px-1 text-fg-4 hover:text-fg transition-colors inline-flex items-center"
+                      >
+                        <Pencil className="size-3" />
+                      </button>
+                      <button
+                        type="button"
                         aria-label={`Delete template ${tpl.name}`}
+                        title={`Delete ${tpl.name}`}
                         onClick={() => {
                           if (active) setActiveTemplateID("");
                           removeTemplate(tpl.id);
                         }}
-                        className="h-full px-1.5 text-fg-4 hover:text-danger transition-colors inline-flex items-center"
+                        className="h-full pl-1 pr-1.5 text-fg-4 hover:text-danger transition-colors inline-flex items-center"
                       >
                         <X className="size-3" />
                       </button>
@@ -671,17 +850,29 @@ export function AgentForm({
             )}
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setTemplateName(name || "Agent template");
-              setSavingTemplate(true);
-            }}
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-3 hover:text-fg transition-colors"
-          >
-            <Bookmark className="size-3.5" />
-            <span>Save as template</span>
-          </button>
+          <div className="flex items-center gap-4 flex-wrap">
+            {activeTemplate && (
+              <button
+                type="button"
+                onClick={handleUpdateActiveTemplate}
+                className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent-text hover:underline underline-offset-2 transition-colors"
+              >
+                <Pencil className="size-3.5" />
+                <span>Update “{activeTemplate.name}”</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setTemplateName(name || "Agent template");
+                setSavingTemplate(true);
+              }}
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-3 hover:text-fg transition-colors"
+            >
+              <Bookmark className="size-3.5" />
+              <span>{activeTemplate ? "Save as new template" : "Save as template"}</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -691,5 +882,16 @@ export function AgentForm({
 
       {footer ? footer(submitBtn) : <div className="flex justify-end">{submitBtn}</div>}
     </form>
+
+    <AgentTemplateDialog
+      open={Boolean(editingTemplate)}
+      template={editingTemplate}
+      computers={computers}
+      onClose={() => setEditingTemplate(null)}
+      onSaved={(updated) => {
+        if (activeTemplateID === updated.id) applyTemplate(updated);
+      }}
+    />
+    </>
   );
 }

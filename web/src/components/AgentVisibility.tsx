@@ -9,34 +9,11 @@ import {
   type Member,
   type Message,
 } from "../api";
-import { agentFocus, agentStatusText, MemberAvatar, PixelAvatar, stateLabel, StatusDot } from "./Avatar";
+import { agentFocus, agentStatusText, MemberAvatar, stateLabel, StatusDot } from "./Avatar";
 import type { DetailTarget } from "./DetailPane";
 import { Badge, useFloatingPosition } from "./ui";
 
-const MAX_STACK_FACES = 3;
-
-/** Compact overlapping stack of up to 3 agent pixel avatars. */
-export function AgentFaceStack({
-  agents,
-  ring = "var(--nav)",
-}: {
-  agents: Member[];
-  ring?: string;
-}) {
-  return (
-    <span className="inline-flex items-center -space-x-1.5 shrink-0">
-      {agents.slice(0, MAX_STACK_FACES).map((a) => (
-        <span
-          key={a.id}
-          className="inline-flex rounded-[5px]"
-          style={{ boxShadow: `0 0 0 1.5px ${ring}` }}
-        >
-          <PixelAvatar seed={a.id} size="xs" label={a.display_name} />
-        </span>
-      ))}
-    </span>
-  );
-}
+const MAX_READ_NAMES = 3;
 
 /**
  * Shared popover listing working agents with their live focus conversation/task and tool activity.
@@ -161,61 +138,6 @@ export function WorkingAgentsPopover({
   );
 }
 
-/**
- * Global "Working now" pill placed in the sidebar header. Takes zero space when no agent is busy.
- */
-export function WorkingNowSummary({
-  boot,
-  onOpenConversation,
-  onOpenDetail,
-}: {
-  boot: BootstrapData;
-  onOpenConversation: (convID: string) => void;
-  onOpenDetail: (t: DetailTarget) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const working = useMemo(
-    () => boot.members.filter((m) => m.kind === "agent" && m.agent?.runtime_state === "working"),
-    [boot.members],
-  );
-
-  useEffect(() => {
-    if (working.length === 0 && open) setOpen(false);
-  }, [working.length, open]);
-
-  if (working.length === 0) return null;
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-expanded={open}
-        aria-label={`${working.length} ${working.length === 1 ? "agent" : "agents"} working now`}
-        title={`${working.length} ${working.length === 1 ? "agent" : "agents"} working now`}
-        onClick={() => setOpen((v) => !v)}
-        className={`h-7 pl-1.5 pr-2 rounded-[6px] border border-busy/25 bg-busy-soft/80 hover:bg-busy-soft text-nav-busy inline-flex items-center gap-1.5 transition-colors shrink-0 ${
-          open ? "ring-1 ring-busy/40" : ""
-        }`}
-      >
-        <AgentFaceStack agents={working} ring="var(--busy-soft)" />
-        <span className="font-mono tabular text-[11.5px] font-semibold leading-none">{working.length}</span>
-      </button>
-      <WorkingAgentsPopover
-        boot={boot}
-        agents={working}
-        open={open}
-        triggerRef={triggerRef}
-        align="right"
-        onClose={() => setOpen(false)}
-        onOpenConversation={onOpenConversation}
-        onOpenDetail={onOpenDetail}
-      />
-    </>
-  );
-}
-
 /** Maps each rendered text message id to the agents whose read watermark stops on that message (excluding the author). */
 export function buildAgentReadMap(
   messages: Message[] | undefined,
@@ -243,8 +165,8 @@ export function buildAgentReadMap(
   return map;
 }
 
-/** Trailing agent read faces on the newest message each agent has read. */
-export function AgentReadFaces({
+/** Quiet trailing read line under the newest message each agent has read. */
+export function AgentReadReceipts({
   agents,
   boot,
   onSelectAgent,
@@ -254,7 +176,7 @@ export function AgentReadFaces({
   onSelectAgent?: (memberID: string) => void;
 }) {
   if (!agents || agents.length === 0) return null;
-  const shown = agents.slice(0, MAX_STACK_FACES);
+  const shown = agents.slice(0, MAX_READ_NAMES);
   const overflow = agents.length - shown.length;
   const label = agents
     .map((a) => {
@@ -265,36 +187,31 @@ export function AgentReadFaces({
 
   return (
     <div
-      data-testid="agent-read-faces"
+      data-testid="agent-read-receipts"
       title={`Read by ${label}`}
       aria-label={`Read by ${label}`}
-      className="mt-1 flex items-center justify-end gap-1 select-none"
+      className="mt-0.5 flex items-center justify-end gap-1 text-[11px] leading-4 text-fg-4 select-none"
     >
-      <CheckCheck className="size-3 text-fg-4 shrink-0" aria-hidden />
-      <span className="inline-flex items-center -space-x-1">
-        {shown.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            onClick={() => onSelectAgent?.(a.id)}
-            title={
-              a.agent?.runtime_state === "working"
-                ? `Read up to here · ${a.display_name} (${agentStatusText(boot, a)})`
-                : `Read up to here · ${a.display_name}`
-            }
-            className="relative inline-flex rounded-[4px] ring-[1.5px] ring-[var(--panel)] hover:z-10 transition-transform hover:scale-110"
-          >
-            <PixelAvatar seed={a.id} size="xs" label={`${a.display_name} read`} />
-            {a.agent?.runtime_state === "working" && (
-              <span className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-[1.5px] border border-[var(--dot-border)] bg-busy ring-1 ring-[var(--panel)]" />
-            )}
-          </button>
-        ))}
-        {overflow > 0 && (
-          <span className="h-5 min-w-5 px-1 rounded-[4px] bg-subtle border border-line text-[10.5px] font-mono tabular text-fg-3 inline-flex items-center justify-center ring-[1.5px] ring-[var(--panel)]">
-            +{overflow}
+      <CheckCheck className="size-3 shrink-0 opacity-75" aria-hidden />
+      <span className="inline-flex items-center flex-wrap justify-end gap-x-1">
+        {shown.map((a, idx) => (
+          <span key={a.id} className="inline-flex items-center">
+            <button
+              type="button"
+              onClick={() => onSelectAgent?.(a.id)}
+              title={
+                a.agent?.runtime_state === "working"
+                  ? `Read up to here · ${a.display_name} (${agentStatusText(boot, a)})`
+                  : `Read up to here · ${a.display_name}`
+              }
+              className="hover:text-fg-2 transition-colors"
+            >
+              {a.display_name}
+            </button>
+            {idx < shown.length - 1 && <span>,</span>}
           </span>
-        )}
+        ))}
+        {overflow > 0 && <span className="tabular">+{overflow}</span>}
       </span>
     </div>
   );

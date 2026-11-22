@@ -169,6 +169,42 @@ export interface ThreadReplyPreview {
   created_at: string;
 }
 
+export type ActionCardType = "agent.create" | (string & {});
+export type ActionCardStatus = "pending" | "executed" | "dismissed";
+
+export interface ActionCardPayload<P = Record<string, unknown>, R = Record<string, unknown>> {
+  version: number;
+  card_type: ActionCardType;
+  status: ActionCardStatus;
+  title: string;
+  description?: string;
+  params?: P;
+  result?: R;
+  executed_by_member_id?: string;
+  executed_by_name?: string;
+  executed_at?: string;
+}
+
+export interface AgentCreateCardParams {
+  display_name?: string;
+  role_text?: string;
+  computer_id?: string;
+  driver_kind?: DriverKind;
+  driver_config?: DriverConfigView;
+}
+
+export interface AgentCreateCardResult {
+  agent_id: string;
+  display_name: string;
+}
+
+export interface AgentCreateProposal {
+  message_id: string;
+  conversation_id: string;
+  proposed_by_name?: string;
+  params: AgentCreateCardParams;
+}
+
 export interface Message {
   id: string;
   space_id: string;
@@ -526,11 +562,17 @@ export const api = {
       computer_id: string;
       driver_kind: DriverKind;
       driver_config: DriverConfigInput;
+      source_conversation_id?: string;
+      action_card_message_id?: string;
     },
   ) =>
     request<{ agent: Member }>(`/api/v1/spaces/${spaceSlug}/agents`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  dismissActionCard: (spaceSlug: string, messageID: string) =>
+    request<{ action_card: ActionCardPayload }>(`/api/v1/spaces/${spaceSlug}/action-cards/${messageID}/dismiss`, {
+      method: "POST",
     }),
   updateAgentDriver: (spaceSlug: string, agentID: string, driver_kind: DriverKind, driver_config: DriverConfigInput) =>
     request<{ agent: Member }>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/driver`, {

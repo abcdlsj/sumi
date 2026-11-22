@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Member, Task } from "../api";
-import { MessageBody } from "./MessageBody";
+import { MessageBody, parseWorkspaceFilePath } from "./MessageBody";
+
+afterEach(cleanup);
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
 const sam: Member = { id: "m-sam", space_id: "s", kind: "human", display_name: "Sam", access_level: "member", created_at: "2026-11-19T10:00:00Z" };
@@ -121,5 +123,50 @@ describe("MessageBody @mentions", () => {
     const { container } = render(<MessageBody body="这是**重要（加粗）**说明。" members={members} selfID={lisi.id} />);
     const strong = container.querySelector("strong");
     expect(strong?.textContent).toBe("重要（加粗）");
+  });
+
+  it("parses safe workspace file paths and rejects URLs, traversal, secrets, and shell snippets", () => {
+    expect(parseWorkspaceFilePath("notes.md")).toBe("notes.md");
+    expect(parseWorkspaceFilePath("./docs/plan.md")).toBe("docs/plan.md");
+    expect(parseWorkspaceFilePath("src/api.ts:42-50")).toBe("src/api.ts");
+    expect(parseWorkspaceFilePath("src/api.ts#L12-L20")).toBe("src/api.ts");
+    expect(parseWorkspaceFilePath("/Users/alice/.sumi/agents/a1/workspace/reports/out.md")).toBe("reports/out.md");
+    expect(parseWorkspaceFilePath("Makefile")).toBe("Makefile");
+
+    expect(parseWorkspaceFilePath("https://example.com/readme.md")).toBeNull();
+    expect(parseWorkspaceFilePath("../secret.txt")).toBeNull();
+    expect(parseWorkspaceFilePath(".env")).toBeNull();
+    expect(parseWorkspaceFilePath(".ssh/id_rsa")).toBeNull();
+    expect(parseWorkspaceFilePath("/etc/hosts")).toBeNull();
+    expect(parseWorkspaceFilePath("console.log")).toBeNull();
+    expect(parseWorkspaceFilePath("go test ./...")).toBeNull();
+  });
+
+  it("turns workspace file paths in agent messages into clickable triggers and leaves human messages plain", () => {
+    const onOpen = vi.fn();
+    const md = [
+      "Updated `docs/plan.md:12`, wrote reports/summary.md, and linked [notes](./notes.md).",
+      "External [site](https://example.com/a.md) and `console.log` stay normal.",
+      "```ts",
+      "import './ignored.ts';",
+      "```",
+    ].join("\n\n");
+
+    const { rerender } = render(<MessageBody body={md} members={members} selfID={lisi.id} onOpenWorkspaceFile={onOpen} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "docs/plan.md:12" }));
+    expect(onOpen).toHaveBeenLastCalledWith("docs/plan.md");
+
+    fireEvent.click(screen.getByRole("button", { name: "reports/summary.md" }));
+    expect(onOpen).toHaveBeenLastCalledWith("reports/summary.md");
+
+    fireEvent.click(screen.getByRole("link", { name: "notes" }));
+    expect(onOpen).toHaveBeenLastCalledWith("notes.md");
+
+    expect(screen.queryByRole("button", { name: "console.log" })).toBeNull();
+    expect(onOpen).toHaveBeenCalledTimes(3);
+
+    rerender(<MessageBody body="Check `docs/plan.md` and reports/summary.md" members={members} selfID={lisi.id} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

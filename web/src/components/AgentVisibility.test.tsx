@@ -1,7 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useRef, useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, Member, Message } from "../api";
-import { AgentReadFaces, buildAgentReadMap, ThreadOutlineRail, WorkingNowSummary } from "./AgentVisibility";
+import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail, WorkingAgentsPopover } from "./AgentVisibility";
+import type { DetailTarget } from "./DetailPane";
+
+afterEach(cleanup);
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
 const lin: Member = {
@@ -66,20 +70,40 @@ function makeMsg(seq: number, author: Member, body: string): Message {
   };
 }
 
-describe("AgentVisibility", () => {
-  it("hides WorkingNowSummary when idle and opens popover to jump when working", () => {
-    const idleBoot: BootstrapData = { ...boot, members: [lisi, kira] };
-    const { container, rerender } = render(
-      <WorkingNowSummary boot={idleBoot} onOpenConversation={() => {}} onOpenDetail={() => {}} />,
-    );
-    expect(container.firstChild).toBeNull();
+function PopoverHarness({
+  onOpenConv,
+  onOpenDetail,
+}: {
+  onOpenConv: (id: string) => void;
+  onOpenDetail: (t: DetailTarget) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button ref={triggerRef} type="button" onClick={() => setOpen((v) => !v)}>
+        Open working
+      </button>
+      <WorkingAgentsPopover
+        boot={boot}
+        agents={[lin]}
+        open={open}
+        triggerRef={triggerRef}
+        onClose={() => setOpen(false)}
+        onOpenConversation={onOpenConv}
+        onOpenDetail={onOpenDetail}
+      />
+    </>
+  );
+}
 
+describe("AgentVisibility", () => {
+  it("opens WorkingAgentsPopover with activity and jumps to the agent's focus conversation", () => {
     const onOpenConv = vi.fn();
     const onOpenDetail = vi.fn();
-    rerender(<WorkingNowSummary boot={boot} onOpenConversation={onOpenConv} onOpenDetail={onOpenDetail} />);
+    render(<PopoverHarness onOpenConv={onOpenConv} onOpenDetail={onOpenDetail} />);
 
-    const trigger = screen.getByRole("button", { name: "1 agent working now" });
-    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Open working" }));
 
     const dialog = screen.getByRole("dialog", { name: "Working now" });
     expect(within(dialog).getByText("Running execute")).toBeTruthy();
@@ -87,7 +111,7 @@ describe("AgentVisibility", () => {
     expect(onOpenConv).toHaveBeenCalledWith("c-eng");
   });
 
-  it("places each agent read face on the latest message at or below its read_seq", () => {
+  it("places each agent read receipt on the latest message at or below its read_seq as quiet text", () => {
     const msgs = [makeMsg(1, lisi, "one"), makeMsg(2, lisi, "two"), makeMsg(3, lisi, "three")];
     const map = buildAgentReadMap(
       msgs,
@@ -102,12 +126,15 @@ describe("AgentVisibility", () => {
     expect(map.get("m-3")?.map((m) => m.id)).toEqual([kira.id]);
 
     const onSelect = vi.fn();
-    render(<AgentReadFaces agents={map.get("m-2")} boot={boot} onSelectAgent={onSelect} />);
-    const faces = screen.getByTestId("agent-read-faces");
-    expect(faces.getAttribute("aria-label")).toContain("Lin");
+    render(<AgentReadReceipts agents={map.get("m-2")} boot={boot} onSelectAgent={onSelect} />);
+    const receipts = screen.getByTestId("agent-read-receipts");
+    expect(receipts.getAttribute("aria-label")).toContain("Lin");
+    expect(within(receipts).queryByRole("img")).toBeNull();
+    fireEvent.click(within(receipts).getByRole("button", { name: "Lin" }));
+    expect(onSelect).toHaveBeenCalledWith(lin.id);
   });
 
-  it("omits an agent's read face on its own message while keeping other agents who read it", () => {
+  it("omits an agent's read receipt on its own message while keeping other agents who read it", () => {
     const msgs = [makeMsg(1, lisi, "one"), makeMsg(2, lin, "reply from lin")];
     const map = buildAgentReadMap(
       msgs,

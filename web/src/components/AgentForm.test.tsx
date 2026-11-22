@@ -227,6 +227,81 @@ describe("AgentForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete template Auditor" }));
     expect(listAgentTemplates()).toHaveLength(0);
   });
+
+  it("edits a saved template via the edit modal and via the active-template quick update without creating an agent", () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Security auditor" } });
+    fireEvent.click(screen.getByRole("button", { name: /Model API/ }));
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "http://127.0.0.1:4000/v1" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "gpt-5-mini" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as template" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Template name" }), { target: { value: "Auditor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const originalID = listAgentTemplates()[0].id;
+
+    // Edit via modal: rename + update role + update model
+    fireEvent.click(screen.getByRole("button", { name: "Edit template Auditor" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit template" });
+    const nameInputEl = dialog.querySelector('input[required]') as HTMLInputElement;
+    fireEvent.change(nameInputEl, { target: { value: "AppSec Auditor" } });
+    const roleArea = dialog.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(roleArea, { target: { value: "Deep AppSec reviewer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(create).not.toHaveBeenCalled();
+    const afterModal = listAgentTemplates();
+    expect(afterModal).toHaveLength(1);
+    expect(afterModal[0].id).toBe(originalID);
+    expect(afterModal[0].name).toBe("AppSec Auditor");
+    expect(afterModal[0].role_text).toBe("Deep AppSec reviewer");
+    // Active form also refreshed to match edited template
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Deep AppSec reviewer");
+
+    // Quick-update active template directly from form edits
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Updated inline role" } });
+    fireEvent.click(screen.getByRole("button", { name: /Update “AppSec Auditor”/ }));
+    expect(listAgentTemplates()[0].role_text).toBe("Updated inline role");
+  });
+
+  it("prefills from an agent.create action card proposal and sends action_card_message_id on create", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(
+      <AgentForm
+        spaceSlug="s"
+        computers={[computer]}
+        initialProposal={{
+          message_id: "m-card-42",
+          conversation_id: "c-eng",
+          proposed_by_name: "Lin",
+          params: {
+            display_name: "XiaoZhu",
+            role_text: "Helper engineer",
+            driver_kind: "acp",
+            driver_config: { provider: "pi" },
+          },
+        }}
+        onCreated={() => {}}
+      />,
+    );
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("XiaoZhu");
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Helper engineer");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({
+          display_name: "XiaoZhu",
+          role_text: "Helper engineer",
+          action_card_message_id: "m-card-42",
+        }),
+      ),
+    );
+  });
 });
 
 describe("suggestCopyName", () => {

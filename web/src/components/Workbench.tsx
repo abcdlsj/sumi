@@ -31,7 +31,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, ownComputers, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
+import { api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
 import { accentSwatch, applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
@@ -39,7 +39,6 @@ import { isMacPlatform, useChannelSort, useSidebarCollapsed, type ChannelSortPre
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
-import { WorkingNowSummary } from "./AgentVisibility";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
 import { DesktopServerTrigger } from "./DesktopServer";
@@ -99,6 +98,7 @@ function sortChannelsList(list: Conversation[], mode: ChannelSortPref): Conversa
 
 const SSE_EVENTS = [
   "message.created",
+  "message.updated",
   "message.reaction_changed",
   "conversation.read_updated",
   "task.created",
@@ -216,6 +216,7 @@ export function Workbench({
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
   const [dialog, setDialog] = useState<Dialog>(() => (readPendingPairing() ? "pairing" : null));
   const [copyAgent, setCopyAgent] = useState<Member | null>(null);
+  const [agentProposal, setAgentProposal] = useState<AgentCreateProposal | null>(null);
   const [editingGroup, setEditingGroup] = useState<ChannelGroup | null>(null);
   const [dragChannelID, setDragChannelID] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -392,6 +393,7 @@ export function Workbench({
           }
           return;
         }
+        case "message.updated":
         case "message.reaction_changed":
           if (convID) void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, convID] });
           else void qc.invalidateQueries({ queryKey: ["messages", spaceSlug] });
@@ -557,7 +559,13 @@ export function Workbench({
   const canGovern = boot.current_member.access_level !== "member";
   const myComputers = ownComputers(boot);
   const openNewAgentDialog = (source?: Member) => {
+    setAgentProposal(null);
     setCopyAgent(source ?? null);
+    setDialog(myComputers.length ? "agent" : "computer");
+  };
+  const openAgentProposalDialog = (proposal: AgentCreateProposal) => {
+    setCopyAgent(null);
+    setAgentProposal(proposal);
     setDialog(myComputers.length ? "agent" : "computer");
   };
   const needsSetup = canGovern && (myComputers.length === 0 || agents.length === 0);
@@ -762,16 +770,9 @@ export function Workbench({
         {desktop && (
           <div
             data-desktop-titlebar
-            className={`h-[52px] ${sidebarCollapsed ? "pl-3 justify-center" : "pl-[92px] pr-3 justify-between"} border-b border-nav-line flex items-center gap-2 shrink-0 titlebar-drag`}
+            className={`h-[52px] ${sidebarCollapsed ? "pl-3 justify-center" : "pl-[92px] pr-4"} border-b border-nav-line flex items-center shrink-0 titlebar-drag`}
           >
             {!sidebarCollapsed && <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>}
-            {!sidebarCollapsed && (
-              <WorkingNowSummary
-                boot={boot}
-                onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
-                onOpenDetail={setDetail}
-              />
-            )}
           </div>
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: sidebarCollapsed ? "56px" : "56px minmax(0, 1fr)" }}>
@@ -833,13 +834,8 @@ export function Workbench({
           {!sidebarCollapsed && (
           <aside aria-label="Sidebar" className="bg-nav flex flex-col min-w-0 min-h-0">
             {!desktop && (
-              <div className="h-[52px] px-4 flex items-center justify-between gap-2 shrink-0">
+              <div className="h-[52px] px-4 flex items-center shrink-0">
                 <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
-                <WorkingNowSummary
-                  boot={boot}
-                  onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
-                  onOpenDetail={setDetail}
-                />
               </div>
             )}
             <div className={`px-3 pb-2 shrink-0 ${desktop ? "pt-3" : ""}`}>
@@ -1116,6 +1112,7 @@ export function Workbench({
                 onOpenDetail={setDetail}
                 onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
                 onOpenDM={(memberID) => void openOrCreateDM(memberID)}
+                onReviewAgentProposal={canGovern ? openAgentProposalDialog : undefined}
                 onArchived={(archived) => setMainView({ kind: "conversation", convID: archived.id, archivedConv: archived })}
                 onUnarchived={(restored) => setMainView({ kind: "conversation", convID: restored.id })}
               />
@@ -1181,6 +1178,7 @@ export function Workbench({
                 onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
                 onOpenDM={(memberID) => void openOrCreateDM(memberID)}
                 onCopyAgent={canGovern ? (agent) => openNewAgentDialog(agent) : undefined}
+                onReviewAgentProposal={canGovern ? openAgentProposalDialog : undefined}
               />
             </ErrorBoundary>
           </div>
@@ -1220,6 +1218,7 @@ export function Workbench({
         onClose={() => {
           setDialog(null);
           setCopyAgent(null);
+          setAgentProposal(null);
         }}
         label="Connect a computer"
         width={520}
@@ -1227,8 +1226,8 @@ export function Workbench({
         <div className="p-6">
           <ComputerStep
             spaceSlug={spaceSlug}
-            nextLabel={copyAgent || agents.length === 0 ? "Next: create an agent" : "Done"}
-            onNext={() => setDialog(copyAgent || agents.length === 0 ? "agent" : null)}
+            nextLabel={copyAgent || agentProposal || agents.length === 0 ? "Next: create an agent" : "Done"}
+            onNext={() => setDialog(copyAgent || agentProposal || agents.length === 0 ? "agent" : null)}
           />
         </div>
       </Modal>
@@ -1237,27 +1236,39 @@ export function Workbench({
         onClose={() => {
           setDialog(null);
           setCopyAgent(null);
+          setAgentProposal(null);
         }}
         label="New agent"
         title="New agent"
         description={
-          copyAgent
-            ? `Starting from ${copyAgent.display_name}'s configuration.`
-            : "A persistent teammate with its own role, memory and workspace."
+          agentProposal
+            ? `Proposed by ${agentProposal.proposed_by_name || "an agent"}. Review, apply a template, or edit before creating.`
+            : copyAgent
+              ? `Starting from ${copyAgent.display_name}'s configuration.`
+              : "A persistent teammate with its own role, memory and workspace."
         }
         width={540}
       >
         <div className="px-6 pb-6 pt-4">
           <AgentForm
-            key={copyAgent?.id ?? "new"}
+            key={agentProposal?.message_id ?? copyAgent?.id ?? "new"}
             spaceSlug={spaceSlug}
             computers={myComputers}
             initialAgent={copyAgent ?? undefined}
+            initialProposal={agentProposal ?? undefined}
             existingMembers={boot.members}
             onCreated={(agent) => {
+              const fromProposal = agentProposal;
               setDialog(null);
               setCopyAgent(null);
-              void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }).then(() => openOrCreateDM(agent.id));
+              setAgentProposal(null);
+              if (fromProposal) {
+                void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, fromProposal.conversation_id] });
+                void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                setDetail({ kind: "agent", memberID: agent.id });
+              } else {
+                void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] }).then(() => openOrCreateDM(agent.id));
+              }
             }}
             footer={(submit) => (
               <div className="flex justify-end gap-2 pt-1">
@@ -1267,6 +1278,7 @@ export function Workbench({
                   onClick={() => {
                     setDialog(null);
                     setCopyAgent(null);
+                    setAgentProposal(null);
                   }}
                 >
                   Cancel

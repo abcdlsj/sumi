@@ -1,10 +1,79 @@
 import { Component, memo, useMemo, useRef, type ReactNode } from "react";
+import { FileText } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import type { BootstrapData, Member, Task } from "../api";
 import { MemberHoverCard } from "./AgentVisibility";
 import { CodeBlock } from "./CodeHighlight";
+
+const WORKSPACE_FILE_EXTS = new Set([
+  "md", "markdown", "mdx", "txt", "rst", "adoc",
+  "json", "jsonc", "jsonl", "yaml", "yml", "toml", "xml", "csv", "tsv",
+  "sql", "graphql", "gql", "prisma", "ini", "conf", "cfg", "properties", "log", "diff", "patch",
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
+  "go", "mod", "sum", "py", "pyi", "rs", "rb", "php", "java", "kt", "kts", "swift",
+  "c", "cc", "cpp", "cxx", "h", "hpp", "cs",
+  "sh", "bash", "zsh", "fish", "ps1",
+  "css", "scss", "sass", "less", "html", "htm", "svg", "vue", "svelte", "astro",
+  "proto", "tf", "hcl", "mk", "lua", "r", "dart", "ex", "exs", "erl", "zig", "nim",
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "pdf",
+]);
+
+const KNOWN_FILENAMES = new Set([
+  "makefile", "dockerfile", "readme", "license", "changelog",
+  "procfile", "justfile", "taskfile", "gemfile", "rakefile", "vagrantfile",
+  ".gitignore", ".dockerignore", ".editorconfig",
+]);
+
+const BLOCKED_DIRS = new Set([".aws", ".gnupg", ".ssh", ".sumi"]);
+
+/**
+ * Extracts a clean workspace-relative file path from an agent's inline code, link href, or prose token.
+ * Rejects URLs, traversal, shell commands, arbitrary absolute paths, and secret filenames.
+ */
+export function parseWorkspaceFilePath(raw: string): string | null {
+  let s = raw.trim();
+  if (!s || s.length > 260) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return null;
+
+  // Strip optional line/column anchors like :42, :42:5, :10-20, #L12, #L12-L20.
+  s = s.replace(/(?::\d+(?::\d+)?(?:-\d+(?::\d+)?)?|#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?)$/i, "");
+  if (!s) return null;
+
+  // Allow absolute paths only when they point inside an agent's .../workspace/ directory.
+  if (s.startsWith("/")) {
+    const wsMatch = s.match(/^\/.+\/workspace\/(.+)$/);
+    if (!wsMatch) return null;
+    s = wsMatch[1];
+  }
+
+  while (s.startsWith("./")) s = s.slice(2);
+  if (!s || s.startsWith("/") || s.startsWith("~") || s.startsWith("-") || s.endsWith("/")) return null;
+  if (/[\s\\*?<>|"'()[\]{};&$!=,\0]/.test(s)) return null;
+
+  const segments = s.split("/");
+  const clean: string[] = [];
+  for (const seg of segments) {
+    if (!seg || seg === "." || seg === "..") return null;
+    if (BLOCKED_DIRS.has(seg.toLowerCase())) return null;
+    clean.push(seg);
+  }
+  const base = clean[clean.length - 1];
+  const lowerBase = base.toLowerCase();
+  if (lowerBase === ".env" || lowerBase.startsWith(".env.") || lowerBase.startsWith("id_rsa") || lowerBase.startsWith("id_ed25519")) {
+    return null;
+  }
+  // Avoid matching common JS expressions like `console.log` when bare.
+  if (clean.length === 1 && lowerBase === "console.log") return null;
+
+  if (KNOWN_FILENAMES.has(lowerBase)) return clean.join("/");
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return null;
+  const ext = base.slice(dot + 1).toLowerCase();
+  if (!WORKSPACE_FILE_EXTS.has(ext)) return null;
+  return clean.join("/");
+}
 
 class MarkdownErrorBoundary extends Component<{ body: string; children: ReactNode }, { body: string; failed: boolean }> {
   state = { body: this.props.body, failed: false };
@@ -25,6 +94,7 @@ class MarkdownErrorBoundary extends Component<{ body: string; children: ReactNod
 interface MdastNode {
   type: string;
   value?: string;
+  url?: string;
   children?: MdastNode[];
   data?: {
     hName?: string;
@@ -34,15 +104,19 @@ interface MdastNode {
 
 const SKIP_TYPES = new Set(["code", "inlineCode", "link", "linkReference", "html", "definition"]);
 
+// Matches plain-text file paths like docs/plan.md, ./notes.md, or src/app.ts:42 without eating URLs or emails.
+const PLAIN_FILE_RE = /(^|[^A-Za-z0-9_@:/])((?:\.\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,10}(?::\d+(?::\d+)?(?:-\d+(?::\d+)?)?|#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?)?)(?![A-Za-z0-9_/@])/giu;
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
  * Remark plugin that turns `@display_name` (plus `@all`) and `#<task_number>` inside plain text
- * nodes into interactive chips while leaving code blocks, inline code, links and unknown tokens alone.
+ * nodes into interactive chips, and optionally turns workspace file paths in agent messages
+ * (inline code, relative links, and plain text) into clickable workspace file links.
  */
-function createRemarkRefs(names: string[], taskNumbers: number[]) {
+function createRemarkRefs(names: string[], taskNumbers: number[], detectFiles: boolean) {
   const uniqueNames = Array.from(new Set(["all", ...names.map((n) => n.toLowerCase())])).sort((a, b) => b.length - a.length);
   const nameAlt = uniqueNames.map(escapeRegex).join("|");
   const numAlt = taskNumbers.length > 0 ? Array.from(new Set(taskNumbers)).sort((a, b) => b - a).join("|") : "";
@@ -52,10 +126,49 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
   if (numAlt) branches.push(`#(${numAlt})(?![0-9A-Za-z_])`);
   const pattern = new RegExp(`(^|[^A-Za-z0-9_#])(?:${branches.join("|")})`, "giu");
 
+  function transformPlainFiles(value: string): MdastNode[] | null {
+    PLAIN_FILE_RE.lastIndex = 0;
+    let match = PLAIN_FILE_RE.exec(value);
+    if (!match) return null;
+
+    const out: MdastNode[] = [];
+    let cursor = 0;
+    let changed = false;
+    while (match) {
+      const prefix = match[1];
+      const token = match[2];
+      const start = match.index + prefix.length;
+      const resolved = parseWorkspaceFilePath(token);
+      if (resolved) {
+        if (start > cursor) {
+          out.push({ type: "text", value: value.slice(cursor, start) });
+        }
+        out.push({
+          type: "sumiFileRef",
+          data: {
+            hName: "span",
+            hProperties: { "data-workspace-file": resolved },
+          },
+          children: [{ type: "text", value: token }],
+        });
+        cursor = start + token.length;
+        changed = true;
+      }
+      match = PLAIN_FILE_RE.exec(value);
+    }
+    if (!changed) return null;
+    if (cursor < value.length) {
+      out.push({ type: "text", value: value.slice(cursor) });
+    }
+    return out;
+  }
+
   function transformText(value: string): MdastNode[] | null {
     pattern.lastIndex = 0;
     let match = pattern.exec(value);
-    if (!match) return null;
+    if (!match) {
+      return detectFiles ? transformPlainFiles(value) : null;
+    }
 
     const out: MdastNode[] = [];
     let cursor = 0;
@@ -65,7 +178,10 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
       const taskNum = match[3];
       const start = match.index + prefix.length;
       if (start > cursor) {
-        out.push({ type: "text", value: value.slice(cursor, start) });
+        const chunk = value.slice(cursor, start);
+        const fileParts = detectFiles ? transformPlainFiles(chunk) : null;
+        if (fileParts) out.push(...fileParts);
+        else out.push({ type: "text", value: chunk });
       }
       if (mention) {
         out.push({
@@ -91,7 +207,10 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
       match = pattern.exec(value);
     }
     if (cursor < value.length) {
-      out.push({ type: "text", value: value.slice(cursor) });
+      const tail = value.slice(cursor);
+      const fileParts = detectFiles ? transformPlainFiles(tail) : null;
+      if (fileParts) out.push(...fileParts);
+      else out.push({ type: "text", value: tail });
     }
     return out;
   }
@@ -107,6 +226,31 @@ function createRemarkRefs(names: string[], taskNumbers: number[]) {
           next.push(...parts);
           changed = true;
           continue;
+        }
+      } else if (detectFiles && child.type === "inlineCode" && typeof child.value === "string") {
+        const resolved = parseWorkspaceFilePath(child.value);
+        if (resolved) {
+          next.push({
+            type: "sumiFileRef",
+            data: {
+              hName: "span",
+              hProperties: { "data-workspace-file": resolved },
+            },
+            children: [{ type: "text", value: child.value }],
+          });
+          changed = true;
+          continue;
+        }
+      } else if (detectFiles && child.type === "link" && typeof child.url === "string") {
+        const resolved = parseWorkspaceFilePath(child.url);
+        if (resolved) {
+          child.data = {
+            ...child.data,
+            hProperties: {
+              ...(child.data?.hProperties ?? {}),
+              "data-workspace-file": resolved,
+            },
+          };
         }
       } else {
         walk(child);
@@ -129,6 +273,7 @@ export const MessageBody = memo(function MessageBody({
   selfID,
   onSelectMember,
   onSelectTask,
+  onOpenWorkspaceFile,
 }: {
   body: string;
   members: Member[];
@@ -137,6 +282,7 @@ export const MessageBody = memo(function MessageBody({
   selfID?: string;
   onSelectMember?: (member: Member) => void;
   onSelectTask?: (task: Task) => void;
+  onOpenWorkspaceFile?: (filePath: string) => void;
 }) {
   const membersRef = useRef(members);
   membersRef.current = members;
@@ -148,6 +294,7 @@ export const MessageBody = memo(function MessageBody({
   // Key by names and task numbers only so agent state ticks never re-parse markdown.
   const memberSig = members.map((m) => `${m.id}:${m.display_name}:${m.kind}`).join("\0");
   const taskSig = tasks.map((t) => `${t.id}:${t.number}:${t.title}`).join("\0");
+  const clickableFile = Boolean(onOpenWorkspaceFile);
 
   const memberByKey = useMemo(() => {
     const map = new Map<string, Member>();
@@ -164,13 +311,15 @@ export const MessageBody = memo(function MessageBody({
   const plugins = useMemo(() => {
     const names = membersRef.current.map((m) => m.display_name);
     const nums = tasksRef.current.map((t) => t.number);
-    return [remarkGfm, remarkCjkFriendly, createRemarkRefs(names, nums)];
-  }, [memberSig, taskSig]);
+    return [remarkGfm, remarkCjkFriendly, createRemarkRefs(names, nums, clickableFile)];
+  }, [memberSig, taskSig, clickableFile]);
 
   const onSelectMemberRef = useRef(onSelectMember);
   onSelectMemberRef.current = onSelectMember;
   const onSelectTaskRef = useRef(onSelectTask);
   onSelectTaskRef.current = onSelectTask;
+  const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
+  onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
   const clickableMember = Boolean(onSelectMember);
   const clickableTask = Boolean(onSelectTask);
 
@@ -186,8 +335,48 @@ export const MessageBody = memo(function MessageBody({
           </div>
         );
       },
+      a({ node: _node, children, href, ...props }) {
+        const record = props as Record<string, unknown>;
+        const wsFile = record["data-workspace-file"];
+        if (typeof wsFile === "string" && clickableFile) {
+          return (
+            <a
+              {...props}
+              href={href}
+              title={`Open ${wsFile} in workspace`}
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenWorkspaceFileRef.current?.(wsFile);
+              }}
+            >
+              {children}
+            </a>
+          );
+        }
+        return (
+          <a {...props} href={href} target="_blank" rel="noreferrer">
+            {children}
+          </a>
+        );
+      },
       span({ node: _node, children, ...props }) {
         const record = props as Record<string, unknown>;
+        const wsFile = record["data-workspace-file"];
+        if (typeof wsFile === "string" && clickableFile) {
+          return (
+            <button
+              type="button"
+              data-workspace-file={wsFile}
+              title={`Open ${wsFile} in workspace`}
+              onClick={() => onOpenWorkspaceFileRef.current?.(wsFile)}
+              className="inline-flex items-baseline gap-1 px-1.5 py-[0.5px] -my-[0.5px] rounded-[4px] font-mono text-[0.88em] bg-subtle text-fg border border-line hover:border-accent hover:text-accent-text transition-colors cursor-pointer"
+            >
+              <FileText className="size-3 text-fg-3 self-center shrink-0" aria-hidden />
+              <span>{children}</span>
+            </button>
+          );
+        }
+
         const taskKey = record["data-task-ref"];
         if (typeof taskKey === "string") {
           const task = taskByNum.get(taskKey);
@@ -268,7 +457,7 @@ export const MessageBody = memo(function MessageBody({
         return btn;
       },
     }),
-    [memberByKey, taskByNum, selfID, clickableMember, clickableTask],
+    [memberByKey, taskByNum, selfID, clickableMember, clickableTask, clickableFile],
   );
 
   return (

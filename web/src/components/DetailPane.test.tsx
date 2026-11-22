@@ -271,6 +271,49 @@ describe("AgentDetail activity", () => {
     expect(await screen.findByText("Hello world!")).toBeTruthy();
   });
 
+  it("opens directly to a targeted file in the Workspace tab when jumped from an agent message", async () => {
+    const listSpy = vi.spyOn(api, "listAgentWorkspace").mockResolvedValue({
+      root_path: "/tmp/agents/a1/workspace",
+      path: "",
+      entries: [],
+    });
+    const readSpy = vi.spyOn(api, "readAgentWorkspaceFile").mockResolvedValue({
+      path: "docs/report.md",
+      size: 16,
+      mtime_ms: Date.now(),
+      binary: false,
+      encoding: "utf8",
+      content: "# Sprint Report\n",
+    });
+
+    const member: Member = {
+      id: "a1",
+      space_id: "s",
+      kind: "agent",
+      display_name: "Lin",
+      access_level: "member",
+      agent: { role_text: "Backend engineer", driver_kind: "acp", runtime_state: "idle" },
+      created_at: "",
+    };
+    const data = { ...boot, members: [member] } as unknown as BootstrapData;
+    const qc = new QueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <DetailPane
+          spaceSlug="s"
+          boot={data}
+          target={{ kind: "agent", memberID: "a1", tab: "workspace", filePath: "docs/report.md", openNonce: 1 }}
+          onClose={() => {}}
+          onSelectTarget={() => {}}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(readSpy).toHaveBeenCalledWith("s", "a1", "docs/report.md"));
+    expect(listSpy).toHaveBeenCalledWith("s", "a1", "docs", false);
+    expect(await screen.findByText("Sprint Report")).toBeTruthy();
+  });
+
   it("copies an agent config and saves a template directly from AgentDetail", () => {
     const onCopyAgent = vi.fn();
     const member: Member = {

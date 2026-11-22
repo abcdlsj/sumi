@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
-import { activityLabel, api, formatClock, formatDay, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
+import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey } from "../preferences";
-import { AgentReadFaces, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
+import { ActionCard, isActionCardMessage } from "./ActionCard";
+import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
 import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
@@ -20,7 +21,7 @@ import { Badge, Button, EmptyState, ErrorState, IconButton, Menu, MenuItem, Segm
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
-  | { kind: "agent"; memberID: string }
+  | { kind: "agent"; memberID: string; tab?: "overview" | "workspace"; filePath?: string; openNonce?: number }
   | { kind: "human"; memberID: string }
   | { kind: "members"; convID: string }
   | { kind: "channel_tasks"; convID: string };
@@ -64,6 +65,7 @@ function CompactMessage({
   spaceSlug,
   boot,
   onSelectTarget,
+  onReviewAgentProposal,
   pickerOpen,
   onPickerOpenChange,
   onToggleReaction,
@@ -72,10 +74,52 @@ function CompactMessage({
   spaceSlug: string;
   boot: BootstrapData;
   onSelectTarget: (t: DetailTarget) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
   pickerOpen: boolean;
   onPickerOpenChange: (open: boolean) => void;
   onToggleReaction: (messageID: string, emoji: Parameters<typeof api.addReaction>[2], reacted: boolean) => void;
 }) {
+  const canGovern = boot.current_member.access_level !== "member";
+  if (isActionCardMessage(m)) {
+    const author = boot.members.find((x) => x.id === m.author_member_id);
+    return (
+      <article className="flex items-start gap-2.5">
+        <button
+          type="button"
+          onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+          aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
+          className="shrink-0"
+        >
+          <MemberAvatar
+            id={m.author_member_id}
+            name={m.author_display_name ?? "?"}
+            kind={m.author_kind ?? "human"}
+            size="sm"
+            state={author?.agent?.runtime_state}
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 h-5">
+            <button
+              type="button"
+              onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+              className="text-[13.5px] font-semibold text-fg hover:underline underline-offset-2"
+            >
+              {m.author_display_name}
+            </button>
+            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+          </div>
+          <ActionCard
+            spaceSlug={spaceSlug}
+            message={m}
+            canGovern={canGovern}
+            onReviewAgentProposal={onReviewAgentProposal}
+            onInspectAgent={(memberID) => onSelectTarget({ kind: "agent", memberID })}
+          />
+        </div>
+      </article>
+    );
+  }
   if (m.kind !== "text") {
     return (
       <div className="flex items-center gap-2 text-[13px] text-fg-3 pl-1">
@@ -123,6 +167,18 @@ function CompactMessage({
             selfID={boot.current_member.id}
             onSelectMember={(member) => onSelectTarget(memberDetailTarget(member))}
             onSelectTask={(tk) => onSelectTarget({ kind: "task", taskID: tk.id })}
+            onOpenWorkspaceFile={
+              m.author_kind === "agent"
+                ? (filePath) =>
+                    onSelectTarget({
+                      kind: "agent",
+                      memberID: m.author_member_id,
+                      tab: "workspace",
+                      filePath,
+                      openNonce: Date.now(),
+                    })
+                : undefined
+            }
           />
         </div>
         <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
@@ -247,6 +303,7 @@ export function DetailPane({
   onOpenConversation,
   onOpenDM,
   onCopyAgent,
+  onReviewAgentProposal,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -256,12 +313,30 @@ export function DetailPane({
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
   onCopyAgent?: (agent: Member) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
 }) {
   return (
     <aside className="h-full bg-panel border-l border-line flex flex-col min-h-0">
-      {target.kind === "task" && <TaskDetail spaceSlug={spaceSlug} boot={boot} taskID={target.taskID} onClose={onClose} onSelectTarget={onSelectTarget} />}
+      {target.kind === "task" && (
+        <TaskDetail
+          spaceSlug={spaceSlug}
+          boot={boot}
+          taskID={target.taskID}
+          onClose={onClose}
+          onSelectTarget={onSelectTarget}
+          onReviewAgentProposal={onReviewAgentProposal}
+        />
+      )}
       {target.kind === "thread" && (
-        <ThreadDetail spaceSlug={spaceSlug} boot={boot} threadConvID={target.threadConvID} parentSlug={target.parentSlug} onClose={onClose} onSelectTarget={onSelectTarget} />
+        <ThreadDetail
+          spaceSlug={spaceSlug}
+          boot={boot}
+          threadConvID={target.threadConvID}
+          parentSlug={target.parentSlug}
+          onClose={onClose}
+          onSelectTarget={onSelectTarget}
+          onReviewAgentProposal={onReviewAgentProposal}
+        />
       )}
       {target.kind === "members" && <MembersDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
       {target.kind === "channel_tasks" && <ChannelTasksDetail spaceSlug={spaceSlug} boot={boot} convID={target.convID} onClose={onClose} onSelectTarget={onSelectTarget} />}
@@ -271,6 +346,9 @@ export function DetailPane({
           spaceSlug={spaceSlug}
           boot={boot}
           memberID={target.memberID}
+          initialTab={target.tab}
+          initialFilePath={target.filePath}
+          openNonce={target.openNonce}
           onClose={onClose}
           onSelectTarget={onSelectTarget}
           onOpenConversation={onOpenConversation}
@@ -629,12 +707,14 @@ function TaskDetail({
   taskID,
   onClose,
   onSelectTarget,
+  onReviewAgentProposal,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
   taskID: string;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
@@ -901,6 +981,7 @@ function TaskDetail({
                 spaceSlug={spaceSlug}
                 boot={boot}
                 onSelectTarget={onSelectTarget}
+                onReviewAgentProposal={onReviewAgentProposal}
                 pickerOpen={pickerMsgID === m.id}
                 onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
                 onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
@@ -938,6 +1019,7 @@ function ThreadDetail({
   parentSlug,
   onClose,
   onSelectTarget,
+  onReviewAgentProposal,
 }: {
   spaceSlug: string;
   boot: BootstrapData;
@@ -945,6 +1027,7 @@ function ThreadDetail({
   parentSlug: string;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
 }) {
   const qc = useQueryClient();
   const act = useAction();
@@ -1039,11 +1122,12 @@ function ThreadDetail({
                   spaceSlug={spaceSlug}
                   boot={boot}
                   onSelectTarget={onSelectTarget}
+                  onReviewAgentProposal={onReviewAgentProposal}
                   pickerOpen={pickerMsgID === m.id}
                   onPickerOpenChange={(open) => setPickerMsgID(open ? m.id : null)}
                   onToggleReaction={(id, emoji, reacted) => void reactions.toggle(id, emoji, reacted)}
                 />
-                <AgentReadFaces
+                <AgentReadReceipts
                   agents={agentReadMap.get(m.id)}
                   boot={boot}
                   onSelectAgent={(memberID) => onSelectTarget({ kind: "agent", memberID })}
@@ -1136,6 +1220,9 @@ function AgentDetail({
   spaceSlug,
   boot,
   memberID,
+  initialTab,
+  initialFilePath,
+  openNonce,
   onClose,
   onSelectTarget,
   onOpenConversation,
@@ -1145,6 +1232,9 @@ function AgentDetail({
   spaceSlug: string;
   boot: BootstrapData;
   memberID: string;
+  initialTab?: "overview" | "workspace";
+  initialFilePath?: string;
+  openNonce?: number;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
@@ -1158,7 +1248,12 @@ function AgentDetail({
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [tplName, setTplName] = useState("");
-  const [tab, setTab] = useState<"overview" | "workspace">("overview");
+  const [tab, setTab] = useState<"overview" | "workspace">(initialFilePath ? "workspace" : (initialTab ?? "overview"));
+
+  useEffect(() => {
+    if (initialFilePath) setTab("workspace");
+    else if (initialTab) setTab(initialTab);
+  }, [initialTab, initialFilePath, openNonce]);
   const member = boot.members.find((m) => m.id === memberID);
   if (!member?.agent) return <DetailSkeleton />;
   const ag = member.agent;
@@ -1284,7 +1379,15 @@ function AgentDetail({
         </form>
       )}
       {tab === "workspace" ? (
-        <AgentWorkspace key={member.id} spaceSlug={spaceSlug} member={member} computer={comp} boot={boot} />
+        <AgentWorkspace
+          key={member.id}
+          spaceSlug={spaceSlug}
+          member={member}
+          computer={comp}
+          boot={boot}
+          initialFilePath={initialFilePath}
+          openNonce={openNonce}
+        />
       ) : (
         <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
         <div className="px-5 py-5 flex items-center gap-4">

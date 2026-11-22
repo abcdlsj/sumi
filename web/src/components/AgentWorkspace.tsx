@@ -93,11 +93,15 @@ export function AgentWorkspace({
   member,
   computer,
   boot,
+  initialFilePath,
+  openNonce,
 }: {
   spaceSlug: string;
   member: Member;
   computer?: Computer;
   boot: BootstrapData;
+  initialFilePath?: string;
+  openNonce?: number;
 }) {
   const [includeHidden, setIncludeHiddenState] = useState(readHiddenPref);
   const [treeQuery, setTreeQuery] = useState("");
@@ -185,14 +189,42 @@ export function AgentWorkspace({
     [spaceSlug, member.id],
   );
 
+  const expandAncestors = useCallback(
+    (relPath: string, hidden: boolean) => {
+      const parts = relPath.split("/").filter(Boolean);
+      if (parts.length <= 1) return;
+      const dirs: string[] = [];
+      for (let i = 1; i < parts.length; i++) {
+        dirs.push(parts.slice(0, i).join("/"));
+      }
+      setExpanded((prev) => {
+        const next = { ...prev };
+        for (const d of dirs) next[d] = true;
+        return next;
+      });
+      for (const d of dirs) {
+        void loadDir(d, hidden, false);
+      }
+    },
+    [loadDir],
+  );
+
   useEffect(() => {
     setExpanded({});
     setDirEntries({});
-    setSelectedFile(null);
-    setFileContent(null);
-    setFileError(null);
+    if (!initialFilePath) {
+      setSelectedFile(null);
+      setFileContent(null);
+      setFileError(null);
+    }
     void loadDir("", includeHidden, true);
   }, [member.id, includeHidden, loadDir]);
+
+  useEffect(() => {
+    if (!initialFilePath) return;
+    expandAncestors(initialFilePath, includeHidden);
+    void openFile(initialFilePath);
+  }, [initialFilePath, openNonce, member.id, includeHidden, expandAncestors, openFile]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -393,7 +425,15 @@ export function AgentWorkspace({
             </div>
           ) : fileContent && md && mdMode === "preview" ? (
             <div className="p-4 text-[14px] leading-relaxed text-fg md">
-              <MessageBody body={fileContent.content} members={boot.members} tasks={boot.tasks} />
+              <MessageBody
+                body={fileContent.content}
+                members={boot.members}
+                tasks={boot.tasks}
+                onOpenWorkspaceFile={(p) => {
+                  expandAncestors(p, includeHidden);
+                  void openFile(p);
+                }}
+              />
             </div>
           ) : fileContent ? (
             fileContent.content ? (

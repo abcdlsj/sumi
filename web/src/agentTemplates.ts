@@ -116,6 +116,25 @@ export function saveAgentTemplate(input: AgentTemplateInput): AgentTemplate {
   return next;
 }
 
+export function updateAgentTemplate(id: string, input: AgentTemplateInput): AgentTemplate | null {
+  const cleanName = input.name.trim().slice(0, 48);
+  if (!cleanName) return null;
+  const existing = loadAll();
+  const idx = existing.findIndex((t) => t.id === id);
+  if (idx < 0) return null;
+  const updated: AgentTemplate = {
+    ...existing[idx],
+    name: cleanName,
+    role_text: input.role_text.trim(),
+    computer_id: input.computer_id || undefined,
+    driver_kind: input.driver_kind,
+    driver_config: sanitizeDriverConfig(input.driver_kind, input.driver_config),
+  };
+  const next = existing.map((t) => (t.id === id ? updated : t));
+  persist(next);
+  return updated;
+}
+
 export function deleteAgentTemplate(id: string) {
   const existing = loadAll();
   const next = existing.filter((t) => t.id !== id);
@@ -179,7 +198,8 @@ export function useAgentTemplates() {
   }, []);
 
   const save = useCallback((input: AgentTemplateInput) => saveAgentTemplate(input), []);
+  const update = useCallback((id: string, input: AgentTemplateInput) => updateAgentTemplate(id, input), []);
   const remove = useCallback((id: string) => deleteAgentTemplate(id), []);
 
-  return { templates, save, remove };
+  return { templates, save, update, remove };
 }
