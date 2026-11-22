@@ -20,6 +20,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/abcdlsj/sumi/internal/agenthost"
 	"github.com/abcdlsj/sumi/internal/datadir"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
@@ -34,6 +35,9 @@ type Config struct {
 	DaemonVersion string
 	// SumiBinary is the executable exposed to agents as `sumi` on PATH; defaults to os.Executable().
 	SumiBinary string
+	// UseSidecar hosts each agent's SessionDriver in a detached `sumi agent-host` process so
+	// restarting `sumi computer` does not interrupt in-flight turns.
+	UseSidecar bool
 	// Optional factory override for deterministic scenario tests.
 	DriverFactory func(spec protocol.AssignedAgentSpec, agentHome string) (driver.SessionDriver, error)
 }
@@ -47,15 +51,16 @@ type hostedAgent struct {
 	mu sync.Mutex
 	// spec and drv are replaced on re-provision; drv is nil when the last provision failed,
 	// in which case failCode/failDetail describe why.
-	spec        protocol.AssignedAgentSpec
-	drv         driver.SessionDriver
-	failCode    string
-	failDetail  string
-	busy        bool
-	dirty       bool
-	focusConvID string
-	lastReason  string
-	lastConvID  string
+	spec           protocol.AssignedAgentSpec
+	drv            driver.SessionDriver
+	failCode       string
+	failDetail     string
+	busy           bool
+	dirty          bool
+	focusConvID    string
+	attachedTurnID string
+	lastReason     string
+	lastConvID     string
 
 	// Failure breaker: after failurePauseThreshold consecutive failed turns the Agent stops
 	// taking wakes until a probe timer, Restart, Reset session or a new spec. Unread triggers stay
@@ -90,19 +95,27 @@ type Daemon struct {
 	daemonSessionID  string
 	httpClient       *http.Client
 
-	mu           sync.RWMutex
-	agents       map[string]*hostedAgent
-	tokenToAgent map[string]string
-	wsSendCh     chan protocol.Envelope
-	connected    bool
-	connectedAt  time.Time
-	serverCaps   []string
-	socketPath   string
-	socketServer *http.Server
-	socketLn     net.Listener
-	binDir       string
-	stopCh       chan struct{}
-	stopOnce     sync.Once
+	mu              sync.RWMutex
+	agents          map[string]*hostedAgent
+	tokenToAgent    map[string]string
+	wsSendCh        chan protocol.Envelope
+	connected       bool
+	connectedAt     time.Time
+	serverCaps      []string
+	socketPath      string
+	socketServer    *http.Server
+	socketLn        net.Listener
+	binDir          string
+	draining        bool
+	drainRequestID  string
+	drainDeadlineAt time.Time
+	drainHoldTimer  *time.Timer
+	drainCheckCh    chan struct{}
+	drainHoldGrace  time.Duration
+	detachCh        chan struct{}
+	detachOnce      sync.Once
+	stopCh          chan struct{}
+	stopOnce        sync.Once
 }
 
 type breakerPolicy struct {
@@ -141,6 +154,9 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
 		agents:          make(map[string]*hostedAgent),
 		tokenToAgent:    make(map[string]string),
+		drainCheckCh:    make(chan struct{}, 1),
+		drainHoldGrace:  defaultDrainHoldGrace,
+		detachCh:        make(chan struct{}),
 		stopCh:          make(chan struct{}),
 	}
 }
@@ -224,25 +240,87 @@ func detectACPProviders() []string {
 }
 
 func (d *Daemon) Stop() {
+	d.stopWith(false, 0)
+}
+
+// StopGraceful gives each agent driver a bounded window to flush persisted session state before stopping.
+func (d *Daemon) StopGraceful(timeoutSeconds int) {
+	d.stopWith(true, timeoutSeconds)
+}
+
+func (d *Daemon) stopWith(graceful bool, timeoutSeconds int) {
 	d.stopOnce.Do(func() {
+		d.clearDrainTimerLocked()
 		close(d.stopCh)
-		if d.socketServer != nil {
-			_ = d.socketServer.Close()
+		d.closeSocketLocked()
+		d.mu.Lock()
+		agents := make([]*hostedAgent, 0, len(d.agents))
+		for _, ag := range d.agents {
+			agents = append(agents, ag)
 		}
-		if d.socketPath != "" {
-			_ = os.Remove(d.socketPath)
+		d.mu.Unlock()
+		for _, ag := range agents {
+			ag.mu.Lock()
+			ag.resetBreakerLocked()
+			drv := ag.drv
+			ag.mu.Unlock()
+			if drv == nil {
+				continue
+			}
+			if graceful {
+				if gc, ok := drv.(driver.GracefulCloser); ok {
+					_ = gc.GracefulClose(timeoutSeconds)
+					continue
+				}
+			}
+			_ = drv.Close()
 		}
+	})
+}
+
+// Detach stops this Daemon process for a hot upgrade while keeping every `sumi agent-host`
+// sidecar and any in-flight turns running undisturbed.
+func (d *Daemon) Detach() {
+	d.detachOnce.Do(func() { close(d.detachCh) })
+	d.stopOnce.Do(func() {
+		d.clearDrainTimerLocked()
+		close(d.stopCh)
+		d.closeSocketLocked()
 		d.mu.Lock()
 		for _, ag := range d.agents {
 			ag.mu.Lock()
 			ag.resetBreakerLocked()
-			if ag.drv != nil {
-				_ = ag.drv.Close()
+			if hc, ok := ag.drv.(*agenthost.Client); ok {
+				hc.Detach()
 			}
 			ag.mu.Unlock()
 		}
 		d.mu.Unlock()
 	})
+}
+
+func (d *Daemon) closeSocketLocked() {
+	d.mu.Lock()
+	srv, sock := d.socketServer, d.socketPath
+	d.socketServer, d.socketLn = nil, nil
+	d.mu.Unlock()
+	if srv != nil {
+		_ = srv.Close()
+	}
+	if sock != "" {
+		_ = os.Remove(sock)
+	}
+}
+
+// RebindCapabilitySocket re-opens capability.sock after a failed hot-upgrade rollback.
+func (d *Daemon) RebindCapabilitySocket() error {
+	return d.startCapabilitySocket()
+}
+
+// ReleaseCapabilitySocket closes capability.sock without stopping the daemon, used during
+// verified replacement handoff so the candidate daemon can bind the deterministic socket path.
+func (d *Daemon) ReleaseCapabilitySocket() {
+	d.closeSocketLocked()
 }
 
 func (d *Daemon) connectLoop(ctx context.Context) {

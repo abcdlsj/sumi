@@ -16,6 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/abcdlsj/sumi/internal/agenthost"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
 	"github.com/abcdlsj/sumi/internal/driver/acp"
@@ -27,7 +30,13 @@ func (d *Daemon) provisionAndWake(ctx context.Context, spec protocol.AssignedAge
 	ag := d.provisionAgent(spec)
 	ag.mu.Lock()
 	failCode, failDetail, ok, busy, focusConvID := ag.failCode, ag.failDetail, ag.drv != nil, ag.busy, ag.focusConvID
-	if ok && busy {
+	attachedTurnID := ag.attachedTurnID
+	if attachedTurnID != "" {
+		ag.attachedTurnID = ""
+		ag.busy = true
+		ag.dirty = true
+		busy = true
+	} else if ok && busy {
 		// Preserve in-flight turn state across WS reconnects; mark dirty so unread items
 		// accumulated during the disconnect are fetched right after the current turn ends.
 		ag.dirty = true
@@ -36,6 +45,11 @@ func (d *Daemon) provisionAndWake(ctx context.Context, spec protocol.AssignedAge
 	if !ok {
 		d.logger.Warn("Agent provision failed", "agent_id", spec.MemberID, "error_code", failCode)
 		d.reportAgentState(spec.MemberID, domain.RuntimeError, "", failCode, failDetail)
+		return
+	}
+	if attachedTurnID != "" {
+		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focusConvID, "", "")
+		go d.resumeAttachedTurn(ctx, ag, attachedTurnID, focusConvID)
 		return
 	}
 	if busy {
@@ -134,6 +148,20 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 	var err error
 	if d.cfg.DriverFactory != nil {
 		drv, err = d.cfg.DriverFactory(spec, ag.homeDir)
+	} else if d.cfg.UseSidecar {
+		attachCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		hc, st, attachErr := agenthost.AttachOrSpawn(attachCtx, agenthost.AttachOptions{
+			BinaryPath:    d.cfg.SumiBinary,
+			AgentHome:     ag.homeDir,
+			Spec:          spec,
+			ScrubEnvToken: d.cfg.ComputerToken,
+		})
+		cancel()
+		drv, err = hc, attachErr
+		if err == nil && st.Busy && st.TurnID != "" {
+			ag.attachedTurnID = st.TurnID
+			ag.focusConvID = st.FocusConvID
+		}
 	} else {
 		drv, err = buildDriver(spec, ag.homeDir)
 	}
@@ -332,6 +360,11 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 	if convID != "" {
 		ag.lastConvID = convID
 	}
+	if d.isDraining() {
+		ag.dirty = true
+		ag.mu.Unlock()
+		return
+	}
 	if ag.busy || (ag.retryTimer != nil && reason != "retry") {
 		ag.dirty = true
 		ag.mu.Unlock()
@@ -352,6 +385,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.busy = false
 			ag.focusConvID = ""
 			ag.mu.Unlock()
+			d.notifyDrainCheck()
 		}
 	}()
 	for {
@@ -363,6 +397,16 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			d.reportAgentState(spec.MemberID, domain.RuntimeError, "", failCode, failDetail)
 			return
 		}
+		if d.isDraining() {
+			ag.mu.Lock()
+			ag.dirty = true
+			ag.busy = false
+			ag.focusConvID = ""
+			released = true
+			ag.mu.Unlock()
+			d.notifyDrainCheck()
+			return
+		}
 
 		items, err := d.fetchAgentInbox(ctx, spec.MemberID)
 		if err != nil {
@@ -372,7 +416,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		if len(items) == 0 {
 			// Check dirty and clear busy under the same lock so wakes arriving during fetchAgentInbox are never lost.
 			ag.mu.Lock()
-			if ag.dirty && !ag.paused {
+			if ag.dirty && !ag.paused && !d.isDraining() {
 				ag.dirty = false
 				ag.mu.Unlock()
 				continue
@@ -381,6 +425,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.focusConvID = ""
 			released = true
 			ag.mu.Unlock()
+			d.notifyDrainCheck()
 			d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 			return
 		}
@@ -394,6 +439,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
 		turnCtx, cancel := context.WithCancelCause(ctx)
+		stopDetachWatch := d.watchDetach(cancel)
 		tracker := newWatchedTurnActivity(d.activity, func(a *domain.AgentActivity) {
 			d.reportAgentStateWith(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "", a)
 		}, func() bool {
@@ -406,7 +452,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 				d.logger.Warn("Refresh ACP runtime dir failed", "agent_id", spec.MemberID, "error", err.Error())
 			}
 		}
-		_, runErr := drv.RunTurn(turnCtx, driver.TurnInput{
+		turnInput := driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
 			StartupContext: buildStartupContext(spec, ag.memoryDir),
 			UserPrompt:     buildWakePrompt(items),
@@ -414,12 +460,25 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			MemoryDir:      ag.memoryDir,
 			Env:            d.agentEnv(ag, spec.DriverKind, spec.DriverConfig.Provider),
 			OnActivity:     tracker.Observe,
-		})
+		}
+		var runErr error
+		if hc, ok := drv.(*agenthost.Client); ok {
+			_, runErr = hc.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+		} else {
+			_, runErr = drv.RunTurn(turnCtx, turnInput)
+		}
 		if errors.Is(context.Cause(turnCtx), errTurnStalled) {
 			runErr = driver.Fail(domain.AgentErrTurnStalled, errTurnStalled)
 		}
+		stopDetachWatch()
 		cancel(nil)
 		tracker.Close()
+
+		if errors.Is(runErr, agenthost.ErrDetaching) || errors.Is(context.Cause(turnCtx), agenthost.ErrDetaching) {
+			// Daemon is detaching for hot upgrade; the turn continues inside agent-host.
+			released = true
+			return
+		}
 
 		ag.mu.Lock()
 		replaced := ag.drv != drv
@@ -450,16 +509,107 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 
 		// Check if new wakes arrived while busy; clear busy under the same lock to prevent lost wakes.
 		ag.mu.Lock()
-		if !ag.dirty || ag.paused {
+		if !ag.dirty || ag.paused || d.isDraining() {
 			ag.busy = false
 			ag.focusConvID = ""
 			released = true
 			ag.mu.Unlock()
+			d.notifyDrainCheck()
 			return
 		}
 		ag.dirty = false
 		ag.mu.Unlock()
 	}
+}
+
+func (d *Daemon) watchDetach(cancel context.CancelCauseFunc) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-d.detachCh:
+			cancel(agenthost.ErrDetaching)
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+// resumeAttachedTurn re-attaches to a turn already running inside a surviving `sumi agent-host`
+// sidecar after a hot `sumi computer` restart, then continues the normal agent loop if dirty.
+func (d *Daemon) resumeAttachedTurn(ctx context.Context, ag *hostedAgent, turnID, focusConvID string) {
+	ag.mu.Lock()
+	spec, drv := ag.spec, ag.drv
+	ag.mu.Unlock()
+	hc, ok := drv.(*agenthost.Client)
+	if !ok {
+		ag.mu.Lock()
+		ag.busy = false
+		ag.focusConvID = ""
+		ag.mu.Unlock()
+		d.notifyDrainCheck()
+		return
+	}
+
+	turnStart := time.Now()
+	d.logger.Info("Re-attached to in-flight agent turn", "agent_id", spec.MemberID, "turn_id", turnID, "conversation_id", focusConvID)
+	turnCtx, cancel := context.WithCancelCause(ctx)
+	stopDetachWatch := d.watchDetach(cancel)
+	tracker := newWatchedTurnActivity(d.activity, func(a *domain.AgentActivity) {
+		d.reportAgentStateWith(spec.MemberID, domain.RuntimeWorking, focusConvID, "", "", a)
+	}, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return ag.dirty
+	}, func() { cancel(errTurnStalled) })
+
+	_, runErr := hc.WaitTurn(turnCtx, turnID, tracker.Observe)
+	if errors.Is(context.Cause(turnCtx), errTurnStalled) {
+		runErr = driver.Fail(domain.AgentErrTurnStalled, errTurnStalled)
+	}
+	stopDetachWatch()
+	cancel(nil)
+	tracker.Close()
+
+	if errors.Is(runErr, agenthost.ErrDetaching) || errors.Is(context.Cause(turnCtx), agenthost.ErrDetaching) {
+		return
+	}
+
+	if runErr != nil {
+		code, detail := failureOf(runErr, spec)
+		d.logger.Warn("Re-attached agent turn failed", "agent_id", spec.MemberID, "error_code", code, "error", detail)
+		if delay, paused := d.recordFailure(ctx, ag); paused {
+			detail = domain.BoundErrorDetail(fmt.Sprintf("paused after %d failed turns, retry in %s: %s", d.breaker.threshold, delay.Round(time.Second), detail))
+		} else {
+			delay := d.armRetry(ctx, ag)
+			detail = domain.BoundErrorDetail(fmt.Sprintf("retrying in %s: %s", delay.Round(time.Second), detail))
+		}
+		ag.mu.Lock()
+		ag.busy = false
+		ag.focusConvID = ""
+		ag.mu.Unlock()
+		d.notifyDrainCheck()
+		d.reportAgentState(spec.MemberID, domain.RuntimeError, focusConvID, code, detail)
+		return
+	}
+
+	ag.mu.Lock()
+	ag.resetBreakerLocked()
+	ag.focusConvID = ""
+	shouldContinue := ag.dirty && !ag.paused && !d.isDraining()
+	if !shouldContinue {
+		ag.busy = false
+	} else {
+		ag.dirty = false
+	}
+	ag.mu.Unlock()
+
+	d.logger.Info("Re-attached agent turn completed", "agent_id", spec.MemberID, "turn_id", turnID, "duration_ms", time.Since(turnStart).Milliseconds())
+	if !shouldContinue {
+		d.notifyDrainCheck()
+		d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
+		return
+	}
+	d.runAgentLoop(ctx, ag)
 }
 
 // recordFailure counts a failed turn and, at the threshold, pauses the Agent and arms one probe
