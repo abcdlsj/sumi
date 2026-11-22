@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearAgentTemplatesForTests, listAgentTemplates, suggestCopyName } from "../agentTemplates";
+import { clearAgentTemplatesForTests, listAgentTemplates, saveAgentTemplate, suggestCopyName } from "../agentTemplates";
 import { api, type Computer, type Member } from "../api";
 import { AgentForm } from "./AgentForm";
 import { agentSprite } from "./Avatar";
@@ -226,6 +226,46 @@ describe("AgentForm", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete template Auditor" }));
     expect(listAgentTemplates()).toHaveLength(0);
+  });
+
+  it("saves a template with an empty role", () => {
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save as template" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Template name" }), { target: { value: "Bare" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(listAgentTemplates()).toHaveLength(1);
+    expect(listAgentTemplates()[0].role_text).toBe("");
+  });
+
+  it("keeps current role and driver values when a template leaves them blank", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    saveAgentTemplate({ name: "Bare", role_text: "", driver_kind: "builtin", driver_config: {} });
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { pressed: false, name: /Model API/ }));
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Keep my role" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "http://127.0.0.1:4000/v1" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "keep-model" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bare/ }));
+    expect((screen.getByLabelText("Role") as HTMLTextAreaElement).value).toBe("Keep my role");
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:4000/v1");
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("keep-model");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({
+          role_text: "Keep my role",
+          driver_kind: "builtin",
+          driver_config: { base_url: "http://127.0.0.1:4000/v1", model: "keep-model" },
+        }),
+      ),
+    );
   });
 
   it("edits a saved template via the edit modal and via the active-template quick update without creating an agent", () => {

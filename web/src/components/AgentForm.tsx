@@ -115,6 +115,23 @@ export function draftFromTemplate(tpl: AgentTemplate, computer?: Computer): Driv
   };
 }
 
+/** A template may leave fields blank; blanks never wipe what the form already holds. */
+export function mergeDraft(current: DriverDraft, fromTemplate: DriverDraft): DriverDraft {
+  const keep = (from: string, fallback: string) => (from.trim() ? from : fallback);
+  return {
+    kind: fromTemplate.kind,
+    provider: fromTemplate.provider,
+    command: keep(fromTemplate.command, current.command),
+    piProvider: keep(fromTemplate.piProvider, current.piProvider),
+    piModel: keep(fromTemplate.piModel, current.piModel),
+    piPackages: keep(fromTemplate.piPackages, current.piPackages),
+    baseURL: keep(fromTemplate.baseURL, current.baseURL),
+    model: keep(fromTemplate.model, current.model),
+    // Templates never carry a key; a key already typed into the form stays.
+    apiKey: current.apiKey,
+  };
+}
+
 export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "model" | "provider" | "command", string>> {
   if (d.kind === "acp") {
     const parsed = splitCommandArgs(d.command);
@@ -591,11 +608,13 @@ export function AgentForm({
     setApiKeyNotice("");
     setErrors({});
     setServerError("");
-    const nextCompID = resolveComputerID(tpl.computer_id);
-    const nextComp = computers.find((c) => c.id === nextCompID);
-    setComputerID(nextCompID);
-    setRole(tpl.role_text);
-    setDraft(draftFromTemplate(tpl, nextComp));
+    // Blank template fields are left undefined on purpose so switching templates
+    // fills in what the template defines and keeps everything else intact.
+    const pinned = computers.find((c) => c.id === tpl.computer_id);
+    if (pinned) setComputerID(pinned.id);
+    const comp = pinned ?? computers.find((c) => c.id === computerID);
+    if (tpl.role_text.trim()) setRole(tpl.role_text);
+    setDraft((cur) => mergeDraft(cur, draftFromTemplate(tpl, comp)));
   }
 
   function handleUpdateActiveTemplate() {

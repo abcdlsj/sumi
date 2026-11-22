@@ -10,6 +10,8 @@
 	<string>com.sumi.desktop</string>
 	<key>CFBundleExecutable</key>
 	<string>Sumi</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleVersion</key>
