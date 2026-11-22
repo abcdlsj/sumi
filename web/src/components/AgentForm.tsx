@@ -292,8 +292,12 @@ export function DriverFields({
                 leading={<Terminal />}
                 value={draft.command}
                 onChange={(e) => set({ command: e.target.value })}
-                placeholder="npx -y my-acp-agent --stdio"
-                hint="Overrides the default ACP launcher command. Leave empty to use the provider default."
+                placeholder={draft.provider === "pi" ? "ak my-pi-provider" : "npx -y my-acp-agent --stdio"}
+                hint={
+                  draft.provider === "pi"
+                    ? "Overrides the default pi launcher command; Sumi appends --mode rpc and isolation flags."
+                    : "Overrides the default ACP launcher command. Leave empty to use the provider default."
+                }
                 error={errors.command}
                 autoComplete="off"
                 spellCheck={false}

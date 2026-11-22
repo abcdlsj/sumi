@@ -554,17 +554,25 @@ func DefaultDriverBuilder(spec protocol.AssignedAgentSpec, homeDir string) (driv
 	case domain.DriverACP:
 		fingerprint := strings.Join([]string{
 			"provider=" + cfg.Provider,
+			"command=" + strings.Join(cfg.Command, "\x00"),
 			"pi_provider=" + cfg.PiProvider,
 			"pi_model=" + cfg.PiModel,
 			"pi_packages=" + strings.Join(cfg.PiPackages, ","),
 		}, ";")
-		if cfg.Provider == domain.ACPProviderPi && len(cfg.Command) == 0 {
-			if _, err := exec.LookPath("pi"); err != nil {
-				return nil, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("pi command %q not found on PATH", "pi"))
+		if cfg.Provider == domain.ACPProviderPi {
+			bin := "pi"
+			var prefixArgs []string
+			if len(cfg.Command) > 0 {
+				bin = cfg.Command[0]
+				prefixArgs = cfg.Command[1:]
+			}
+			if _, err := exec.LookPath(bin); err != nil {
+				return nil, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("pi command %q not found on PATH", bin))
 			}
 			runtimeDir := filepath.Join(homeDir, "runtime", domain.ACPProviderPi)
 			return pidriver.New(pidriver.Config{
-				Binary:           "pi",
+				Binary:           bin,
+				PrefixArgs:       prefixArgs,
 				SessionDir:       filepath.Join(runtimeDir, "sessions"),
 				SessionFile:      filepath.Join(homeDir, "pi-session.json"),
 				SystemPromptFile: filepath.Join(runtimeDir, "SYSTEM.md"),

@@ -254,8 +254,9 @@ func TestExplicitCancelCancelsUnderlyingDriver(t *testing.T) {
 func TestDefaultDriverBuilderRoutesPiToNativeRPC(t *testing.T) {
 	binDir := t.TempDir()
 	fakePi := filepath.Join(binDir, "pi")
+	fakeWrapper := filepath.Join(binDir, "ak")
 	fakeACP := filepath.Join(binDir, "custom-acp")
-	for _, p := range []string{fakePi, fakeACP} {
+	for _, p := range []string{fakePi, fakeWrapper, fakeACP} {
 		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -277,6 +278,22 @@ func TestDefaultDriverBuilderRoutesPiToNativeRPC(t *testing.T) {
 	defer drv.Close()
 	if _, ok := drv.(*pidriver.Driver); !ok {
 		t.Fatalf("expected *pi.Driver for provider=pi, got %T", drv)
+	}
+
+	piWrappedSpec := protocol.AssignedAgentSpec{
+		MemberID:     "agent-pi-ak",
+		SpaceID:      "space-1",
+		DisplayName:  "Cato",
+		DriverKind:   domain.DriverACP,
+		DriverConfig: domain.DriverConfig{Provider: domain.ACPProviderPi, Command: []string{"ak", "opendesign-pi"}},
+	}
+	drvWrapped, err := DefaultDriverBuilder(piWrappedSpec, home)
+	if err != nil {
+		t.Fatalf("build wrapped pi driver: %v", err)
+	}
+	defer drvWrapped.Close()
+	if _, ok := drvWrapped.(*pidriver.Driver); !ok {
+		t.Fatalf("expected *pi.Driver for provider=pi with wrapper command, got %T", drvWrapped)
 	}
 
 	customSpec := protocol.AssignedAgentSpec{
