@@ -392,7 +392,9 @@ func SpawnDetachedServer(ctx context.Context, binaryPath, dataRoot, addr, dbPath
 		return ServerStatus{}, fmt.Errorf("spawn detached server: %w", err)
 	}
 	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
+	// Reap in the background: releasing without waiting would leave a zombie
+	// behind for as long as this process lives.
+	go func() { _ = cmd.Wait() }()
 
 	client := NewControlClient(datadir.ServerControlSocket(dataRoot))
 	deadline := time.Now().Add(10 * time.Second)
@@ -405,9 +407,12 @@ func SpawnDetachedServer(ctx context.Context, binaryPath, dataRoot, addr, dbPath
 			return st, nil
 		}
 		if !ProcessAlive(pid) {
+			killCandidate(pid)
 			return ServerStatus{}, errors.New("detached server exited before becoming ready")
 		}
 		time.Sleep(60 * time.Millisecond)
 	}
+	// A spawned-but-never-ready child must not outlive this call.
+	killCandidate(pid)
 	return ServerStatus{}, errors.New("detached server did not become ready in time")
 }

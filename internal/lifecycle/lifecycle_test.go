@@ -38,6 +38,20 @@ func freeLocalAddr(t *testing.T) string {
 	return addr
 }
 
+// requireGone guarantees a detached child never outlives the test that spawned it, even when
+// the graceful control-socket stop never landed (failed test, removed temp dir, dead socket).
+func requireGone(t *testing.T, pid int) {
+	t.Helper()
+	killCandidate(pid)
+	deadline := time.Now().Add(2 * time.Second)
+	for ProcessAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if ProcessAlive(pid) {
+		t.Errorf("detached process %d leaked past cleanup", pid)
+	}
+}
+
 func TestStageBinaryAndServerHandoffWithBackup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-binary handoff test in -short mode")
@@ -73,6 +87,7 @@ func TestStageBinaryAndServerHandoffWithBackup(t *testing.T) {
 	if st1.Version != "2.0.1" || st1.BinaryHash != info1.BinaryHash {
 		t.Fatalf("unexpected v1 status: %+v", st1)
 	}
+	t.Cleanup(func() { requireGone(t, st1.PID) })
 
 	// Stage v2 and hand off the running server seamlessly via TCP FD inheritance.
 	staged2, info2, err := StageBinary(ctx, root, binV2)
@@ -87,6 +102,7 @@ func TestStageBinaryAndServerHandoffWithBackup(t *testing.T) {
 	if resp.OldPID != st1.PID || resp.NewPID == 0 || resp.NewPID == st1.PID {
 		t.Fatalf("unexpected handoff PIDs: %+v", resp)
 	}
+	t.Cleanup(func() { requireGone(t, resp.NewPID) })
 	if resp.TargetHash != info2.BinaryHash {
 		t.Fatalf("handoff hash mismatch: got %q want %q", resp.TargetHash, info2.BinaryHash)
 	}
@@ -137,6 +153,7 @@ func TestServerHandoffRollsBackOnBrokenCandidate(t *testing.T) {
 		_ = srvCtl.PostJSON(stopCtx, "/stop", nil, nil)
 		c()
 	}()
+	t.Cleanup(func() { requireGone(t, st1.PID) })
 
 	// Create a fake binary that passes `version --json` probe, then crashes when run as `server`.
 	badBin := filepath.Join(t.TempDir(), "bad-sumi")
@@ -202,13 +219,16 @@ func TestComputerHotUpgradePreservesAgentHostSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn agent-host: %v", err)
 	}
+	defer func() { _ = hostClient.GracefulClose(2) }()
 	defer func() { _ = hostClient.Close() }()
+	t.Cleanup(func() { requireGone(t, hostSt1.PID) })
 
 	// Launch detached `sumi computer` v1.
 	st1, err := SpawnDetachedComputer(ctx, staged1, root, "http://127.0.0.1:1", "tok-test", compDir)
 	if err != nil {
 		t.Fatalf("spawn computer v1: %v", err)
 	}
+	t.Cleanup(func() { requireGone(t, st1.PID) })
 	cmpCtl := NewControlClient(datadir.ComputerControlSocket(root))
 	defer func() {
 		stopCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
@@ -227,6 +247,7 @@ func TestComputerHotUpgradePreservesAgentHostSidecar(t *testing.T) {
 	if upResp.OldPID != st1.PID || upResp.NewPID == 0 || upResp.NewPID == st1.PID {
 		t.Fatalf("unexpected computer PIDs: %+v", upResp)
 	}
+	t.Cleanup(func() { requireGone(t, upResp.NewPID) })
 	if upResp.TargetHash != info2.BinaryHash || upResp.Mode != "hot" {
 		t.Fatalf("unexpected upgrade response: %+v", upResp)
 	}

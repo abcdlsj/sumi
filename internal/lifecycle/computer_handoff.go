@@ -360,7 +360,9 @@ func SpawnDetachedComputer(ctx context.Context, binaryPath, dataRoot, serverURL,
 		return ComputerStatus{}, fmt.Errorf("spawn detached computer: %w", err)
 	}
 	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
+	// Reap in the background: releasing without waiting would leave a zombie
+	// behind for as long as this process lives.
+	go func() { _ = cmd.Wait() }()
 
 	client := NewControlClient(datadir.ComputerControlSocket(dataRoot))
 	deadline := time.Now().Add(10 * time.Second)
@@ -373,10 +375,13 @@ func SpawnDetachedComputer(ctx context.Context, binaryPath, dataRoot, serverURL,
 			return st, nil
 		}
 		if !ProcessAlive(pid) {
+			killCandidate(pid)
 			return ComputerStatus{}, errors.New("detached computer exited before becoming ready")
 		}
 		time.Sleep(60 * time.Millisecond)
 	}
+	// A spawned-but-never-ready child must not outlive this call.
+	killCandidate(pid)
 	return ComputerStatus{}, errors.New("detached computer did not become ready in time")
 }
 

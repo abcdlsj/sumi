@@ -103,7 +103,11 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 	if err := cmd.Start(); err != nil {
 		return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("spawn agent-host: %w", err))
 	}
-	_ = cmd.Process.Release()
+	pid := cmd.Process.Pid
+	// Reap in the background so a retired sidecar never lingers as a zombie.
+	go func() { _ = cmd.Wait() }()
+	// Failures below must never leave an orphaned sidecar behind.
+	killSidecar := func() { terminateProcess(pid) }
 
 	timeout := opts.StartupTimeout
 	if timeout <= 0 {
@@ -121,16 +125,19 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 		}
 		select {
 		case <-ctx.Done():
+			killSidecar()
 			return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, ctx.Err())
 		case <-time.After(40 * time.Millisecond):
 		}
 	}
 	if lastErr != nil {
+		killSidecar()
 		return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("agent-host did not become ready: %w", lastErr))
 	}
 
 	if err := client.Configure(ctx, opts.Spec, opts.AgentHome); err != nil {
 		_ = client.Close()
+		killSidecar()
 		return nil, StatusResponse{}, err
 	}
 	st, _ = client.Status(ctx)
@@ -159,6 +166,22 @@ func waitSocketGone(sockPath string, timeout time.Duration) {
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
+}
+
+// terminateProcess reaps a detached sidecar that never reached a usable state.
+func terminateProcess(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func (c *Client) Status(ctx context.Context) (StatusResponse, error) {
