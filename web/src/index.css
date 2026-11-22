@@ -317,6 +317,8 @@ html.desktop {
 }
 html.desktop .titlebar-drag {
   --wails-draggable: drag;
+  user-select: none;
+  -webkit-user-select: none;
 }
 html.desktop .titlebar-drag button,
 html.desktop .titlebar-drag a,
@@ -329,6 +331,11 @@ html.desktop .titlebar-drag [role="tablist"],
 html.desktop .titlebar-drag [role="separator"],
 html.desktop .titlebar-drag .titlebar-no-drag {
   --wails-draggable: no-drag;
+}
+html.desktop .titlebar-drag input,
+html.desktop .titlebar-drag textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Resize handles for the sidebar and the detail pane. */

@@ -191,6 +191,7 @@ func main() {
 		MinHeight:        600,
 		BackgroundColour: application.NewRGBA(244, 244, 247, 255),
 		URL:              startURL,
+		JS:               desktopWindowDragJS,
 		// Unified 52pt transparent toolbar centers macOS traffic lights on the same
 		// horizontal axis as the 52px pane headers; CSS --wails-draggable drives drag.
 		Mac: application.MacWindow{
