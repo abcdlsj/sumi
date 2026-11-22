@@ -83,11 +83,11 @@ jobs:
             goos: linux
             goarch: arm64
             target: aarch64-unknown-linux-gnu
-          - runner: macos-14
+          - runner: macos-15
             goos: darwin
             goarch: arm64
             target: aarch64-apple-darwin
-          - runner: macos-14
+          - runner: macos-15
             goos: darwin
             goarch: amd64
             target: x86_64-apple-darwin
@@ -133,7 +133,7 @@ jobs:
   desktop:
     name: Build macOS app
     needs: verify
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
