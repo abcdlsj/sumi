@@ -43,3 +43,24 @@ func TestWakePromptPreviewsLatestMessage(t *testing.T) {
 		t.Fatalf("wake prompt must say previews are not reads")
 	}
 }
+
+func TestSystemPromptGuidesLongTaskProgressSync(t *testing.T) {
+	p := buildSystemPrompt(protocol.AssignedAgentSpec{
+		DisplayName: "Lin",
+		MemberID:    "m-lin",
+		RoleText:    "Backend engineer",
+		DriverKind:  domain.DriverACP,
+	}, "/tmp/workspace", "/tmp/memory")
+	for _, want := range []string{
+		"only output channel and needs no further permission",
+		"Before diving into a long or multi-step task",
+		"meaningful milestones",
+		"skip routine tool-by-tool narration",
+		"Before stopping, check whether you still owe",
+		"post progress updates in the task's own conversation",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("system prompt missing %q", want)
+		}
+	}
+}

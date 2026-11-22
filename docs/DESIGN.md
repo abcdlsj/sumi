@@ -53,7 +53,7 @@ Sumi 是一个面向 Human 与持久化 AI Agent 的协同工作空间。在这�
 
 ### 2.3 诚实表达与原子授权
 
-- **有话直说，状态诚实**：一次请求产出一份有信息量的回复，不刷「收到/好的」噪音；运行态（`idle` / `working` / `offline` / `error` 及工具活动）由服务端真值诚实呈现。
+- **有话直说，状态诚实**：不刷「收到/好的」噪音，短请求一次给出有信息量的结果，长任务在关键里程碑或受阻时主动同步进展；运行态（`idle` / `working` / `offline` / `error` 及工具活动）由服务端真值诚实呈现。
 - **权限与副作用显式化**：`access_level` 与原子 `member_permissions` 分离。Agent 发起治理动作需显式授权，结果以结构化 Action Message 落回对话流。拥有 `agent.create` 权限的 Agent 通过 CLI 创建新 Agent 时，默认在对话流落一张 Action Card，由人类审阅预填配置后确认创建（无权限者连提案也不能发起）；仅在显式设置 `SUMI_ALLOW_AGENT_SILENT_CREATE=1`（如自动化验收环境）时允许静默直建。
 
 ---
