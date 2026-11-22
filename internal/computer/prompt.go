@@ -35,8 +35,8 @@ func memoryPaths(kind domain.DriverKind, memoryDir string) (memFile, notesDir st
 	return filepath.Join(memoryDir, "MEMORY.md"), filepath.Join(memoryDir, "notes") + "/"
 }
 
-// buildSystemPrompt renders the standing instructions for one Agent. It is sent to the model
-// once per fresh Runtime Session (ACP) or with every request (builtin).
+// buildSystemPrompt renders the standing instructions for one Agent. It is placed in the
+// native system prompt slot (builtin, Pi RPC) or opens a fresh ACP Runtime Session once.
 func buildSystemPrompt(spec protocol.AssignedAgentSpec, workDir, memoryDir string) string {
 	memFile, notesDir := memoryPaths(spec.DriverKind, memoryDir)
 	role := strings.TrimSpace(spec.RoleText)

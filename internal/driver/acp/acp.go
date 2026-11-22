@@ -49,17 +49,17 @@ func (c Config) ResolvedCommand() ([]string, error) {
 		return []string{"npx", "-y", "@zed-industries/codex-acp@0.16.0"}, nil
 	case domain.ACPProviderClaude:
 		return []string{"npx", "-y", "@zed-industries/claude-code-acp@0.16.2"}, nil
-	case domain.ACPProviderPi:
-		return []string{"npx", "-y", "pi-acp@0.0.34"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported acp provider %q", c.Provider)
 	}
 }
 
-// ProviderBinaries lists the executables a provider's default command needs on PATH.
+// ProviderBinaries lists the executables a provider's default runtime needs on PATH.
 func ProviderBinaries(provider string) []string {
 	switch provider {
-	case domain.ACPProviderPi, domain.ACPProviderCodex, domain.ACPProviderClaude:
+	case domain.ACPProviderPi:
+		return []string{"pi"}
+	case domain.ACPProviderCodex, domain.ACPProviderClaude:
 		return []string{provider, "npx"}
 	default:
 		return nil

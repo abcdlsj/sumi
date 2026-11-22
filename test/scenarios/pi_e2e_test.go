@@ -12,17 +12,15 @@ import (
 	"github.com/abcdlsj/sumi/internal/domain"
 )
 
-// TestPiACPEndToEnd drives a real `pi` coding agent through the ACP driver: the agent must
-// read its DM and reply via the `sumi` CLI that the daemon puts on PATH.
-// Opt in with SUMI_E2E_PI=1; requires `pi` and `npx` on PATH and pi's own login.
+// TestPiACPEndToEnd drives a real `pi` coding agent through the native Pi RPC driver: the agent
+// must read its DM and reply via the `sumi` CLI that the daemon puts on PATH.
+// Opt in with SUMI_E2E_PI=1; requires `pi` on PATH and pi's own login.
 func TestPiACPEndToEnd(t *testing.T) {
 	if os.Getenv("SUMI_E2E_PI") != "1" {
-		t.Skip("set SUMI_E2E_PI=1 to run the real pi ACP end-to-end check")
+		t.Skip("set SUMI_E2E_PI=1 to run the real pi end-to-end check")
 	}
-	for _, bin := range []string{"pi", "npx"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Fatalf("%s not on PATH: %v", bin, err)
-		}
+	if _, err := exec.LookPath("pi"); err != nil {
+		t.Fatalf("pi not on PATH: %v", err)
 	}
 	env := startScenarioEnv(t, nil)
 	ctx := context.Background()

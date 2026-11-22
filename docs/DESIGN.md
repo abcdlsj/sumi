@@ -89,18 +89,19 @@ adapters (server / computer / cli / web / desktop) ──▶ app ──▶ domai
     agents/<agent-id>/
       driver.token           # 持久化 per-agent driver token（0600）
       host.sock / host.json  # Per-agent host sidecar socket 与元数据
+      pi-session.json        # Pi 原生 RPC 会话持久化记录（含 provider/model 指纹）
       acp-session.json       # ACP 会话持久化记录（含 provider/model 指纹）
       session.jsonl          # Builtin harness 会话历史
       workspace/             # Agent 本地工作目录（只读浏览限域于此）
       memory/MEMORY.md       # 持久化长期记忆
-      runtime/<provider>/    # 按 provider 隔离的 ACP 配置目录
+      runtime/<provider>/    # 按 provider 隔离的运行时配置目录（Pi 含 SYSTEM.md 与 sessions/）
 ```
 
 ### 3.3 三认证面隔离与运行时沙箱
 
 - **三认证面互不通用**：Browser Session Cookie、Computer Bearer Token、Agent Driver Token 严格隔离；服务端只存 token hash；模型凭据仅下发给承载对应 Agent 的 Computer，永不回传浏览器。
 - **Computer ↔ Server 通道**：单条 WebSocket 加版本与能力协商（`Capabilities`）。唤醒帧是轻量通知而非重型队列；失败按指数退避重试，连续失败触发熔断暂停，期间不丢消息。通过同一条连接提供按需只读浏览 Agent Workspace 文件的能力（强制路径限域、拒绝跟随软链与硬链、屏蔽敏感凭据文件）。
-- **Agent 强隔离**：同机 Agent 各自拥有独立的 Agent Home、独立 `driver.token` 与隔离环境，彼此不可读目录与对话；外部 coding agent（ACP）运行在按 provider 隔离的目录中，不继承宿主全局 skills / hooks / 会话，仅最小化带入运行所需的凭据与按 Agent 显式声明的插件（`driver_config.pi_packages`，仅允许 `npm:` 规格）。Runtime Session 仅在 provider 与模型指纹未变时通过 `session/load` 恢复；更换凭据或模型后强制开启新会话。
+- **Agent 强隔离**：同机 Agent 各自拥有独立的 Agent Home、独立 `driver.token` 与隔离环境，彼此不可读目录与对话；外部 coding agent 运行在按 provider 隔离的目录中，不继承宿主全局 skills / hooks / 会话，仅最小化带入运行所需的凭据与按 Agent 显式声明的插件（`driver_config.pi_packages`，仅允许 `npm:` 规格）。其中 `pi` provider 直接通过原生 `pi --mode rpc` 驱动（不经 `pi-acp` 中转），以 `--system-prompt` 将 Sumi 协作指令置于真正的 System Prompt 槽位（替换 Pi 默认提示词且不受 compaction 稀释）、以 `--no-skills --no-prompt-templates --no-themes --no-context-files --no-mcp` 强化沙箱，并在 Turn 结束后根据 `get_session_stats` 超过软上下文预算时主动触发 `compact` 控制大窗口成本；`codex` / `claude` 与自定义命令经 ACP 协议驱动。Runtime Session 仅在 provider 与模型指纹未变时恢复；更换凭据或模型后强制开启新会话。
 - **错误可见且无泄漏**：所有错误以稳定错误码加有界描述上报；日志、错误与协议帧严禁携带消息正文、附件、Prompt、Memory 内容或 Secret。
 
 ---
@@ -127,7 +128,7 @@ flowchart TD
 
     subgraph Runtime["长生命周期运行时层（跨控制面更新存活）"]
         Host["sumi agent-host (per-agent sidecar)<br/>host.sock + Turn 状态机 + 活动流缓冲"]
-        ACP["ACP 子进程 (codex / claude / pi)<br/>或 Builtin Harness"]
+        ACP["Pi RPC / ACP 子进程 (codex / claude)<br/>或 Builtin Harness"]
     end
 
     Desktop -- "HTTP / SSE / ctl.sock" --> Server

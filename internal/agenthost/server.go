@@ -18,6 +18,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/driver"
 	"github.com/abcdlsj/sumi/internal/driver/acp"
 	"github.com/abcdlsj/sumi/internal/driver/builtin"
+	pidriver "github.com/abcdlsj/sumi/internal/driver/pi"
 	"github.com/abcdlsj/sumi/internal/protocol"
 	"github.com/abcdlsj/sumi/internal/version"
 )
@@ -532,7 +533,7 @@ func driverErrorParts(err error, spec protocol.AssignedAgentSpec) (string, strin
 	return code, domain.BoundErrorDetail(detail)
 }
 
-// DefaultDriverBuilder constructs the production SessionDriver (builtin or ACP).
+// DefaultDriverBuilder constructs the production SessionDriver (builtin, native Pi RPC, or ACP).
 func DefaultDriverBuilder(spec protocol.AssignedAgentSpec, homeDir string) (driver.SessionDriver, error) {
 	cfg, err := domain.NormalizeDriverConfig(spec.DriverKind, spec.DriverConfig)
 	if err != nil {
@@ -551,15 +552,30 @@ func DefaultDriverBuilder(spec protocol.AssignedAgentSpec, homeDir string) (driv
 			SessionFile: filepath.Join(homeDir, "session.jsonl"),
 		}, nil)
 	case domain.DriverACP:
+		fingerprint := strings.Join([]string{
+			"provider=" + cfg.Provider,
+			"pi_provider=" + cfg.PiProvider,
+			"pi_model=" + cfg.PiModel,
+			"pi_packages=" + strings.Join(cfg.PiPackages, ","),
+		}, ";")
+		if cfg.Provider == domain.ACPProviderPi && len(cfg.Command) == 0 {
+			if _, err := exec.LookPath("pi"); err != nil {
+				return nil, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("pi command %q not found on PATH", "pi"))
+			}
+			runtimeDir := filepath.Join(homeDir, "runtime", domain.ACPProviderPi)
+			return pidriver.New(pidriver.Config{
+				Binary:           "pi",
+				SessionDir:       filepath.Join(runtimeDir, "sessions"),
+				SessionFile:      filepath.Join(homeDir, "pi-session.json"),
+				SystemPromptFile: filepath.Join(runtimeDir, "SYSTEM.md"),
+				Fingerprint:      fingerprint,
+			}), nil
+		}
 		acfg := acp.Config{
 			Provider:    cfg.Provider,
 			Command:     cfg.Command,
 			SessionFile: filepath.Join(homeDir, "acp-session.json"),
-			Fingerprint: strings.Join([]string{
-				"provider=" + cfg.Provider,
-				"pi_provider=" + cfg.PiProvider,
-				"pi_model=" + cfg.PiModel,
-			}, ";"),
+			Fingerprint: fingerprint,
 		}
 		argv, err := acfg.ResolvedCommand()
 		if err != nil {

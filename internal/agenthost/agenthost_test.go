@@ -3,6 +3,7 @@ package agenthost
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
+	"github.com/abcdlsj/sumi/internal/driver/acp"
+	pidriver "github.com/abcdlsj/sumi/internal/driver/pi"
 	"github.com/abcdlsj/sumi/internal/protocol"
 )
 
@@ -245,5 +248,50 @@ func TestExplicitCancelCancelsUnderlyingDriver(t *testing.T) {
 	}
 	if !gd.canceled.Load() {
 		t.Fatal("explicit cancel must cancel underlying driver context")
+	}
+}
+
+func TestDefaultDriverBuilderRoutesPiToNativeRPC(t *testing.T) {
+	binDir := t.TempDir()
+	fakePi := filepath.Join(binDir, "pi")
+	fakeACP := filepath.Join(binDir, "custom-acp")
+	for _, p := range []string{fakePi, fakeACP} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+
+	home := t.TempDir()
+	piSpec := protocol.AssignedAgentSpec{
+		MemberID:     "agent-pi",
+		SpaceID:      "space-1",
+		DisplayName:  "Piper",
+		DriverKind:   domain.DriverACP,
+		DriverConfig: domain.DriverConfig{Provider: domain.ACPProviderPi},
+	}
+	drv, err := DefaultDriverBuilder(piSpec, home)
+	if err != nil {
+		t.Fatalf("build pi driver: %v", err)
+	}
+	defer drv.Close()
+	if _, ok := drv.(*pidriver.Driver); !ok {
+		t.Fatalf("expected *pi.Driver for provider=pi, got %T", drv)
+	}
+
+	customSpec := protocol.AssignedAgentSpec{
+		MemberID:     "agent-custom",
+		SpaceID:      "space-1",
+		DisplayName:  "Custom",
+		DriverKind:   domain.DriverACP,
+		DriverConfig: domain.DriverConfig{Command: []string{fakeACP}},
+	}
+	drv2, err := DefaultDriverBuilder(customSpec, home)
+	if err != nil {
+		t.Fatalf("build custom acp driver: %v", err)
+	}
+	defer drv2.Close()
+	if _, ok := drv2.(*acp.Driver); !ok {
+		t.Fatalf("expected *acp.Driver for custom command, got %T", drv2)
 	}
 }

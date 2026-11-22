@@ -10,7 +10,6 @@ import (
 	mrand "math/rand/v2"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,8 +20,6 @@ import (
 	"github.com/abcdlsj/sumi/internal/agenthost"
 	"github.com/abcdlsj/sumi/internal/domain"
 	"github.com/abcdlsj/sumi/internal/driver"
-	"github.com/abcdlsj/sumi/internal/driver/acp"
-	"github.com/abcdlsj/sumi/internal/driver/builtin"
 	"github.com/abcdlsj/sumi/internal/protocol"
 )
 
@@ -121,14 +118,6 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	return ag
 }
 
-func acpFingerprint(cfg domain.DriverConfig) string {
-	return strings.Join([]string{
-		"provider=" + cfg.Provider,
-		"pi_provider=" + cfg.PiProvider,
-		"pi_model=" + cfg.PiModel,
-	}, ";")
-}
-
 func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSpec) (driver.SessionDriver, string, string) {
 	for _, dir := range []string{ag.workDir, ag.memoryDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -163,7 +152,7 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 			ag.focusConvID = st.FocusConvID
 		}
 	} else {
-		drv, err = buildDriver(spec, ag.homeDir)
+		drv, err = agenthost.DefaultDriverBuilder(spec, ag.homeDir)
 	}
 	if err != nil {
 		code, detail := failureOf(err, spec)
@@ -173,49 +162,6 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 		return nil, code, detail
 	}
 	return drv, "", ""
-}
-
-func buildDriver(spec protocol.AssignedAgentSpec, homeDir string) (driver.SessionDriver, error) {
-	cfg, err := domain.NormalizeDriverConfig(spec.DriverKind, spec.DriverConfig)
-	if err != nil {
-		var de *domain.Error
-		if errors.As(err, &de) {
-			err = errors.New(de.Message)
-		}
-		return nil, driver.Fail(domain.AgentErrDriverConfigInvalid, err)
-	}
-	switch spec.DriverKind {
-	case domain.DriverBuiltin:
-		return builtin.New(builtin.Config{
-			BaseURL:     cfg.BaseURL,
-			APIKey:      cfg.APIKey,
-			Model:       cfg.Model,
-			SessionFile: filepath.Join(homeDir, "session.jsonl"),
-		}, nil)
-	case domain.DriverACP:
-		acfg := acp.Config{
-			Provider:    cfg.Provider,
-			Command:     cfg.Command,
-			SessionFile: filepath.Join(homeDir, "acp-session.json"),
-			Fingerprint: acpFingerprint(cfg),
-		}
-		argv, err := acfg.ResolvedCommand()
-		if err != nil {
-			return nil, driver.Fail(domain.AgentErrDriverConfigInvalid, err)
-		}
-		bins := []string{argv[0]}
-		if len(cfg.Command) == 0 {
-			bins = acp.ProviderBinaries(cfg.Provider)
-		}
-		for _, bin := range bins {
-			if _, err := exec.LookPath(bin); err != nil {
-				return nil, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("acp command %q not found on PATH", bin))
-			}
-		}
-		return acp.New(acfg), nil
-	default:
-		return nil, driver.Fail(domain.AgentErrDriverConfigInvalid, fmt.Errorf("unsupported driver kind %q", spec.DriverKind))
-	}
 }
 
 // failureOf maps a driver error to an agent error code and a bounded, secret-free detail.
