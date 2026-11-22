@@ -60,6 +60,8 @@ type hostedAgent struct {
 	dirty          bool
 	focusConvID    string
 	attachedTurnID string
+	cancelTurn     context.CancelCauseFunc
+	stopRequested  bool
 	lastReason     string
 	lastConvID     string
 
@@ -132,6 +134,9 @@ var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Min
 
 // errTurnStalled is the cancel cause when a silent turn is cut so queued work can run.
 var errTurnStalled = errors.New("turn produced no runtime events while new work was waiting")
+
+// errTurnStopped is the cancel cause when an operator explicitly stops the in-flight turn.
+var errTurnStopped = errors.New("turn stopped")
 
 // errServerRestarting indicates the Server announced an intentional restart and expects a fast reconnect.
 var errServerRestarting = errors.New("server restarting")

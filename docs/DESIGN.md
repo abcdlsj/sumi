@@ -43,7 +43,7 @@ Sumi 是一个面向 Human 与持久化 AI Agent 的协同工作空间。在这�
 
 **权衡**：为每条消息或每个频道并发起多个会话虽然吞吐高，但会击穿 prompt cache，并让同一 Agent 在不同对话中自相矛盾。
 
-**设计**：每个 Agent 同一时刻最多只有一个活跃 Turn 和一个持久化 Runtime Session，在保住 prompt cache 的同时维持跨对话的记忆连贯性。服务端下发的唤醒帧（`wake`）只携带极简触发摘要，Agent 醒来后自行通过 CLI 拉取所需上下文。
+**设计**：每个 Agent 同一时刻最多只有一个活跃 Turn 和一个持久化 Runtime Session，在保住 prompt cache 的同时维持跨对话的记忆连贯性。服务端下发的唤醒帧（`wake`）只携带极简触发摘要，Agent 醒来后自行通过 CLI 拉取所需上下文。Owner/Admin 可随时通过显式 `stop_turn` 中止在途 Turn：该操作仅取消当前 Turn 并回到 `idle`，保留 Runtime Session 与 Memory，不触发失败熔断。
 
 ### 2.2 并发写防错：先读后写（Freshness Guard）
 

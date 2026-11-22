@@ -119,7 +119,7 @@ type AgentStateFrame struct {
 
 type AgentControlFrame struct {
 	AgentMemberID string             `json:"agent_member_id"`
-	Action        string             `json:"action"` // "provision" | "restart" | "reset_session" | "retire"
+	Action        string             `json:"action"` // "provision" | "restart" | "reset_session" | "stop_turn" | "retire"
 	Spec          *AssignedAgentSpec `json:"spec,omitempty"`
 }
 

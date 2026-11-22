@@ -341,8 +341,8 @@ func (s *Service) ControlAgent(ctx context.Context, actor domain.Member, agentMe
 	if actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin {
 		return domain.NewError(domain.CodePermissionDenied, "only owner or admin can control agent runtime")
 	}
-	if action != "restart" && action != "reset_session" {
-		return domain.NewError(domain.CodeInvalidArgument, "action must be restart or reset_session")
+	if action != "restart" && action != "reset_session" && action != "stop_turn" {
+		return domain.NewError(domain.CodeInvalidArgument, "action must be restart, reset_session, or stop_turn")
 	}
 	var compID string
 	err := s.store.ReadDB().QueryRowContext(ctx,

@@ -216,3 +216,30 @@ func TestAgentActivityIsEphemeralAndOnlyWhileWorking(t *testing.T) {
 		t.Fatalf("idle agent must not expose activity: %+v", m.Agent.Activity)
 	}
 }
+
+func TestControlAgentAcceptsStopTurnAndEnforcesAccess(t *testing.T) {
+	svc, spy, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+	lin, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName: "Lin", ComputerID: comp.ID, DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"stop_turn", "restart", "reset_session"} {
+		if err := svc.ControlAgent(ctx, owner, lin.ID, action); err != nil {
+			t.Fatalf("ControlAgent(%q): %v", action, err)
+		}
+		last := spy.controls[len(spy.controls)-1]
+		if last.AgentMemberID != lin.ID || last.Action != action {
+			t.Fatalf("unexpected control frame: %+v", last)
+		}
+	}
+	var de *domain.Error
+	if err := svc.ControlAgent(ctx, owner, lin.ID, "unknown"); !errors.As(err, &de) || de.Code != domain.CodeInvalidArgument {
+		t.Fatalf("want invalid_argument, got %v", err)
+	}
+	if err := svc.ControlAgent(ctx, lin, lin.ID, "stop_turn"); !errors.As(err, &de) || de.Code != domain.CodePermissionDenied {
+		t.Fatalf("want permission_denied, got %v", err)
+	}
+}

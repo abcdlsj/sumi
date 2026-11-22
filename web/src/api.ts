@@ -579,7 +579,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ driver_kind, driver_config }),
     }),
-  controlAgent: (spaceSlug: string, agentID: string, action: "restart" | "reset_session") =>
+  controlAgent: (spaceSlug: string, agentID: string, action: "restart" | "reset_session" | "stop_turn") =>
     request<{ ok: boolean }>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/control`, {
       method: "POST",
       body: JSON.stringify({ action }),

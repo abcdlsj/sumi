@@ -195,3 +195,85 @@ func TestSilentTurnIsCancelledOnlyWhenWorkIsWaiting(t *testing.T) {
 		t.Fatal("expected a turn_stalled error report")
 	}
 }
+
+type stoppableDriver struct {
+	started   chan struct{}
+	turns     atomic.Int32
+	resetCnt  atomic.Int32
+	cancelled atomic.Int32
+}
+
+func (b *stoppableDriver) RunTurn(ctx context.Context, _ driver.TurnInput) (driver.TurnResult, error) {
+	if b.turns.Add(1) == 1 {
+		close(b.started)
+		<-ctx.Done()
+		b.cancelled.Add(1)
+		return driver.TurnResult{}, ctx.Err()
+	}
+	return driver.TurnResult{}, nil
+}
+func (b *stoppableDriver) ResetSession() error { b.resetCnt.Add(1); return nil }
+func (b *stoppableDriver) Close() error        { return nil }
+
+func TestStopTurnCancelsInFlightTurnWithoutTrippingBreakerOrResettingSession(t *testing.T) {
+	drv := &stoppableDriver{started: make(chan struct{})}
+	srv := pendingInbox(t, drv.turns.Load, 2)
+	d := NewDaemon(Config{
+		ServerURL: srv.URL,
+		DataDir:   t.TempDir(),
+		DriverFactory: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
+			return drv, nil
+		},
+	}, nil)
+	ch := make(chan protocol.Envelope, 64)
+	d.wsSendCh = ch
+	defer d.Stop()
+	ag := d.provisionAgent(builtinSpec("m1"))
+	ctx := context.Background()
+
+	d.scheduleWake(ctx, "agent-1", "c1", "mention")
+	<-drv.started
+
+	// Queue a wake while busy; stop_turn must cancel the turn and not immediately re-wake it.
+	d.scheduleWake(ctx, "agent-1", "c1", "mention")
+	d.handleControl(ctx, protocol.AgentControlFrame{AgentMemberID: "agent-1", Action: "stop_turn"})
+
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy && ag.cancelTurn == nil
+	})
+	if drv.cancelled.Load() != 1 {
+		t.Fatalf("cancelled = %d, want 1", drv.cancelled.Load())
+	}
+	if drv.resetCnt.Load() != 0 {
+		t.Fatalf("stop_turn must not reset session, resetCnt = %d", drv.resetCnt.Load())
+	}
+	ag.mu.Lock()
+	failStreak, paused, dirty, retry := ag.failStreak, ag.paused, ag.dirty, ag.retryTimer
+	ag.mu.Unlock()
+	if failStreak != 0 || paused || dirty || retry != nil {
+		t.Fatalf("unexpected state after stop_turn: failStreak=%d paused=%v dirty=%v retry=%v", failStreak, paused, dirty, retry != nil)
+	}
+	if drv.turns.Load() != 1 {
+		t.Fatalf("stop_turn must not immediately start a second turn, turns=%d", drv.turns.Load())
+	}
+
+	var lastState domain.RuntimeState
+	for len(ch) > 0 {
+		env := <-ch
+		if env.AgentState != nil {
+			if env.AgentState.RuntimeState == domain.RuntimeError {
+				t.Fatalf("stop_turn must not report error state: %+v", env.AgentState)
+			}
+			lastState = env.AgentState.RuntimeState
+		}
+	}
+	if lastState != domain.RuntimeIdle {
+		t.Fatalf("last reported state = %q, want idle", lastState)
+	}
+
+	// A subsequent wake runs normally on the preserved session.
+	d.scheduleWake(ctx, "agent-1", "c1", "mention")
+	waitFor(t, func() bool { return drv.turns.Load() == 2 })
+}

@@ -73,9 +73,11 @@ function makeMsg(seq: number, author: Member, body: string): Message {
 function PopoverHarness({
   onOpenConv,
   onOpenDetail,
+  onStopAgent,
 }: {
   onOpenConv: (id: string) => void;
   onOpenDetail: (t: DetailTarget) => void;
+  onStopAgent?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -92,21 +94,25 @@ function PopoverHarness({
         onClose={() => setOpen(false)}
         onOpenConversation={onOpenConv}
         onOpenDetail={onOpenDetail}
+        onStopAgent={onStopAgent}
       />
     </>
   );
 }
 
 describe("AgentVisibility", () => {
-  it("opens WorkingAgentsPopover with activity and jumps to the agent's focus conversation", () => {
+  it("opens WorkingAgentsPopover with activity, stops an agent, and jumps to its focus conversation", () => {
     const onOpenConv = vi.fn();
     const onOpenDetail = vi.fn();
-    render(<PopoverHarness onOpenConv={onOpenConv} onOpenDetail={onOpenDetail} />);
+    const onStopAgent = vi.fn();
+    render(<PopoverHarness onOpenConv={onOpenConv} onOpenDetail={onOpenDetail} onStopAgent={onStopAgent} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Open working" }));
 
     const dialog = screen.getByRole("dialog", { name: "Working now" });
     expect(within(dialog).getByText("Running execute")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stop Lin" }));
+    expect(onStopAgent).toHaveBeenCalledWith(lin.id);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lin" }));
     expect(onOpenConv).toHaveBeenCalledWith("c-eng");
   });

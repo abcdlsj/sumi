@@ -21,6 +21,7 @@ import {
   MoreHorizontal,
   PanelRight,
   Sparkles,
+  Square,
   UserPlus,
   Users,
   X,
@@ -106,21 +107,34 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
 
 /** Honest runtime line above the composer: shows working agents (with popover when multiple) or DM peer state. */
 function AgentStatusLine({
+  spaceSlug,
   boot,
   conv,
   onOpenDetail,
   onOpenConversation,
 }: {
+  spaceSlug: string;
   boot: BootstrapData;
   conv: Conversation;
   onOpenDetail: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
 }) {
+  const qc = useQueryClient();
+  const act = useAction();
   const [popOpen, setPopOpen] = useState(false);
+  const [stoppingID, setStoppingID] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const canGovern = boot.current_member.access_level !== "member";
   const agents = boot.members.filter((m) => m.kind === "agent");
   const peer = conv.kind === "dm" ? agents.find((a) => a.id === conv.peer_member_id) : undefined;
   const busyHere = agents.filter((a) => a.agent?.runtime_state === "working" && a.agent.focus_conversation_id === conv.id);
+
+  async function stopAgent(agentID: string) {
+    setStoppingID(agentID);
+    await act.run(() => api.controlAgent(spaceSlug, agentID, "stop_turn"));
+    setStoppingID(null);
+    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+  }
 
   if (busyHere.length > 0 && conv.kind !== "dm") {
     const names = busyHere.map((a) => a.display_name);
@@ -147,6 +161,18 @@ function AgentStatusLine({
             <span className="font-medium">{label}</span>
           )}
         </button>
+        {canGovern && busyHere.length === 1 && (
+          <button
+            type="button"
+            disabled={stoppingID === busyHere[0].id}
+            onClick={() => void stopAgent(busyHere[0].id)}
+            aria-label={`Stop ${busyHere[0].display_name}`}
+            className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
+          >
+            <Square className="size-2.5 fill-current" />
+            Stop
+          </button>
+        )}
         {busyHere.length > 1 && (
           <WorkingAgentsPopover
             boot={boot}
@@ -157,6 +183,7 @@ function AgentStatusLine({
             onClose={() => setPopOpen(false)}
             onOpenConversation={onOpenConversation}
             onOpenDetail={onOpenDetail}
+            onStopAgent={canGovern ? (id) => void stopAgent(id) : undefined}
           />
         )}
       </div>
@@ -185,6 +212,18 @@ function AgentStatusLine({
       <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
         <span className="font-semibold">{subject.display_name}</span> {text}
       </button>
+      {canGovern && st === "working" && (
+        <button
+          type="button"
+          disabled={stoppingID === subject.id}
+          onClick={() => void stopAgent(subject.id)}
+          aria-label={`Stop ${subject.display_name}`}
+          className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
+        >
+          <Square className="size-2.5 fill-current" />
+          Stop
+        </button>
+      )}
     </div>
   );
 }
@@ -1189,7 +1228,7 @@ export function ConversationView({
         </div>
       ) : (
       <div className="shrink-0 bg-bg/60 border-t border-line">
-        <AgentStatusLine boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
+        <AgentStatusLine spaceSlug={spaceSlug} boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
         <MessageComposer
           spaceSlug={spaceSlug}
           boot={boot}

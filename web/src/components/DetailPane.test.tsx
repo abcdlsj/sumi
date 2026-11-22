@@ -411,6 +411,36 @@ describe("AgentDetail activity", () => {
       driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini" },
     });
   });
+
+  it("exposes Stop button for working agents to owners/admins and sends stop_turn", async () => {
+    const ctrl = vi.spyOn(api, "controlAgent").mockResolvedValue({ ok: true });
+    const workingLin: Member = {
+      ...lin,
+      agent: { ...lin.agent!, runtime_state: "working", focus_conversation_id: "c-eng" },
+    };
+    const data = {
+      ...roster,
+      members: [lisi, workingLin, sam],
+      conversations: [{ id: "c-eng", space_id: "s", kind: "public", slug: "eng", unread_count: 0, notify_level: "mentions" }],
+    } as unknown as BootstrapData;
+
+    renderPane({ kind: "agent", memberID: lin.id }, data);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(ctrl).toHaveBeenCalledWith("s", lin.id, "stop_turn"));
+  });
+
+  it("hides Stop button when agent is idle or viewer is a regular member", () => {
+    renderPane({ kind: "agent", memberID: lin.id }, roster);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+
+    const workingLin: Member = {
+      ...lin,
+      agent: { ...lin.agent!, runtime_state: "working", focus_conversation_id: "c-eng" },
+    };
+    const memberView = { ...roster, members: [lisi, workingLin, sam], current_member: sam } as unknown as BootstrapData;
+    renderPane({ kind: "agent", memberID: lin.id }, memberView);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
 });
 
 describe("HumanDetail and thread @mentions", () => {

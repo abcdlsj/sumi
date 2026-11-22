@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CheckCheck, MessageSquare, PanelRight } from "lucide-react";
+import { CheckCheck, MessageSquare, PanelRight, Square } from "lucide-react";
 import {
   activityLabel,
   formatClock,
@@ -27,6 +27,7 @@ export function WorkingAgentsPopover({
   onClose,
   onOpenConversation,
   onOpenDetail,
+  onStopAgent,
 }: {
   boot: BootstrapData;
   agents: Member[];
@@ -36,6 +37,7 @@ export function WorkingAgentsPopover({
   onClose: () => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDetail: (t: DetailTarget) => void;
+  onStopAgent?: (agentID: string) => void;
 }) {
   const popRef = useRef<HTMLDivElement | null>(null);
   const style = useFloatingPosition(open, triggerRef, popRef, { align, width: 300, maxHeight: 340 });
@@ -107,18 +109,31 @@ export function WorkingAgentsPopover({
                   >
                     {a.display_name}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenDetail({ kind: "agent", memberID: a.id });
-                    }}
-                    title={`Inspect ${a.display_name}`}
-                    aria-label={`Inspect ${a.display_name}`}
-                    className="size-6 rounded-[4px] text-fg-4 hover:text-fg hover:bg-hover flex items-center justify-center shrink-0"
-                  >
-                    <PanelRight className="size-3.5" />
-                  </button>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {onStopAgent && (
+                      <button
+                        type="button"
+                        onClick={() => onStopAgent(a.id)}
+                        title={`Stop ${a.display_name}`}
+                        aria-label={`Stop ${a.display_name}`}
+                        className="size-6 rounded-[4px] text-fg-4 hover:text-danger hover:bg-hover flex items-center justify-center shrink-0"
+                      >
+                        <Square className="size-2.5 fill-current" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenDetail({ kind: "agent", memberID: a.id });
+                      }}
+                      title={`Inspect ${a.display_name}`}
+                      aria-label={`Inspect ${a.display_name}`}
+                      className="size-6 rounded-[4px] text-fg-4 hover:text-fg hover:bg-hover flex items-center justify-center shrink-0"
+                    >
+                      <PanelRight className="size-3.5" />
+                    </button>
+                  </div>
                 </div>
                 {focus && (
                   <div className="text-[12px] text-fg-3 truncate">in {focus.label}</div>

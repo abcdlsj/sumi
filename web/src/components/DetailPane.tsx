@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey, useTaskDetailsCollapsed } from "../preferences";
@@ -1309,7 +1309,7 @@ function AgentDetail({
   const qc = useQueryClient();
   const act = useAction();
   const toast = useToast();
-  const [pending, setPending] = useState<"restart" | "reset_session" | null>(null);
+  const [pending, setPending] = useState<"restart" | "reset_session" | "stop_turn" | null>(null);
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [tplName, setTplName] = useState("");
@@ -1329,7 +1329,7 @@ function AgentDetail({
   const st = ag.runtime_state;
   const cfg = ag.driver_config;
 
-  async function control(action: "restart" | "reset_session") {
+  async function control(action: "restart" | "reset_session" | "stop_turn") {
     setPending(action);
     await act.run(() => api.controlAgent(spaceSlug, member!.id, action));
     setPending(null);
@@ -1492,6 +1492,17 @@ function AgentDetail({
                 </div>
               )}
             </div>
+            {canGovern && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Square className="size-3 fill-current" />}
+                loading={pending === "stop_turn"}
+                onClick={() => void control("stop_turn")}
+              >
+                Stop
+              </Button>
+            )}
           </div>
         )}
 
