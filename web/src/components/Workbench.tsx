@@ -35,7 +35,7 @@ import { api, ownComputers, type AgentCreateProposal, type BootstrapData, type C
 import { accentSwatch, applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
-import { isMacPlatform, useChannelSort, useSidebarCollapsed, type ChannelSortPref } from "../preferences";
+import { isMacPlatform, readLastSpaceView, useChannelSort, useSidebarCollapsed, writeLastSpaceView, type ChannelSortPref, type SavedMainView } from "../preferences";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
@@ -191,6 +191,15 @@ function SectionAdd({ label, onClick }: { label: string; onClick: () => void }) 
   );
 }
 
+function toSavedMainView(v: MainView): SavedMainView | null {
+  if (v.kind === "conversation") {
+    // Archived channels are not part of bootstrap and are skipped for restore.
+    return v.archivedConv ? null : { kind: "conversation", convID: v.convID };
+  }
+  if (v.kind === "admin") return { kind: "admin", tab: v.tab };
+  return { kind: v.kind };
+}
+
 export function Workbench({
   spaceSlug,
   spaces = [],
@@ -210,7 +219,11 @@ export function Workbench({
   const toast = useToast();
   const bootQ = useQuery({ queryKey: ["bootstrap", spaceSlug], queryFn: () => api.bootstrap(spaceSlug) });
   const [theme, setTheme] = useTheme();
-  const [mainView, setMainViewState] = useState<MainView>({ kind: "inbox" });
+  const initialViewRef = useRef<MainView | null>(null);
+  if (!initialViewRef.current) {
+    initialViewRef.current = (!initialPeerID ? readLastSpaceView(spaceSlug) : null) ?? { kind: "inbox" };
+  }
+  const [mainView, setMainViewState] = useState<MainView>(initialViewRef.current);
   const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("needs_me");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("active");
@@ -228,7 +241,7 @@ export function Workbench({
   const dm = useAction();
   const groupAct = useAction();
   const landed = useRef(false);
-  const historyRef = useRef<{ stack: MainView[]; index: number }>({ stack: [{ kind: "inbox" }], index: 0 });
+  const historyRef = useRef<{ stack: MainView[]; index: number }>({ stack: [initialViewRef.current], index: 0 });
   const boot = bootQ.data;
   const panes = usePaneWidths();
   const draftConvIDs = useDraftConvIDs();
@@ -237,8 +250,12 @@ export function Workbench({
   useEffect(() => setRecentConvIDs(readRecentConvs(spaceSlug)), [spaceSlug]);
 
   const setMainView = useCallback(
-    (next: MainView, opts?: { replace?: boolean }) => {
+    (next: MainView, opts?: { replace?: boolean; persist?: boolean }) => {
       setMainViewState(next);
+      if (opts?.persist !== false) {
+        const saved = toSavedMainView(next);
+        if (saved) writeLastSpaceView(spaceSlug, saved);
+      }
       if (next.kind === "conversation") {
         setRecentConvIDs(recordRecentConv(spaceSlug, next.convID));
       }
@@ -261,13 +278,19 @@ export function Workbench({
     [spaceSlug],
   );
 
-  const stepHistory = useCallback((delta: -1 | 1) => {
-    const h = historyRef.current;
-    const nextIdx = h.index + delta;
-    if (nextIdx < 0 || nextIdx >= h.stack.length) return;
-    h.index = nextIdx;
-    setMainViewState(h.stack[nextIdx]);
-  }, []);
+  const stepHistory = useCallback(
+    (delta: -1 | 1) => {
+      const h = historyRef.current;
+      const nextIdx = h.index + delta;
+      if (nextIdx < 0 || nextIdx >= h.stack.length) return;
+      h.index = nextIdx;
+      const target = h.stack[nextIdx];
+      setMainViewState(target);
+      const saved = toSavedMainView(target);
+      if (saved) writeLastSpaceView(spaceSlug, saved);
+    },
+    [spaceSlug],
+  );
 
   // Dismiss channel right-click context menu on outside click or Escape.
   useEffect(() => {
@@ -287,7 +310,8 @@ export function Workbench({
     };
   }, [ctxMenu]);
 
-  // First landing: open the agent created during onboarding, else #general when Inbox is empty.
+  // First landing: open the agent created during onboarding, restore last visited view,
+  // or fall back to the first channel when Inbox is empty.
   useEffect(() => {
     if (!boot || landed.current) return;
     landed.current = true;
@@ -295,9 +319,18 @@ export function Workbench({
       void openOrCreateDM(initialPeerID);
       return;
     }
+    const saved = readLastSpaceView(spaceSlug);
+    if (saved) {
+      if (saved.kind !== "conversation") return;
+      if (boot.conversations.some((c) => c.id === saved.convID && !c.archived_at)) return;
+    }
     const firstChannel = boot.conversations.find((c) => c.kind === "public" || c.kind === "private");
-    if (boot.inbox.length === 0 && firstChannel) setMainView({ kind: "conversation", convID: firstChannel.id });
-  }, [boot]);
+    if (boot.inbox.length === 0 && firstChannel) {
+      setMainView({ kind: "conversation", convID: firstChannel.id }, { replace: true, persist: false });
+    } else if (saved) {
+      setMainView({ kind: "inbox" }, { replace: true, persist: false });
+    }
+  }, [boot, initialPeerID, spaceSlug, setMainView]);
 
   useEffect(() => {
     const es = new EventSource(`/api/v1/spaces/${spaceSlug}/events`, { withCredentials: true });

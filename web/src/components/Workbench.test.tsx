@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
+import { App } from "../App";
+import { clearLastLocation, writeLastSpaceView } from "../preferences";
 import { Workbench } from "./Workbench";
 
 const sampleBoot: BootstrapData = {
@@ -150,6 +152,7 @@ describe("Workbench", () => {
   });
 
   afterEach(() => {
+    clearLastLocation();
     sessionStorage.clear();
     vi.restoreAllMocks();
   });
@@ -321,5 +324,78 @@ describe("Workbench", () => {
         driver_config: { provider: "pi" },
       }),
     );
+  });
+
+  it("remembers the last visited space and channel across restarts and falls back if removed", async () => {
+    const secondSpace = {
+      id: "sp-2",
+      slug: "ops",
+      name: "Ops Space",
+      accent: "flame" as const,
+      owner_member_id: "m-owner",
+      event_seq: 1,
+      created_at: "2026-11-19T10:00:00Z",
+    };
+    const opsBoot: BootstrapData = {
+      ...sampleBoot,
+      space: secondSpace,
+      conversations: [
+        {
+          id: "conv-ops-alerts",
+          space_id: "sp-2",
+          kind: "public",
+          slug: "alerts",
+          topic: "Production alerts",
+          next_seq: 1,
+          read_seq: 1,
+          unread_count: 0,
+          mention_count: 0,
+          notify_level: "mentions",
+          following: false,
+        },
+      ],
+    };
+    vi.spyOn(api, "me").mockResolvedValue({
+      user: { id: "u-1", email: "lisi@example.com", display_name: "Lisi", created_at: "2026-11-19T10:00:00Z" },
+      spaces: [sampleBoot.space, secondSpace],
+    });
+    const bootSpy = vi.spyOn(api, "bootstrap").mockImplementation(async (slug) => (slug === "ops" ? opsBoot : sampleBoot));
+    vi.spyOn(api, "listMessages").mockResolvedValue({ read_seq: 1, following: false, messages: [] });
+
+    // First session: switch to the second space and open #alerts.
+    const qc1 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const first = render(
+      <QueryClientProvider client={qc1}>
+        <App />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Sumi Studio");
+    fireEvent.click(screen.getByRole("button", { name: "Space Ops Space" }));
+    const opsSidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+    fireEvent.click(await within(opsSidebar).findByRole("button", { name: /^alerts$/i }));
+    await screen.findByText("Production alerts");
+    first.unmount();
+
+    // Restart: App lands directly in Ops Space -> #alerts (even though inbox is non-empty).
+    bootSpy.mockClear();
+    const qc2 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const second = render(
+      <QueryClientProvider client={qc2}>
+        <App />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Production alerts")).toBeTruthy();
+    expect(bootSpy).toHaveBeenCalledWith("ops");
+    second.unmount();
+
+    // Stale saved channel falls back cleanly to Inbox when inbox is non-empty.
+    writeLastSpaceView("studio", { kind: "conversation", convID: "conv-deleted" });
+    const qc3 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc3}>
+        <App />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
   });
 });

@@ -249,7 +249,11 @@ function NewTaskModal({
     value: c.id,
     label: `#${c.slug ?? "channel"}`,
     description: c.topic || undefined,
-    icon: c.kind === "private" ? <Lock className="size-3.5 text-fg-3" /> : <Hash className="size-3.5 text-fg-3" />,
+    icon: (
+      <span className="size-5 flex items-center justify-center text-fg-3">
+        {c.kind === "private" ? <Lock className="size-3.5" /> : <Hash className="size-3.5" />}
+      </span>
+    ),
   }));
 
   const assigneeOptions: SelectOption<string>[] = [
@@ -280,7 +284,7 @@ function NewTaskModal({
 
   return (
     <Modal open label="New task" title="New task" description="Track work inside a channel and optionally assign a member." onClose={onClose}>
-      <form onSubmit={(e) => void submit(e)} className="space-y-4">
+      <form onSubmit={(e) => void submit(e)} className="px-6 pb-6 pt-4 space-y-4">
         <Field label="Title" autoFocus placeholder="e.g. Ship workspace file viewer" value={title} onChange={(e) => setTitle(e.target.value)} />
         <Select
           label="Channel"
@@ -514,13 +518,13 @@ function AgentList({
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-[320px]">
-          <Search className="size-4 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Search className="size-4 text-fg-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search agents"
             aria-label="Search agents"
-            className="w-full h-8 pl-8 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+            className="w-full h-10 pl-9 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
           />
         </div>
         <Segmented
@@ -830,15 +834,19 @@ export function AdminPanel({
                             <div className="text-[14px] font-semibold text-fg truncate">{tpl.name}</div>
                             <div className="text-[13px] text-fg-3 truncate font-body">{tpl.role_text || "No role defined."}</div>
                           </div>
-                          <span className="hidden sm:block font-mono text-[12.5px] text-fg-3 truncate max-w-[160px] shrink-0" title={templateDriverSummary(tpl)}>
+                          <span className="hidden sm:block w-[150px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={templateDriverSummary(tpl)}>
                             {templateDriverSummary(tpl)}
                           </span>
-                          {comp && (
-                            <span className="hidden md:inline-flex items-center gap-1.5 text-[12.5px] text-fg-3 truncate max-w-[120px] shrink-0">
-                              <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
-                              <span className="truncate">{comp.name}</span>
-                            </span>
-                          )}
+                          <span className="hidden md:flex items-center gap-1.5 w-[136px] text-[12.5px] text-fg-3 shrink-0 min-w-0">
+                            {comp ? (
+                              <>
+                                <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                                <span className="truncate">{comp.name}</span>
+                              </>
+                            ) : (
+                              <span className="text-fg-4 truncate">Any computer</span>
+                            )}
+                          </span>
                           <div className="flex items-center gap-1 shrink-0">
                             <IconButton label={`Edit template ${tpl.name}`} onClick={() => setEditingTemplate(tpl)}>
                               <Pencil />

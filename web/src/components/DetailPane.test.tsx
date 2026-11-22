@@ -75,6 +75,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  try {
+    localStorage?.removeItem?.("sumi.pref.task_details_collapsed");
+  } catch {
+    // ignore unavailable storage in test environments
+  }
   clearAgentTemplatesForTests();
   vi.restoreAllMocks();
 });
@@ -218,6 +223,45 @@ describe("TaskDetail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Claim" }));
     await waitFor(() => expect(claim).toHaveBeenCalledWith("s", task.id));
+  });
+
+  it("collapses and expands task details while keeping summary visible and honoring Edit", async () => {
+    const detailedTask = {
+      ...task,
+      description: "Detailed rollout plan for the unified watermark.",
+      assignee_member_id: lin.id,
+      assignee_display_name: lin.display_name,
+      assignee_kind: lin.kind,
+    };
+    vi.spyOn(api, "getTask").mockResolvedValue({ task: detailedTask });
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [reply(1)], read_seq: 0, following: true });
+
+    renderPane({ kind: "task", taskID: detailedTask.id });
+    expect(await screen.findByText("Detailed rollout plan for the unified watermark.")).toBeTruthy();
+
+    // Status and assignee selects share identical sizing classes for visual alignment.
+    const statusWrap = screen.getByRole("button", { name: "Task status" }).parentElement!;
+    const assigneeWrap = screen.getByRole("button", { name: "Task assignee" }).parentElement!;
+    expect(statusWrap.className).toContain("w-[196px]");
+    expect(assigneeWrap.className).toContain("w-[196px]");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse task details" }));
+    expect(screen.queryByText("Detailed rollout plan for the unified watermark.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Task status" })).toBeNull();
+    expect(screen.getByText("Unified read watermark")).toBeTruthy();
+    expect(screen.getByText("In progress")).toBeTruthy();
+    expect(screen.getByText("Lin")).toBeTruthy();
+
+    // Clicking Edit while collapsed opens the inline editor immediately.
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox", { name: "Task title" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Task status" })).toBeNull();
+
+    // Clicking the compact summary expands the details back.
+    fireEvent.click(screen.getByRole("button", { name: "Expand task details" }));
+    expect(screen.getByText("Detailed rollout plan for the unified watermark.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Task status" })).toBeTruthy();
   });
 });
 

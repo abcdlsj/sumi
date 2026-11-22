@@ -122,7 +122,7 @@ function DesktopServerDialog({
 
   return (
     <Modal open={open} onClose={onClose} label="Server" width={420}>
-      <div className="px-6 pt-5 pb-3 border-b border-line">
+      <div className="pl-6 pr-12 pt-5 pb-3 border-b border-line">
         <h2 className="text-[16px] font-semibold text-fg">Server</h2>
         <p className="mt-0.5 text-[12.5px] font-mono text-fg-3 truncate">{currentUrl}</p>
       </div>

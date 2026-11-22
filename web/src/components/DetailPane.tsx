@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
-import { isComposerSendEvent, useSendKey } from "../preferences";
+import { isComposerSendEvent, useSendKey, useTaskDetailsCollapsed } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
@@ -719,6 +719,7 @@ function TaskDetail({
   const qc = useQueryClient();
   const act = useAction();
   const [editing, setEditing] = useState(false);
+  const [detailsCollapsed, setDetailsCollapsed] = useTaskDetailsCollapsed();
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [pickerMsgID, setPickerMsgID] = useState<string | null>(null);
@@ -770,15 +771,19 @@ function TaskDetail({
   const canClaim = open && (!task.assignee_member_id || (task.assignee_member_id === meID && task.status === "todo"));
   const canUnclaim = open && task.assignee_member_id === meID && task.status !== "todo";
 
+  const assigneeMember = task.assignee_member_id ? boot.members.find((m) => m.id === task.assignee_member_id) : undefined;
   const assigneePool = members.slice();
   if (task.assignee_member_id && !assigneePool.some((m) => m.id === task.assignee_member_id)) {
-    const existing = boot.members.find((m) => m.id === task.assignee_member_id);
-    if (existing) assigneePool.push(existing);
+    if (assigneeMember) assigneePool.push(assigneeMember);
   }
   const statusOptions: SelectOption<TaskStatus>[] = STATUSES.map((s) => ({
     value: s,
     label: taskStatusLabel(s),
-    icon: <TaskStatusIcon status={s} size={14} />,
+    icon: (
+      <span className="size-5 flex items-center justify-center">
+        <TaskStatusIcon status={s} size={16} />
+      </span>
+    ),
   }));
   const assigneeOptions: SelectOption<string>[] = [
     { value: "", label: "Unassigned" },
@@ -831,100 +836,119 @@ function TaskDetail({
         <span className="text-fg-2 truncate">{task.channel_slug ? `#${task.channel_slug}` : "Direct message"}</span>
       </PaneHeader>
 
-      <div className="px-5 pt-4 pb-4 border-b border-line space-y-3 shrink-0">
-        {editing ? (
-          <form onSubmit={(e) => void saveEdit(e)} className="space-y-2.5 animate-fade-in">
-            <input
-              autoFocus
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              aria-label="Task title"
-              placeholder="Task title"
-              className="w-full h-9 px-3 rounded-[6px] border border-line-strong bg-card text-[15px] font-semibold text-fg outline-none focus:border-accent focus:shadow-[var(--ring)]"
-            />
-            <textarea
-              rows={3}
-              value={editDesc}
-              onChange={(e) => setEditDesc(e.target.value)}
-              aria-label="Task description"
-              placeholder="Add details…"
-              className="w-full px-3 py-2 rounded-[6px] border border-line-strong bg-card text-[14px] text-fg leading-relaxed outline-none resize-none focus:border-accent focus:shadow-[var(--ring)]"
-            />
-            <div className="flex justify-end gap-2">
-              <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" loading={act.busy} disabled={!editTitle.trim()}>
-                Save
-              </Button>
+      {detailsCollapsed && !editing ? (
+        <section className="px-5 py-2.5 border-b border-line shrink-0">
+          <button
+            type="button"
+            aria-expanded={false}
+            aria-label="Expand task details"
+            onClick={() => setDetailsCollapsed(false)}
+            className="w-full text-left group flex items-start justify-between gap-2.5 rounded-[6px] -mx-1.5 px-1.5 py-1 hover:bg-subtle transition-colors"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="text-[14.5px] font-semibold text-fg truncate leading-snug">{task.title}</div>
+              <div className="mt-1 flex items-center gap-2 text-[12.5px] text-fg-3 min-w-0 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 text-fg-2 font-medium shrink-0">
+                  <TaskStatusIcon status={task.status} size={13} />
+                  {taskStatusLabel(task.status)}
+                </span>
+                <span className="text-fg-4">·</span>
+                {task.assignee_member_id ? (
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <MemberAvatar
+                      id={task.assignee_member_id}
+                      name={task.assignee_display_name ?? "?"}
+                      kind={task.assignee_kind ?? "human"}
+                      size="xs"
+                      state={assigneeMember?.agent?.runtime_state}
+                    />
+                    <span className="truncate text-fg-2">{task.assignee_display_name}</span>
+                  </span>
+                ) : (
+                  <span className="text-fg-4">Unassigned</span>
+                )}
+                <span className="text-fg-4">·</span>
+                <span className="tabular text-fg-4 shrink-0">rev {task.revision}</span>
+              </div>
             </div>
-          </form>
-        ) : (
-          <>
-            <h2 className="font-display text-[20px] font-semibold text-fg leading-snug">{task.title}</h2>
-            {task.description && <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
-          </>
-        )}
-        <div className="grid grid-cols-[84px_1fr] gap-x-3 gap-y-2 pt-1">
-          <KV label="Status">
-            <Select
-              size="sm"
-              ariaLabel="Task status"
-              value={task.status}
-              options={statusOptions}
-              onChange={(next) => {
-                const prevTask = qc.getQueryData<Task>(["task", spaceSlug, taskID]);
-                const prevBoot = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
-                if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, status: next });
-                if (prevBoot) {
-                  qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
-                    ...prevBoot,
-                    tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, status: next } : item)),
-                  });
-                }
-                void act.run(async () => {
-                  try {
-                    await api.updateTaskStatus(spaceSlug, task.id, next);
-                  } catch (err) {
-                    if (prevTask) qc.setQueryData(["task", spaceSlug, taskID], prevTask);
-                    if (prevBoot) qc.setQueryData(["bootstrap", spaceSlug], prevBoot);
-                    throw err;
-                  }
-                  refresh();
-                });
-              }}
-              className="w-[176px]"
-            />
-          </KV>
-          <KV label="Assignee">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="h-6 px-1.5 rounded-[5px] text-[12.5px] text-fg-3 group-hover:text-fg inline-flex items-center gap-1 shrink-0 mt-0.5">
+              <ChevronDown className="size-3.5" />
+              <span>Details</span>
+            </span>
+          </button>
+        </section>
+      ) : (
+        <section className="px-5 py-3.5 border-b border-line space-y-2.5 shrink-0">
+          {editing ? (
+            <form onSubmit={(e) => void saveEdit(e)} className="space-y-2.5 animate-fade-in">
+              <input
+                autoFocus
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                aria-label="Task title"
+                placeholder="Task title"
+                className="w-full h-9 px-3 rounded-[6px] border border-line-strong bg-card text-[15px] font-semibold text-fg outline-none focus:border-accent focus:shadow-[var(--ring)]"
+              />
+              <textarea
+                rows={3}
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                aria-label="Task description"
+                placeholder="Add details…"
+                className="w-full px-3 py-2 rounded-[6px] border border-line-strong bg-card text-[14px] text-fg leading-relaxed outline-none resize-none focus:border-accent focus:shadow-[var(--ring)]"
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" loading={act.busy} disabled={!editTitle.trim()}>
+                  Save
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="font-display text-[19px] font-semibold text-fg leading-snug min-w-0 flex-1">{task.title}</h2>
+                <button
+                  type="button"
+                  aria-expanded={true}
+                  aria-label="Collapse task details"
+                  title="Collapse task details"
+                  onClick={() => setDetailsCollapsed(true)}
+                  className="h-7 px-2 -mr-1.5 rounded-[5px] text-[12.5px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center gap-1 shrink-0 transition-colors"
+                >
+                  <ChevronUp className="size-3.5" />
+                  <span>Hide</span>
+                </button>
+              </div>
+              {task.description && (
+                <p className="text-[14px] text-fg-2 leading-relaxed whitespace-pre-wrap max-h-[168px] overflow-y-auto scroll-thin pr-1">
+                  {task.description}
+                </p>
+              )}
+            </>
+          )}
+          <div className="grid grid-cols-[84px_1fr] gap-x-3 gap-y-2 pt-0.5">
+            <KV label="Status">
               <Select
                 size="sm"
-                searchable
-                searchPlaceholder="Search channel members…"
-                ariaLabel="Task assignee"
-                value={task.assignee_member_id ?? ""}
-                options={assigneeOptions}
-                disabled={!open}
+                ariaLabel="Task status"
+                value={task.status}
+                options={statusOptions}
                 onChange={(next) => {
-                  const nextMember = assigneePool.find((m) => m.id === next);
                   const prevTask = qc.getQueryData<Task>(["task", spaceSlug, taskID]);
                   const prevBoot = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
-                  const patch = {
-                    assignee_member_id: next || undefined,
-                    assignee_display_name: nextMember?.display_name,
-                    assignee_kind: nextMember?.kind,
-                  };
-                  if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, ...patch });
+                  if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, status: next });
                   if (prevBoot) {
                     qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
                       ...prevBoot,
-                      tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, ...patch } : item)),
+                      tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, status: next } : item)),
                     });
                   }
                   void act.run(async () => {
                     try {
-                      await api.assignTask(spaceSlug, task.id, next);
+                      await api.updateTaskStatus(spaceSlug, task.id, next);
                     } catch (err) {
                       if (prevTask) qc.setQueryData(["task", spaceSlug, taskID], prevTask);
                       if (prevBoot) qc.setQueryData(["bootstrap", spaceSlug], prevBoot);
@@ -933,27 +957,68 @@ function TaskDetail({
                     refresh();
                   });
                 }}
-                className="flex-1 min-w-0 max-w-[210px]"
+                className="w-[196px] max-w-full"
               />
-              {canClaim && (
-                <Button size="sm" variant="soft" loading={act.busy} onClick={() => void act.run(() => api.claimTask(spaceSlug, task.id)).then(refresh)}>
-                  Claim
-                </Button>
-              )}
-              {canUnclaim && (
-                <Button size="sm" variant="ghost" loading={act.busy} onClick={() => void act.run(() => api.unclaimTask(spaceSlug, task.id)).then(refresh)}>
-                  Unclaim
-                </Button>
-              )}
-            </div>
-          </KV>
-          <KV label="Revision">
-            <span className="tabular text-[13px] text-fg-3">rev {task.revision}</span>
-          </KV>
-        </div>
-      </div>
+            </KV>
+            <KV label="Assignee">
+              <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                <Select
+                  size="sm"
+                  searchable
+                  searchPlaceholder="Search channel members…"
+                  ariaLabel="Task assignee"
+                  value={task.assignee_member_id ?? ""}
+                  options={assigneeOptions}
+                  disabled={!open}
+                  onChange={(next) => {
+                    const nextMember = assigneePool.find((m) => m.id === next);
+                    const prevTask = qc.getQueryData<Task>(["task", spaceSlug, taskID]);
+                    const prevBoot = qc.getQueryData<BootstrapData>(["bootstrap", spaceSlug]);
+                    const patch = {
+                      assignee_member_id: next || undefined,
+                      assignee_display_name: nextMember?.display_name,
+                      assignee_kind: nextMember?.kind,
+                    };
+                    if (prevTask) qc.setQueryData<Task>(["task", spaceSlug, taskID], { ...prevTask, ...patch });
+                    if (prevBoot) {
+                      qc.setQueryData<BootstrapData>(["bootstrap", spaceSlug], {
+                        ...prevBoot,
+                        tasks: prevBoot.tasks.map((item) => (item.id === task.id ? { ...item, ...patch } : item)),
+                      });
+                    }
+                    void act.run(async () => {
+                      try {
+                        await api.assignTask(spaceSlug, task.id, next);
+                      } catch (err) {
+                        if (prevTask) qc.setQueryData(["task", spaceSlug, taskID], prevTask);
+                        if (prevBoot) qc.setQueryData(["bootstrap", spaceSlug], prevBoot);
+                        throw err;
+                      }
+                      refresh();
+                    });
+                  }}
+                  className="w-[196px] max-w-full"
+                />
+                {canClaim && (
+                  <Button size="sm" variant="soft" loading={act.busy} onClick={() => void act.run(() => api.claimTask(spaceSlug, task.id)).then(refresh)}>
+                    Claim
+                  </Button>
+                )}
+                {canUnclaim && (
+                  <Button size="sm" variant="ghost" loading={act.busy} onClick={() => void act.run(() => api.unclaimTask(spaceSlug, task.id)).then(refresh)}>
+                    Unclaim
+                  </Button>
+                )}
+              </div>
+            </KV>
+            <KV label="Revision">
+              <span className="tabular text-[13px] text-fg-3">rev {task.revision}</span>
+            </KV>
+          </div>
+        </section>
+      )}
 
-      <div className="h-10 px-5 flex items-center justify-between text-[13px] text-fg-3 border-b border-line shrink-0 bg-bg/50">
+      <div className="h-9 px-5 flex items-center justify-between text-[13px] text-fg-3 border-b border-line shrink-0 bg-bg/50">
         <span className="font-semibold text-fg-2 flex items-center gap-2">
           <MessageSquare className="size-4" /> Discussion
         </span>

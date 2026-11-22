@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./api";
 import { Onboarding } from "./components/Onboarding";
 import { WorkbenchSkeleton } from "./components/Skeletons";
 import { ErrorBoundary, ErrorState } from "./components/ui";
 import { Workbench } from "./components/Workbench";
+import { clearLastLocation, readLastSpace, writeLastSpace } from "./preferences";
 
 type Setup = { slug: string; step: "computer" | "agent" } | null;
 
@@ -21,6 +22,21 @@ export function App() {
     retry: (count, err) => !(err instanceof ApiError && err.status === 401) && count < 2,
   });
 
+  const user = meQ.isSuccess ? meQ.data.user : null;
+  const spaces = meQ.isSuccess ? meQ.data.spaces : [];
+  const savedSlug = readLastSpace();
+  const activeSlug =
+    selectedSlug ||
+    (savedSlug && spaces.some((s) => s.slug === savedSlug) ? savedSlug : "") ||
+    spaces[0]?.slug ||
+    "";
+
+  useEffect(() => {
+    if (user && activeSlug && !setup) {
+      writeLastSpace(activeSlug);
+    }
+  }, [user, activeSlug, setup]);
+
   if (meQ.isLoading) return <WorkbenchSkeleton />;
 
   const isUnauth = meQ.error instanceof ApiError && meQ.error.status === 401;
@@ -36,13 +52,11 @@ export function App() {
     );
   }
 
-  const user = meQ.isSuccess ? meQ.data.user : null;
-  const spaces = meQ.isSuccess ? meQ.data.spaces : [];
-  const activeSlug = selectedSlug || spaces[0]?.slug || "";
-
   function logout() {
+    clearLastLocation();
     void api.logout().then(() => {
       setSelectedSlug("");
+      setOpenPeer("");
       setSetup(null);
       qc.clear();
       void qc.invalidateQueries({ queryKey: ["me"] });
@@ -60,6 +74,7 @@ export function App() {
           onAuthenticated={() => void qc.invalidateQueries({ queryKey: ["me"] })}
           onSpaceCreated={(slug) => {
             setSelectedSlug(slug);
+            writeLastSpace(slug);
             setSetup({ slug, step: "computer" });
             void qc.invalidateQueries({ queryKey: ["me"] });
           }}
@@ -81,9 +96,15 @@ export function App() {
           key={activeSlug}
           spaceSlug={activeSlug}
           spaces={spaces}
-          onSwitchSpace={setSelectedSlug}
-          onSpaceCreated={(slug) => {
+          onSwitchSpace={(slug) => {
+            setOpenPeer("");
             setSelectedSlug(slug);
+            writeLastSpace(slug);
+          }}
+          onSpaceCreated={(slug) => {
+            setOpenPeer("");
+            setSelectedSlug(slug);
+            writeLastSpace(slug);
             setSetup({ slug, step: "computer" });
             void qc.invalidateQueries({ queryKey: ["me"] });
           }}

@@ -775,9 +775,11 @@ export function AgentForm({
         </div>
       )}
 
-      <div className="flex items-end gap-3">
-        <PixelAvatar seed={name || "agent"} size="xl" />
-        <div className="flex-1">
+      <div className="flex items-start gap-3">
+        <div className="pt-2.5 shrink-0">
+          <PixelAvatar seed={name || "agent"} size="xl" />
+        </div>
+        <div className="flex-1 min-w-0">
           <Field
             label="Name"
             value={name}
