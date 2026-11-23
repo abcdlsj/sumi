@@ -86,6 +86,8 @@ func TestFakePiRPC(t *testing.T) {
 	out := json.NewEncoder(os.Stdout)
 	turns := 0
 	compacted := false
+	compactAttempts := 0
+	postStatsFails := 0
 	for in.Scan() {
 		var cmd struct {
 			ID                 string `json:"id"`
@@ -155,11 +157,22 @@ func TestFakePiRPC(t *testing.T) {
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "abort", "success": true})
 			_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": true})
 		case "get_session_stats":
+			if mode == "compact_post_stats_fail_then_ok" && compacted && postStatsFails == 0 {
+				postStatsFails++
+				_ = out.Encode(map[string]any{
+					"id":      cmd.ID,
+					"type":    "response",
+					"command": "get_session_stats",
+					"success": false,
+					"error":   "temporary stats error",
+				})
+				continue
+			}
 			ctxTokens := 4000
 			switch mode {
 			case "over_budget", "over_budget_sticky":
 				ctxTokens = 200_000
-			case "over_budget_shrinks":
+			case "over_budget_shrinks", "compact_refused_then_ok", "compact_fail_then_ok", "compact_timeout_then_ok", "compact_post_stats_fail_then_ok":
 				if compacted {
 					ctxTokens = 30_000
 				} else {
@@ -188,8 +201,40 @@ func TestFakePiRPC(t *testing.T) {
 				},
 			})
 		case "compact":
+			compactAttempts++
+			logLine(fmt.Sprintf("COMPACT:%d:%s", compactAttempts, cmd.CustomInstructions))
+			if mode == "compact_refused_then_ok" && compactAttempts == 1 {
+				_ = out.Encode(map[string]any{
+					"id":      cmd.ID,
+					"type":    "response",
+					"command": "compact",
+					"success": false,
+					"error":   "already compacting",
+				})
+				continue
+			}
+			if mode == "compact_fail_then_ok" && compactAttempts == 1 {
+				_ = out.Encode(map[string]any{
+					"id":      cmd.ID,
+					"type":    "response",
+					"command": "compact",
+					"success": false,
+					"error":   "provider 503 upstream failure",
+				})
+				continue
+			}
+			if mode == "compact_timeout_then_ok" && compactAttempts == 1 {
+				time.Sleep(250 * time.Millisecond)
+				_ = out.Encode(map[string]any{
+					"id":      cmd.ID,
+					"type":    "response",
+					"command": "compact",
+					"success": true,
+					"data":    map[string]any{},
+				})
+				continue
+			}
 			compacted = true
-			logLine("COMPACT:" + cmd.CustomInstructions)
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "compact", "success": true, "data": map[string]any{}})
 		}
 	}
@@ -527,6 +572,129 @@ func TestCompactionArmingPreventsRetryLoop(t *testing.T) {
 	}
 	if got := countCompacts(readLogLines(logShrink)); got != 2 {
 		t.Fatalf("expected 2 compactions after shrinking re-armed, got %d", got)
+	}
+}
+
+func TestClassifyCompactionErrorAndBackoff(t *testing.T) {
+	if got := classifyCompactionError(nil); got != compactionCompleted {
+		t.Fatalf("nil err = %v, want completed", got)
+	}
+	for _, msg := range []string{"already compacting", "Nothing to compact", "session busy", "agent is streaming"} {
+		if got := classifyCompactionError(errors.New(msg)); got != compactionRefused {
+			t.Fatalf("err %q = %v, want refused", msg, got)
+		}
+	}
+	for _, err := range []error{context.DeadlineExceeded, context.Canceled, errors.New("provider 503"), errors.New("pi process ended")} {
+		if got := classifyCompactionError(err); got != compactionFailed {
+			t.Fatalf("err %v = %v, want failed", err, got)
+		}
+	}
+	wantBackoff := []int{0, 1, 2, 4, 4, 4}
+	for streak, want := range wantBackoff {
+		if got := compactBackoffTurns(streak); got != want {
+			t.Fatalf("compactBackoffTurns(%d) = %d, want %d", streak, got, want)
+		}
+	}
+}
+
+func TestCompactionRefusedFailedTimeoutAndStatsRecovery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	countCompacts := func(lines []string) int {
+		n := 0
+		for _, l := range lines {
+			if strings.HasPrefix(l, "COMPACT:") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// 1. Refused keeps armed: turn 1 refused -> turn 2 retries immediately and succeeds.
+	dRef, inRef, logRef := newFakeDriver(t, "compact_refused_then_ok", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+	})
+	defer dRef.Close()
+	if _, err := dRef.RunTurn(ctx, inRef); err != nil {
+		t.Fatalf("refused turn 1: %v", err)
+	}
+	if got := countCompacts(readLogLines(logRef)); got != 1 {
+		t.Fatalf("refused turn 1 compacts = %d, want 1", got)
+	}
+	if _, err := dRef.RunTurn(ctx, inRef); err != nil {
+		t.Fatalf("refused turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logRef)); got != 2 {
+		t.Fatalf("refused must keep armed for immediate retry on turn 2, got %d compacts", got)
+	}
+
+	// 2. Failed applies 1-turn backoff then re-arms: turn 1 fails, turn 2 skips, turn 3 retries and succeeds.
+	dFail, inFail, logFail := newFakeDriver(t, "compact_fail_then_ok", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+	})
+	defer dFail.Close()
+	if _, err := dFail.RunTurn(ctx, inFail); err != nil {
+		t.Fatalf("fail turn 1: %v", err)
+	}
+	if _, err := dFail.RunTurn(ctx, inFail); err != nil {
+		t.Fatalf("fail turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logFail)); got != 1 {
+		t.Fatalf("turn 2 after failure must back off, got %d compacts", got)
+	}
+	if _, err := dFail.RunTurn(ctx, inFail); err != nil {
+		t.Fatalf("fail turn 3: %v", err)
+	}
+	if got := countCompacts(readLogLines(logFail)); got != 2 {
+		t.Fatalf("turn 3 must re-arm and retry after backoff, got %d compacts", got)
+	}
+
+	// 3. Timeout behaves as failed (backs off 1 turn, then re-arms and succeeds).
+	dTO, inTO, logTO := newFakeDriver(t, "compact_timeout_then_ok", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+		CompactTimeout:       60 * time.Millisecond,
+	})
+	defer dTO.Close()
+	if _, err := dTO.RunTurn(ctx, inTO); err != nil {
+		t.Fatalf("timeout turn 1: %v", err)
+	}
+	if _, err := dTO.RunTurn(ctx, inTO); err != nil {
+		t.Fatalf("timeout turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logTO)); got != 1 {
+		t.Fatalf("turn 2 after timeout must back off, got %d compacts", got)
+	}
+	if _, err := dTO.RunTurn(ctx, inTO); err != nil {
+		t.Fatalf("timeout turn 3: %v", err)
+	}
+	if got := countCompacts(readLogLines(logTO)); got != 2 {
+		t.Fatalf("turn 3 after timeout must re-arm and retry, got %d compacts", got)
+	}
+
+	// 4. Post-compaction stats read failure does not permanently lock out arming.
+	dStats, inStats, logStats := newFakeDriver(t, "compact_post_stats_fail_then_ok", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+	})
+	defer dStats.Close()
+	if _, err := dStats.RunTurn(ctx, inStats); err != nil {
+		t.Fatalf("stats-fail turn 1: %v", err)
+	}
+	if _, err := dStats.RunTurn(ctx, inStats); err != nil {
+		t.Fatalf("stats-fail turn 2: %v", err)
+	}
+	if got := countCompacts(readLogLines(logStats)); got != 1 {
+		t.Fatalf("turn 2 after post-stats error must skip once, got %d compacts", got)
+	}
+	if _, err := dStats.RunTurn(ctx, inStats); err != nil {
+		t.Fatalf("stats-fail turn 3: %v", err)
+	}
+	if got := countCompacts(readLogLines(logStats)); got != 2 {
+		t.Fatalf("turn 3 after post-stats error must re-arm and retry, got %d compacts", got)
 	}
 }
 

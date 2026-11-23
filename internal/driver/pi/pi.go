@@ -35,9 +35,13 @@ const (
 	DefaultColdRecycleIdle      = 60 * time.Minute
 	DefaultColdRecycleMinTokens = 64_000
 
+	// DefaultCompactTimeout bounds a post-turn proactive `compact` RPC; large contexts need
+	// several minutes for summarization, so 90s causes premature timeouts.
+	DefaultCompactTimeout  = 5 * time.Minute
+	maxCompactBackoffTurns = 4
+
 	rpcCallTimeout     = 30 * time.Second
 	statsCallTimeout   = 5 * time.Second
-	compactCallTimeout = 90 * time.Second
 	abortSettleTimeout = 2 * time.Second
 	stderrTailBytes    = 2048
 
@@ -62,6 +66,9 @@ type Config struct {
 	// exceeds min(SoftCompactionTokens, 75% of contextWindow). Zero uses DefaultSoftCompactionTokens;
 	// negative values disable proactive compaction.
 	SoftCompactionTokens int
+	// CompactTimeout bounds how long a post-turn proactive `compact` RPC may run.
+	// Zero uses DefaultCompactTimeout.
+	CompactTimeout time.Duration
 	// ColdRecycleIdle is the idle gap past which a large session is recycled instead of resumed.
 	// Zero uses DefaultColdRecycleIdle; negative values disable cold wake recycling.
 	ColdRecycleIdle time.Duration
@@ -82,6 +89,8 @@ type Driver struct {
 	resumed           bool
 	sentFirstTurn     bool
 	compactArmed      bool
+	compactFailStreak int
+	compactSkipTurns  int
 	lastActiveAt      time.Time
 	lastContextTokens int
 
@@ -118,6 +127,13 @@ func (d *Driver) softCompactionLimit() int {
 	return d.cfg.SoftCompactionTokens
 }
 
+func (d *Driver) compactTimeout() time.Duration {
+	if d.cfg.CompactTimeout > 0 {
+		return d.cfg.CompactTimeout
+	}
+	return DefaultCompactTimeout
+}
+
 func (d *Driver) coldRecycleLimits() (time.Duration, int) {
 	if d.cfg.ColdRecycleIdle < 0 || d.cfg.ColdRecycleMinTokens < 0 {
 		return 0, 0
@@ -146,6 +162,8 @@ func (d *Driver) resetSessionStateLocked() {
 	d.resumed = false
 	d.sentFirstTurn = false
 	d.compactArmed = true
+	d.compactFailStreak = 0
+	d.compactSkipTurns = 0
 	d.lastActiveAt = time.Time{}
 	d.lastContextTokens = 0
 	d.prevInputTokens, d.prevOutputTokens, d.prevToolCalls = 0, 0, 0
@@ -616,6 +634,50 @@ func shouldProactiveCompact(contextTokens, contextWindow, softLimit int) bool {
 	return threshold > 0 && contextTokens > threshold
 }
 
+type compactionOutcome int
+
+const (
+	compactionCompleted compactionOutcome = iota
+	// compactionRefused means the runtime did not run compaction (busy, already compacting, nothing to compact).
+	compactionRefused
+	// compactionFailed means compaction ran and errored or timed out.
+	compactionFailed
+)
+
+func classifyCompactionError(err error) compactionOutcome {
+	if err == nil {
+		return compactionCompleted
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return compactionFailed
+	}
+	lower := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lower, "already compacting"),
+		strings.Contains(lower, "compaction already"),
+		strings.Contains(lower, "nothing to compact"),
+		strings.Contains(lower, "no messages to compact"),
+		strings.Contains(lower, "not enough messages"),
+		strings.Contains(lower, "busy"),
+		strings.Contains(lower, "streaming"),
+		strings.Contains(lower, "cannot compact"):
+		return compactionRefused
+	default:
+		return compactionFailed
+	}
+}
+
+func compactBackoffTurns(failStreak int) int {
+	if failStreak <= 0 {
+		return 0
+	}
+	shift := failStreak - 1
+	if shift > 2 {
+		shift = 2
+	}
+	return min(1<<shift, maxCompactBackoffTurns)
+}
+
 func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in driver.TurnInput) driver.TurnResult {
 	var res driver.TurnResult
 	statsCtx, cancel := context.WithTimeout(ctx, statsCallTimeout)
@@ -650,24 +712,41 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 		if threshold > 0 {
 			if st.ContextUsage.Tokens <= threshold {
 				d.compactArmed = true
+				d.compactFailStreak = 0
+				d.compactSkipTurns = 0
 			} else if d.compactArmed {
-				// Disarm before calling compact so a failed or ineffective compaction never loops on consecutive turns.
-				d.compactArmed = false
-				in.Emit(driver.Activity{})
-				compCtx, compCancel := context.WithTimeout(ctx, compactCallTimeout)
-				_, compErr := p.call(compCtx, "compact", map[string]any{"customInstructions": compactionInstructions})
-				compCancel()
-				if compErr == nil {
-					postCtx, postCancel := context.WithTimeout(ctx, statsCallTimeout)
-					postRaw, postErr := p.call(postCtx, "get_session_stats", nil)
-					postCancel()
-					if postErr == nil {
-						var postSt sessionStats
-						if json.Unmarshal(postRaw, &postSt) == nil && postSt.ContextUsage != nil && postSt.ContextUsage.Tokens > 0 {
-							d.lastContextTokens = postSt.ContextUsage.Tokens
-							if postSt.ContextUsage.Tokens <= threshold {
-								d.compactArmed = true
+				if d.compactSkipTurns > 0 {
+					d.compactSkipTurns--
+				} else {
+					in.Emit(driver.Activity{})
+					compCtx, compCancel := context.WithTimeout(ctx, d.compactTimeout())
+					_, compErr := p.call(compCtx, "compact", map[string]any{"customInstructions": compactionInstructions})
+					compCancel()
+					switch classifyCompactionError(compErr) {
+					case compactionRefused:
+						// Runtime did nothing; keep armed for the next settled turn without backoff.
+						d.compactSkipTurns = 0
+					case compactionFailed:
+						// Back off bounded turns instead of permanently disarming on a transient failure or timeout.
+						d.compactFailStreak++
+						d.compactSkipTurns = compactBackoffTurns(d.compactFailStreak)
+					case compactionCompleted:
+						d.compactFailStreak = 0
+						d.compactSkipTurns = 0
+						postCtx, postCancel := context.WithTimeout(ctx, statsCallTimeout)
+						postRaw, postErr := p.call(postCtx, "get_session_stats", nil)
+						postCancel()
+						if postErr == nil {
+							var postSt sessionStats
+							if json.Unmarshal(postRaw, &postSt) == nil && postSt.ContextUsage != nil && postSt.ContextUsage.Tokens > 0 {
+								d.lastContextTokens = postSt.ContextUsage.Tokens
+								// Only disarm when a successful compaction still left context above threshold.
+								d.compactArmed = postSt.ContextUsage.Tokens <= threshold
+							} else {
+								d.compactSkipTurns = 1
 							}
+						} else {
+							d.compactSkipTurns = 1
 						}
 					}
 				}
