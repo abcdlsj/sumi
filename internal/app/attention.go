@@ -195,7 +195,11 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 	}
 	defer rows.Close()
 
-	items := make([]domain.InboxItem, 0)
+	type inboxCandidate struct {
+		item    domain.InboxItem
+		readSeq int64
+	}
+	candidates := make([]inboxCandidate, 0)
 	for rows.Next() {
 		var convID, kindStr, slug, parentSlug, taskID, taskTitle, taskStatusStr, notifyStr, peerName string
 		var latestAuthor, latestBody, latestAction, latestAtStr string
@@ -264,24 +268,27 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 			title = fmt.Sprintf("#%d %s", taskNumber, taskTitle)
 		}
 
-		items = append(items, domain.InboxItem{
-			ConversationID:   convID,
-			Target:           inboxTarget(kind, convID, slug, peerName, taskNumber),
-			Kind:             kind,
-			Title:            title,
-			ParentSlug:       parentSlug,
-			TaskNumber:       taskNumber,
-			TaskID:           taskID,
-			UnreadCount:      unreadCnt,
-			MentionCount:     totalMentions,
-			NeedsAttention:   needsAttention,
-			Reason:           reason,
-			LatestSeq:        latestSeq,
-			LatestAuthorName: latestAuthor,
-			LatestPreview:    preview,
-			LatestAt:         store.ParseTime(latestAtStr),
-			Following:        following,
-			NotifyLevel:      notify,
+		candidates = append(candidates, inboxCandidate{
+			readSeq: readSeq,
+			item: domain.InboxItem{
+				ConversationID:   convID,
+				Target:           inboxTarget(kind, convID, slug, peerName, taskNumber),
+				Kind:             kind,
+				Title:            title,
+				ParentSlug:       parentSlug,
+				TaskNumber:       taskNumber,
+				TaskID:           taskID,
+				UnreadCount:      unreadCnt,
+				MentionCount:     totalMentions,
+				NeedsAttention:   needsAttention,
+				Reason:           reason,
+				LatestSeq:        latestSeq,
+				LatestAuthorName: latestAuthor,
+				LatestPreview:    preview,
+				LatestAt:         store.ParseTime(latestAtStr),
+				Following:        following,
+				NotifyLevel:      notify,
+			},
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -289,23 +296,40 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 	}
 	_ = rows.Close()
 
-	// Suppress following-only inbox attention for agents on conversations paused by the
-	// agent-chain circuit breaker (checked after closing rows to avoid nested pool grabs).
-	if viewer.Kind == domain.MemberKindAgent {
-		filtered := items[:0]
-		for _, it := range items {
-			if it.NeedsAttention && (it.Reason == "task" || it.Reason == "thread") {
-				if paused, perr := isAgentChainPaused(ctx, s.store.ReadDB(), it.ConversationID); perr == nil && paused {
-					if filter == "needs_me" {
-						continue
+	// Apply agent-to-agent wake governance to agent inbox attention (checked after closing rows
+	// to avoid nested connection-pool grabs). Human inbox is never suppressed.
+	items := make([]domain.InboxItem, 0, len(candidates))
+	for _, cand := range candidates {
+		it := cand.item
+		if viewer.Kind == domain.MemberKindAgent && it.NeedsAttention {
+			suppressed := false
+			switch it.Reason {
+			case "task", "thread", "channel":
+				if streak, serr := consecutiveAgentTextCount(ctx, s.store.ReadDB(), it.ConversationID, DefaultAgentChainLimit); serr == nil && streak >= DefaultAgentChainLimit {
+					suppressed = true
+				}
+			case "mention":
+				if it.Kind != domain.ConversationDM {
+					if streak, serr := consecutiveAgentTextCount(ctx, s.store.ReadDB(), it.ConversationID, DefaultAgentHardChainLimit); serr == nil && streak >= DefaultAgentHardChainLimit {
+						if hasHuman, herr := hasUnreadHumanMention(ctx, s.store.ReadDB(), it.ConversationID, viewer.ID, cand.readSeq); herr == nil && !hasHuman {
+							suppressed = true
+						}
 					}
-					it.NeedsAttention = false
-					it.Reason = "unread"
+				}
+			case "dm":
+				if limited, lerr := isAgentDMWindowLimited(ctx, s.store.ReadDB(), it.ConversationID, s.now()); lerr == nil && limited {
+					suppressed = true
 				}
 			}
-			filtered = append(filtered, it)
+			if suppressed {
+				if filter == "needs_me" {
+					continue
+				}
+				it.NeedsAttention = false
+				it.Reason = "unread"
+			}
 		}
-		items = filtered
+		items = append(items, it)
 	}
 
 	sort.Slice(items, func(i, j int) bool {

@@ -146,7 +146,8 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 			return err
 		}
 
-		msg, err := insertMessageTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindText, body, "", "{}", mentionAll, mentionIDs)
+		now := s.now()
+		msg, err := insertMessageAtTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindText, body, "", "{}", mentionAll, mentionIDs, now)
 		if err != nil {
 			return err
 		}
@@ -213,56 +214,141 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		}
 		events = append(events, ev)
 
-		// Agent-to-agent chain circuit breaker: on active threads/tasks, pause automatic following
-		// wakes once DefaultAgentChainLimit consecutive text messages are authored by agents.
-		agentChainPaused := false
-		if targetMeta.Kind == domain.ConversationThread || (targetMeta.Kind == domain.ConversationTask && !taskTerminal) {
-			streak, err := consecutiveAgentTextCount(ctx, tx, targetMeta.ID, DefaultAgentChainLimit+1)
+		// Evaluate agent-to-agent wake governance policy:
+		//   - Shared conversations: Tier 1 (10 consecutive agent texts) pauses passive wakes
+		//     (following, channel_all); Tier 2 (20 consecutive agent texts) pauses all agent
+		//     wakes including explicit @mentions until a human posts.
+		//   - Agent-to-agent DMs: sliding window cap (10 texts per 15m) with automatic recovery.
+		policy := wakePolicy{taskTerminal: taskTerminal}
+		streak := 0
+		dmRecentCount := 0
+		dmCutoff := now.Add(-DefaultAgentDMWindow)
+		if targetMeta.Kind == domain.ConversationDM {
+			if actor.Kind == domain.MemberKindAgent {
+				isA2A, err := isAgentToAgentDM(ctx, tx, targetMeta.ID)
+				if err != nil {
+					return err
+				}
+				if isA2A {
+					dmRecentCount, err = recentDMTextCount(ctx, tx, targetMeta.ID, dmCutoff)
+					if err != nil {
+						return err
+					}
+					policy.dmLimited = dmRecentCount >= DefaultAgentDMWindowLimit
+				}
+			}
+		} else {
+			streak, err = consecutiveAgentTextCount(ctx, tx, targetMeta.ID, DefaultAgentHardChainLimit)
 			if err != nil {
 				return err
 			}
-			agentChainPaused = streak >= DefaultAgentChainLimit
-			if actor.Kind == domain.MemberKindAgent && streak == DefaultAgentChainLimit {
-				sysBody := fmt.Sprintf(
-					"paused automatic following wakes after %d consecutive agent messages without human input; explicit @mentions still wake, and a human reply resumes automatic wakes",
-					DefaultAgentChainLimit,
-				)
-				sysPayload, err := json.Marshal(map[string]any{
-					"consecutive_agent_messages": streak,
-					"limit":                      DefaultAgentChainLimit,
-				})
-				if err != nil {
-					return domain.WrapError(domain.CodeInternal, "marshal wake pause payload", err)
-				}
-				sysMsg, err := insertMessageTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindSystem, sysBody, domain.ActionWakePaused, string(sysPayload), false, nil)
-				if err != nil {
-					return err
-				}
-				if err := advanceReadSeqTx(ctx, tx, targetMeta.ID, actor.ID, sysMsg.Seq); err != nil {
-					return err
-				}
-				sysEv, err := store.AppendEvent(ctx, tx, actor.SpaceID, "message.created", map[string]any{
-					"message_id":             sysMsg.ID,
-					"conversation_id":        targetMeta.ID,
-					"parent_conversation_id": targetMeta.ParentConversationID,
-					"root_message_id":        targetMeta.RootMessageID,
-					"task_id":                targetMeta.TaskID,
-					"seq":                    sysMsg.Seq,
-					"kind":                   string(domain.MessageKindSystem),
-					"action_kind":            domain.ActionWakePaused,
-				})
-				if err != nil {
-					return err
-				}
-				events = append(events, sysEv)
-			}
+			policy.softPaused = streak >= DefaultAgentChainLimit
+			policy.hardPaused = streak >= DefaultAgentHardChainLimit
 		}
 
-		// Compute agent wake targets (DM, @mention, followed thread/task, or notify_level=all).
-		wakes, err = computeAgentWakesTx(ctx, tx, targetMeta, actor.ID, mentionAll, mentionIDs, taskTerminal, agentChainPaused)
+		// Compute agent wake targets and check whether any wake was suppressed by governance.
+		outcome, err := computeAgentWakesTx(ctx, tx, targetMeta, actor.ID, mentionAll, mentionIDs, policy)
 		if err != nil {
 			return err
 		}
+		wakes = outcome.wakes
+
+		emitWakePauseNotice := func(tier, sysBody string, payload map[string]any) error {
+			sysPayload, err := json.Marshal(payload)
+			if err != nil {
+				return domain.WrapError(domain.CodeInternal, "marshal wake pause payload", err)
+			}
+			sysMsg, err := insertMessageAtTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindSystem, sysBody, domain.ActionWakePaused, string(sysPayload), false, nil, now)
+			if err != nil {
+				return err
+			}
+			if err := advanceReadSeqTx(ctx, tx, targetMeta.ID, actor.ID, sysMsg.Seq); err != nil {
+				return err
+			}
+			sysEv, err := store.AppendEvent(ctx, tx, actor.SpaceID, "message.created", map[string]any{
+				"message_id":             sysMsg.ID,
+				"conversation_id":        targetMeta.ID,
+				"parent_conversation_id": targetMeta.ParentConversationID,
+				"root_message_id":        targetMeta.RootMessageID,
+				"task_id":                targetMeta.TaskID,
+				"seq":                    sysMsg.Seq,
+				"kind":                   string(domain.MessageKindSystem),
+				"action_kind":            domain.ActionWakePaused,
+			})
+			if err != nil {
+				return err
+			}
+			events = append(events, sysEv)
+			return nil
+		}
+
+		if actor.Kind == domain.MemberKindAgent {
+			if outcome.suppressedDM {
+				already, err := hasWakePausedNoticeSinceTime(ctx, tx, targetMeta.ID, dmCutoff, wakePauseTierDMRateLimit)
+				if err != nil {
+					return err
+				}
+				if !already {
+					sysBody := fmt.Sprintf(
+						"paused automatic agent-to-agent DM wakes after %d messages within %s; wakes resume automatically once the window cools down",
+						DefaultAgentDMWindowLimit,
+						DefaultAgentDMWindow.String(),
+					)
+					if err := emitWakePauseNotice(wakePauseTierDMRateLimit, sysBody, map[string]any{
+						"tier":           wakePauseTierDMRateLimit,
+						"recent_count":   dmRecentCount,
+						"limit":          DefaultAgentDMWindowLimit,
+						"window_seconds": int(DefaultAgentDMWindow.Seconds()),
+					}); err != nil {
+						return err
+					}
+				}
+			} else if outcome.suppressedHard || outcome.suppressedPassive {
+				sinceSeq, err := lastHumanTextSeq(ctx, tx, targetMeta.ID)
+				if err != nil {
+					return err
+				}
+				if outcome.suppressedHard {
+					already, err := hasWakePausedNoticeSinceSeq(ctx, tx, targetMeta.ID, sinceSeq, wakePauseTierAll)
+					if err != nil {
+						return err
+					}
+					if !already {
+						sysBody := fmt.Sprintf(
+							"paused all agent-authored wakes (including @mentions) after %d consecutive agent messages without human input; a human message resets the counter and resumes wakes",
+							DefaultAgentHardChainLimit,
+						)
+						if err := emitWakePauseNotice(wakePauseTierAll, sysBody, map[string]any{
+							"tier":                       wakePauseTierAll,
+							"consecutive_agent_messages": streak,
+							"limit":                      DefaultAgentHardChainLimit,
+						}); err != nil {
+							return err
+						}
+					}
+				} else if outcome.suppressedPassive {
+					already, err := hasWakePausedNoticeSinceSeq(ctx, tx, targetMeta.ID, sinceSeq, wakePauseTierPassive)
+					if err != nil {
+						return err
+					}
+					if !already {
+						sysBody := fmt.Sprintf(
+							"paused automatic passive wakes after %d consecutive agent messages without human input; explicit @mentions still wake up to %d, and a human reply resumes automatic wakes",
+							DefaultAgentChainLimit,
+							DefaultAgentHardChainLimit,
+						)
+						if err := emitWakePauseNotice(wakePauseTierPassive, sysBody, map[string]any{
+							"tier":                       wakePauseTierPassive,
+							"consecutive_agent_messages": streak,
+							"limit":                      DefaultAgentChainLimit,
+						}); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+
 		result = SendMessageResult{Message: msg, WokenCount: len(wakes)}
 		return nil
 	})
@@ -347,6 +433,22 @@ func insertMessageTx(
 	mentionAll bool,
 	mentionIDs []string,
 ) (domain.Message, error) {
+	return insertMessageAtTx(ctx, tx, convID, author, kind, body, actionKind, payloadJSON, mentionAll, mentionIDs, time.Now().UTC())
+}
+
+func insertMessageAtTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	convID string,
+	author domain.Member,
+	kind domain.MessageKind,
+	body string,
+	actionKind domain.ActionKind,
+	payloadJSON string,
+	mentionAll bool,
+	mentionIDs []string,
+	now time.Time,
+) (domain.Message, error) {
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
 		`UPDATE conversations SET next_seq = next_seq + 1 WHERE id = ? RETURNING next_seq - 1`,
@@ -354,7 +456,7 @@ func insertMessageTx(
 	).Scan(&seq); err != nil {
 		return domain.Message{}, domain.WrapError(domain.CodeInternal, "allocate conversation seq", err)
 	}
-	now := time.Now().UTC()
+	now = now.UTC()
 	msgID := uuid.NewString()
 	mAllInt := 0
 	if mentionAll {

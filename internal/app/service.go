@@ -26,6 +26,16 @@ type Service struct {
 	// while the Agent's persisted runtime_state is working.
 	activityMu sync.Mutex
 	activity   map[string]domain.AgentActivity
+
+	// nowFn overrides wall time in deterministic tests; nil uses time.Now().UTC().
+	nowFn func() time.Time
+}
+
+func (s *Service) now() time.Time {
+	if s.nowFn != nil {
+		return s.nowFn().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func NewService(s *store.Store, hub *EventHub, notifier ComputerNotifier) *Service {
