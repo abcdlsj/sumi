@@ -29,6 +29,12 @@ const (
 	DefaultSoftCompactionTokens = 150_000
 	softCompactionWindowRatio   = 0.75
 
+	// DefaultHardRecycleTokens forces a clean session recycle at turn end when post-compaction
+	// context still exceeds the ceiling, bounding continuously active sessions that never go idle.
+	DefaultHardRecycleTokens     = 400_000
+	hardRecycleWindowRatio       = 0.85
+	DefaultMaxCompactionFailures = 3
+
 	// DefaultColdRecycleIdle and DefaultColdRecycleMinTokens recycle large idle sessions once
 	// the provider's prompt cache has expired, starting fresh with MEMORY.md instead of paying
 	// a full cold rewrite of a bloated history.
@@ -69,6 +75,14 @@ type Config struct {
 	// CompactTimeout bounds how long a post-turn proactive `compact` RPC may run.
 	// Zero uses DefaultCompactTimeout.
 	CompactTimeout time.Duration
+	// HardRecycleTokens forces a warm session recycle at a clean turn end when post-compaction
+	// context still exceeds min(HardRecycleTokens, 85% of contextWindow). Zero uses
+	// DefaultHardRecycleTokens; negative values disable hard ceiling recycling.
+	HardRecycleTokens int
+	// MaxCompactionFailures forces a session recycle after this many consecutive failed
+	// post-turn compactions while over the soft budget. Zero uses DefaultMaxCompactionFailures;
+	// negative values disable failure-streak recycling.
+	MaxCompactionFailures int
 	// ColdRecycleIdle is the idle gap past which a large session is recycled instead of resumed.
 	// Zero uses DefaultColdRecycleIdle; negative values disable cold wake recycling.
 	ColdRecycleIdle time.Duration
@@ -93,6 +107,7 @@ type Driver struct {
 	compactSkipTurns  int
 	lastActiveAt      time.Time
 	lastContextTokens int
+	lastContextWindow int
 
 	prevInputTokens  int
 	prevOutputTokens int
@@ -134,6 +149,26 @@ func (d *Driver) compactTimeout() time.Duration {
 	return DefaultCompactTimeout
 }
 
+func (d *Driver) hardRecycleLimit() int {
+	if d.cfg.HardRecycleTokens < 0 {
+		return 0
+	}
+	if d.cfg.HardRecycleTokens == 0 {
+		return DefaultHardRecycleTokens
+	}
+	return d.cfg.HardRecycleTokens
+}
+
+func (d *Driver) maxCompactionFailures() int {
+	if d.cfg.MaxCompactionFailures < 0 {
+		return 0
+	}
+	if d.cfg.MaxCompactionFailures == 0 {
+		return DefaultMaxCompactionFailures
+	}
+	return d.cfg.MaxCompactionFailures
+}
+
 func (d *Driver) coldRecycleLimits() (time.Duration, int) {
 	if d.cfg.ColdRecycleIdle < 0 || d.cfg.ColdRecycleMinTokens < 0 {
 		return 0, 0
@@ -166,7 +201,18 @@ func (d *Driver) resetSessionStateLocked() {
 	d.compactSkipTurns = 0
 	d.lastActiveAt = time.Time{}
 	d.lastContextTokens = 0
+	d.lastContextWindow = 0
 	d.prevInputTokens, d.prevOutputTokens, d.prevToolCalls = 0, 0, 0
+}
+
+func (d *Driver) recycleSessionLocked() {
+	if d.proc != nil && !d.proc.exited() {
+		d.proc.gracefulStop(2 * time.Second)
+		d.proc = nil
+	}
+	d.stopLocked()
+	_ = d.forgetSession()
+	d.resetSessionStateLocked()
 }
 
 func (d *Driver) ResetSession() error {
@@ -226,36 +272,37 @@ type savedSession struct {
 	Fingerprint       string `json:"fingerprint,omitempty"`
 	LastActiveAt      string `json:"last_active_at,omitempty"`
 	LastContextTokens int    `json:"last_context_tokens,omitempty"`
+	LastContextWindow int    `json:"last_context_window,omitempty"`
 }
 
-func (d *Driver) loadSavedSession() (sessionFile string, lastActive time.Time, lastTokens int) {
+func (d *Driver) loadSavedSession() (sessionFile string, lastActive time.Time, lastTokens, lastWindow int) {
 	if d.cfg.SessionFile == "" {
-		return "", time.Time{}, 0
+		return "", time.Time{}, 0, 0
 	}
 	raw, err := os.ReadFile(d.cfg.SessionFile)
 	if err != nil {
-		return "", time.Time{}, 0
+		return "", time.Time{}, 0, 0
 	}
 	var s savedSession
 	if json.Unmarshal(raw, &s) != nil || s.SessionFile == "" || s.Fingerprint != d.cfg.Fingerprint {
-		return "", time.Time{}, 0
+		return "", time.Time{}, 0, 0
 	}
 	if fi, err := os.Stat(s.SessionFile); err != nil || fi.IsDir() {
-		return "", time.Time{}, 0
+		return "", time.Time{}, 0, 0
 	}
 	if s.LastActiveAt != "" {
 		if t, err := time.Parse(time.RFC3339Nano, s.LastActiveAt); err == nil {
 			lastActive = t
 		}
 	}
-	if d.shouldColdRecycle(lastActive, s.LastContextTokens) {
+	if d.shouldColdRecycle(lastActive, s.LastContextTokens) || shouldHardRecycle(s.LastContextTokens, s.LastContextWindow, d.hardRecycleLimit()) {
 		_ = d.forgetSession()
-		return "", time.Time{}, 0
+		return "", time.Time{}, 0, 0
 	}
-	return s.SessionFile, lastActive, s.LastContextTokens
+	return s.SessionFile, lastActive, s.LastContextTokens, s.LastContextWindow
 }
 
-func (d *Driver) saveSession(sessionFile string, lastActive time.Time, lastTokens int) error {
+func (d *Driver) saveSession(sessionFile string, lastActive time.Time, lastTokens, lastWindow int) error {
 	if d.cfg.SessionFile == "" || sessionFile == "" {
 		return nil
 	}
@@ -263,6 +310,7 @@ func (d *Driver) saveSession(sessionFile string, lastActive time.Time, lastToken
 		SessionFile:       sessionFile,
 		Fingerprint:       d.cfg.Fingerprint,
 		LastContextTokens: lastTokens,
+		LastContextWindow: lastWindow,
 	}
 	if !lastActive.IsZero() {
 		rec.LastActiveAt = lastActive.UTC().Format(time.RFC3339Nano)
@@ -361,13 +409,7 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, in driver.TurnInput) e
 	}
 
 	if d.shouldColdRecycle(d.lastActiveAt, d.lastContextTokens) {
-		if d.proc != nil && !d.proc.exited() {
-			d.proc.gracefulStop(2 * time.Second)
-			d.proc = nil
-		}
-		d.stopLocked()
-		_ = d.forgetSession()
-		d.resetSessionStateLocked()
+		d.recycleSessionLocked()
 	}
 
 	if d.proc != nil && !d.proc.exited() {
@@ -395,11 +437,12 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, in driver.TurnInput) e
 		}
 	}
 	if resumeFile == "" {
-		savedFile, lastActive, lastTokens := d.loadSavedSession()
+		savedFile, lastActive, lastTokens, lastWindow := d.loadSavedSession()
 		if savedFile != "" {
 			resumeFile = savedFile
 			d.lastActiveAt = lastActive
 			d.lastContextTokens = lastTokens
+			d.lastContextWindow = lastWindow
 		}
 	}
 
@@ -454,7 +497,7 @@ func (d *Driver) spawnAndProbeLocked(ctx context.Context, workDir string, env []
 	}
 	d.resumed = resumeFile != ""
 	if d.resumed && d.sessionFile != "" {
-		_ = d.saveSession(d.sessionFile, d.lastActiveAt, d.lastContextTokens)
+		_ = d.saveSession(d.sessionFile, d.lastActiveAt, d.lastContextTokens, d.lastContextWindow)
 	}
 	return nil
 }
@@ -598,7 +641,7 @@ func (d *Driver) persistSessionIfPresent() {
 		return
 	}
 	if fi, err := os.Stat(d.sessionFile); err == nil && !fi.IsDir() {
-		_ = d.saveSession(d.sessionFile, d.lastActiveAt, d.lastContextTokens)
+		_ = d.saveSession(d.sessionFile, d.lastActiveAt, d.lastContextTokens, d.lastContextWindow)
 	}
 }
 
@@ -631,6 +674,24 @@ func compactionThreshold(contextWindow, softLimit int) int {
 
 func shouldProactiveCompact(contextTokens, contextWindow, softLimit int) bool {
 	threshold := compactionThreshold(contextWindow, softLimit)
+	return threshold > 0 && contextTokens > threshold
+}
+
+func hardRecycleThreshold(contextWindow, hardLimit int) int {
+	if hardLimit <= 0 {
+		return 0
+	}
+	threshold := hardLimit
+	if contextWindow > 0 {
+		if ratioCap := int(float64(contextWindow) * hardRecycleWindowRatio); ratioCap > 0 && ratioCap < threshold {
+			threshold = ratioCap
+		}
+	}
+	return threshold
+}
+
+func shouldHardRecycle(contextTokens, contextWindow, hardLimit int) bool {
+	threshold := hardRecycleThreshold(contextWindow, hardLimit)
 	return threshold > 0 && contextTokens > threshold
 }
 
@@ -708,6 +769,9 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 
 	if st.ContextUsage != nil && st.ContextUsage.Tokens > 0 {
 		d.lastContextTokens = st.ContextUsage.Tokens
+		if st.ContextUsage.ContextWindow > 0 {
+			d.lastContextWindow = st.ContextUsage.ContextWindow
+		}
 		threshold := compactionThreshold(st.ContextUsage.ContextWindow, d.softCompactionLimit())
 		if threshold > 0 {
 			if st.ContextUsage.Tokens <= threshold {
@@ -740,6 +804,9 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 							var postSt sessionStats
 							if json.Unmarshal(postRaw, &postSt) == nil && postSt.ContextUsage != nil && postSt.ContextUsage.Tokens > 0 {
 								d.lastContextTokens = postSt.ContextUsage.Tokens
+								if postSt.ContextUsage.ContextWindow > 0 {
+									d.lastContextWindow = postSt.ContextUsage.ContextWindow
+								}
 								// Only disarm when a successful compaction still left context above threshold.
 								d.compactArmed = postSt.ContextUsage.Tokens <= threshold
 							} else {
@@ -751,6 +818,16 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 					}
 				}
 			}
+		}
+
+		// Warm hard ceiling / repeated compaction failure backstop: recycle immediately at this
+		// clean turn end so continuously woken sessions never grow unbounded.
+		hitHardCeiling := shouldHardRecycle(d.lastContextTokens, d.lastContextWindow, d.hardRecycleLimit())
+		maxFails := d.maxCompactionFailures()
+		hitFailCap := maxFails > 0 && d.compactFailStreak >= maxFails && threshold > 0 && d.lastContextTokens > threshold
+		if hitHardCeiling || hitFailCap {
+			d.recycleSessionLocked()
+			return res
 		}
 	}
 	d.persistSessionIfPresent()

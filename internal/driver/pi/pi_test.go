@@ -170,8 +170,16 @@ func TestFakePiRPC(t *testing.T) {
 			}
 			ctxTokens := 4000
 			switch mode {
-			case "over_budget", "over_budget_sticky":
+			case "over_budget", "over_budget_sticky", "compact_always_fails":
 				ctxTokens = 200_000
+			case "over_hard_ceiling_sticky":
+				ctxTokens = 450_000
+			case "over_hard_ceiling_shrinks":
+				if compacted {
+					ctxTokens = 40_000
+				} else {
+					ctxTokens = 450_000
+				}
 			case "over_budget_shrinks", "compact_refused_then_ok", "compact_fail_then_ok", "compact_timeout_then_ok", "compact_post_stats_fail_then_ok":
 				if compacted {
 					ctxTokens = 30_000
@@ -213,7 +221,7 @@ func TestFakePiRPC(t *testing.T) {
 				})
 				continue
 			}
-			if mode == "compact_fail_then_ok" && compactAttempts == 1 {
+			if mode == "compact_always_fails" || (mode == "compact_fail_then_ok" && compactAttempts == 1) {
 				_ = out.Encode(map[string]any{
 					"id":      cmd.ID,
 					"type":    "response",
@@ -786,5 +794,152 @@ func TestColdWakeRecycleOnLiveProcessAndRestart(t *testing.T) {
 	joined = strings.Join(readLogLines(logSmall), "\n")
 	if strings.Contains(joined, "OPEN:new") || strings.Contains(joined, "MEMORY SNAPSHOT") {
 		t.Fatalf("small session must keep continuity even after long idle:\n%s", joined)
+	}
+}
+
+func TestHardRecycleThresholdMath(t *testing.T) {
+	if !shouldHardRecycle(400_001, 1_048_576, DefaultHardRecycleTokens) {
+		t.Fatal("400,001 on 1M window must trigger hard recycle")
+	}
+	if shouldHardRecycle(400_000, 1_048_576, DefaultHardRecycleTokens) {
+		t.Fatal("400,000 must not trigger hard recycle")
+	}
+	if !shouldHardRecycle(171_000, 200_000, DefaultHardRecycleTokens) {
+		t.Fatal("171k on 200k window exceeds 85% ratio cap (170k) and must hard recycle")
+	}
+	if shouldHardRecycle(500_000, 1_048_576, 0) {
+		t.Fatal("0 hard limit disables hard recycle")
+	}
+}
+
+func TestWarmHardCeilingRecyclesSessionImmediatelyAtTurnEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// 1. Context stays at 450k (> 400k hard ceiling) after compaction -> recycled immediately with 0 idle gap.
+	d, in, logPath := newFakeDriver(t, "over_hard_ceiling_sticky", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+		HardRecycleTokens:    400_000,
+	})
+	defer d.Close()
+
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("ceiling turn 1: %v", err)
+	}
+	if _, err := os.Stat(d.cfg.SessionFile); !os.IsNotExist(err) {
+		t.Fatalf("session pointer file must be removed after hard ceiling recycle, err=%v", err)
+	}
+	_ = os.Remove(logPath)
+
+	// Immediate next turn (no idle gap) must spawn a fresh session with StartupContext.
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("ceiling turn 2: %v", err)
+	}
+	joined := strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("expected fresh session with MEMORY after hard ceiling recycle:\n%s", joined)
+	}
+
+	// 2. If compaction shrinks 450k down to 40k (<= 400k), warm session is preserved.
+	dShrink, inShrink, logShrink := newFakeDriver(t, "over_hard_ceiling_shrinks", Config{
+		Fingerprint:          "fp",
+		SoftCompactionTokens: 150_000,
+		HardRecycleTokens:    400_000,
+	})
+	defer dShrink.Close()
+	if _, err := dShrink.RunTurn(ctx, inShrink); err != nil {
+		t.Fatalf("shrink turn 1: %v", err)
+	}
+	_ = os.Remove(logShrink)
+	if _, err := dShrink.RunTurn(ctx, inShrink); err != nil {
+		t.Fatalf("shrink turn 2: %v", err)
+	}
+	joined = strings.Join(readLogLines(logShrink), "\n")
+	if strings.Contains(joined, "OPEN:new") || strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("effective compaction below hard ceiling must keep warm session:\n%s", joined)
+	}
+
+	// 3. Saved session on disk already above hard ceiling recycles on restart even with zero idle gap.
+	dir := t.TempDir()
+	logRestart := filepath.Join(dir, "pi.log")
+	sessFile := filepath.Join(dir, "runtime", "pi", "sessions", "existing.jsonl")
+	_ = os.MkdirAll(filepath.Dir(sessFile), 0o700)
+	_ = os.WriteFile(sessFile, []byte("{\"type\":\"session\"}\n"), 0o600)
+	metaFile := filepath.Join(dir, "pi-session.json")
+	rawMeta, _ := json.Marshal(savedSession{
+		SessionFile:       sessFile,
+		Fingerprint:       "fp",
+		LastActiveAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		LastContextTokens: 450_000,
+		LastContextWindow: 1_048_576,
+	})
+	_ = os.WriteFile(metaFile, rawMeta, 0o600)
+
+	dRestart := New(Config{
+		Binary:            os.Args[0],
+		PrefixArgs:        []string{"-test.run=^TestFakePiRPC$", "--"},
+		SessionDir:        filepath.Dir(sessFile),
+		SessionFile:       metaFile,
+		SystemPromptFile:  filepath.Join(dir, "runtime", "pi", "SYSTEM.md"),
+		Fingerprint:       "fp",
+		HardRecycleTokens: 400_000,
+	})
+	defer dRestart.Close()
+	inRestart := driver.TurnInput{
+		SystemPrompt:   "SUMI RULES",
+		StartupContext: "MEMORY SNAPSHOT",
+		UserPrompt:     "wake",
+		WorkDir:        dir,
+		Env:            append(os.Environ(), "SUMI_FAKE_PI=ok", "SUMI_FAKE_PI_LOG="+logRestart),
+	}
+	if _, err := dRestart.RunTurn(ctx, inRestart); err != nil {
+		t.Fatalf("restart turn: %v", err)
+	}
+	joined = strings.Join(readLogLines(logRestart), "\n")
+	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("oversized saved session must recycle on startup:\n%s", joined)
+	}
+}
+
+func TestConsecutiveCompactionFailuresRecycleSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d, in, logPath := newFakeDriver(t, "compact_always_fails", Config{
+		Fingerprint:           "fp",
+		SoftCompactionTokens:  150_000,
+		HardRecycleTokens:     400_000,
+		MaxCompactionFailures: 2,
+	})
+	defer d.Close()
+
+	// Turn 1: fail #1 (200k < 400k ceiling), enters 1-turn backoff, keeps warm session.
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	_ = os.Remove(logPath)
+	// Turn 2: backoff skip, still warm session.
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if strings.Contains(strings.Join(readLogLines(logPath), "\n"), "OPEN:new") {
+		t.Fatalf("turn 2 must keep warm session during backoff")
+	}
+	// Turn 3: fail #2 hits MaxCompactionFailures=2 -> recycles session at turn end.
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 3: %v", err)
+	}
+	if _, err := os.Stat(d.cfg.SessionFile); !os.IsNotExist(err) {
+		t.Fatalf("session pointer must be removed after hitting compaction failure cap, err=%v", err)
+	}
+	_ = os.Remove(logPath)
+	// Turn 4: starts a fresh session with StartupContext.
+	if _, err := d.RunTurn(ctx, in); err != nil {
+		t.Fatalf("turn 4: %v", err)
+	}
+	joined := strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
+		t.Fatalf("turn 4 after failure-cap recycle must open fresh session with MEMORY:\n%s", joined)
 	}
 }
