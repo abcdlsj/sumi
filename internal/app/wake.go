@@ -7,6 +7,10 @@ import (
 	"github.com/abcdlsj/sumi/internal/domain"
 )
 
+// DefaultAgentChainLimit caps consecutive agent-authored text messages without human input
+// in a thread or active task before automatic following-based agent wakes pause.
+const DefaultAgentChainLimit = 10
+
 func isTaskTerminalTx(ctx context.Context, q queryer, target convMeta) (bool, error) {
 	if target.Kind != domain.ConversationTask || target.TaskID == "" {
 		return false, nil
@@ -21,17 +25,54 @@ func isTaskTerminalTx(ctx context.Context, q queryer, target convMeta) (bool, er
 	return domain.TaskStatus(status).IsTerminal(), nil
 }
 
-func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, authorID string, mentionAll bool, mentionIDs []string) ([]wakeTarget, error) {
+// consecutiveAgentTextCount counts leading agent-authored text messages from the newest message
+// backwards until a human text message is encountered, bounded at maxScan.
+func consecutiveAgentTextCount(ctx context.Context, q queryer, convID string, maxScan int) (int, error) {
+	if maxScan <= 0 {
+		return 0, nil
+	}
+	rows, err := q.QueryContext(ctx,
+		`SELECT m.kind
+		 FROM messages msg
+		 JOIN members m ON m.id = msg.author_member_id
+		 WHERE msg.conversation_id = ? AND msg.kind = 'text' AND msg.deleted_at IS NULL
+		 ORDER BY msg.seq DESC
+		 LIMIT ?`,
+		convID, maxScan,
+	)
+	if err != nil {
+		return 0, domain.WrapError(domain.CodeInternal, "query recent text authors", err)
+	}
+	defer rows.Close()
+	streak := 0
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return 0, err
+		}
+		if domain.MemberKind(kind) != domain.MemberKindAgent {
+			break
+		}
+		streak++
+	}
+	return streak, rows.Err()
+}
+
+func isAgentChainPaused(ctx context.Context, q queryer, convID string) (bool, error) {
+	streak, err := consecutiveAgentTextCount(ctx, q, convID, DefaultAgentChainLimit)
+	if err != nil {
+		return false, err
+	}
+	return streak >= DefaultAgentChainLimit, nil
+}
+
+func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, authorID string, mentionAll bool, mentionIDs []string, taskTerminal, agentChainPaused bool) ([]wakeTarget, error) {
 	boundary, err := resolveVisibilityBoundary(ctx, tx, target)
 	if err != nil {
 		return nil, err
 	}
 	if target.ArchivedAt != nil || boundary.ArchivedAt != nil {
 		return nil, nil
-	}
-	taskTerminal, err := isTaskTerminalTx(ctx, tx, target)
-	if err != nil {
-		return nil, err
 	}
 	mentionedSet := make(map[string]struct{}, len(mentionIDs))
 	for _, id := range mentionIDs {
@@ -68,7 +109,7 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 			reason = "dm"
 		case directlyMentioned || mentionAll:
 			reason = "mention"
-		case (target.Kind == domain.ConversationThread || (target.Kind == domain.ConversationTask && !taskTerminal)) && following == 1:
+		case (target.Kind == domain.ConversationThread || (target.Kind == domain.ConversationTask && !taskTerminal)) && following == 1 && !agentChainPaused:
 			reason = "following"
 		case (target.Kind == domain.ConversationPublic || target.Kind == domain.ConversationPrivate) && notify == string(domain.NotifyAll):
 			reason = "channel_all"

@@ -33,6 +33,7 @@ Sumi 是一个面向 Human 与持久化 AI Agent 的协同工作空间。在这�
 ### 1.4 注意力模型与单一已读真值
 
 - **可见性不等于打扰**：能读到不代表要被叫醒。默认仅 DM、`@mention`、Followed 的活跃 Thread/Task 新消息、Assign 给自己四类事件产生唤醒信号（`needs_me`），其余消息只推进未读水位；静音频道退居背景。Task 进入终态（`done` / `closed`）后，`following=1` 不再触发自动唤醒或 `needs_me`（也不再因后续发言自动建立 follow），仅显式 `@mention` 可唤醒，重新打开（Reopen）后恢复 `following` 唤醒。
+- **Agent 对话链熔断**：在活跃的 Thread 或 Task 对话中，若连续 10 条正文消息均由 Agent 发出且无 Human 介入，服务端自动暂停该对话的 `following` 唤醒（同步在 Agent 的 `needs_me` 收件箱抑制 `following` 条目），并在对话流中落一条 `system` 提示消息（每段连续链只发一次）。暂停期间显式 `@mention` 仍可直接唤醒被提及者；任意 Human 在该对话发言后立即重置计数并恢复 `following` 唤醒。
 - **单一已读真值（Single Read Watermark）**：已读水位只存在服务端 SQLite。前端不做孤立的未读推断，Computer 与 Agent 也不维护第二份消息队列。这条不变量不仅消除了多端未读漂移，更是后文「热更新与重启不丢消息」的基石。
 
 ---

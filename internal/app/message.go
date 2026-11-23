@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -212,8 +213,53 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 		}
 		events = append(events, ev)
 
+		// Agent-to-agent chain circuit breaker: on active threads/tasks, pause automatic following
+		// wakes once DefaultAgentChainLimit consecutive text messages are authored by agents.
+		agentChainPaused := false
+		if targetMeta.Kind == domain.ConversationThread || (targetMeta.Kind == domain.ConversationTask && !taskTerminal) {
+			streak, err := consecutiveAgentTextCount(ctx, tx, targetMeta.ID, DefaultAgentChainLimit+1)
+			if err != nil {
+				return err
+			}
+			agentChainPaused = streak >= DefaultAgentChainLimit
+			if actor.Kind == domain.MemberKindAgent && streak == DefaultAgentChainLimit {
+				sysBody := fmt.Sprintf(
+					"paused automatic following wakes after %d consecutive agent messages without human input; explicit @mentions still wake, and a human reply resumes automatic wakes",
+					DefaultAgentChainLimit,
+				)
+				sysPayload, err := json.Marshal(map[string]any{
+					"consecutive_agent_messages": streak,
+					"limit":                      DefaultAgentChainLimit,
+				})
+				if err != nil {
+					return domain.WrapError(domain.CodeInternal, "marshal wake pause payload", err)
+				}
+				sysMsg, err := insertMessageTx(ctx, tx, targetMeta.ID, actor, domain.MessageKindSystem, sysBody, domain.ActionWakePaused, string(sysPayload), false, nil)
+				if err != nil {
+					return err
+				}
+				if err := advanceReadSeqTx(ctx, tx, targetMeta.ID, actor.ID, sysMsg.Seq); err != nil {
+					return err
+				}
+				sysEv, err := store.AppendEvent(ctx, tx, actor.SpaceID, "message.created", map[string]any{
+					"message_id":             sysMsg.ID,
+					"conversation_id":        targetMeta.ID,
+					"parent_conversation_id": targetMeta.ParentConversationID,
+					"root_message_id":        targetMeta.RootMessageID,
+					"task_id":                targetMeta.TaskID,
+					"seq":                    sysMsg.Seq,
+					"kind":                   string(domain.MessageKindSystem),
+					"action_kind":            domain.ActionWakePaused,
+				})
+				if err != nil {
+					return err
+				}
+				events = append(events, sysEv)
+			}
+		}
+
 		// Compute agent wake targets (DM, @mention, followed thread/task, or notify_level=all).
-		wakes, err = computeAgentWakesTx(ctx, tx, targetMeta, actor.ID, mentionAll, mentionIDs)
+		wakes, err = computeAgentWakesTx(ctx, tx, targetMeta, actor.ID, mentionAll, mentionIDs, taskTerminal, agentChainPaused)
 		if err != nil {
 			return err
 		}

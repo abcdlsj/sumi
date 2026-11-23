@@ -287,6 +287,26 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	_ = rows.Close()
+
+	// Suppress following-only inbox attention for agents on conversations paused by the
+	// agent-chain circuit breaker (checked after closing rows to avoid nested pool grabs).
+	if viewer.Kind == domain.MemberKindAgent {
+		filtered := items[:0]
+		for _, it := range items {
+			if it.NeedsAttention && (it.Reason == "task" || it.Reason == "thread") {
+				if paused, perr := isAgentChainPaused(ctx, s.store.ReadDB(), it.ConversationID); perr == nil && paused {
+					if filter == "needs_me" {
+						continue
+					}
+					it.NeedsAttention = false
+					it.Reason = "unread"
+				}
+			}
+			filtered = append(filtered, it)
+		}
+		items = filtered
+	}
 
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].NeedsAttention != items[j].NeedsAttention {

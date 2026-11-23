@@ -73,6 +73,7 @@ const (
 	ActionAgentCreated      ActionKind = "agent_created"
 	ActionTaskEvent         ActionKind = "task_event"
 	ActionActionCard        ActionKind = "action_card"
+	ActionWakePaused        ActionKind = "wake_paused"
 )
 
 type ActionCardType string
