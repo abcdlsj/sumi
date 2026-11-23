@@ -155,3 +155,165 @@ func TestTaskLifecycleGuards(t *testing.T) {
 	_, err = svc.UnclaimTask(ctx, agentA, task.ID)
 	assertTaskErrorCode(t, err, domain.CodeConflict)
 }
+
+func TestTerminalTaskSuppressesFollowingWakesAndInboxNeedsMe(t *testing.T) {
+	svc, spy, _, owner, comp := setupTestService(t)
+	ctx := context.Background()
+
+	agentA, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName:  "Cato",
+		RoleText:     "Engineer",
+		ComputerID:   comp.ID,
+		DriverKind:   domain.DriverBuiltin,
+		DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create agent A: %v", err)
+	}
+	agentB, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName:  "Iris",
+		RoleText:     "Reviewer",
+		ComputerID:   comp.ID,
+		DriverKind:   domain.DriverBuiltin,
+		DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+	agentC, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
+		DisplayName:  "Piper",
+		RoleText:     "QA",
+		ComputerID:   comp.ID,
+		DriverKind:   domain.DriverBuiltin,
+		DriverConfig: testBuiltinConfig,
+	})
+	if err != nil {
+		t.Fatalf("create agent C: %v", err)
+	}
+
+	ch, err := svc.CreateChannel(ctx, owner, CreateChannelInput{
+		Slug:      "game-dev",
+		Kind:      domain.ConversationPrivate,
+		MemberIDs: []string{agentA.ID, agentB.ID, agentC.ID},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	task, err := svc.CreateTask(ctx, owner, CreateTaskInput{
+		ChannelID:        ch.ID,
+		Title:            "Wire loop",
+		AssigneeMemberID: agentA.ID,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	taskConvID := task.ConversationID
+	if err := svc.SetFollowing(ctx, agentB, taskConvID, true); err != nil {
+		t.Fatalf("follow task: %v", err)
+	}
+
+	clearWakes := func() {
+		spy.mu.Lock()
+		spy.wakes = nil
+		spy.mu.Unlock()
+	}
+	getWakes := func() int {
+		spy.mu.Lock()
+		defer spy.mu.Unlock()
+		return len(spy.wakes)
+	}
+
+	// Active task: plain reply from agentA wakes follower agentB and enters needs_me.
+	clearWakes()
+	res, err := svc.SendMessage(ctx, agentA, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "Active update"})
+	if err != nil || res.WokenCount != 1 || getWakes() != 1 {
+		t.Fatalf("active task must wake follower: woken=%d spy=%d err=%v", res.WokenCount, getWakes(), err)
+	}
+	items, err := svc.ListInbox(ctx, agentB, "needs_me")
+	if err != nil || len(items) != 1 || items[0].Reason != "task" {
+		t.Fatalf("active task must enter follower needs_me: items=%+v err=%v", items, err)
+	}
+	if _, err := svc.ListMessages(ctx, agentB, ListMessagesInput{ConversationID: taskConvID, UnreadOnly: true, MarkRead: true}); err != nil {
+		t.Fatalf("mark read agentB: %v", err)
+	}
+
+	// Mark task done -> plain replies must NOT wake followers or enter needs_me.
+	if _, err := svc.UpdateTaskStatus(ctx, agentA, task.ID, domain.TaskDone); err != nil {
+		t.Fatalf("mark done: %v", err)
+	}
+	clearWakes()
+	res, err = svc.SendMessage(ctx, agentA, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "Closing remark after done"})
+	if err != nil || res.WokenCount != 0 || getWakes() != 0 {
+		t.Fatalf("done task must not wake followers: woken=%d spy=%d err=%v", res.WokenCount, getWakes(), err)
+	}
+	items, err = svc.ListInbox(ctx, agentB, "needs_me")
+	if err != nil || len(items) != 0 {
+		t.Fatalf("done task must not enter agent needs_me via following: items=%+v err=%v", items, err)
+	}
+	ownerNeeds, err := svc.ListInbox(ctx, owner, "needs_me")
+	if err != nil || len(ownerNeeds) != 0 {
+		t.Fatalf("done task must not enter human needs_me via following: items=%+v err=%v", ownerNeeds, err)
+	}
+	// Still visible under unread filter.
+	unreadItems, err := svc.ListInbox(ctx, agentB, "unread")
+	if err != nil || len(unreadItems) != 1 {
+		t.Fatalf("done task unread must still appear in unread filter: items=%+v err=%v", unreadItems, err)
+	}
+	// Terminal task is excluded from agent's active followed conversations list.
+	agentConvs, err := svc.ListAgentConversations(ctx, agentB)
+	if err != nil {
+		t.Fatalf("list agent convs: %v", err)
+	}
+	for _, c := range agentConvs {
+		if c.ID == taskConvID {
+			t.Fatalf("done task must not appear in followed active conversations")
+		}
+	}
+
+	// Posting in a terminal task does NOT auto-follow a non-follower (agentC).
+	if _, err := svc.SendMessage(ctx, agentC, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "Post-done note"}); err != nil {
+		t.Fatalf("agentC post in done task: %v", err)
+	}
+	pageC, err := svc.ListMessages(ctx, agentC, ListMessagesInput{ConversationID: taskConvID})
+	if err != nil || pageC.Following {
+		t.Fatalf("posting in done task must not auto-follow: following=%v err=%v", pageC.Following, err)
+	}
+
+	// Explicit @mention in a done task STILL wakes the mentioned agent and enters needs_me.
+	clearWakes()
+	res, err = svc.SendMessage(ctx, agentA, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "@Iris please double check"})
+	if err != nil || res.WokenCount != 1 || getWakes() != 1 {
+		t.Fatalf("explicit mention in done task must wake target: woken=%d spy=%d err=%v", res.WokenCount, getWakes(), err)
+	}
+	items, err = svc.ListInbox(ctx, agentB, "needs_me")
+	if err != nil || len(items) != 1 || items[0].Reason != "mention" {
+		t.Fatalf("explicit mention in done task must enter needs_me with reason=mention: items=%+v err=%v", items, err)
+	}
+	if _, err := svc.ListMessages(ctx, agentB, ListMessagesInput{ConversationID: taskConvID, UnreadOnly: true, MarkRead: true}); err != nil {
+		t.Fatalf("mark read agentB after mention: %v", err)
+	}
+
+	// Closed task also suppresses following wakes.
+	if _, err := svc.UpdateTaskStatus(ctx, owner, task.ID, domain.TaskClosed); err != nil {
+		t.Fatalf("mark closed: %v", err)
+	}
+	clearWakes()
+	res, err = svc.SendMessage(ctx, agentA, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "Note on closed task"})
+	if err != nil || res.WokenCount != 0 || getWakes() != 0 {
+		t.Fatalf("closed task must not wake followers: woken=%d spy=%d err=%v", res.WokenCount, getWakes(), err)
+	}
+
+	// Reopening the task restores following wakes for existing followers.
+	if _, err := svc.UpdateTaskStatus(ctx, owner, task.ID, domain.TaskInProgress); err != nil {
+		t.Fatalf("reopen task: %v", err)
+	}
+	clearWakes()
+	res, err = svc.SendMessage(ctx, agentA, SendMessageInput{ConversationID: taskConvID, BodyMarkdown: "Resumed work"})
+	if err != nil || res.WokenCount != 1 || getWakes() != 1 {
+		t.Fatalf("reopened task must restore following wake: woken=%d spy=%d err=%v", res.WokenCount, getWakes(), err)
+	}
+	items, err = svc.ListInbox(ctx, agentB, "needs_me")
+	if err != nil || len(items) != 1 || items[0].Reason != "task" {
+		t.Fatalf("reopened task must restore needs_me reason=task: items=%+v err=%v", items, err)
+	}
+}

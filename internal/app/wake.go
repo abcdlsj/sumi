@@ -7,6 +7,20 @@ import (
 	"github.com/abcdlsj/sumi/internal/domain"
 )
 
+func isTaskTerminalTx(ctx context.Context, q queryer, target convMeta) (bool, error) {
+	if target.Kind != domain.ConversationTask || target.TaskID == "" {
+		return false, nil
+	}
+	var status string
+	if err := q.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id = ?`, target.TaskID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, domain.WrapError(domain.CodeInternal, "query task status", err)
+	}
+	return domain.TaskStatus(status).IsTerminal(), nil
+}
+
 func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, authorID string, mentionAll bool, mentionIDs []string) ([]wakeTarget, error) {
 	boundary, err := resolveVisibilityBoundary(ctx, tx, target)
 	if err != nil {
@@ -14,6 +28,10 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 	}
 	if target.ArchivedAt != nil || boundary.ArchivedAt != nil {
 		return nil, nil
+	}
+	taskTerminal, err := isTaskTerminalTx(ctx, tx, target)
+	if err != nil {
+		return nil, err
 	}
 	mentionedSet := make(map[string]struct{}, len(mentionIDs))
 	for _, id := range mentionIDs {
@@ -50,7 +68,7 @@ func computeAgentWakesTx(ctx context.Context, tx *sql.Tx, target convMeta, autho
 			reason = "dm"
 		case directlyMentioned || mentionAll:
 			reason = "mention"
-		case (target.Kind == domain.ConversationThread || target.Kind == domain.ConversationTask) && following == 1:
+		case (target.Kind == domain.ConversationThread || (target.Kind == domain.ConversationTask && !taskTerminal)) && following == 1:
 			reason = "following"
 		case (target.Kind == domain.ConversationPublic || target.Kind == domain.ConversationPrivate) && notify == string(domain.NotifyAll):
 			reason = "channel_all"

@@ -127,6 +127,11 @@ const (
 	TaskClosed     TaskStatus = "closed"
 )
 
+// IsTerminal reports whether a task status suppresses automatic following-based wakes.
+func (s TaskStatus) IsTerminal() bool {
+	return s == TaskDone || s == TaskClosed
+}
+
 type NotifyLevel string
 
 const (

@@ -405,6 +405,7 @@ func (s *Service) ListAgentConversations(ctx context.Context, viewer domain.Memb
 		 JOIN conversations c ON c.id = cs.conversation_id
 		 LEFT JOIN tasks t ON t.id = c.task_id
 		 WHERE cs.member_id = ? AND cs.following = 1 AND c.space_id = ? AND c.kind IN ('thread', 'task') AND c.archived_at IS NULL
+		   AND (c.kind <> 'task' OR COALESCE(t.status, '') NOT IN ('done', 'closed'))
 		 ORDER BY c.created_at ASC`,
 		viewer.ID, viewer.ID, viewer.ID, viewer.SpaceID,
 	)

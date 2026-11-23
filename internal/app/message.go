@@ -171,11 +171,15 @@ func (s *Service) SendMessage(ctx context.Context, actor domain.Member, in SendM
 			}
 		}
 
-		// Author has seen up to their own message; auto-follow thread/task on reply.
+		// Author has seen up to their own message; auto-follow active thread/task on reply.
 		if err := advanceReadSeqTx(ctx, tx, targetMeta.ID, actor.ID, msg.Seq); err != nil {
 			return err
 		}
-		if targetMeta.Kind == domain.ConversationThread || targetMeta.Kind == domain.ConversationTask {
+		taskTerminal, err := isTaskTerminalTx(ctx, tx, targetMeta)
+		if err != nil {
+			return err
+		}
+		if targetMeta.Kind == domain.ConversationThread || (targetMeta.Kind == domain.ConversationTask && !taskTerminal) {
 			if err := setFollowingTx(ctx, tx, targetMeta.ID, actor.ID, true); err != nil {
 				return err
 			}

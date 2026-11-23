@@ -162,7 +162,7 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		filter = "needs_me"
 	}
 	rows, err := s.store.ReadDB().QueryContext(ctx,
-		`SELECT c.id, c.kind, COALESCE(c.slug, ''), COALESCE(pc.slug, ''), COALESCE(t.number, 0), COALESCE(t.id, ''), COALESCE(t.title, ''),
+		`SELECT c.id, c.kind, COALESCE(c.slug, ''), COALESCE(pc.slug, ''), COALESCE(t.number, 0), COALESCE(t.id, ''), COALESCE(t.title, ''), COALESCE(t.status, ''),
 		        c.next_seq - 1 AS latest_seq,
 		        COALESCE(cs.read_seq, 0), COALESCE(cs.done_seq, 0), COALESCE(cs.notify_level, 'mentions'), COALESCE(cs.following, 0),
 		        COALESCE(peer.display_name, ''),
@@ -197,12 +197,12 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 
 	items := make([]domain.InboxItem, 0)
 	for rows.Next() {
-		var convID, kindStr, slug, parentSlug, taskID, taskTitle, notifyStr, peerName string
+		var convID, kindStr, slug, parentSlug, taskID, taskTitle, taskStatusStr, notifyStr, peerName string
 		var latestAuthor, latestBody, latestAction, latestAtStr string
 		var taskNumber, latestSeq, readSeq, doneSeq, unreadCnt, mentionCnt, mentionAllCnt int64
 		var followingInt int
 		if err := rows.Scan(
-			&convID, &kindStr, &slug, &parentSlug, &taskNumber, &taskID, &taskTitle,
+			&convID, &kindStr, &slug, &parentSlug, &taskNumber, &taskID, &taskTitle, &taskStatusStr,
 			&latestSeq, &readSeq, &doneSeq, &notifyStr, &followingInt, &peerName,
 			&unreadCnt, &mentionCnt, &mentionAllCnt,
 			&latestAuthor, &latestBody, &latestAction, &latestAtStr,
@@ -219,6 +219,7 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		kind := domain.ConversationKind(kindStr)
 		notify := domain.NotifyLevel(notifyStr)
 		following := followingInt == 1
+		taskTerminal := kind == domain.ConversationTask && domain.TaskStatus(taskStatusStr).IsTerminal()
 		totalMentions := mentionCnt + mentionAllCnt
 
 		needsAttention := false
@@ -230,7 +231,7 @@ func (s *Service) ListInbox(ctx context.Context, viewer domain.Member, filter st
 		case totalMentions > 0 && notify != domain.NotifyMute:
 			needsAttention = true
 			reason = "mention"
-		case (kind == domain.ConversationThread || kind == domain.ConversationTask) && following && unreadCnt > 0:
+		case (kind == domain.ConversationThread || (kind == domain.ConversationTask && !taskTerminal)) && following && unreadCnt > 0:
 			needsAttention = true
 			if kind == domain.ConversationTask {
 				reason = "task"
