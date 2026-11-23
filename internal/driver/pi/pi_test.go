@@ -38,7 +38,7 @@ func TestFakePiRPC(t *testing.T) {
 		_ = f.Close()
 	}
 
-	var sysPromptPath, sessionDir, resumePath string
+	var sysPromptPath, extPath, sessionDir, resumePath string
 	var flags []string
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
@@ -46,6 +46,11 @@ func TestFakePiRPC(t *testing.T) {
 		case "--system-prompt":
 			if i+1 < len(args) {
 				sysPromptPath = args[i+1]
+				i++
+			}
+		case "--extension":
+			if i+1 < len(args) {
+				extPath = args[i+1]
 				i++
 			}
 		case "--session-dir":
@@ -70,16 +75,23 @@ func TestFakePiRPC(t *testing.T) {
 		}
 	}
 	logLine("FLAGS:" + strings.Join(flags, ","))
+	if extPath != "" {
+		logLine("EXTENSION:" + extPath)
+	}
 	if sysPromptPath != "" {
 		raw, _ := os.ReadFile(sysPromptPath)
 		logLine("SYSPROMPT:" + strings.TrimSpace(string(raw)))
 	}
 	sessionFile := resumePath
 	if sessionFile == "" {
-		sessionFile = filepath.Join(sessionDir, "sess-1.jsonl")
+		if mode == "rotate_after_compact" {
+			sessionFile = filepath.Join(sessionDir, "2026-11-23T00-00-00-000Z_sess-rot.jsonl")
+		} else {
+			sessionFile = filepath.Join(sessionDir, "sess-1.jsonl")
+		}
 		logLine("OPEN:new")
 	} else {
-		logLine("OPEN:resume")
+		logLine("OPEN:resume:" + filepath.Base(sessionFile))
 	}
 
 	in := bufio.NewScanner(os.Stdin)
@@ -209,8 +221,8 @@ func TestFakePiRPC(t *testing.T) {
 				} else {
 					ctxTokens = 450_000
 				}
-			case "over_budget_shrinks", "compact_refused_then_ok", "compact_fail_then_ok", "compact_timeout_then_ok", "compact_post_stats_fail_then_ok":
-				if compacted {
+			case "over_budget_shrinks", "compact_refused_then_ok", "compact_fail_then_ok", "compact_timeout_then_ok", "compact_post_stats_fail_then_ok", "rotate_after_compact":
+				if compacted || resumePath != "" {
 					ctxTokens = 30_000
 				} else {
 					ctxTokens = 200_000
@@ -272,6 +284,9 @@ func TestFakePiRPC(t *testing.T) {
 				continue
 			}
 			compacted = true
+			if mode == "rotate_after_compact" {
+				writeFakeCompactedV3Session(sessionFile, "sess-rot", 2048)
+			}
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "compact", "success": true, "data": map[string]any{}})
 		}
 	}

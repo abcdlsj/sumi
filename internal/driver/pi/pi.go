@@ -100,6 +100,10 @@ type Config struct {
 	// MaxTurnToolCalls caps tool invocations (`tool_execution_start` events) within one RunTurn.
 	// Zero uses DefaultMaxTurnToolCalls; negative values disable the tool call budget.
 	MaxTurnToolCalls int
+	// SessionRotateBytes triggers post-compaction JSONL seed rotation once the session file
+	// reaches this size (preserving the same session ID). Zero uses DefaultSessionRotateBytes;
+	// negative values disable rotation.
+	SessionRotateBytes int64
 	// Now overrides the clock for deterministic tests; defaults to time.Now.
 	Now func() time.Time
 }
@@ -198,6 +202,16 @@ func (d *Driver) maxTurnToolCalls() int {
 		return DefaultMaxTurnToolCalls
 	}
 	return d.cfg.MaxTurnToolCalls
+}
+
+func (d *Driver) sessionRotateBytes() int64 {
+	if d.cfg.SessionRotateBytes < 0 {
+		return 0
+	}
+	if d.cfg.SessionRotateBytes == 0 {
+		return DefaultSessionRotateBytes
+	}
+	return d.cfg.SessionRotateBytes
 }
 
 func (d *Driver) coldRecycleLimits() (time.Duration, int) {
@@ -390,6 +404,16 @@ func (d *Driver) resolvedSystemPromptFile(workDir string) string {
 	return filepath.Join(workDir, ".pi-system-prompt.md")
 }
 
+func (d *Driver) resolvedCompactionFitFile(workDir string) string {
+	if d.cfg.SessionDir != "" {
+		return filepath.Join(filepath.Dir(d.cfg.SessionDir), "compaction-fit.mjs")
+	}
+	if d.cfg.SessionFile != "" {
+		return filepath.Join(filepath.Dir(d.cfg.SessionFile), "runtime", "pi", "compaction-fit.mjs")
+	}
+	return filepath.Join(workDir, ".pi-compaction-fit.mjs")
+}
+
 func writeSystemPromptFile(path, prompt string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
@@ -406,8 +430,8 @@ func writeSystemPromptFile(path, prompt string) (string, error) {
 	return hash, nil
 }
 
-func (d *Driver) buildArgs(sysPromptPath, sessionDir, resumeFile string) []string {
-	args := make([]string, 0, len(d.cfg.PrefixArgs)+14)
+func (d *Driver) buildArgs(sysPromptPath, compactionFitPath, sessionDir, resumeFile string) []string {
+	args := make([]string, 0, len(d.cfg.PrefixArgs)+16)
 	args = append(args, d.cfg.PrefixArgs...)
 	args = append(args,
 		"--mode", "rpc",
@@ -418,6 +442,9 @@ func (d *Driver) buildArgs(sysPromptPath, sessionDir, resumeFile string) []strin
 		"--no-context-files",
 		"--no-mcp",
 	)
+	if compactionFitPath != "" {
+		args = append(args, "--extension", compactionFitPath)
+	}
 	if sysPromptPath != "" {
 		args = append(args, "--system-prompt", sysPromptPath)
 	}
@@ -461,6 +488,11 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, in driver.TurnInput) e
 		return driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("create pi session dir: %w", err))
 	}
 
+	compactionFitPath := d.resolvedCompactionFitFile(in.WorkDir)
+	if err := writeCompactionFitExtension(compactionFitPath); err != nil {
+		return driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("write pi compaction-fit extension: %w", err))
+	}
+
 	resumeFile := ""
 	if d.sessionFile != "" {
 		if fi, err := os.Stat(d.sessionFile); err == nil && !fi.IsDir() {
@@ -477,12 +509,12 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, in driver.TurnInput) e
 		}
 	}
 
-	err := d.spawnAndProbeLocked(ctx, in.WorkDir, in.Env, sysPromptPath, sessionDir, resumeFile)
+	err := d.spawnAndProbeLocked(ctx, in.WorkDir, in.Env, sysPromptPath, compactionFitPath, sessionDir, resumeFile)
 	if err != nil && resumeFile != "" {
 		// Saved session may be corrupt or incompatible; forget it and open a fresh session once.
 		_ = d.forgetSession()
 		d.resetSessionStateLocked()
-		err = d.spawnAndProbeLocked(ctx, in.WorkDir, in.Env, sysPromptPath, sessionDir, "")
+		err = d.spawnAndProbeLocked(ctx, in.WorkDir, in.Env, sysPromptPath, compactionFitPath, sessionDir, "")
 	}
 	if err != nil {
 		return err
@@ -491,12 +523,12 @@ func (d *Driver) ensureStartedLocked(ctx context.Context, in driver.TurnInput) e
 	return nil
 }
 
-func (d *Driver) spawnAndProbeLocked(ctx context.Context, workDir string, env []string, sysPromptPath, sessionDir, resumeFile string) error {
+func (d *Driver) spawnAndProbeLocked(ctx context.Context, workDir string, env []string, sysPromptPath, compactionFitPath, sessionDir, resumeFile string) error {
 	bin := d.cfg.Binary
 	if bin == "" {
 		bin = "pi"
 	}
-	args := d.buildArgs(sysPromptPath, sessionDir, resumeFile)
+	args := d.buildArgs(sysPromptPath, compactionFitPath, sessionDir, resumeFile)
 	p, err := startProcess(bin, args, workDir, env)
 	if err != nil {
 		return startFailure("start pi rpc: %v", err, nil)
@@ -841,6 +873,7 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 	}
 	d.prevInputTokens, d.prevOutputTokens, d.prevToolCalls = totalIn, st.Tokens.Output, st.ToolCalls
 
+	compactedOK := false
 	if st.ContextUsage != nil && st.ContextUsage.Tokens > 0 {
 		d.lastContextTokens = st.ContextUsage.Tokens
 		if st.ContextUsage.ContextWindow > 0 {
@@ -869,6 +902,7 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 						d.compactFailStreak++
 						d.compactSkipTurns = compactBackoffTurns(d.compactFailStreak)
 					case compactionCompleted:
+						compactedOK = true
 						d.compactFailStreak = 0
 						d.compactSkipTurns = 0
 						postCtx, postCancel := context.WithTimeout(ctx, statsCallTimeout)
@@ -902,6 +936,25 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 		if hitHardCeiling || hitFailCap {
 			d.recycleSessionLocked()
 			return res
+		}
+	}
+
+	// Post-compaction JSONL rotation: when the compacted session file exceeds the size threshold,
+	// flush Pi cleanly and rewrite a lean same-ID seed so compacted-away entries stop bloating disk/RAM.
+	if compactedOK && d.sessionFile != "" {
+		if limit := d.sessionRotateBytes(); limit > 0 {
+			if fi, err := os.Stat(d.sessionFile); err == nil && !fi.IsDir() && fi.Size() >= limit {
+				if d.proc != nil && !d.proc.exited() {
+					d.proc.gracefulStop(2 * time.Second)
+					d.proc = nil
+					d.resumed = false
+				}
+				if activeFile, rotated, _ := rotateSessionFile(d.sessionFile, d.now()); rotated && activeFile != "" {
+					d.sessionFile = activeFile
+					// Cumulative usage entries before the kept segment are dropped on rotation.
+					d.prevInputTokens, d.prevOutputTokens, d.prevToolCalls = 0, 0, 0
+				}
+			}
 		}
 	}
 	d.persistSessionIfPresent()
