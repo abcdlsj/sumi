@@ -123,6 +123,35 @@ func TestFakePiRPC(t *testing.T) {
 				"data":    map[string]any{"disposition": "started"},
 			})
 			_ = out.Encode(map[string]any{"type": "agent_start"})
+			if mode == "many_steps_over_budget" {
+				for step := 1; step <= 4; step++ {
+					_ = out.Encode(map[string]any{"type": "turn_start"})
+					if step <= 3 {
+						_ = out.Encode(map[string]any{"type": "turn_end"})
+					}
+				}
+				// Wait for driver to send abort once step 4 trips MaxTurnSteps=3.
+				continue
+			}
+			if mode == "exact_steps" {
+				for step := 1; step <= 3; step++ {
+					_ = out.Encode(map[string]any{"type": "turn_start"})
+					_ = out.Encode(map[string]any{"type": "turn_end"})
+				}
+				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+				continue
+			}
+			if mode == "many_tools" {
+				_ = out.Encode(map[string]any{"type": "turn_start"})
+				for i := 1; i <= 4; i++ {
+					_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": fmt.Sprintf("tc-%d", i), "toolName": "bash"})
+					if i <= 3 {
+						_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": fmt.Sprintf("tc-%d", i), "toolName": "bash", "isError": false})
+					}
+				}
+				continue
+			}
 			_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "tc-1", "toolName": "bash"})
 			if mode == "ui_request" {
 				_ = out.Encode(map[string]any{"type": "extension_ui_request", "id": "ui-1", "method": "confirm", "title": "confirm?"})
@@ -170,7 +199,7 @@ func TestFakePiRPC(t *testing.T) {
 			}
 			ctxTokens := 4000
 			switch mode {
-			case "over_budget", "over_budget_sticky", "compact_always_fails":
+			case "over_budget", "over_budget_sticky", "compact_always_fails", "many_steps_over_budget":
 				ctxTokens = 200_000
 			case "over_hard_ceiling_sticky":
 				ctxTokens = 450_000
@@ -941,5 +970,68 @@ func TestConsecutiveCompactionFailuresRecycleSession(t *testing.T) {
 	joined := strings.Join(readLogLines(logPath), "\n")
 	if !strings.Contains(joined, "OPEN:new") || !strings.Contains(joined, "MEMORY SNAPSHOT") {
 		t.Fatalf("turn 4 after failure-cap recycle must open fresh session with MEMORY:\n%s", joined)
+	}
+}
+
+func TestPerTurnStepAndToolCallBudgets(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// 1. Exact step count equal to MaxTurnSteps succeeds cleanly.
+	dExact, inExact, _ := newFakeDriver(t, "exact_steps", Config{
+		Fingerprint:  "fp",
+		MaxTurnSteps: 3,
+	})
+	defer dExact.Close()
+	if _, err := dExact.RunTurn(ctx, inExact); err != nil {
+		t.Fatalf("exact steps at limit must succeed, got %v", err)
+	}
+
+	// 2. Exceeding MaxTurnSteps sends abort, runs post-turn stats & compaction, and reports turn_budget_exceeded.
+	dSteps, inSteps, logSteps := newFakeDriver(t, "many_steps_over_budget", Config{
+		Fingerprint:          "fp",
+		MaxTurnSteps:         3,
+		SoftCompactionTokens: 150_000,
+	})
+	defer dSteps.Close()
+	res, err := dSteps.RunTurn(ctx, inSteps)
+	var fail *driver.Failure
+	if !errors.As(err, &fail) || fail.Code != domain.AgentErrTurnBudgetExceeded {
+		t.Fatalf("expected %s, got err=%v", domain.AgentErrTurnBudgetExceeded, err)
+	}
+	if res.InputTokens == 0 {
+		t.Fatalf("post-turn stats must still be collected after budget abort, got %+v", res)
+	}
+	joined := strings.Join(readLogLines(logSteps), "\n")
+	if !strings.Contains(joined, "ABORT") {
+		t.Fatalf("expected abort RPC on step budget exceeded:\n%s", joined)
+	}
+	if !strings.Contains(joined, "COMPACT:1:") {
+		t.Fatalf("expected post-turn proactive compaction to still run after budget abort:\n%s", joined)
+	}
+
+	// 3. Exceeding MaxTurnToolCalls aborts and reports turn_budget_exceeded.
+	dTools, inTools, logTools := newFakeDriver(t, "many_tools", Config{
+		Fingerprint:      "fp",
+		MaxTurnToolCalls: 3,
+	})
+	defer dTools.Close()
+	_, err = dTools.RunTurn(ctx, inTools)
+	fail = nil
+	if !errors.As(err, &fail) || fail.Code != domain.AgentErrTurnBudgetExceeded {
+		t.Fatalf("expected %s for tool call cap, got err=%v", domain.AgentErrTurnBudgetExceeded, err)
+	}
+	if !strings.Contains(strings.Join(readLogLines(logTools), "\n"), "ABORT") {
+		t.Fatalf("expected abort RPC on tool call budget exceeded")
+	}
+
+	// 4. Negative config disables step budget.
+	dOff, inOff, _ := newFakeDriver(t, "exact_steps", Config{
+		Fingerprint:  "fp",
+		MaxTurnSteps: -1,
+	})
+	defer dOff.Close()
+	if _, err := dOff.RunTurn(ctx, inOff); err != nil {
+		t.Fatalf("disabled step budget must succeed, got %v", err)
 	}
 }

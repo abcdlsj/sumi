@@ -33,6 +33,7 @@ const (
 	AgentErrModelUnreachable    = "model_unreachable"
 	AgentErrTurnFailed          = "turn_failed"
 	AgentErrTurnStalled         = "turn_stalled"
+	AgentErrTurnBudgetExceeded  = "turn_budget_exceeded"
 	AgentErrInboxUnreachable    = "inbox_unreachable"
 )
 

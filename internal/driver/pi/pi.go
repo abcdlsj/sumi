@@ -46,6 +46,11 @@ const (
 	DefaultCompactTimeout  = 5 * time.Minute
 	maxCompactBackoffTurns = 4
 
+	// DefaultMaxTurnSteps and DefaultMaxTurnToolCalls bound runaway multi-step / tool-call
+	// loops within a single wake turn.
+	DefaultMaxTurnSteps     = 60
+	DefaultMaxTurnToolCalls = 120
+
 	rpcCallTimeout     = 30 * time.Second
 	statsCallTimeout   = 5 * time.Second
 	abortSettleTimeout = 2 * time.Second
@@ -89,6 +94,12 @@ type Config struct {
 	// ColdRecycleMinTokens is the minimum prior context size eligible for cold wake recycling.
 	// Zero uses DefaultColdRecycleMinTokens; negative values disable cold wake recycling.
 	ColdRecycleMinTokens int
+	// MaxTurnSteps caps LLM steps (`turn_start` events) within one RunTurn. Zero uses
+	// DefaultMaxTurnSteps; negative values disable the step budget.
+	MaxTurnSteps int
+	// MaxTurnToolCalls caps tool invocations (`tool_execution_start` events) within one RunTurn.
+	// Zero uses DefaultMaxTurnToolCalls; negative values disable the tool call budget.
+	MaxTurnToolCalls int
 	// Now overrides the clock for deterministic tests; defaults to time.Now.
 	Now func() time.Time
 }
@@ -167,6 +178,26 @@ func (d *Driver) maxCompactionFailures() int {
 		return DefaultMaxCompactionFailures
 	}
 	return d.cfg.MaxCompactionFailures
+}
+
+func (d *Driver) maxTurnSteps() int {
+	if d.cfg.MaxTurnSteps < 0 {
+		return 0
+	}
+	if d.cfg.MaxTurnSteps == 0 {
+		return DefaultMaxTurnSteps
+	}
+	return d.cfg.MaxTurnSteps
+}
+
+func (d *Driver) maxTurnToolCalls() int {
+	if d.cfg.MaxTurnToolCalls < 0 {
+		return 0
+	}
+	if d.cfg.MaxTurnToolCalls == 0 {
+		return DefaultMaxTurnToolCalls
+	}
+	return d.cfg.MaxTurnToolCalls
 }
 
 func (d *Driver) coldRecycleLimits() (time.Duration, int) {
@@ -522,8 +553,20 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	}
 
 	settledCh := make(chan settledEvent, 1)
+	budgetExceededCh := make(chan string, 1)
+	maxSteps := d.maxTurnSteps()
+	maxTools := d.maxTurnToolCalls()
+	var stepCount atomic.Int64
+	var toolCallCount atomic.Int64
 	var errMu sync.Mutex
 	var lastRunErr string
+
+	signalBudgetExceeded := func(reason string) {
+		select {
+		case budgetExceededCh <- reason:
+		default:
+		}
+	}
 
 	onEvent := func(ev rpcEvent) {
 		switch ev.Type {
@@ -533,13 +576,21 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 				tool = "tool"
 			}
 			in.Emit(driver.Activity{ToolCallID: ev.ToolCallID, Tool: tool, Done: false})
+			if maxTools > 0 && toolCallCount.Add(1) > int64(maxTools) {
+				signalBudgetExceeded(fmt.Sprintf("pi turn exceeded tool call budget (%d)", maxTools))
+			}
 		case "tool_execution_end":
 			tool := ev.ToolName
 			if tool == "" {
 				tool = "tool"
 			}
 			in.Emit(driver.Activity{ToolCallID: ev.ToolCallID, Tool: tool, Done: true})
-		case "message_update", "turn_start", "turn_end", "compaction_start", "compaction_end", "auto_retry_start":
+		case "turn_start":
+			in.Emit(driver.Activity{})
+			if maxSteps > 0 && stepCount.Add(1) > int64(maxSteps) {
+				signalBudgetExceeded(fmt.Sprintf("pi turn exceeded step budget (%d)", maxSteps))
+			}
+		case "message_update", "turn_end", "compaction_start", "compaction_end", "auto_retry_start":
 			in.Emit(driver.Activity{})
 		case "auto_retry_end":
 			in.Emit(driver.Activity{})
@@ -596,8 +647,31 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 		return driver.TurnResult{}, nil
 	}
 
+	finishBudgetExceeded := func(reason string, alreadySettled bool) (driver.TurnResult, error) {
+		if !alreadySettled {
+			d.abortLocked(p, settledCh)
+		}
+		d.sentFirstTurn = true
+		d.lastActiveAt = d.now()
+		var res driver.TurnResult
+		if d.proc != nil && !d.proc.exited() {
+			res = d.postTurnStatsAndCompact(ctx, p, in)
+		} else {
+			d.persistSessionIfPresent()
+		}
+		return res, driver.Fail(domain.AgentErrTurnBudgetExceeded, errors.New(reason))
+	}
+
 	select {
+	case reason := <-budgetExceededCh:
+		return finishBudgetExceeded(reason, false)
 	case settled := <-settledCh:
+		// If budget was tripped right as the turn settled, still enforce the budget outcome.
+		select {
+		case reason := <-budgetExceededCh:
+			return finishBudgetExceeded(reason, true)
+		default:
+		}
 		d.sentFirstTurn = true
 		d.lastActiveAt = d.now()
 		d.persistSessionIfPresent()
