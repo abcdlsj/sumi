@@ -1050,3 +1050,15 @@ func TestPerTurnStepAndToolCallBudgets(t *testing.T) {
 		t.Fatalf("disabled step budget must succeed, got %v", err)
 	}
 }
+
+// A missing work dir used to surface as fork/exec ENOENT on the pi binary, blaming the wrong file.
+func TestStartProcessNamesMissingWorkDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "workspace")
+	_, err := startProcess("definitely-not-a-binary", nil, missing, nil)
+	if err == nil {
+		t.Fatal("expected an error for a missing work dir")
+	}
+	if !strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), "fork/exec") {
+		t.Fatalf("error must name the missing work dir, got %v", err)
+	}
+}

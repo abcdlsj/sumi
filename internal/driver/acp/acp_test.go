@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -257,5 +258,17 @@ func TestActivityOfKeepsOnlyToolLifecycle(t *testing.T) {
 	}
 	if chunk := activityOf(json.RawMessage(`{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}}`)); chunk != (driver.Activity{}) {
 		t.Fatalf("content updates are generic progress only: %+v", chunk)
+	}
+}
+
+// A missing work dir used to surface as fork/exec ENOENT on the ACP binary, blaming the wrong file.
+func TestStartProcessNamesMissingWorkDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "workspace")
+	_, err := startProcess([]string{"definitely-not-a-binary"}, missing, nil)
+	if err == nil {
+		t.Fatal("expected an error for a missing work dir")
+	}
+	if !strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), "fork/exec") {
+		t.Fatalf("error must name the missing work dir, got %v", err)
 	}
 }

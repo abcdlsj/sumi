@@ -95,7 +95,7 @@ adapters (server / computer / cli / web / desktop) ──▶ app ──▶ domai
       pi-session.json        # Pi 原生 RPC 会话持久化记录（含 provider/model 指纹）
       acp-session.json       # ACP 会话持久化记录（含 provider/model 指纹）
       session.jsonl          # Builtin harness 会话历史
-      workspace/             # Agent 本地工作目录（只读浏览限域于此）
+      workspace/             # Agent 本地工作目录（只读浏览限域于此；缺失时 Turn 前自愈重建）
       memory/MEMORY.md       # 持久化长期记忆
       runtime/<provider>/    # 按 provider 隔离的运行时配置目录（Pi 含 SYSTEM.md、compaction-fit.mjs 与 sessions/）
 ```
@@ -105,6 +105,7 @@ adapters (server / computer / cli / web / desktop) ──▶ app ──▶ domai
 - **三认证面互不通用**：Browser Session Cookie、Computer Bearer Token、Agent Driver Token 严格隔离；服务端只存 token hash；模型凭据仅下发给承载对应 Agent 的 Computer，永不回传浏览器。
 - **Computer ↔ Server 通道**：单条 WebSocket 加版本与能力协商（`Capabilities`）。唤醒帧是轻量通知而非重型队列；失败按指数退避重试，连续失败触发熔断暂停，期间不丢消息。通过同一条连接提供按需只读浏览 Agent Workspace 文件的能力（强制路径限域、拒绝跟随软链与硬链、屏蔽敏感凭据文件）。
 - **Agent 强隔离**：同机 Agent 各自拥有独立的 Agent Home、独立 `driver.token` 与隔离环境，彼此不可读目录与对话；外部 coding agent 运行在按 provider 隔离的目录中，不继承宿主全局 skills / hooks / 会话，仅最小化带入运行所需的凭据与按 Agent 显式声明的插件（`driver_config.pi_packages`，仅允许 `npm:` 规格）。其中 `pi` provider 直接通过原生 `pi --mode rpc` 驱动（不经 `pi-acp` 中转），以 `--system-prompt` 将 Sumi 协作指令置于真正的 System Prompt 槽位（替换 Pi 默认提示词且不受 compaction 稀释）、以 `--no-skills --no-prompt-templates --no-themes --no-context-files --no-mcp` 强化沙箱，并在 Turn 结束后根据 `get_session_stats` 超过软上下文预算时主动触发 `compact`（5 分钟超时预算；区分短暂拒绝 `refused` 保留武装、失败/超时 `failed` 按有界轮次退避重武装、仅在压缩成功仍超阈值时解除武装，避免一次失败导致永久失锁），同时通过零依赖内建扩展（`--extension <runtime/pi/compaction-fit.mjs>`）拦截 `session_before_compact` 裁剪超长单条或最旧待总结历史以防止单请求超窗死锁，并在压缩成功后对超过 30MB 的 `.jsonl` 会话文件执行同 Session ID 精简 seed 轮转（保住 Prompt Cache 亲和度、将旧文件安全改名 `.rotated`）以遏制内存与磁盘无界增长；配两层会话回收兜底——空闲超过缓存周期且上下文偏大时的**冷唤醒回收**，以及压缩后仍超过硬上下文天花板（`min(400K, 85% contextWindow)`）或连续 3 次压缩失败时的**热回合末强制回收**（立即退出当前进程并清理会话指针，下个 Turn 以新会话配合 `MEMORY.md` 续接），防止持续活跃会话无界膨胀；此外对单次 Turn 施加硬性步数与工具调用预算（默认最多 60 步 `turn_start`、120 次 `tool_execution_start`），超限立即发送 `abort` 终止失控循环，在干净收敛后继续完成 Turn 末统计、压缩与硬天花板检查，并以 `turn_budget_exceeded` 上报交由 Computer 退避熔断保护；`codex` / `claude` 与自定义命令经 ACP 协议驱动。Runtime Session 仅在 provider 与模型指纹未变时恢复；更换凭据或模型后强制开启新会话。
+- **Agent Home 自愈**：`workspace/` 与 `memory/` 只在 provisioning 时创建，因此每次 Turn 前还会校验一次并按 `0700` 重建缺失目录（`MEMORY.md` 缺失时重新播种），避免工作目录被外部删除后每个 Turn 都失败、直到 Computer 重启。驱动在 fork 前显式校验子进程工作目录，让「目录不存在」如实报出路径，而不是靠 `fork/exec` 把 ENOENT 归咎于 `ak` / `pi` 二进制。
 - **错误可见且无泄漏**：所有错误以稳定错误码加有界描述上报；日志、错误与协议帧严禁携带消息正文、附件、Prompt、Memory 内容或 Secret。
 
 ---

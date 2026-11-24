@@ -1,6 +1,12 @@
 package driver
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+)
 
 // TurnInput carries the per-turn wake prompt and execution environment for a single-session agent.
 type TurnInput struct {
@@ -29,6 +35,21 @@ func (in TurnInput) Emit(a Activity) {
 	if in.OnActivity != nil {
 		in.OnActivity(a)
 	}
+}
+
+// EnsureWorkDir validates the child's working directory before fork. Drivers set SysProcAttr,
+// which makes os/exec skip its own cwd pre-check, so a missing directory would surface from
+// fork/exec as ENOENT on the binary path and blame the wrong file.
+func EnsureWorkDir(workDir string) error {
+	switch fi, err := os.Stat(workDir); {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("work dir %s does not exist", workDir)
+	case err != nil:
+		return fmt.Errorf("work dir %s: %w", workDir, err)
+	case !fi.IsDir():
+		return fmt.Errorf("work dir %s is not a directory", workDir)
+	}
+	return nil
 }
 
 type TurnResult struct {

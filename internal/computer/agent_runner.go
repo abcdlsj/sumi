@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	mrand "math/rand/v2"
 	"net/http"
 	"os"
@@ -119,20 +120,35 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	return ag
 }
 
-func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSpec) (driver.SessionDriver, string, string) {
+// ensureAgentHome makes an Agent Home's storage usable again and reports whether it had to be
+// rebuilt. It only runs at provisioning otherwise, so an externally removed workspace would
+// fail every turn until the spec changes or the Computer restarts.
+func ensureAgentHome(ag *hostedAgent) (bool, error) {
+	rebuilt := false
 	for _, dir := range []string{ag.workDir, ag.memoryDir} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
+		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+			rebuilt = true
 		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return rebuilt, err
+		}
+	}
+	memFile := filepath.Join(ag.memoryDir, "MEMORY.md")
+	if _, err := os.Stat(memFile); errors.Is(err, fs.ErrNotExist) {
+		rebuilt = true
+		_ = os.WriteFile(memFile, []byte(memoryTemplate), 0o600)
+	}
+	return rebuilt, nil
+}
+
+func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSpec) (driver.SessionDriver, string, string) {
+	if _, err := ensureAgentHome(ag); err != nil {
+		return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
 	}
 	if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
 		if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig); err != nil {
 			return nil, domain.AgentErrDriverStartFailed, domain.BoundErrorDetail(err.Error())
 		}
-	}
-	memFile := filepath.Join(ag.memoryDir, "MEMORY.md")
-	if _, err := os.Stat(memFile); os.IsNotExist(err) {
-		_ = os.WriteFile(memFile, []byte(memoryTemplate), 0o600)
 	}
 	var drv driver.SessionDriver
 	var err error
@@ -422,6 +438,11 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig); err != nil {
 				d.logger.Warn("Refresh ACP runtime dir failed", "agent_id", spec.MemberID, "error", err.Error())
 			}
+		}
+		if rebuilt, err := ensureAgentHome(ag); err != nil {
+			d.logger.Warn("Restore agent home failed", "agent_id", spec.MemberID, "error", err.Error())
+		} else if rebuilt {
+			d.logger.Warn("Agent home was missing and has been rebuilt", "agent_id", spec.MemberID)
 		}
 		turnInput := driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),

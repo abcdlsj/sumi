@@ -407,6 +407,9 @@ type process struct {
 }
 
 func startProcess(argv []string, workDir string, env []string) (*process, error) {
+	if err := driver.EnsureWorkDir(workDir); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = workDir
 	cmd.Env = env

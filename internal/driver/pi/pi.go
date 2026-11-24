@@ -1062,6 +1062,9 @@ type process struct {
 }
 
 func startProcess(bin string, args []string, workDir string, env []string) (*process, error) {
+	if err := driver.EnsureWorkDir(workDir); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = workDir
 	cmd.Env = env
