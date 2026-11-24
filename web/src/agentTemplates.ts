@@ -26,6 +26,7 @@ function sanitizeDriverConfig(kind: DriverKind, raw?: DriverConfigView): Omit<Dr
     const out: Omit<DriverConfigView, "api_key_set"> = {};
     if (raw.provider) out.provider = raw.provider;
     if (Array.isArray(raw.command) && raw.command.length > 0) out.command = raw.command.filter((x): x is string => typeof x === "string" && x.length > 0);
+    if (typeof raw.context_window === "number" && raw.context_window > 0) out.context_window = raw.context_window;
     if (raw.provider === "pi") {
       if (raw.pi_provider?.trim()) out.pi_provider = raw.pi_provider.trim();
       if (raw.pi_model?.trim()) out.pi_model = raw.pi_model.trim();

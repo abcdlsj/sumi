@@ -137,6 +137,27 @@ describe("AgentForm", () => {
     );
   });
 
+  it("forwards a context window and rejects one outside the Claude Code range", async () => {
+    const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
+    render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
+    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "ak my-claude" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Claude Code/ }));
+    fireEvent.change(screen.getByLabelText(/Context window/), { target: { value: "64000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    expect(await screen.findByText(/between 100000 and 1000000/)).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/Context window/), { target: { value: "200000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        "s",
+        expect.objectContaining({ driver_config: { provider: "claude", command: ["ak", "my-claude"], context_window: 200000 } }),
+      ),
+    );
+  });
+
   it("prefills from an existing agent copy with a unique name and copies driver settings", async () => {
     const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
     render(

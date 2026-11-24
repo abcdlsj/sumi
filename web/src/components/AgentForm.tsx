@@ -24,7 +24,7 @@ import { Button, Field, Modal, Select, TextArea, useToast } from "./ui";
 const PROVIDERS: { id: ACPProvider; name: string; desc: string }[] = [
   { id: "pi", name: "pi", desc: "Pi coding agent, uses your pi login" },
   { id: "codex", name: "Codex", desc: "OpenAI Codex CLI via ACP" },
-  { id: "claude", name: "Claude Code", desc: "Claude Code via ACP" },
+  { id: "claude", name: "Claude Code", desc: "Claude Code CLI, driven natively" },
 ];
 
 export const ROLE_PRESETS = [
@@ -40,6 +40,8 @@ export interface DriverDraft {
   piProvider: string;
   piModel: string;
   piPackages: string;
+  /** Context window in tokens as typed; empty keeps the runtime default. */
+  contextWindow: string;
   baseURL: string;
   model: string;
   apiKey: string;
@@ -92,6 +94,7 @@ export function draftFromAgent(m?: Member, computer?: Computer): DriverDraft {
     piProvider: cfg?.pi_provider ?? "",
     piModel: cfg?.pi_model ?? "",
     piPackages: cfg?.pi_packages?.join(", ") ?? "",
+    contextWindow: cfg?.context_window ? String(cfg.context_window) : "",
     baseURL: cfg?.base_url ?? "",
     model: cfg?.model ?? "",
     apiKey: "",
@@ -109,6 +112,7 @@ export function draftFromTemplate(tpl: AgentTemplate, computer?: Computer): Driv
     piProvider: cfg.pi_provider ?? "",
     piModel: cfg.pi_model ?? "",
     piPackages: cfg.pi_packages?.join(", ") ?? "",
+    contextWindow: cfg.context_window ? String(cfg.context_window) : "",
     baseURL: cfg.base_url ?? "",
     model: cfg.model ?? "",
     apiKey: "",
@@ -125,6 +129,7 @@ export function mergeDraft(current: DriverDraft, fromTemplate: DriverDraft): Dri
     piProvider: keep(fromTemplate.piProvider, current.piProvider),
     piModel: keep(fromTemplate.piModel, current.piModel),
     piPackages: keep(fromTemplate.piPackages, current.piPackages),
+    contextWindow: keep(fromTemplate.contextWindow, current.contextWindow),
     baseURL: keep(fromTemplate.baseURL, current.baseURL),
     model: keep(fromTemplate.model, current.model),
     // Templates never carry a key; a key already typed into the form stays.
@@ -132,10 +137,26 @@ export function mergeDraft(current: DriverDraft, fromTemplate: DriverDraft): Dri
   };
 }
 
-export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "model" | "provider" | "command", string>> {
+type DriverField = "baseURL" | "model" | "provider" | "command" | "contextWindow";
+
+/** Mirrors domain.NormalizeDriverConfig bounds; Claude Code only accepts 100k–1M. */
+export function contextWindowError(provider: ACPProvider, raw: string): string | undefined {
+  const v = raw.trim();
+  if (!v) return undefined;
+  const [lo, hi] = provider === "claude" ? [100_000, 1_000_000] : [16_000, 10_000_000];
+  const n = Number(v);
+  if (!/^\d+$/.test(v) || n < lo || n > hi) return `Enter a token count between ${lo} and ${hi}`;
+  return undefined;
+}
+
+export function validateDriver(d: DriverDraft): Partial<Record<DriverField, string>> {
   if (d.kind === "acp") {
+    const errs: Partial<Record<DriverField, string>> = {};
     const parsed = splitCommandArgs(d.command);
-    return parsed.error ? { command: parsed.error } : {};
+    if (parsed.error) errs.command = parsed.error;
+    const cw = contextWindowError(d.provider, d.contextWindow);
+    if (cw) errs.contextWindow = cw;
+    return errs;
   }
   const errs: Partial<Record<"baseURL" | "model", string>> = {};
   if (!/^https?:\/\/[^\s]+$/i.test(d.baseURL.trim())) errs.baseURL = "Enter an http(s) URL, e.g. http://127.0.0.1:4000/v1";
@@ -146,10 +167,9 @@ export function validateDriver(d: DriverDraft): Partial<Record<"baseURL" | "mode
 export function driverInput(d: DriverDraft): DriverConfigInput {
   if (d.kind === "acp") {
     const { args } = splitCommandArgs(d.command);
-    const cfg: { provider?: ACPProvider; command?: string[]; pi_provider?: string; pi_model?: string; pi_packages?: string[] } = {
-      provider: d.provider,
-    };
+    const cfg: Extract<DriverConfigInput, { provider?: ACPProvider }> = { provider: d.provider };
     if (args.length > 0) cfg.command = args;
+    if (d.contextWindow.trim()) cfg.context_window = Number(d.contextWindow.trim());
     if (d.provider === "pi") {
       const packages = d.piPackages.split(",").map((p) => p.trim()).filter(Boolean);
       if (d.piProvider.trim()) cfg.pi_provider = d.piProvider.trim();
@@ -208,13 +228,17 @@ export function DriverFields({
   draft: DriverDraft;
   onChange: (d: DriverDraft) => void;
   computer?: Computer;
-  errors?: Partial<Record<"baseURL" | "model" | "provider" | "command", string>>;
+  errors?: Partial<Record<DriverField, string>>;
   apiKeySet?: boolean;
   showApiKey?: boolean;
 }) {
   const [showKey, setShowKey] = useState(false);
   const hasAdvancedValues = Boolean(
-    draft.command.trim() || draft.piProvider.trim() || draft.piModel.trim() || draft.piPackages.trim(),
+    draft.command.trim() ||
+      draft.piProvider.trim() ||
+      draft.piModel.trim() ||
+      draft.piPackages.trim() ||
+      draft.contextWindow.trim(),
   );
   const [showAdvanced, setShowAdvanced] = useState(hasAdvancedValues);
   useEffect(() => {
@@ -292,13 +316,36 @@ export function DriverFields({
                 leading={<Terminal />}
                 value={draft.command}
                 onChange={(e) => set({ command: e.target.value })}
-                placeholder={draft.provider === "pi" ? "ak my-pi-provider" : "npx -y my-acp-agent --stdio"}
+                placeholder={
+                  draft.provider === "pi" ? "ak my-pi-provider" : draft.provider === "claude" ? "ak my-claude-provider" : "npx -y my-acp-agent --stdio"
+                }
                 hint={
                   draft.provider === "pi"
                     ? "Overrides the default pi launcher command; Sumi appends --mode rpc and isolation flags."
-                    : "Overrides the default ACP launcher command. Leave empty to use the provider default."
+                    : draft.provider === "claude"
+                      ? "Overrides the default claude launcher command; Sumi appends -p stream-json and isolation flags."
+                      : "Overrides the default ACP launcher command. Leave empty to use the provider default."
                 }
                 error={errors.command}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Field
+                label="Context window"
+                optional
+                leading={<Cpu />}
+                value={draft.contextWindow}
+                onChange={(e) => set({ contextWindow: e.target.value })}
+                placeholder={draft.provider === "claude" ? "200000" : "272000"}
+                hint={
+                  draft.provider === "pi"
+                    ? "Tokens. Sets contextWindow for this agent's pi model. Leave empty to use the host models.json."
+                    : draft.provider === "codex"
+                      ? "Tokens. Sets model_context_window and a 75% auto-compact limit. Leave empty to use the host config.toml."
+                      : "Tokens, 100000–1000000. Sets CLAUDE_CODE_AUTO_COMPACT_WINDOW. Leave empty to inherit the environment."
+                }
+                error={errors.contextWindow}
+                inputMode="numeric"
                 autoComplete="off"
                 spellCheck={false}
               />

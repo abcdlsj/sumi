@@ -40,11 +40,20 @@ export interface DriverConfigView {
   pi_provider?: string;
   pi_model?: string;
   pi_packages?: string[];
+  /** pi, codex and claude: per-agent context window override in tokens. */
+  context_window?: number;
 }
 
 export type DriverConfigInput =
   | { base_url: string; model: string; api_key?: string }
-  | { provider?: ACPProvider; command?: string[]; pi_provider?: string; pi_model?: string; pi_packages?: string[] };
+  | {
+      provider?: ACPProvider;
+      command?: string[];
+      pi_provider?: string;
+      pi_model?: string;
+      pi_packages?: string[];
+      context_window?: number;
+    };
 
 export interface AgentInfo {
   computer_id?: string;

@@ -1569,6 +1569,11 @@ function AgentDetail({
                       <span className="font-mono text-[13px] break-all">{cfg.command.join(" ")}</span>
                     </KV>
                   )}
+                  {cfg?.context_window && (
+                    <KV label="Context window">
+                      <span className="font-mono text-[13px]">{cfg.context_window.toLocaleString()} tokens</span>
+                    </KV>
+                  )}
                   {cfg?.pi_provider && (
                     <KV label="pi provider">
                       <span className="font-mono text-[13px]">{cfg.pi_provider}</span>
