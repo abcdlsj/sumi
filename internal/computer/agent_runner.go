@@ -236,6 +236,7 @@ func (d *Daemon) agentEnv(ag *hostedAgent, kind domain.DriverKind, provider stri
 				env = unsetEnv(env, "CLAUDECODE")
 				env = setEnv(env, "CLAUDE_CONFIG_DIR", runtimeDir)
 				env = setEnv(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
+				env = setEnv(env, "CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1")
 			}
 		}
 	}

@@ -252,6 +252,93 @@ model = "gpt-5.4-mini"
 	}
 }
 
+func TestPreparePiRuntimeDirAppliesContextWindow(t *testing.T) {
+	hostPi := filepath.Join(t.TempDir(), "host-pi")
+	if err := os.MkdirAll(hostPi, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostModels := `{"providers":{"custom":{"baseUrl":"https://x.invalid","models":[{"id":"m1","contextWindow":1000000}]}}}`
+	mustWrite(t, filepath.Join(hostPi, "models.json"), hostModels)
+	mustWrite(t, filepath.Join(hostPi, "settings.json"), `{"defaultProvider":"custom","defaultModel":"m1"}`)
+	t.Setenv("PI_CODING_AGENT_DIR", hostPi)
+	agentHome := filepath.Join(t.TempDir(), "agent-cw")
+	rtModels := filepath.Join(acpRuntimeDir(agentHome, domain.ACPProviderPi), "models.json")
+
+	readModels := func() map[string]any {
+		t.Helper()
+		if fi, err := os.Lstat(rtModels); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("models.json must be a private copy: %v", err)
+		}
+		raw, err := os.ReadFile(rtModels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc["providers"].(map[string]any)
+	}
+
+	// Host default model defined in models.json: window is set inline.
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: "pi", ContextWindow: 272_000}); err != nil {
+		t.Fatal(err)
+	}
+	m := readModels()["custom"].(map[string]any)["models"].([]any)[0].(map[string]any)
+	if m["contextWindow"] != float64(272_000) || m["id"] != "m1" {
+		t.Fatalf("inline model=%v", m)
+	}
+
+	// Built-in model: window goes to modelOverrides.
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: "pi", PiProvider: "anthropic", PiModel: "claude-x", ContextWindow: 200_000}); err != nil {
+		t.Fatal(err)
+	}
+	ov := readModels()["anthropic"].(map[string]any)["modelOverrides"].(map[string]any)["claude-x"].(map[string]any)
+	if ov["contextWindow"] != float64(200_000) {
+		t.Fatalf("override=%v", ov)
+	}
+
+	if raw, _ := os.ReadFile(filepath.Join(hostPi, "models.json")); string(raw) != hostModels {
+		t.Fatalf("host models.json modified: %s", raw)
+	}
+
+	// Clearing the window restores the host symlink.
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: "pi"}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(rtModels); err != nil || target != filepath.Join(hostPi, "models.json") {
+		t.Fatalf("models.json symlink=%q err=%v", target, err)
+	}
+}
+
+func TestPrepareCodexRuntimeDirAppliesContextWindow(t *testing.T) {
+	hostCodex := filepath.Join(t.TempDir(), "host-codex")
+	if err := os.MkdirAll(hostCodex, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(hostCodex, "config.toml"), "model = \"gpt-5.4\"\nmodel_context_window = 1000000\n\n[profiles.fast]\nmodel = \"mini\"\n")
+	t.Setenv("CODEX_HOME", hostCodex)
+	agentHome := filepath.Join(t.TempDir(), "agent-cw")
+	cfgPath := filepath.Join(acpRuntimeDir(agentHome, domain.ACPProviderCodex), "config.toml")
+
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(cfgPath); !strings.Contains(string(raw), "model_context_window = 1000000") {
+		t.Fatalf("host window must pass through without an override:\n%s", raw)
+	}
+
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: "codex", ContextWindow: 400_000}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(cfgPath)
+	got := string(raw)
+	want := "model_context_window = 400000\nmodel_auto_compact_token_limit = 300000\nmodel = \"gpt-5.4\"\n"
+	if !strings.HasPrefix(got, want) || strings.Contains(got, "1000000") || !strings.Contains(got, "[profiles.fast]") {
+		t.Fatalf("config.toml=\n%s", got)
+	}
+}
+
 func TestPrepareClaudeRuntimeDirIsClean(t *testing.T) {
 	agentHome := filepath.Join(t.TempDir(), "agent-3")
 	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderClaude}); err != nil {

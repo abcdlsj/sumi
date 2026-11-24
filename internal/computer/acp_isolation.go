@@ -2,9 +2,11 @@ package computer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/abcdlsj/sumi/internal/domain"
@@ -37,9 +39,10 @@ func prepareACPRuntimeDir(agentHome string, cfg domain.DriverConfig) error {
 		return syncPiRuntimeDir(hostDir, runtimeDir, cfg)
 	case domain.ACPProviderCodex:
 		hostDir := resolveHostDir("CODEX_HOME", filepath.Join(userHome, ".codex"))
-		return syncCodexRuntimeDir(hostDir, runtimeDir)
+		return syncCodexRuntimeDir(hostDir, runtimeDir, cfg.ContextWindow)
 	case domain.ACPProviderClaude:
 		// Claude uses API env vars; keep CLAUDE_CONFIG_DIR empty of host hooks/skills/plugins.
+		// context_window travels as CLAUDE_CODE_AUTO_COMPACT_WINDOW set by the claude driver.
 		return nil
 	default:
 		return nil
@@ -68,10 +71,11 @@ func syncPiRuntimeDir(hostDir, runtimeDir string, cfg domain.DriverConfig) error
 	if hostDir == "" || sameDir(hostDir, runtimeDir) {
 		return nil
 	}
-	for _, name := range []string{"auth.json", "models.json"} {
-		if err := syncFileSymlink(filepath.Join(hostDir, name), filepath.Join(runtimeDir, name)); err != nil {
-			return err
-		}
+	if err := syncFileSymlink(filepath.Join(hostDir, "auth.json"), filepath.Join(runtimeDir, "auth.json")); err != nil {
+		return err
+	}
+	if err := syncPiModels(hostDir, runtimeDir, cfg); err != nil {
+		return err
 	}
 	// Provider plugins requested per agent must be loadable from the isolated dir.
 	if len(cfg.PiPackages) > 0 {
@@ -126,9 +130,99 @@ func syncPiSettings(srcPath, dstPath string, cfg domain.DriverConfig) error {
 	return writeFileAtomic(dstPath, append(out, '\n'), 0o600)
 }
 
+// syncPiModels symlinks the host models.json, or writes a copy whose active model carries
+// cfg.ContextWindow: inline on a models.json-defined model, else as a modelOverrides entry.
+func syncPiModels(hostDir, runtimeDir string, cfg domain.DriverConfig) error {
+	src, dst := filepath.Join(hostDir, "models.json"), filepath.Join(runtimeDir, "models.json")
+	if cfg.ContextWindow <= 0 {
+		// Drop a copy left by an earlier context_window so the host file is used again.
+		if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink == 0 {
+			if err := removeIfExists(dst); err != nil {
+				return err
+			}
+		}
+		return syncFileSymlink(src, dst)
+	}
+	provider, model := cfg.PiProvider, cfg.PiModel
+	if provider == "" || model == "" {
+		var settings struct {
+			DefaultProvider string `json:"defaultProvider"`
+			DefaultModel    string `json:"defaultModel"`
+		}
+		if raw, err := os.ReadFile(filepath.Join(hostDir, "settings.json")); err == nil {
+			_ = json.Unmarshal(raw, &settings)
+		}
+		if provider == "" {
+			provider = settings.DefaultProvider
+		}
+		if model == "" {
+			model = settings.DefaultModel
+		}
+	}
+	if provider == "" || model == "" {
+		return errors.New("driver_config.context_window for pi needs pi_provider and pi_model or host defaultProvider/defaultModel")
+	}
+	doc := map[string]any{}
+	switch raw, err := os.ReadFile(src); {
+	case err == nil:
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("parse host pi models.json: %w", err)
+		}
+	case !os.IsNotExist(err):
+		return err
+	}
+	providers, _ := doc["providers"].(map[string]any)
+	if providers == nil {
+		providers = map[string]any{}
+		doc["providers"] = providers
+	}
+	prov, _ := providers[provider].(map[string]any)
+	if prov == nil {
+		prov = map[string]any{}
+		providers[provider] = prov
+	}
+	inline := false
+	if models, ok := prov["models"].([]any); ok {
+		for _, m := range models {
+			if entry, ok := m.(map[string]any); ok && entry["id"] == model {
+				entry["contextWindow"] = cfg.ContextWindow
+				inline = true
+			}
+		}
+	}
+	if !inline {
+		overrides, _ := prov["modelOverrides"].(map[string]any)
+		if overrides == nil {
+			overrides = map[string]any{}
+			prov["modelOverrides"] = overrides
+		}
+		entry, _ := overrides[model].(map[string]any)
+		if entry == nil {
+			entry = map[string]any{}
+			overrides[model] = entry
+		}
+		entry["contextWindow"] = cfg.ContextWindow
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Replace a previous symlink instead of writing through it into the host file.
+	if err := removeIfExists(dst); err != nil {
+		return err
+	}
+	return writeFileAtomic(dst, append(out, '\n'), 0o600)
+}
+
+// codexWindowKeys are written from driver_config.context_window when set, replacing host values.
+var codexWindowKeys = []string{"model_context_window", "model_auto_compact_token_limit"}
+
+// codexAutoCompactRatio matches the pi driver's soft compaction ratio.
+const codexAutoCompactRatio = 0.75
+
 // syncCodexRuntimeDir symlinks host auth/model cache and writes a filtered config.toml keeping
 // only model/provider/profile settings while excluding MCP servers, hooks, plugins and projects.
-func syncCodexRuntimeDir(hostDir, runtimeDir string) error {
+func syncCodexRuntimeDir(hostDir, runtimeDir string, contextWindow int) error {
 	if hostDir == "" || sameDir(hostDir, runtimeDir) {
 		return nil
 	}
@@ -137,30 +231,32 @@ func syncCodexRuntimeDir(hostDir, runtimeDir string) error {
 			return err
 		}
 	}
-	return syncCodexConfig(filepath.Join(hostDir, "config.toml"), filepath.Join(runtimeDir, "config.toml"))
+	return syncCodexConfig(filepath.Join(hostDir, "config.toml"), filepath.Join(runtimeDir, "config.toml"), contextWindow)
 }
 
 var codexAllowedTopKeys = map[string]bool{
-	"model":                      true,
-	"model_provider":             true,
-	"model_reasoning_effort":     true,
-	"model_reasoning_summary":    true,
-	"model_verbosity":            true,
-	"cli_auth_credentials_store": true,
-	"chatgpt_base_url":           true,
-	"profile":                    true,
-	"model_catalog_json":         true,
+	"model":                          true,
+	"model_provider":                 true,
+	"model_reasoning_effort":         true,
+	"model_reasoning_summary":        true,
+	"model_verbosity":                true,
+	"cli_auth_credentials_store":     true,
+	"chatgpt_base_url":               true,
+	"profile":                        true,
+	"model_catalog_json":             true,
+	"model_context_window":           true,
+	"model_auto_compact_token_limit": true,
 }
 
-func syncCodexConfig(srcPath, dstPath string) error {
+func syncCodexConfig(srcPath, dstPath string, contextWindow int) error {
 	raw, err := os.ReadFile(srcPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return removeIfExists(dstPath)
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	filtered := filterCodexConfigTOML(string(raw))
+	if contextWindow > 0 {
+		filtered = withCodexContextWindow(filtered, contextWindow)
+	}
 	if strings.TrimSpace(filtered) == "" {
 		return removeIfExists(dstPath)
 	}
@@ -205,6 +301,25 @@ func filterCodexConfigTOML(content string) string {
 		return ""
 	}
 	return strings.Join(out, "\n") + "\n"
+}
+
+// withCodexContextWindow drops host window keys and prepends the per-agent values, so they stay
+// top-level ahead of any table.
+func withCodexContextWindow(content string, contextWindow int) string {
+	var kept []string
+	for _, line := range strings.Split(content, "\n") {
+		if key, ok := parseTOMLKey(strings.TrimSpace(line)); ok && slices.Contains(codexWindowKeys, key) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	head := fmt.Sprintf("model_context_window = %d\nmodel_auto_compact_token_limit = %d\n",
+		contextWindow, int(float64(contextWindow)*codexAutoCompactRatio))
+	rest := strings.TrimLeft(strings.Join(kept, "\n"), "\n")
+	if rest == "" {
+		return head
+	}
+	return head + rest
 }
 
 func parseTOMLTableHeader(trimmed string) (string, bool) {

@@ -164,6 +164,9 @@ func TestAgentEnvAndCLIInstall(t *testing.T) {
 	if mem := get(claudeEnv, "CLAUDE_CODE_DISABLE_AUTO_MEMORY"); len(mem) != 1 || mem[0] != "1" {
 		t.Fatalf("claude auto memory env=%v", mem)
 	}
+	if md := get(claudeEnv, "CLAUDE_CODE_DISABLE_CLAUDE_MDS"); len(md) != 1 || md[0] != "1" {
+		t.Fatalf("claude CLAUDE.md env=%v", md)
+	}
 	if cc := get(claudeEnv, "CLAUDECODE"); len(cc) != 0 {
 		t.Fatalf("CLAUDECODE must be unset, got %v", cc)
 	}

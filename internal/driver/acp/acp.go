@@ -30,7 +30,7 @@ const (
 )
 
 type Config struct {
-	Provider string   `json:"provider"` // "codex" | "claude" | "pi"
+	Provider string   `json:"provider"` // "codex"; pi and claude have native drivers
 	Command  []string `json:"command,omitempty"`
 	// SessionFile persists the active sessionId so a restarted daemon resumes it via session/load.
 	SessionFile string `json:"-"`
@@ -47,8 +47,6 @@ func (c Config) ResolvedCommand() ([]string, error) {
 	switch c.Provider {
 	case domain.ACPProviderCodex:
 		return []string{"npx", "-y", "@zed-industries/codex-acp@0.16.0"}, nil
-	case domain.ACPProviderClaude:
-		return []string{"npx", "-y", "@zed-industries/claude-code-acp@0.16.2"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported acp provider %q", c.Provider)
 	}
@@ -59,8 +57,10 @@ func ProviderBinaries(provider string) []string {
 	switch provider {
 	case domain.ACPProviderPi:
 		return []string{"pi"}
-	case domain.ACPProviderCodex, domain.ACPProviderClaude:
-		return []string{provider, "npx"}
+	case domain.ACPProviderClaude:
+		return []string{"claude"}
+	case domain.ACPProviderCodex:
+		return []string{"codex", "npx"}
 	default:
 		return nil
 	}

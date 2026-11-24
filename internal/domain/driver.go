@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -64,7 +65,17 @@ type DriverConfig struct {
 	PiProvider string   `json:"pi_provider,omitempty"`
 	PiModel    string   `json:"pi_model,omitempty"`
 	PiPackages []string `json:"pi_packages,omitempty"`
+	// ContextWindow overrides the runtime's context window in tokens for pi, codex and claude.
+	ContextWindow int `json:"context_window,omitempty"`
 }
+
+// Context window bounds; Claude Code only accepts auto-compact windows of 100k to 1M tokens.
+const (
+	MinContextWindow       = 16_000
+	MaxContextWindow       = 10_000_000
+	MinClaudeContextWindow = 100_000
+	MaxClaudeContextWindow = 1_000_000
+)
 
 // NormalizeDriverConfig validates cfg for kind and returns a copy holding only the fields of that kind.
 func NormalizeDriverConfig(kind DriverKind, cfg DriverConfig) (DriverConfig, error) {
@@ -105,6 +116,19 @@ func NormalizeDriverConfig(kind DriverKind, cfg DriverConfig) (DriverConfig, err
 				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.pi_packages entries must look like npm:<package>")
 			}
 			out.PiPackages = append(out.PiPackages, trimmed)
+		}
+		if cfg.ContextWindow != 0 {
+			lo, hi := MinContextWindow, MaxContextWindow
+			if out.Provider == ACPProviderClaude {
+				lo, hi = MinClaudeContextWindow, MaxClaudeContextWindow
+			}
+			switch {
+			case out.Provider == "":
+				return DriverConfig{}, NewError(CodeInvalidArgument, "driver_config.context_window requires provider pi, codex or claude")
+			case cfg.ContextWindow < lo || cfg.ContextWindow > hi:
+				return DriverConfig{}, NewError(CodeInvalidArgument, fmt.Sprintf("driver_config.context_window must be between %d and %d for %s", lo, hi, out.Provider))
+			}
+			out.ContextWindow = cfg.ContextWindow
 		}
 		if out.PiProvider != "" || out.PiModel != "" || len(out.PiPackages) > 0 {
 			if out.Provider != ACPProviderPi {
@@ -151,6 +175,7 @@ func (c DriverConfig) Redact(kind DriverKind) DriverConfigView {
 	case DriverACP:
 		v.Provider, v.Command = c.Provider, c.Command
 		v.PiProvider, v.PiModel, v.PiPackages = c.PiProvider, c.PiModel, c.PiPackages
+		v.ContextWindow = c.ContextWindow
 	}
 	return v
 }
@@ -167,6 +192,8 @@ type DriverConfigView struct {
 	PiProvider string   `json:"pi_provider,omitempty"`
 	PiModel    string   `json:"pi_model,omitempty"`
 	PiPackages []string `json:"pi_packages,omitempty"`
+
+	ContextWindow int `json:"context_window,omitempty"`
 }
 
 // MarshalJSON emits the exact per-kind shape: builtin {base_url, model, api_key_set}, acp {provider, command?}.
@@ -180,12 +207,13 @@ func (v DriverConfigView) MarshalJSON() ([]byte, error) {
 		}{v.BaseURL, v.Model, v.APIKeySet != nil && *v.APIKeySet})
 	case DriverACP:
 		return json.Marshal(struct {
-			Provider   string   `json:"provider"`
-			Command    []string `json:"command,omitempty"`
-			PiProvider string   `json:"pi_provider,omitempty"`
-			PiModel    string   `json:"pi_model,omitempty"`
-			PiPackages []string `json:"pi_packages,omitempty"`
-		}{v.Provider, v.Command, v.PiProvider, v.PiModel, v.PiPackages})
+			Provider      string   `json:"provider"`
+			Command       []string `json:"command,omitempty"`
+			PiProvider    string   `json:"pi_provider,omitempty"`
+			PiModel       string   `json:"pi_model,omitempty"`
+			PiPackages    []string `json:"pi_packages,omitempty"`
+			ContextWindow int      `json:"context_window,omitempty"`
+		}{v.Provider, v.Command, v.PiProvider, v.PiModel, v.PiPackages, v.ContextWindow})
 	default:
 		type plain DriverConfigView
 		return json.Marshal(plain(v))

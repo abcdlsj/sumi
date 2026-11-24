@@ -18,6 +18,7 @@ import (
 	"github.com/abcdlsj/sumi/internal/driver"
 	"github.com/abcdlsj/sumi/internal/driver/acp"
 	"github.com/abcdlsj/sumi/internal/driver/builtin"
+	claudedriver "github.com/abcdlsj/sumi/internal/driver/claude"
 	pidriver "github.com/abcdlsj/sumi/internal/driver/pi"
 	"github.com/abcdlsj/sumi/internal/protocol"
 	"github.com/abcdlsj/sumi/internal/version"
@@ -577,6 +578,25 @@ func DefaultDriverBuilder(spec protocol.AssignedAgentSpec, homeDir string) (driv
 				SessionFile:      filepath.Join(homeDir, "pi-session.json"),
 				SystemPromptFile: filepath.Join(runtimeDir, "SYSTEM.md"),
 				Fingerprint:      fingerprint,
+			}), nil
+		}
+		if cfg.Provider == domain.ACPProviderClaude {
+			bin := "claude"
+			var prefixArgs []string
+			if len(cfg.Command) > 0 {
+				bin = cfg.Command[0]
+				prefixArgs = cfg.Command[1:]
+			}
+			if _, err := exec.LookPath(bin); err != nil {
+				return nil, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("claude command %q not found on PATH", bin))
+			}
+			return claudedriver.New(claudedriver.Config{
+				Binary:           bin,
+				PrefixArgs:       prefixArgs,
+				SessionFile:      filepath.Join(homeDir, "claude-session.json"),
+				SystemPromptFile: filepath.Join(homeDir, "runtime", domain.ACPProviderClaude, "SYSTEM.md"),
+				Fingerprint:      fingerprint,
+				ContextWindow:    cfg.ContextWindow,
 			}), nil
 		}
 		acfg := acp.Config{

@@ -46,6 +46,15 @@ func TestNormalizeDriverConfig(t *testing.T) {
 			DriverConfig{Provider: "pi", PiModel: "two words"}, "driver_config.pi_model", DriverConfig{}},
 		{"acp pi package spec", DriverACP,
 			DriverConfig{Provider: "pi", PiPackages: []string{"some-plugin"}}, "driver_config.pi_packages", DriverConfig{}},
+		{"acp context window per provider", DriverACP,
+			DriverConfig{Provider: "codex", ContextWindow: 272_000}, "",
+			DriverConfig{Provider: "codex", ContextWindow: 272_000}},
+		{"acp claude context window range", DriverACP,
+			DriverConfig{Provider: "claude", ContextWindow: 64_000}, "between 100000 and 1000000", DriverConfig{}},
+		{"acp pi context window too small", DriverACP,
+			DriverConfig{Provider: "pi", ContextWindow: 1_000}, "driver_config.context_window", DriverConfig{}},
+		{"acp context window needs provider", DriverACP,
+			DriverConfig{Command: []string{"my-acp"}, ContextWindow: 200_000}, "requires provider", DriverConfig{}},
 		{"unknown kind", DriverKind("mcp"), DriverConfig{}, "driver_kind", DriverConfig{}},
 	}
 	for _, tc := range cases {
