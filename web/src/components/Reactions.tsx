@@ -195,20 +195,35 @@ function saveQuickEmoji(code: ReactionEmoji) {
   }
 }
 
-/** One-click button for the user's most recently used reaction emoji. */
-export function QuickReactionButton({
-  reactions,
-  onToggle,
-}: {
-  reactions?: ReactionGroup[];
-  onToggle: (emoji: ReactionEmoji, currentlyReacted: boolean) => void;
-}) {
+/** Shared subscription for the user's quick-reaction emoji so lists only register one window listener. */
+export function useQuickReactionEmoji(): ReactionEmoji {
   const [favorite, setFavorite] = useState<ReactionEmoji>(readQuickEmoji);
   useEffect(() => {
     const onSync = () => setFavorite(readQuickEmoji());
     window.addEventListener("sumi:quick-reaction", onSync);
     return () => window.removeEventListener("sumi:quick-reaction", onSync);
   }, []);
+  return favorite;
+}
+
+/** One-click button for the user's most recently used reaction emoji. */
+export function QuickReactionButton({
+  reactions,
+  favorite: controlledFavorite,
+  onToggle,
+}: {
+  reactions?: ReactionGroup[];
+  favorite?: ReactionEmoji;
+  onToggle: (emoji: ReactionEmoji, currentlyReacted: boolean) => void;
+}) {
+  const [localFavorite, setLocalFavorite] = useState<ReactionEmoji>(() => controlledFavorite ?? readQuickEmoji());
+  useEffect(() => {
+    if (controlledFavorite !== undefined) return;
+    const onSync = () => setLocalFavorite(readQuickEmoji());
+    window.addEventListener("sumi:quick-reaction", onSync);
+    return () => window.removeEventListener("sumi:quick-reaction", onSync);
+  }, [controlledFavorite]);
+  const favorite = controlledFavorite ?? localFavorite;
   const reacted = Boolean(reactions?.some((r) => r.emoji === favorite && r.reacted));
   const meta = getReactionEmoji(favorite);
   return (
@@ -218,7 +233,7 @@ export function QuickReactionButton({
       aria-pressed={reacted}
       title={reacted ? `Remove :${favorite}:` : `React with :${favorite}: · ${meta.label}`}
       onClick={() => onToggle(favorite, reacted)}
-      className={`size-7 rounded-[5px] flex items-center justify-center transition-colors ${
+      className={`size-7 rounded-[4px] flex items-center justify-center ${
         reacted ? "bg-accent-soft text-accent-text" : "text-fg-2 hover:bg-hover hover:text-fg"
       }`}
     >

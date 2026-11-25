@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -37,7 +37,8 @@ import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachment
 import { CollapsibleMessage } from "./CollapsibleMessage";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
 import { MessageBody } from "./MessageBody";
-import { MessageReactions, QuickReactionButton, ReactionPickerButton, useReactionToggle } from "./Reactions";
+import { MessageReactions, QuickReactionButton, ReactionPickerButton, useQuickReactionEmoji, useReactionToggle } from "./Reactions";
+import type { ReactionEmoji } from "../emojis";
 import { ThreadReplySummary } from "./ThreadReplies";
 import { LoadEarlierButton, mergeMessageIntoCache, NewMessagesPill, useOlderMessages, useStickToBottom } from "./scroll";
 import { MessageListSkeleton } from "./Skeletons";
@@ -564,6 +565,350 @@ function MessageComposer({
   );
 }
 
+/** Memoized single message row so scroll-state flips and single-row menus skip reconciling unchanged rows. */
+const MessageRow = memo(function MessageRow({
+  spaceSlug,
+  convSlug,
+  boot,
+  m,
+  author,
+  grouped,
+  animateArrival,
+  showDay,
+  showNew,
+  highlighted,
+  isArchived,
+  canGovern,
+  creatingTask,
+  newTaskTitle,
+  taskBusy,
+  reactionPickerOpen,
+  moreMenuOpen,
+  quickEmoji,
+  readAgents,
+  onOpenDetail,
+  onOpenDM,
+  onReviewAgentProposal,
+  onReply,
+  onStartTask,
+  onChangeTaskTitle,
+  onCancelTask,
+  onSubmitTask,
+  onToggleReaction,
+  onReactionPickerChange,
+  onMoreMenuChange,
+  onCopyText,
+  onCopyLink,
+}: {
+  spaceSlug: string;
+  convSlug: string;
+  boot: BootstrapData;
+  m: Message;
+  author?: Member;
+  grouped: boolean;
+  animateArrival: boolean;
+  showDay: boolean;
+  showNew: boolean;
+  highlighted: boolean;
+  isArchived: boolean;
+  canGovern: boolean;
+  creatingTask: boolean;
+  newTaskTitle: string;
+  taskBusy: boolean;
+  reactionPickerOpen: boolean;
+  moreMenuOpen: boolean;
+  quickEmoji: ReactionEmoji;
+  readAgents?: Member[];
+  onOpenDetail: (t: DetailTarget) => void;
+  onOpenDM?: (memberID: string) => void;
+  onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
+  onReply: (messageID: string) => void;
+  onStartTask: (messageID: string) => void;
+  onChangeTaskTitle: (title: string) => void;
+  onCancelTask: () => void;
+  onSubmitTask: (e: FormEvent, sourceMsgID: string) => void;
+  onToggleReaction: (messageID: string, emoji: ReactionEmoji, reacted: boolean) => void;
+  onReactionPickerChange: (messageID: string, open: boolean) => void;
+  onMoreMenuChange: (messageID: string, open: boolean) => void;
+  onCopyText: (body: string) => void;
+  onCopyLink: (messageID: string) => void;
+}) {
+  const toolbarPinned = reactionPickerOpen || moreMenuOpen;
+  return (
+    <div data-message-id={m.id} className={animateArrival ? "animate-rise-in" : undefined}>
+      {showDay && <DayDivider iso={m.created_at} />}
+      {showNew && <UnreadDivider />}
+      {isActionCardMessage(m) ? (
+        <article className="msg-row px-6 pt-3 pb-1.5 flex items-start gap-3">
+          <div className="w-9 shrink-0">
+            <button
+              type="button"
+              onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+              className="block mt-0.5"
+              aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
+            >
+              <MemberAvatar
+                id={m.author_member_id}
+                name={m.author_display_name ?? "?"}
+                kind={m.author_kind ?? "human"}
+                size="md"
+                state={author?.agent?.runtime_state}
+              />
+            </button>
+          </div>
+          <div className="min-w-0 flex-1 max-w-[920px]">
+            <div className="flex items-baseline gap-2 h-5">
+              <button
+                type="button"
+                onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
+              >
+                {m.author_display_name}
+              </button>
+              <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+            </div>
+            <ActionCard
+              spaceSlug={spaceSlug}
+              message={m}
+              canGovern={canGovern}
+              onReviewAgentProposal={onReviewAgentProposal}
+              onInspectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
+            />
+          </div>
+        </article>
+      ) : m.kind !== "text" ? (
+        <div className="msg-row px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
+          <span className="w-9 flex justify-center shrink-0">
+            <span className="size-5 rounded-[4px] bg-subtle border border-line flex items-center justify-center">
+              <Sparkles className="size-3 text-fg-3" />
+            </span>
+          </span>
+          <span className="min-w-0">
+            <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
+            <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+          </span>
+        </div>
+      ) : (
+        <article
+          className={`msg-row relative px-6 ${grouped ? "py-[3px]" : "pt-3 pb-1"} flex items-start gap-3 group ${
+            highlighted ? "bg-accent-soft" : "hover:bg-subtle/85"
+          }`}
+        >
+          <div className="w-9 shrink-0">
+            {grouped ? (
+              <span className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100">
+                {formatClock(m.created_at)}
+              </span>
+            ) : (
+              <button
+                onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                className="block mt-0.5"
+                aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
+              >
+                <MemberAvatar
+                  id={m.author_member_id}
+                  name={m.author_display_name ?? "?"}
+                  kind={m.author_kind ?? "human"}
+                  size="md"
+                  state={author?.agent?.runtime_state}
+                />
+              </button>
+            )}
+          </div>
+          <div className="min-w-0 flex-1 max-w-[920px]">
+            {!grouped && (
+              <div className="flex items-baseline gap-2 h-5">
+                <MemberHoverCard
+                  boot={boot}
+                  member={author}
+                  onInspect={(member) => onOpenDetail(memberDetailTarget(member))}
+                  onMessage={onOpenDM}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
+                    className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
+                  >
+                    {m.author_display_name}
+                  </button>
+                </MemberHoverCard>
+                <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+              </div>
+            )}
+            <div className={`${grouped ? "" : "mt-0.5"} text-[14.5px] leading-[1.6] text-fg md`}>
+              <CollapsibleMessage messageID={m.id}>
+                <MessageBody
+                  body={m.body_markdown}
+                  members={boot.members}
+                  tasks={boot.tasks}
+                  boot={boot}
+                  selfID={boot.current_member.id}
+                  onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
+                  onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
+                  onOpenWorkspaceFile={
+                    m.author_kind === "agent"
+                      ? (filePath) =>
+                          onOpenDetail({
+                            kind: "agent",
+                            memberID: m.author_member_id,
+                            tab: "workspace",
+                            filePath,
+                            openNonce: Date.now(),
+                          })
+                      : undefined
+                  }
+                />
+              </CollapsibleMessage>
+            </div>
+
+            <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
+
+            <MessageReactions
+              reactions={m.reactions}
+              members={boot.members}
+              onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
+            />
+
+            {m.attached_tasks && m.attached_tasks.length > 0 && (
+              <div className="mt-2 rounded-[6px] border border-line-strong bg-card divide-y divide-line overflow-hidden max-w-[580px]">
+                {m.attached_tasks.map((tk) => (
+                  <button
+                    key={tk.id}
+                    onClick={() => onOpenDetail({ kind: "task", taskID: tk.id })}
+                    className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left"
+                  >
+                    <TaskStatusIcon status={tk.status} />
+                    <span className="tabular text-[13px] text-fg-3 shrink-0">#{tk.number}</span>
+                    <span className="text-[14px] font-medium text-fg truncate flex-1">{tk.title}</span>
+                    {tk.assignee_member_id ? (
+                      <span className="flex items-center gap-1.5 text-[13px] text-fg-2 shrink-0">
+                        <MemberAvatar id={tk.assignee_member_id} name={tk.assignee_display_name ?? "?"} kind={tk.assignee_kind ?? "human"} size="xs" />
+                        {tk.assignee_display_name}
+                      </span>
+                    ) : (
+                      <span className="text-[13px] text-fg-4 shrink-0">Unassigned</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {creatingTask && (
+              <form onSubmit={(e) => onSubmitTask(e, m.id)} className="mt-2.5 flex items-center gap-2 max-w-[560px] animate-rise-in">
+                <input
+                  autoFocus
+                  value={newTaskTitle}
+                  onChange={(e) => onChangeTaskTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && onCancelTask()}
+                  placeholder="Task title"
+                  className="flex-1 h-9 px-3 rounded-[6px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
+                />
+                <Button type="submit" size="sm" loading={taskBusy} disabled={!newTaskTitle.trim()}>
+                  Create task
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={onCancelTask}>
+                  Cancel
+                </Button>
+              </form>
+            )}
+
+            {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
+              <ThreadReplySummary
+                replyCount={m.reply_count}
+                lastReplyAt={m.last_reply_at}
+                replies={m.latest_replies}
+                onOpen={() =>
+                  onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: convSlug })
+                }
+              />
+            ) : null}
+
+            <AgentReadReceipts
+              agents={readAgents}
+              boot={boot}
+              onSelectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
+            />
+          </div>
+
+          {!isArchived && (
+            <div
+              className={`absolute right-5 -top-3.5 ${
+                toolbarPinned
+                  ? "opacity-100 pointer-events-auto"
+                  : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
+              } flex items-center gap-0.5 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-md z-20`}
+            >
+              <QuickReactionButton
+                reactions={m.reactions}
+                favorite={quickEmoji}
+                onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
+              />
+              <ReactionPickerButton
+                reactions={m.reactions}
+                open={reactionPickerOpen}
+                onOpenChange={(open) => onReactionPickerChange(m.id, open)}
+                onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
+              />
+              <button
+                onClick={() => onReply(m.id)}
+                className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+              >
+                <CornerUpLeft className="size-3.5" /> Reply
+              </button>
+              <button
+                onClick={() => onStartTask(m.id)}
+                className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+              >
+                <ListPlus className="size-3.5" /> Task
+              </button>
+              <Menu
+                width={160}
+                onOpenChange={(open) => onMoreMenuChange(m.id, open)}
+                trigger={(open, toggle) => (
+                  <button
+                    type="button"
+                    aria-label="More message actions"
+                    aria-expanded={open}
+                    onClick={toggle}
+                    className={`size-7 rounded-[4px] text-fg-2 hover:bg-hover hover:text-fg flex items-center justify-center ${
+                      open ? "bg-hover text-fg" : ""
+                    }`}
+                  >
+                    <MoreHorizontal className="size-3.5" />
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem
+                      icon={<Copy />}
+                      onSelect={() => {
+                        close();
+                        onCopyText(m.body_markdown);
+                      }}
+                    >
+                      Copy text
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Link2 />}
+                      onSelect={() => {
+                        close();
+                        onCopyLink(m.id);
+                      }}
+                    >
+                      Copy link
+                    </MenuItem>
+                  </>
+                )}
+              </Menu>
+            </div>
+          )}
+        </article>
+      )}
+    </div>
+  );
+});
+
 export function ConversationView({
   spaceSlug,
   boot,
@@ -685,19 +1030,63 @@ export function ConversationView({
     [boot.tasks, conv.id],
   );
   const clearReply = useCallback(() => setReplyingTo(null), []);
+  const quickEmoji = useQuickReactionEmoji();
+  const memberByID = useMemo(() => new Map(boot.members.map((m) => [m.id, m])), [boot.members]);
+  const streamEntries = useMemo(
+    () => (messages ? buildStreamEntries(messages, boundary, boot.current_member.id) : []),
+    [messages, boundary, boot.current_member.id],
+  );
 
-  async function handleCreateTask(e: FormEvent, sourceMsgID: string) {
-    e.preventDefault();
-    if (!newTaskTitle.trim()) return;
-    await taskAction.run(async () => {
-      const res = await api.createTask(spaceSlug, { channel_id: conv.id, source_message_id: sourceMsgID, title: newTaskTitle.trim() });
-      setNewTaskTitle("");
-      setCreatingTaskOnMsg(null);
-      onOpenDetail({ kind: "task", taskID: res.task.id });
-      void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
-      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-    });
-  }
+  const handleReplyToMessage = useCallback((messageID: string) => {
+    setReplyingTo(messageID);
+    composerFocusRef.current?.();
+  }, []);
+  const handleStartTask = useCallback((messageID: string) => {
+    setNewTaskTitle("");
+    setCreatingTaskOnMsg(messageID);
+  }, []);
+  const handleCancelTask = useCallback(() => setCreatingTaskOnMsg(null), []);
+  const handleReactionPickerChange = useCallback((messageID: string, open: boolean) => {
+    setReactionPickerMsgID(open ? messageID : null);
+  }, []);
+  const handleMoreMenuChange = useCallback((messageID: string, open: boolean) => {
+    setMoreMenuMsgID(open ? messageID : null);
+  }, []);
+  const handleToggleReaction = useCallback(
+    (messageID: string, emoji: ReactionEmoji, reacted: boolean) => {
+      void reactions.toggle(messageID, emoji, reacted);
+    },
+    [reactions.toggle],
+  );
+  const handleCopyText = useCallback(
+    (body: string) => {
+      void navigator.clipboard?.writeText(body).then(() => toast("Copied message text", "success"));
+    },
+    [toast],
+  );
+  const handleCopyLink = useCallback(
+    (messageID: string) => {
+      const link = `${window.location.origin}${window.location.pathname}#${spaceSlug}/c/${conv.id}/m/${messageID}`;
+      void navigator.clipboard?.writeText(link).then(() => toast("Copied message link", "success"));
+    },
+    [spaceSlug, conv.id, toast],
+  );
+
+  const handleCreateTask = useCallback(
+    (e: FormEvent, sourceMsgID: string) => {
+      e.preventDefault();
+      if (!newTaskTitle.trim()) return;
+      void taskAction.run(async () => {
+        const res = await api.createTask(spaceSlug, { channel_id: conv.id, source_message_id: sourceMsgID, title: newTaskTitle.trim() });
+        setNewTaskTitle("");
+        setCreatingTaskOnMsg(null);
+        onOpenDetail({ kind: "task", taskID: res.task.id });
+        void qc.invalidateQueries({ queryKey: ["messages", spaceSlug, conv.id] });
+        void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+      });
+    },
+    [newTaskTitle, taskAction, spaceSlug, conv.id, onOpenDetail, qc],
+  );
 
   return (
     <section className="flex flex-col h-full min-h-0 bg-panel">
@@ -929,7 +1318,7 @@ export function ConversationView({
           ) : (
             <div className="pb-4">
               <LoadEarlierButton hasMore={history.hasMore} loading={history.loading} onClick={() => void history.loadEarlier()} />
-              {buildStreamEntries(messages, boundary, boot.current_member.id).map((entry) => {
+              {streamEntries.map((entry) => {
                 if (entry.kind === "action_group") {
                   const first = entry.items[0];
                   const prev = messages[entry.firstIdx - 1];
@@ -951,294 +1340,52 @@ export function ConversationView({
                 const prev = messages[entry.idx - 1];
                 const showDay = !prev || !sameDay(prev.created_at, m.created_at);
                 const showNew = boundary > 0 && m.seq > boundary && m.author_member_id !== boot.current_member.id && (!prev || prev.seq <= boundary);
-                const grouped =
+                const grouped = Boolean(
                   !showDay &&
                   !showNew &&
                   prev &&
                   prev.kind === "text" &&
                   m.kind === "text" &&
                   prev.author_member_id === m.author_member_id &&
-                  new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
-                const author = boot.members.find((x) => x.id === m.author_member_id);
-                const toolbarPinned = reactionPickerMsgID === m.id || moreMenuMsgID === m.id;
+                  new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS,
+                );
+                const creatingTask = creatingTaskOnMsg === m.id;
                 return (
-                  <div key={m.id} data-message-id={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
-                    {showDay && <DayDivider iso={m.created_at} />}
-                    {showNew && <UnreadDivider />}
-                    {isActionCardMessage(m) ? (
-                      <article className="px-6 pt-3 pb-1.5 flex items-start gap-3">
-                        <div className="w-9 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                            className="block mt-0.5"
-                            aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
-                          >
-                            <MemberAvatar
-                              id={m.author_member_id}
-                              name={m.author_display_name ?? "?"}
-                              kind={m.author_kind ?? "human"}
-                              size="md"
-                              state={author?.agent?.runtime_state}
-                            />
-                          </button>
-                        </div>
-                        <div className="min-w-0 flex-1 max-w-[920px]">
-                          <div className="flex items-baseline gap-2 h-5">
-                            <button
-                              type="button"
-                              onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                              className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
-                            >
-                              {m.author_display_name}
-                            </button>
-                            <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
-                          </div>
-                          <ActionCard
-                            spaceSlug={spaceSlug}
-                            message={m}
-                            canGovern={canGovern}
-                            onReviewAgentProposal={onReviewAgentProposal}
-                            onInspectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
-                          />
-                        </div>
-                      </article>
-                    ) : m.kind !== "text" ? (
-                      <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
-                        <span className="w-9 flex justify-center shrink-0">
-                          <span className="size-5 rounded-[4px] bg-subtle border border-line flex items-center justify-center">
-                            <Sparkles className="size-3 text-fg-3" />
-                          </span>
-                        </span>
-                        <span className="min-w-0">
-                          <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-                          <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
-                        </span>
-                      </div>
-                    ) : (
-                      <article
-                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
-                          replyingTo === m.id || highlightedMsgID === m.id ? "bg-accent-soft" : "hover:bg-subtle/85"
-                        }`}
-                      >
-                        <div className="w-9 shrink-0">
-                          {grouped ? (
-                            <span className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                              {formatClock(m.created_at)}
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                              className="block mt-0.5"
-                              aria-label={m.author_kind === "agent" ? `Inspect ${m.author_display_name}` : `View ${m.author_display_name}`}
-                            >
-                              <MemberAvatar
-                                id={m.author_member_id}
-                                name={m.author_display_name ?? "?"}
-                                kind={m.author_kind ?? "human"}
-                                size="md"
-                                state={author?.agent?.runtime_state}
-                              />
-                            </button>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1 max-w-[920px]">
-                          {!grouped && (
-                            <div className="flex items-baseline gap-2 h-5">
-                              <MemberHoverCard
-                                boot={boot}
-                                member={author}
-                                onInspect={(member) => onOpenDetail(memberDetailTarget(member))}
-                                onMessage={onOpenDM}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                                  className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
-                                >
-                                  {m.author_display_name}
-                                </button>
-                              </MemberHoverCard>
-                              <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
-                            </div>
-                          )}
-                          <div className={`${grouped ? "" : "mt-0.5"} text-[14.5px] leading-[1.6] text-fg md`}>
-                            <CollapsibleMessage messageID={m.id}>
-                              <MessageBody
-                                body={m.body_markdown}
-                                members={boot.members}
-                                tasks={boot.tasks}
-                                boot={boot}
-                                selfID={boot.current_member.id}
-                                onSelectMember={(member) => onOpenDetail(memberDetailTarget(member))}
-                                onSelectTask={(tk) => onOpenDetail({ kind: "task", taskID: tk.id })}
-                                onOpenWorkspaceFile={
-                                  m.author_kind === "agent"
-                                    ? (filePath) =>
-                                        onOpenDetail({
-                                          kind: "agent",
-                                          memberID: m.author_member_id,
-                                          tab: "workspace",
-                                          filePath,
-                                          openNonce: Date.now(),
-                                        })
-                                    : undefined
-                                }
-                              />
-                            </CollapsibleMessage>
-                          </div>
-
-                          <MessageAttachments spaceSlug={spaceSlug} attachments={m.attachments} />
-
-                          <MessageReactions
-                            reactions={m.reactions}
-                            members={boot.members}
-                            onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
-                          />
-
-                          {m.attached_tasks && m.attached_tasks.length > 0 && (
-                            <div className="mt-2 rounded-[6px] border border-line-strong bg-card divide-y divide-line overflow-hidden max-w-[580px]">
-                              {m.attached_tasks.map((tk) => (
-                                <button
-                                  key={tk.id}
-                                  onClick={() => onOpenDetail({ kind: "task", taskID: tk.id })}
-                                  className="w-full h-10 px-3 hover:bg-subtle flex items-center gap-2.5 text-left transition-colors"
-                                >
-                                  <TaskStatusIcon status={tk.status} />
-                                  <span className="tabular text-[13px] text-fg-3 shrink-0">#{tk.number}</span>
-                                  <span className="text-[14px] font-medium text-fg truncate flex-1">{tk.title}</span>
-                                  {tk.assignee_member_id ? (
-                                    <span className="flex items-center gap-1.5 text-[13px] text-fg-2 shrink-0">
-                                      <MemberAvatar id={tk.assignee_member_id} name={tk.assignee_display_name ?? "?"} kind={tk.assignee_kind ?? "human"} size="xs" />
-                                      {tk.assignee_display_name}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[13px] text-fg-4 shrink-0">Unassigned</span>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
-                          {creatingTaskOnMsg === m.id && (
-                            <form onSubmit={(e) => void handleCreateTask(e, m.id)} className="mt-2.5 flex items-center gap-2 max-w-[560px] animate-rise-in">
-                              <input
-                                autoFocus
-                                value={newTaskTitle}
-                                onChange={(e) => setNewTaskTitle(e.target.value)}
-                                onKeyDown={(e) => e.key === "Escape" && setCreatingTaskOnMsg(null)}
-                                placeholder="Task title"
-                                className="flex-1 h-9 px-3 rounded-[6px] border border-accent bg-card text-[14px] outline-none shadow-[var(--ring)]"
-                              />
-                              <Button type="submit" size="sm" loading={taskAction.busy} disabled={!newTaskTitle.trim()}>
-                                Create task
-                              </Button>
-                              <Button type="button" size="sm" variant="ghost" onClick={() => setCreatingTaskOnMsg(null)}>
-                                Cancel
-                              </Button>
-                            </form>
-                          )}
-
-                          {m.reply_count && m.reply_count > 0 && m.thread_conversation_id ? (
-                            <ThreadReplySummary
-                              replyCount={m.reply_count}
-                              lastReplyAt={m.last_reply_at}
-                              replies={m.latest_replies}
-                              onOpen={() =>
-                                onOpenDetail({ kind: "thread", threadConvID: m.thread_conversation_id!, rootMessageID: m.id, parentSlug: conv.slug ?? "dm" })
-                              }
-                            />
-                          ) : null}
-
-                          <AgentReadReceipts
-                            agents={agentReadMap.get(m.id)}
-                            boot={boot}
-                            onSelectAgent={(memberID) => onOpenDetail({ kind: "agent", memberID })}
-                          />
-                        </div>
-
-                        {!isArchived && (
-                          <div
-                            className={`absolute right-5 -top-3.5 ${
-                              toolbarPinned
-                                ? "opacity-100 pointer-events-auto"
-                                : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
-                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-md z-20`}
-                          >
-                            <QuickReactionButton
-                              reactions={m.reactions}
-                              onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
-                            />
-                            <ReactionPickerButton
-                              reactions={m.reactions}
-                              open={reactionPickerMsgID === m.id}
-                              onOpenChange={(open) => setReactionPickerMsgID(open ? m.id : null)}
-                              onToggle={(emoji, reacted) => void reactions.toggle(m.id, emoji, reacted)}
-                            />
-                            <button
-                              onClick={() => {
-                                setReplyingTo(m.id);
-                                composerFocusRef.current?.();
-                              }}
-                              className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
-                            >
-                              <CornerUpLeft className="size-3.5" /> Reply
-                            </button>
-                            <button
-                              onClick={() => {
-                                setNewTaskTitle("");
-                                setCreatingTaskOnMsg(m.id);
-                              }}
-                              className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
-                            >
-                              <ListPlus className="size-3.5" /> Task
-                            </button>
-                            <Menu
-                              width={160}
-                              onOpenChange={(open) => setMoreMenuMsgID(open ? m.id : null)}
-                              trigger={(open, toggle) => (
-                                <button
-                                  type="button"
-                                  aria-label="More message actions"
-                                  aria-expanded={open}
-                                  onClick={toggle}
-                                  className={`size-7 rounded-[4px] text-fg-2 hover:bg-hover hover:text-fg flex items-center justify-center ${
-                                    open ? "bg-hover text-fg" : ""
-                                  }`}
-                                >
-                                  <MoreHorizontal className="size-3.5" />
-                                </button>
-                              )}
-                            >
-                              {(close) => (
-                                <>
-                                  <MenuItem
-                                    icon={<Copy />}
-                                    onSelect={() => {
-                                      close();
-                                      void navigator.clipboard?.writeText(m.body_markdown).then(() => toast("Copied message text", "success"));
-                                    }}
-                                  >
-                                    Copy text
-                                  </MenuItem>
-                                  <MenuItem
-                                    icon={<Link2 />}
-                                    onSelect={() => {
-                                      close();
-                                      const link = `${window.location.origin}${window.location.pathname}#${spaceSlug}/c/${conv.id}/m/${m.id}`;
-                                      void navigator.clipboard?.writeText(link).then(() => toast("Copied message link", "success"));
-                                    }}
-                                  >
-                                    Copy link
-                                  </MenuItem>
-                                </>
-                              )}
-                            </Menu>
-                          </div>
-                        )}
-                      </article>
-                    )}
-                  </div>
+                  <MessageRow
+                    key={m.id}
+                    spaceSlug={spaceSlug}
+                    convSlug={conv.slug ?? "dm"}
+                    boot={boot}
+                    m={m}
+                    author={memberByID.get(m.author_member_id)}
+                    grouped={grouped}
+                    animateArrival={isNew(m.id)}
+                    showDay={showDay}
+                    showNew={showNew}
+                    highlighted={replyingTo === m.id || highlightedMsgID === m.id}
+                    isArchived={isArchived}
+                    canGovern={canGovern}
+                    creatingTask={creatingTask}
+                    newTaskTitle={creatingTask ? newTaskTitle : ""}
+                    taskBusy={creatingTask ? taskAction.busy : false}
+                    reactionPickerOpen={reactionPickerMsgID === m.id}
+                    moreMenuOpen={moreMenuMsgID === m.id}
+                    quickEmoji={quickEmoji}
+                    readAgents={agentReadMap.get(m.id)}
+                    onOpenDetail={onOpenDetail}
+                    onOpenDM={onOpenDM}
+                    onReviewAgentProposal={onReviewAgentProposal}
+                    onReply={handleReplyToMessage}
+                    onStartTask={handleStartTask}
+                    onChangeTaskTitle={setNewTaskTitle}
+                    onCancelTask={handleCancelTask}
+                    onSubmitTask={handleCreateTask}
+                    onToggleReaction={handleToggleReaction}
+                    onReactionPickerChange={handleReactionPickerChange}
+                    onMoreMenuChange={handleMoreMenuChange}
+                    onCopyText={handleCopyText}
+                    onCopyLink={handleCopyLink}
+                  />
                 );
               })}
             </div>

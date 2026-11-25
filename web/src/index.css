@@ -371,6 +371,10 @@ html.desktop .titlebar-drag textarea {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+/* Isolates per-row layout/style work during high-refresh scrolling without clipping floating toolbars. */
+.msg-row {
+  contain: layout style;
+}
 .fade-truncate {
   overflow: hidden;
   white-space: nowrap;

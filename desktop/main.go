@@ -202,6 +202,7 @@ func main() {
 		window.Hide()
 		e.Cancel()
 	})
+	attachHighRefreshRate(app, window, logger)
 
 	tray := app.SystemTray.New()
 	tray.SetTemplateIcon(trayTemplatePNG)

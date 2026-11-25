@@ -133,7 +133,7 @@ function CompactMessage({
   }
   const author = boot.members.find((x) => x.id === m.author_member_id);
   return (
-    <article className="relative group flex items-start gap-2.5">
+    <article className="msg-row relative group flex items-start gap-2.5">
       <button
         type="button"
         onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
@@ -193,7 +193,7 @@ function CompactMessage({
           pickerOpen
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
-        } transition-opacity duration-100 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-sm z-20`}
+        } bg-card border border-line-strong rounded-[5px] p-0.5 shadow-sm z-20`}
       >
         <ReactionPickerButton
           reactions={m.reactions}
