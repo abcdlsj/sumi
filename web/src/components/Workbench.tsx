@@ -1178,6 +1178,7 @@ export function Workbench({
                 selectedAgentID={detail?.kind === "agent" ? detail.memberID : undefined}
                 onInspectHuman={(id) => setDetail({ kind: "human", memberID: id })}
                 selectedHumanID={detail?.kind === "human" ? detail.memberID : undefined}
+                onOpenDM={(memberID) => void openOrCreateDM(memberID)}
                 onNewAgent={() => openNewAgentDialog()}
                 onCopyAgent={canGovern ? (agent) => openNewAgentDialog(agent) : undefined}
                 onConnectComputer={() => {

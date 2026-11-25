@@ -1,30 +1,34 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
   ArchiveRestore,
   AtSign,
   Bookmark,
   Bot,
+  Check,
   CheckCircle2,
   ChevronRight,
   CircleDot,
   Copy,
   Hash,
   Inbox,
+  Keyboard,
   Lock,
   LogOut,
   MessageSquare,
   Monitor,
-  Moon,
   Pencil,
   Plus,
   Search,
-  Sun,
+  SlidersHorizontal,
   SunMoon,
   Trash2,
+  User,
   Users,
+  X,
 } from "lucide-react";
-import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
+import { accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useSendKey } from "../preferences";
@@ -501,135 +505,277 @@ export function TasksView({
 const STATE_WORD: Record<RuntimeState, string> = { idle: "Idle", working: "Working", error: "Error", offline: "Offline" };
 const STATE_TEXT: Record<RuntimeState, string> = { idle: "text-online", working: "text-busy", error: "text-danger", offline: "text-fg-3" };
 
-/** Raft-style agent table: identity on the left, aligned status / runtime / computer columns on the right. */
+type AgentStateFilter = "all" | RuntimeState;
+
+function agentDriverPrimary(m: Member): string {
+  const ag = m.agent;
+  if (!ag) return "—";
+  if (ag.driver_kind === "acp") return `ACP · ${ag.driver_config?.provider ?? "?"}`;
+  return "Model API";
+}
+
+function agentDriverSecondary(m: Member): string {
+  const cfg = m.agent?.driver_config;
+  if (!cfg) return "";
+  if (m.agent?.driver_kind === "builtin") return cfg.model ?? "";
+  if (cfg.provider === "pi") {
+    return [cfg.pi_provider, cfg.pi_model].filter(Boolean).join(" / ");
+  }
+  return "";
+}
+
+/** Slack/Mattermost-style agent directory table with docked filters, status breakdown, and inline DM/copy actions. */
 function AgentList({
   boot,
   selectedID,
   onInspect,
+  onOpenDM,
   onCopyAgent,
 }: {
   boot: BootstrapData;
   selectedID?: string;
   onInspect: (id: string) => void;
+  onOpenDM?: (memberID: string) => void;
   onCopyAgent?: (agent: Member) => void;
 }) {
   const [q, setQ] = useState("");
+  const [stateFilter, setStateFilter] = useState<AgentStateFilter>("all");
   const [group, setGroup] = useState<"none" | "computer">("none");
+  const allAgents = boot.members.filter((m) => m.kind === "agent");
+  const counts = {
+    all: allAgents.length,
+    working: allAgents.filter((m) => m.agent?.runtime_state === "working").length,
+    idle: allAgents.filter((m) => m.agent?.runtime_state === "idle").length,
+    offline: allAgents.filter((m) => (m.agent?.runtime_state ?? "offline") === "offline").length,
+    error: allAgents.filter((m) => m.agent?.runtime_state === "error").length,
+  };
   const query = q.trim().toLowerCase();
-  const agents = boot.members
-    .filter((m) => m.kind === "agent")
-    .filter((m) => !query || m.display_name.toLowerCase().includes(query) || (m.agent?.role_text ?? "").toLowerCase().includes(query));
+  const agents = allAgents.filter((m) => {
+    const st = m.agent?.runtime_state ?? "offline";
+    if (stateFilter !== "all" && st !== stateFilter) return false;
+    if (!query) return true;
+    const comp = boot.computers.find((c) => c.id === m.agent?.computer_id);
+    return (
+      m.display_name.toLowerCase().includes(query) ||
+      (m.agent?.role_text ?? "").toLowerCase().includes(query) ||
+      agentDriverPrimary(m).toLowerCase().includes(query) ||
+      agentDriverSecondary(m).toLowerCase().includes(query) ||
+      (comp?.name ?? "").toLowerCase().includes(query)
+    );
+  });
+
   const groups =
     group === "none"
-      ? [{ key: "all", label: "", items: agents }]
+      ? [{ key: "all", label: "", subtitle: "", online: undefined as boolean | undefined, items: agents }]
       : boot.computers
-          .map((c) => ({ key: c.id, label: c.name, items: agents.filter((a) => a.agent?.computer_id === c.id) }))
+          .map((c) => ({
+            key: c.id,
+            label: c.name,
+            subtitle: c.hostname,
+            online: c.connection_status === "online",
+            items: agents.filter((a) => a.agent?.computer_id === c.id),
+          }))
           .filter((g) => g.items.length > 0);
+
+  const filterPills: { value: AgentStateFilter; label: string; count: number; dot?: RuntimeState }[] = [
+    { value: "all", label: "All", count: counts.all },
+    { value: "working", label: "Working", count: counts.working, dot: "working" },
+    { value: "idle", label: "Idle", count: counts.idle, dot: "idle" },
+    { value: "offline", label: "Offline", count: counts.offline, dot: "offline" },
+    ...(counts.error > 0 || stateFilter === "error" ? [{ value: "error" as const, label: "Error", count: counts.error, dot: "error" as const }] : []),
+  ];
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-[320px]">
-          <Search className="size-4 text-fg-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    <div className="@container flex flex-col">
+      <div className="px-6 py-2.5 border-b border-line bg-panel flex items-center gap-2.5 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+          <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search agents"
+            placeholder="Search agents by name, role, or model…"
             aria-label="Search agents"
-            className="w-full h-8 pl-9 pr-3 rounded-[5px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+            className="w-full h-8 pl-8 pr-7 rounded-[5px] border border-line-strong bg-card text-[13px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
           />
+          {q && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setQ("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 size-5 rounded-[4px] text-fg-4 hover:text-fg hover:bg-hover flex items-center justify-center"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
+        <div role="tablist" aria-label="Filter agents by status" className="flex items-center gap-1 flex-wrap">
+          {filterPills.map((p) => {
+            const active = stateFilter === p.value;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-label={`${p.label} ${p.count}`}
+                onClick={() => setStateFilter(p.value)}
+                className={`h-7 px-2.5 rounded-[4px] border text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+                  active
+                    ? "border-line-strong bg-subtle text-fg font-semibold"
+                    : "border-transparent text-fg-3 hover:bg-subtle/70 hover:text-fg"
+                }`}
+              >
+                {p.dot && <StatusDot state={p.dot} size={6} ring="transparent" />}
+                <span>{p.label}</span>
+                <span className={`tabular font-mono text-[11.5px] ${active ? "text-fg-2" : "text-fg-4"}`}>{p.count}</span>
+              </button>
+            );
+          })}
+        </div>
+        <span className="flex-1" />
         <Segmented
           value={group}
           onChange={setGroup}
           options={[
-            { value: "none", label: "All" },
+            { value: "none", label: "List" },
             { value: "computer", label: <><Monitor />By computer</> },
           ]}
         />
       </div>
+
       {agents.length === 0 ? (
-        <p className="py-8 text-center text-[13.5px] text-fg-3">No agents match “{q}”.</p>
-      ) : (
-        groups.map((g) => (
-          <div key={g.key}>
-            {g.label && (
-              <div className="px-1 pb-1.5 pt-1 flex items-center gap-2 text-[12px] font-semibold text-fg-3">
-                {g.label} <span className="font-mono text-fg-4">{g.items.length}</span>
-              </div>
-            )}
-            <div className="@container rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-              <div className="hidden @[640px]:flex h-7 px-4 bg-subtle/60 items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-4 select-none">
-                <span className="flex-1 min-w-0">Agent</span>
-                <span className="w-[84px] shrink-0">Status</span>
-                <span className="w-[104px] shrink-0">Runtime</span>
-                <span className="w-[136px] shrink-0">Computer</span>
-                <span className="w-[52px] shrink-0" />
-              </div>
-              {g.items.map((m) => {
-                const ag = m.agent;
-                const st = ag?.runtime_state ?? "offline";
-                const comp = boot.computers.find((c) => c.id === ag?.computer_id);
-                const runtime = ag?.driver_kind === "acp" ? `ACP · ${ag.driver_config?.provider ?? "?"}` : "Model API";
-                const model = ag?.driver_kind === "builtin" ? ag.driver_config?.model ?? "" : "";
-                const selected = m.id === selectedID;
-                return (
-                  <div
-                    key={m.id}
-                    className={`group w-full flex items-center transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onInspect(m.id)}
-                      aria-current={selected || undefined}
-                      className="min-w-0 flex-1 px-4 py-2.5 flex items-center gap-3 text-left"
-                    >
-                      <MemberAvatar id={m.id} name={m.display_name} kind="agent" size="md" state={st} ring={selected ? "var(--accent-soft)" : "var(--card)"} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-baseline gap-2 min-w-0">
-                          <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
-                          {st === "working" || st === "error" ? (
-                            <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
-                              {agentStatusText(boot, m)}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="block text-[13px] text-fg-3 truncate font-body" title={ag?.role_text}>
-                          {ag?.role_text || "No role defined."}
-                        </span>
-                        <span className="@[640px]:hidden block font-mono text-[12px] text-fg-4 truncate">
-                          {[STATE_WORD[st], runtime, model, comp?.name].filter(Boolean).join(" · ")}
-                        </span>
-                      </span>
-                      <span className={`hidden @[640px]:flex items-center gap-1.5 w-[84px] text-[13px] shrink-0 ${STATE_TEXT[st]}`}>
-                        <StatusDot state={st} size={7} ring="transparent" />
-                        {STATE_WORD[st]}
-                      </span>
-                      <span className="hidden @[640px]:block w-[104px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={model || runtime}>
-                        {model || runtime}
-                      </span>
-                      <span className="hidden @[640px]:flex items-center gap-1.5 w-[136px] text-[13px] text-fg-3 shrink-0 min-w-0" title={comp?.hostname}>
-                        <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
-                        <span className="truncate">{comp?.name ?? "No computer"}</span>
-                      </span>
-                    </button>
-                    <div className="pr-3 flex items-center gap-1 shrink-0">
-                      {onCopyAgent && (
-                        <IconButton
-                          label={`Copy ${m.display_name} to new agent`}
-                          onClick={() => onCopyAgent(m)}
-                          className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
-                        >
-                          <Copy />
-                        </IconButton>
-                      )}
-                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pointer-events-none" />
-                    </div>
-                  </div>
-                );
-              })}
+        <div className="px-6 py-14 text-center">
+          <p className="text-[14px] text-fg-2 font-medium">No agents match this filter</p>
+          <p className="mt-1 text-[13px] text-fg-3">
+            {q ? `No matches for “${q}”.` : `No agents are currently ${STATE_WORD[stateFilter === "all" ? "idle" : stateFilter].toLowerCase()}.`}
+          </p>
+          {(q || stateFilter !== "all") && (
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setQ("");
+                  setStateFilter("all");
+                }}
+              >
+                Reset filters
+              </Button>
             </div>
+          )}
+        </div>
+      ) : (
+        <div>
+          <div className="hidden @[640px]:flex h-8 px-6 bg-subtle/60 border-b border-line items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-3 select-none">
+            <span className="flex-1 min-w-0">Agent</span>
+            <span className="w-[100px] shrink-0">Status</span>
+            <span className="w-[144px] shrink-0">Driver</span>
+            <span className="w-[144px] shrink-0">Computer</span>
+            <span className="w-[84px] shrink-0 text-right">Actions</span>
           </div>
-        ))
+          {groups.map((g) => (
+            <div key={g.key}>
+              {g.label && (
+                <div className="h-8 px-6 bg-subtle/85 border-b border-line flex items-center gap-2 text-[12px] font-semibold text-fg-2">
+                  <span className={`size-2 rounded-full shrink-0 ${g.online ? "bg-online" : "bg-fg-4"}`} />
+                  <span>{g.label}</span>
+                  {g.subtitle && <span className="font-mono font-normal text-[11.5px] text-fg-4">{g.subtitle}</span>}
+                  <span className="ml-auto font-mono font-normal text-[11.5px] text-fg-4 tabular">{g.items.length}</span>
+                </div>
+              )}
+              <div className="divide-y divide-line border-b border-line">
+                {g.items.map((m) => {
+                  const ag = m.agent;
+                  const st = ag?.runtime_state ?? "offline";
+                  const comp = boot.computers.find((c) => c.id === ag?.computer_id);
+                  const driverPrimary = agentDriverPrimary(m);
+                  const driverSecondary = agentDriverSecondary(m);
+                  const selected = m.id === selectedID;
+                  return (
+                    <div
+                      key={m.id}
+                      className={`relative group w-full flex items-center transition-colors ${
+                        selected ? "bg-accent-soft/55" : "hover:bg-subtle/60"
+                      }`}
+                    >
+                      {selected && <span aria-hidden className="absolute left-0 inset-y-0 w-[3px] bg-accent" />}
+                      <button
+                        type="button"
+                        onClick={() => onInspect(m.id)}
+                        aria-current={selected || undefined}
+                        className="min-w-0 flex-1 pl-6 pr-2 py-3 flex items-center gap-3 text-left"
+                      >
+                        <MemberAvatar
+                          id={m.id}
+                          name={m.display_name}
+                          kind="agent"
+                          size="md"
+                          state={st}
+                          ring={selected ? "var(--accent-soft)" : "var(--panel)"}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-baseline gap-2 min-w-0">
+                            <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
+                            {st === "working" || st === "error" ? (
+                              <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
+                                {agentStatusText(boot, m)}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="block text-[12.5px] text-fg-3 truncate mt-0.5" title={ag?.role_text}>
+                            {ag?.role_text || "No role defined."}
+                          </span>
+                          <span className="@[640px]:hidden mt-1 block font-mono text-[11.5px] text-fg-4 truncate">
+                            {[STATE_WORD[st], driverSecondary || driverPrimary, comp?.name].filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
+                        <span className={`hidden @[640px]:flex items-center gap-1.5 w-[100px] text-[13px] font-medium shrink-0 ${STATE_TEXT[st]}`}>
+                          <StatusDot state={st} size={7} ring="transparent" />
+                          {STATE_WORD[st]}
+                        </span>
+                        <span className="hidden @[640px]:block w-[144px] shrink-0 min-w-0">
+                          <span className="block font-mono text-[12.5px] text-fg-2 truncate" title={driverPrimary}>
+                            {driverPrimary}
+                          </span>
+                          {driverSecondary && (
+                            <span className="block font-mono text-[11.5px] text-fg-4 truncate" title={driverSecondary}>
+                              {driverSecondary}
+                            </span>
+                          )}
+                        </span>
+                        <span className="hidden @[640px]:flex items-center gap-1.5 w-[144px] text-[13px] text-fg-2 shrink-0 min-w-0" title={comp?.hostname}>
+                          <span className={`size-1.5 rounded-full shrink-0 ${comp?.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                          <span className="truncate">{comp?.name ?? "No computer"}</span>
+                        </span>
+                      </button>
+                      <div className="pr-5 w-[84px] flex items-center justify-end gap-0.5 shrink-0">
+                        {onOpenDM && (
+                          <IconButton
+                            label={`Message ${m.display_name}`}
+                            onClick={() => onOpenDM(m.id)}
+                            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}
+                          >
+                            <MessageSquare />
+                          </IconButton>
+                        )}
+                        {onCopyAgent && (
+                          <IconButton
+                            label={`Copy ${m.display_name} to new agent`}
+                            onClick={() => onCopyAgent(m)}
+                            className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}
+                          >
+                            <Copy />
+                          </IconButton>
+                        )}
+                        <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pointer-events-none" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -639,14 +785,15 @@ function AccentPicker({ spaceSlug, value, disabled }: { spaceSlug: string; value
   const qc = useQueryClient();
   const { busy, run } = useAction();
   return (
-    <div className="mb-3 px-4 h-12 rounded-[6px] border border-line bg-card flex items-center text-[14px]">
-      <span className="w-40 text-fg-3">Accent</span>
-      <div role="radiogroup" aria-label="Space accent" className="flex items-center gap-2">
-        {SPACE_ACCENTS.map((a) => (
+    <div role="radiogroup" aria-label="Space accent" className="flex items-center gap-2 flex-wrap">
+      {SPACE_ACCENTS.map((a) => {
+        const active = a.value === value;
+        return (
           <button
             key={a.value}
+            type="button"
             role="radio"
-            aria-checked={a.value === value}
+            aria-checked={active}
             aria-label={a.label}
             title={disabled ? "Only owners and admins can change the accent" : a.label}
             disabled={disabled || busy}
@@ -657,24 +804,92 @@ function AccentPicker({ spaceSlug, value, disabled }: { spaceSlug: string; value
                 await qc.invalidateQueries({ queryKey: ["me"] });
               })
             }
-            className={`size-6 rounded-[4px] transition-shadow disabled:cursor-not-allowed ${a.value === value ? "ring-2 ring-offset-2 ring-offset-[var(--card)]" : "opacity-85 hover:opacity-100"}`}
-            style={{ background: a.swatch, ["--tw-ring-color" as string]: a.swatch }}
-          />
-        ))}
-      </div>
-      <span className="ml-3 text-[13px] text-fg-3">{SPACE_ACCENTS.find((a) => a.value === value)?.label}</span>
+            className={`h-8 px-2.5 rounded-[5px] border inline-flex items-center gap-2 text-[13px] transition-colors disabled:opacity-55 disabled:cursor-not-allowed ${
+              active
+                ? "border-accent bg-accent-soft/60 text-fg font-semibold"
+                : "border-line-strong bg-card text-fg-2 hover:bg-subtle hover:text-fg"
+            }`}
+          >
+            <span className="size-3.5 rounded-[3px] shrink-0" style={{ background: a.swatch }} />
+            <span>{a.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function SectionTitle({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
-  return (
-    <div className="flex items-end justify-between gap-4 mb-3">
-      <div>
-        <h2 className="font-display text-[17px] font-semibold text-fg">{title}</h2>
-        {body && <p className="text-[13px] text-fg-3 mt-0.5">{body}</p>}
+function ThemeCard({
+  value,
+  active,
+  label,
+  onSelect,
+}: {
+  value: ThemePref;
+  active: boolean;
+  label: string;
+  onSelect: () => void;
+}) {
+  const preview = (cls: string) => (
+    <div className={`${cls} flex-1 h-full flex overflow-hidden`}>
+      <div className="w-[26%] h-full border-r flex flex-col gap-1 p-1.5" style={{ background: "var(--swatch-nav)", borderColor: "var(--swatch-line)" }}>
+        <span className="h-1.5 w-3/4 rounded-[1px] bg-white/30" />
+        <span className="h-1 w-full rounded-[1px] bg-white/15" />
+        <span className="h-1 w-2/3 rounded-[1px] bg-white/15" />
       </div>
-      {action}
+      <div className="flex-1 h-full p-1.5 flex flex-col gap-1.5" style={{ background: "var(--swatch-canvas)" }}>
+        <span className="h-1.5 w-2/5 rounded-[1px]" style={{ background: "var(--swatch-bar)" }} />
+        <span className="h-1.5 w-4/5 rounded-[1px]" style={{ background: "var(--swatch-bar-2)" }} />
+        <span className="h-1.5 w-3/5 rounded-[1px]" style={{ background: "var(--swatch-bar-2)" }} />
+      </div>
+    </div>
+  );
+
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onSelect}
+      className={`text-left rounded-[6px] border p-2 transition-colors ${
+        active
+          ? "border-accent bg-accent-soft/45"
+          : "border-line-strong bg-card hover:bg-subtle/60"
+      }`}
+    >
+      <div className="h-14 rounded-[4px] border border-line overflow-hidden flex">
+        {value === "system" ? (
+          <>
+            {preview("theme-swatch-light")}
+            <span className="w-px bg-line shrink-0" />
+            {preview("theme-swatch-dark")}
+          </>
+        ) : value === "light" ? (
+          preview("theme-swatch-light")
+        ) : (
+          preview("theme-swatch-dark")
+        )}
+      </div>
+      <div className="mt-2 px-0.5 flex items-center justify-between gap-2">
+        <span className={`text-[13px] ${active ? "font-semibold text-fg" : "font-medium text-fg-2"}`}>{label}</span>
+        <span
+          aria-hidden
+          className={`size-4 rounded-full border flex items-center justify-center shrink-0 ${
+            active ? "border-accent bg-accent text-accent-fg" : "border-line-strong bg-card"
+          }`}
+        >
+          {active && <Check className="size-2.5 stroke-[3]" />}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function SettingsSectionHeading({ title, body }: { title: string; body?: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-[15.5px] font-semibold text-fg leading-snug">{title}</h2>
+      {body && <p className="text-[13px] text-fg-3 mt-0.5 leading-relaxed">{body}</p>}
     </div>
   );
 }
@@ -700,18 +915,22 @@ function ArchivedChannelsSection({
 
   return (
     <div>
-      <SectionTitle title="Archived channels" body="Read-only channels. Unarchive a channel to resume messaging and notifications." />
+      <SettingsSectionHeading
+        title="Archived channels"
+        body="Read-only channels. Unarchive a channel to resume messaging and notifications."
+      />
       {archivedQ.isLoading ? (
-        <div className="rounded-[6px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
+        <div className="rounded-[6px] border border-line bg-subtle/30 px-4 py-5 text-[13px] text-fg-3">Loading archived channels…</div>
       ) : list.length === 0 ? (
-        <div className="rounded-[6px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
-          No archived channels.
+        <div className="rounded-[6px] border border-line bg-subtle/25 px-4 py-5 flex items-center gap-3 text-[13px] text-fg-3">
+          <Archive className="size-4 text-fg-4 shrink-0" />
+          <span>No archived channels in this space.</span>
         </div>
       ) : (
-        <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
+        <div className="rounded-[6px] border border-line bg-panel divide-y divide-line overflow-hidden">
           {list.map((c) => (
-            <div key={c.id} className="px-4 py-3 flex items-center gap-3">
-              <span className="size-8 rounded-[6px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
+            <div key={c.id} className="px-4 py-3 flex items-center gap-3 hover:bg-subtle/50 transition-colors">
+              <span className="size-8 rounded-[5px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
                 {c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />}
               </span>
               <button
@@ -719,8 +938,8 @@ function ArchivedChannelsSection({
                 onClick={() => onOpenChannel?.(c)}
                 className="min-w-0 flex-1 text-left group"
               >
-                <div className="text-[14px] font-semibold text-fg group-hover:underline underline-offset-2 truncate">#{c.slug}</div>
-                <div className="text-[12.5px] text-fg-3 truncate">
+                <div className="text-[13.5px] font-semibold text-fg group-hover:underline underline-offset-2 truncate">#{c.slug}</div>
+                <div className="text-[12px] text-fg-3 truncate">
                   {c.kind === "private" ? "Private" : "Public"}
                   {c.archived_at ? ` · Archived ${formatDay(c.archived_at)} ${formatClock(c.archived_at)}` : ""}
                   {c.topic ? ` · ${c.topic}` : ""}
@@ -763,6 +982,16 @@ function ArchivedChannelsSection({
   );
 }
 
+type SettingsSectionID = "appearance" | "composer" | "space" | "archived" | "account";
+
+const SETTINGS_NAV: { id: SettingsSectionID; label: string; icon: ReactNode }[] = [
+  { id: "appearance", label: "Appearance", icon: <SunMoon /> },
+  { id: "composer", label: "Messages & composer", icon: <Keyboard /> },
+  { id: "space", label: "Space", icon: <SlidersHorizontal /> },
+  { id: "archived", label: "Archived channels", icon: <Archive /> },
+  { id: "account", label: "Account", icon: <User /> },
+];
+
 export function AdminPanel({
   boot,
   tab,
@@ -771,6 +1000,7 @@ export function AdminPanel({
   selectedAgentID,
   onInspectHuman,
   selectedHumanID,
+  onOpenDM,
   onNewAgent,
   onCopyAgent,
   onConnectComputer,
@@ -786,6 +1016,7 @@ export function AdminPanel({
   selectedAgentID?: string;
   onInspectHuman?: (memberID: string) => void;
   selectedHumanID?: string;
+  onOpenDM?: (memberID: string) => void;
   onNewAgent: () => void;
   onCopyAgent?: (agent: Member) => void;
   onConnectComputer: () => void;
@@ -796,238 +1027,556 @@ export function AdminPanel({
 }) {
   const humans = boot.members.filter((m) => m.kind === "human");
   const agents = boot.members.filter((m) => m.kind === "agent");
+  const onlineComputers = boot.computers.filter((c) => c.connection_status === "online").length;
   const { templates, remove: removeTemplate } = useAgentTemplates();
   const [editingTemplate, setEditingTemplate] = useState<AgentTemplate | null>(null);
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionID>("appearance");
+  const settingsRefs = useRef<Partial<Record<SettingsSectionID, HTMLElement | null>>>({});
   const [sendKey, setSendKey] = useSendKey();
 
+  const filteredHumans = humans.filter((m) => {
+    const q = peopleQuery.trim().toLowerCase();
+    if (!q) return true;
+    return m.display_name.toLowerCase().includes(q) || m.access_level.toLowerCase().includes(q);
+  });
+
+  function jumpToSettings(id: SettingsSectionID) {
+    setActiveSettingsSection(id);
+    settingsRefs.current[id]?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
+  const headerActions =
+    tab === "agents" ? (
+      <Button size="sm" icon={<Plus />} onClick={onNewAgent}>
+        New agent
+      </Button>
+    ) : tab === "computers" ? (
+      <Button size="sm" icon={<Plus />} onClick={onConnectComputer}>
+        Connect computer
+      </Button>
+    ) : undefined;
+
   return (
-    <section className="flex flex-col h-full min-h-0 bg-bg">
-      <ViewHeader title={boot.space.name}>
+    <section className="flex flex-col h-full min-h-0 bg-panel">
+      <ViewHeader
+        title={boot.space.name}
+        icon={
+          <span
+            aria-hidden
+            className="size-5 rounded-[4px] text-[11px] font-bold text-white inline-flex items-center justify-center shrink-0"
+            style={{ background: accentSwatch(boot.space.accent) }}
+          >
+            {(boot.space.name[0] ?? "S").toUpperCase()}
+          </span>
+        }
+        actions={headerActions}
+      >
         <span className="w-px h-4 bg-line shrink-0" />
         <HeaderTabs
           value={tab}
           onChange={onTab}
           options={[
-            { value: "agents", label: <><Bot />Agents</> },
-            { value: "computers", label: <><Monitor />Computers</> },
-            { value: "people", label: <><Users />People</> },
+            {
+              value: "agents",
+              label: (
+                <>
+                  <Bot />
+                  <span>Agents</span>
+                  {agents.length > 0 && <span className="font-mono text-[11.5px] text-fg-4 tabular">{agents.length}</span>}
+                </>
+              ),
+            },
+            {
+              value: "computers",
+              label: (
+                <>
+                  <Monitor />
+                  <span>Computers</span>
+                  {boot.computers.length > 0 && <span className="font-mono text-[11.5px] text-fg-4 tabular">{boot.computers.length}</span>}
+                </>
+              ),
+            },
+            {
+              value: "people",
+              label: (
+                <>
+                  <Users />
+                  <span>People</span>
+                  {humans.length > 0 && <span className="font-mono text-[11.5px] text-fg-4 tabular">{humans.length}</span>}
+                </>
+              ),
+            },
             { value: "settings", label: "Settings" },
           ]}
         />
       </ViewHeader>
-      <div className="flex-1 overflow-y-auto scroll-thin">
-        <div className="px-6 py-6 max-w-[960px]">
-          {tab === "agents" && (
-            <>
-              <SectionTitle
-                title="Agents"
-                body="Persistent teammates. Select one to see its runtime, driver and permissions."
-                action={
-                  <Button icon={<Plus />} onClick={onNewAgent}>
-                    New agent
-                  </Button>
-                }
-              />
-              {agents.length === 0 ? (
-                <div className="rounded-[6px] border border-dashed border-line-strong bg-card">
-                  <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
-                </div>
-              ) : (
-                <AgentList boot={boot} selectedID={selectedAgentID} onInspect={onInspectAgent} onCopyAgent={onCopyAgent} />
-              )}
-              {templates.length > 0 && (
-                <div className="mt-8">
-                  <div className="mb-3 flex items-center gap-2">
-                    <h2 className="text-[14px] font-semibold text-fg">Templates</h2>
-                    <span className="font-mono text-[12px] text-fg-4">{templates.length}</span>
-                  </div>
-                  <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-                    {templates.map((tpl) => {
-                      const comp = tpl.computer_id ? boot.computers.find((c) => c.id === tpl.computer_id) : undefined;
-                      return (
-                        <div key={tpl.id} className="group px-4 py-2.5 flex items-center gap-3 hover:bg-subtle transition-colors">
-                          <span className="size-8 rounded-[6px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
-                            <Bookmark className="size-4" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[14px] font-semibold text-fg truncate">{tpl.name}</div>
-                            <div className="text-[13px] text-fg-3 truncate font-body">{tpl.role_text || "No role defined."}</div>
-                          </div>
-                          <span className="hidden sm:block w-[150px] font-mono text-[12.5px] text-fg-3 truncate shrink-0" title={templateDriverSummary(tpl)}>
-                            {templateDriverSummary(tpl)}
-                          </span>
-                          <span className="hidden md:flex items-center gap-1.5 w-[136px] text-[12.5px] text-fg-3 shrink-0 min-w-0">
-                            {comp ? (
-                              <>
-                                <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
-                                <span className="truncate">{comp.name}</span>
-                              </>
-                            ) : (
-                              <span className="text-fg-4 truncate">Any computer</span>
-                            )}
-                          </span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <IconButton label={`Edit template ${tpl.name}`} onClick={() => setEditingTemplate(tpl)}>
-                              <Pencil />
-                            </IconButton>
-                            <IconButton label={`Delete template ${tpl.name}`} onClick={() => removeTemplate(tpl.id)} className="hover:text-danger">
-                              <Trash2 />
-                            </IconButton>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <AgentTemplateDialog
-                open={Boolean(editingTemplate)}
-                template={editingTemplate}
-                computers={boot.computers}
-                onClose={() => setEditingTemplate(null)}
-              />
-            </>
+
+      {tab === "agents" && (
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">
+          {agents.length === 0 ? (
+            <EmptyState
+              icon={<Bot />}
+              title="No agents yet"
+              body="Create a persistent agent with its own role, memory and workspace, then DM it or invite it into channels."
+              action={
+                <Button icon={<Plus />} onClick={onNewAgent}>
+                  Create an agent
+                </Button>
+              }
+            />
+          ) : (
+            <AgentList
+              boot={boot}
+              selectedID={selectedAgentID}
+              onInspect={onInspectAgent}
+              onOpenDM={onOpenDM}
+              onCopyAgent={onCopyAgent}
+            />
           )}
 
-          {tab === "computers" && (
-            <>
-              <SectionTitle
-                title="Computers"
-                body="Machines that host this space's agents."
-                action={
-                  <Button icon={<Plus />} onClick={onConnectComputer}>
-                    Connect computer
-                  </Button>
-                }
-              />
-              {boot.computers.length === 0 ? (
-                <div className="rounded-[6px] border border-dashed border-line-strong bg-card">
-                  <EmptyState
-                    icon={<Monitor />}
-                    title="No computers yet"
-                    body="Open the Sumi desktop app and confirm it, or run one command on any machine."
-                    action={<Button onClick={onConnectComputer}>Connect a computer</Button>}
-                  />
+          {templates.length > 0 && (
+            <div className="@container mt-6">
+              <div className="px-6 py-2.5 bg-subtle/50 border-y border-line flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Bookmark className="size-3.5 text-fg-3" />
+                  <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.05em] text-fg-2">Templates</h2>
+                  <span className="font-mono text-[11.5px] text-fg-4 tabular">{templates.length}</span>
                 </div>
-              ) : (
-                <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-                  {boot.computers.map((c) => {
-                    const hosted = agents.filter((a) => a.agent?.computer_id === c.id);
-                    const online = c.connection_status === "online";
-                    return (
-                      <div key={c.id} className="px-4 py-3.5 flex items-center gap-3.5">
-                        <span className="size-10 rounded-[6px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
-                          <Monitor className="size-5" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[14.5px] font-semibold text-fg truncate">{c.name}</div>
-                          <div className="text-[13px] text-fg-3 truncate">
-                            {c.owner_member_id === boot.current_member.id
-                              ? "Yours"
-                              : `${boot.members.find((m) => m.id === c.owner_member_id)?.display_name ?? "Former member"}'s`}{" "}
+                <span className="text-[12px] text-fg-3 hidden @[560px]:inline">Saved locally for creating agents faster</span>
+              </div>
+              <div className="divide-y divide-line border-b border-line">
+                {templates.map((tpl) => {
+                  const comp = tpl.computer_id ? boot.computers.find((c) => c.id === tpl.computer_id) : undefined;
+                  return (
+                    <div key={tpl.id} className="group px-6 py-2.5 flex items-center gap-3 hover:bg-subtle/60 transition-colors">
+                      <span className="size-9 rounded-[5px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
+                        <Bookmark className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13.5px] font-semibold text-fg truncate">{tpl.name}</div>
+                        <div className="text-[12.5px] text-fg-3 truncate">{tpl.role_text || "No role defined."}</div>
+                      </div>
+                      <span className="hidden @[640px]:block w-[144px] font-mono text-[12.5px] text-fg-2 truncate shrink-0" title={templateDriverSummary(tpl)}>
+                        {templateDriverSummary(tpl)}
+                      </span>
+                      <span className="hidden @[640px]:flex items-center gap-1.5 w-[144px] text-[13px] text-fg-2 shrink-0 min-w-0">
+                        {comp ? (
+                          <>
+                            <span className={`size-1.5 rounded-full shrink-0 ${comp.connection_status === "online" ? "bg-online" : "bg-fg-4"}`} />
+                            <span className="truncate">{comp.name}</span>
+                          </>
+                        ) : (
+                          <span className="text-fg-4 truncate">Any computer</span>
+                        )}
+                      </span>
+                      <div className="w-[84px] flex items-center justify-end gap-0.5 shrink-0">
+                        <IconButton label={`Edit template ${tpl.name}`} onClick={() => setEditingTemplate(tpl)}>
+                          <Pencil />
+                        </IconButton>
+                        <IconButton label={`Delete template ${tpl.name}`} onClick={() => removeTemplate(tpl.id)} className="hover:text-danger">
+                          <Trash2 />
+                        </IconButton>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <AgentTemplateDialog
+            open={Boolean(editingTemplate)}
+            template={editingTemplate}
+            computers={boot.computers}
+            onClose={() => setEditingTemplate(null)}
+          />
+        </div>
+      )}
+
+      {tab === "computers" && (
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin @container">
+          <div className="px-6 py-2.5 border-b border-line bg-panel flex items-center justify-between gap-3 flex-wrap text-[13px]">
+            <span className="text-fg-3">Machines that host this space&apos;s agents and local workspaces.</span>
+            {boot.computers.length > 0 && (
+              <span className="inline-flex items-center gap-2 text-[12.5px] text-fg-2 tabular shrink-0">
+                <span className={`size-2 rounded-full ${onlineComputers > 0 ? "bg-online" : "bg-fg-4"}`} />
+                <span className="font-medium">{onlineComputers} online</span>
+                <span className="text-fg-4">·</span>
+                <span className="text-fg-3">{boot.computers.length} total</span>
+              </span>
+            )}
+          </div>
+          {boot.computers.length === 0 ? (
+            <EmptyState
+              icon={<Monitor />}
+              title="No computers yet"
+              body="Open the Sumi desktop app and confirm it, or run one command on any machine."
+              action={
+                <Button icon={<Plus />} onClick={onConnectComputer}>
+                  Connect a computer
+                </Button>
+              }
+            />
+          ) : (
+            <div>
+              <div className="hidden @[700px]:flex h-8 px-6 bg-subtle/60 border-b border-line items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-3 select-none">
+                <span className="flex-1 min-w-0">Computer</span>
+                <span className="w-[180px] shrink-0">Host &amp; OS</span>
+                <span className="w-[160px] shrink-0">Coding agents</span>
+                <span className="w-[108px] shrink-0">Agents</span>
+                <span className="w-[120px] shrink-0 text-right">Status</span>
+              </div>
+              <div className="divide-y divide-line border-b border-line">
+                {boot.computers.map((c) => {
+                  const hosted = agents.filter((a) => a.agent?.computer_id === c.id);
+                  const online = c.connection_status === "online";
+                  const ownerLabel =
+                    c.owner_member_id === boot.current_member.id
+                      ? "Yours"
+                      : `${boot.members.find((m) => m.id === c.owner_member_id)?.display_name ?? "Former member"}'s`;
+                  return (
+                    <div key={c.id} className="px-6 py-3 flex items-center gap-3 hover:bg-subtle/60 transition-colors">
+                      <span className="size-9 rounded-[5px] bg-subtle border border-line text-fg-2 flex items-center justify-center shrink-0">
+                        <Monitor className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[14px] font-semibold text-fg truncate">{c.name}</div>
+                        <div className="text-[12.5px] text-fg-3 truncate">
+                          {ownerLabel}
+                          <span className="@[700px]:hidden">
+                            {" "}
                             · {c.hostname} · {c.os === "macos" ? "macOS" : "Linux"}
-                            {c.acp_providers && c.acp_providers.length > 0 && ` · ACP: ${c.acp_providers.join(", ")}`}
-                          </div>
+                          </span>
                         </div>
-                        <div className="flex -space-x-1.5">
-                          {hosted.slice(0, 5).map((a) => (
-                            <span key={a.id} className="rounded-[5px] ring-2 ring-[var(--card)]">
-                              <MemberAvatar id={a.id} name={a.display_name} kind="agent" size="sm" />
+                      </div>
+                      <div className="hidden @[700px]:block w-[180px] shrink-0 min-w-0">
+                        <div className="font-mono text-[12.5px] text-fg-2 truncate" title={c.hostname}>
+                          {c.hostname}
+                        </div>
+                        <div className="text-[12px] text-fg-4">{c.os === "macos" ? "macOS" : "Linux"}</div>
+                      </div>
+                      <div className="hidden @[700px]:flex items-center gap-1 flex-wrap w-[160px] shrink-0">
+                        {c.acp_providers && c.acp_providers.length > 0 ? (
+                          c.acp_providers.map((p) => (
+                            <span
+                              key={p}
+                              className="h-5 px-1.5 rounded-[4px] bg-subtle border border-line font-mono text-[11.5px] text-fg-2 inline-flex items-center"
+                            >
+                              {p}
                             </span>
-                          ))}
-                        </div>
+                          ))
+                        ) : (
+                          <span className="text-[12.5px] text-fg-4">—</span>
+                        )}
+                      </div>
+                      <div className="hidden @[700px]:flex items-center gap-1.5 w-[108px] shrink-0">
+                        {hosted.length > 0 ? (
+                          <>
+                            <div className="flex -space-x-1.5">
+                              {hosted.slice(0, 4).map((a) => (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  title={a.display_name}
+                                  onClick={() => onInspectAgent(a.id)}
+                                  className="rounded-[4px] ring-2 ring-[var(--panel)] hover:z-10 transition-transform hover:scale-105"
+                                >
+                                  <MemberAvatar id={a.id} name={a.display_name} kind="agent" size="xs" />
+                                </button>
+                              ))}
+                            </div>
+                            <span className="tabular font-mono text-[11.5px] text-fg-4">{hosted.length}</span>
+                          </>
+                        ) : (
+                          <span className="text-[12.5px] text-fg-4">None</span>
+                        )}
+                      </div>
+                      <div className="w-[120px] flex justify-end shrink-0">
                         <Badge tone={online ? "online" : "neutral"}>
                           <span className={`size-1.5 rounded-full ${online ? "bg-online" : "bg-fg-4"}`} />
                           {online ? "Online" : c.last_seen_at ? `Seen ${formatDay(c.last_seen_at)} ${formatClock(c.last_seen_at)}` : "Offline"}
                         </Badge>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === "people" && (
-            <>
-              <SectionTitle title="People" body="Humans in this space." />
-              <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-                {humans.map((m) => {
-                  const selected = m.id === selectedHumanID;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => onInspectHuman?.(m.id)}
-                      aria-current={selected || undefined}
-                      className={`group w-full px-4 h-14 flex items-center gap-3 text-left transition-colors ${selected ? "bg-accent-soft" : "hover:bg-subtle"}`}
-                    >
-                      <MemberAvatar id={m.id} name={m.display_name} kind="human" size="md" />
-                      <span className="text-[14.5px] font-medium text-fg">{m.display_name}</span>
-                      {m.id === boot.current_member.id && <Badge>You</Badge>}
-                      <span className="flex-1" />
-                      <span className="text-[13px] text-fg-3 capitalize">{m.access_level}</span>
-                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                    </button>
+                    </div>
                   );
                 })}
               </div>
-            </>
-          )}
-
-          {tab === "settings" && (
-            <div className="space-y-8">
-              <div>
-                <SectionTitle title="Appearance" />
-                <Segmented
-                  value={theme}
-                  onChange={onTheme}
-                  options={[
-                    { value: "system", label: <><SunMoon />System</> },
-                    { value: "light", label: <><Sun />Light</> },
-                    { value: "dark", label: <><Moon />Dark</> },
-                  ]}
-                />
-              </div>
-              <div>
-                <SectionTitle title="Composer" body="Choose which key sends messages in channels, DMs, and threads." />
-                <Segmented
-                  value={sendKey}
-                  onChange={setSendKey}
-                  options={[
-                    { value: "enter", label: "Enter" },
-                    { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
-                  ]}
-                />
-              </div>
-              <div>
-                <SectionTitle title="Space" />
-                <AccentPicker spaceSlug={boot.space.slug} value={boot.space.accent} disabled={boot.current_member.access_level === "member"} />
-                <div className="rounded-[6px] border border-line bg-card divide-y divide-line text-[14px]">
-                  {[
-                    ["Name", boot.space.name],
-                    ["Address", `/${boot.space.slug}`],
-                    ["Your role", boot.current_member.access_level],
-                  ].map(([k, v]) => (
-                    <div key={k} className="px-4 h-12 flex items-center">
-                      <span className="w-40 text-fg-3">{k}</span>
-                      <span className="text-fg font-medium">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <ArchivedChannelsSection
-                spaceSlug={boot.space.slug}
-                canGovern={boot.current_member.access_level !== "member"}
-                onOpenChannel={onOpenArchivedChannel}
-              />
-              <Button variant="danger" icon={<LogOut />} onClick={onLogout}>
-                Sign out
-              </Button>
             </div>
           )}
         </div>
-      </div>
+      )}
+
+      {tab === "people" && (
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin @container">
+          <div className="px-6 py-2.5 border-b border-line bg-panel flex items-center justify-between gap-3 flex-wrap">
+            {humans.length > 1 ? (
+              <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+                <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={peopleQuery}
+                  onChange={(e) => setPeopleQuery(e.target.value)}
+                  placeholder="Search people…"
+                  aria-label="Search people"
+                  className="w-full h-8 pl-8 pr-7 rounded-[5px] border border-line-strong bg-card text-[13px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+                />
+                {peopleQuery && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => setPeopleQuery("")}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 size-5 rounded-[4px] text-fg-4 hover:text-fg hover:bg-hover flex items-center justify-center"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="text-[13px] text-fg-3">Humans collaborating in {boot.space.name}.</span>
+            )}
+            <span className="text-[12.5px] text-fg-3 tabular">
+              {humans.length} {humans.length === 1 ? "person" : "people"}
+            </span>
+          </div>
+
+          <div className="hidden @[560px]:flex h-8 px-6 bg-subtle/60 border-b border-line items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-3 select-none">
+            <span className="flex-1 min-w-0">Member</span>
+            <span className="w-[100px] shrink-0">Access</span>
+            <span className="w-[120px] shrink-0">Computers</span>
+            <span className="w-[64px] shrink-0" />
+          </div>
+
+          {filteredHumans.length === 0 ? (
+            <div className="px-6 py-12 text-center text-[13.5px] text-fg-3">No people match “{peopleQuery}”.</div>
+          ) : (
+            <div className="divide-y divide-line border-b border-line">
+              {filteredHumans.map((m) => {
+                const selected = m.id === selectedHumanID;
+                const isSelf = m.id === boot.current_member.id;
+                const owned = boot.computers.filter((c) => c.owner_member_id === m.id);
+                const ownedOnline = owned.filter((c) => c.connection_status === "online").length;
+                return (
+                  <div
+                    key={m.id}
+                    className={`relative group w-full flex items-center transition-colors ${
+                      selected ? "bg-accent-soft/55" : "hover:bg-subtle/60"
+                    }`}
+                  >
+                    {selected && <span aria-hidden className="absolute left-0 inset-y-0 w-[3px] bg-accent" />}
+                    <button
+                      type="button"
+                      onClick={() => onInspectHuman?.(m.id)}
+                      aria-current={selected || undefined}
+                      className="min-w-0 flex-1 pl-6 pr-2 py-2.5 flex items-center gap-3 text-left"
+                    >
+                      <MemberAvatar id={m.id} name={m.display_name} kind="human" size="md" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
+                          {isSelf && <Badge tone="accent">You</Badge>}
+                        </span>
+                        <span className="block font-mono text-[12px] text-fg-4 truncate">@{m.display_name}</span>
+                      </span>
+                      <span className="hidden @[560px]:flex items-center w-[100px] shrink-0">
+                        <Badge className="capitalize">{m.access_level}</Badge>
+                      </span>
+                      <span className="hidden @[560px]:flex items-center gap-1.5 w-[120px] text-[12.5px] text-fg-3 shrink-0">
+                        {owned.length > 0 ? (
+                          <>
+                            <span className={`size-1.5 rounded-full shrink-0 ${ownedOnline > 0 ? "bg-online" : "bg-fg-4"}`} />
+                            <span className="tabular">{owned.length} {owned.length === 1 ? "machine" : "machines"}</span>
+                          </>
+                        ) : (
+                          <span className="text-fg-4">—</span>
+                        )}
+                      </span>
+                    </button>
+                    <div className="pr-5 w-[64px] flex items-center justify-end gap-0.5 shrink-0">
+                      {!isSelf && onOpenDM && (
+                        <IconButton
+                          label={`Message ${m.display_name}`}
+                          onClick={() => onOpenDM(m.id)}
+                          className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}
+                        >
+                          <MessageSquare />
+                        </IconButton>
+                      )}
+                      <ChevronRight className="size-4 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pointer-events-none" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div className="@container flex-1 min-h-0 flex">
+          <nav
+            aria-label="Settings sections"
+            className="hidden @[760px]:flex flex-col w-[212px] shrink-0 border-r border-line bg-subtle/25 py-4 px-3 gap-0.5 select-none"
+          >
+            {SETTINGS_NAV.map((item) => {
+              const active = activeSettingsSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => jumpToSettings(item.id)}
+                  className={`relative h-8 px-2.5 rounded-[5px] flex items-center gap-2.5 text-[13.5px] text-left transition-colors [&>svg]:size-4 ${
+                    active
+                      ? "bg-hover text-fg font-semibold"
+                      : "text-fg-2 hover:bg-subtle hover:text-fg font-medium"
+                  }`}
+                >
+                  {active && <span aria-hidden className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-r-[2px] bg-accent" />}
+                  <span className={active ? "text-fg" : "text-fg-3"}>{item.icon}</span>
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex-1 min-w-0 overflow-y-auto scroll-thin">
+            <div className="max-w-[740px] px-7 py-6 divide-y divide-line">
+              <section
+                ref={(el) => {
+                  settingsRefs.current.appearance = el;
+                }}
+                className="pb-7 scroll-mt-6"
+              >
+                <SettingsSectionHeading
+                  title="Appearance"
+                  body="Choose how Sumi looks on this device."
+                />
+                <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-3 max-w-[460px]">
+                  <ThemeCard value="system" active={theme === "system"} label="System" onSelect={() => onTheme("system")} />
+                  <ThemeCard value="light" active={theme === "light"} label="Light" onSelect={() => onTheme("light")} />
+                  <ThemeCard value="dark" active={theme === "dark"} label="Dark" onSelect={() => onTheme("dark")} />
+                </div>
+              </section>
+
+              <section
+                ref={(el) => {
+                  settingsRefs.current.composer = el;
+                }}
+                className="py-7 scroll-mt-6"
+              >
+                <SettingsSectionHeading
+                  title="Messages & composer"
+                  body="Control how messages are sent in channels, direct messages, and threads."
+                />
+                <div className="flex items-center justify-between gap-4 flex-wrap py-1">
+                  <div className="min-w-0">
+                    <div className="text-[14px] font-medium text-fg">Send message shortcut</div>
+                    <div className="text-[12.5px] text-fg-3 mt-0.5">
+                      {sendKey === "enter"
+                        ? "Press Enter to send, Shift + Enter for a new line."
+                        : `Press ${isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter"} to send, Enter for a new line.`}
+                    </div>
+                  </div>
+                  <Segmented
+                    value={sendKey}
+                    onChange={setSendKey}
+                    options={[
+                      { value: "enter", label: "Enter" },
+                      { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
+                    ]}
+                  />
+                </div>
+              </section>
+
+              <section
+                ref={(el) => {
+                  settingsRefs.current.space = el;
+                }}
+                className="py-7 scroll-mt-6"
+              >
+                <SettingsSectionHeading
+                  title="Space"
+                  body="Workspace identity and accent color shared by everyone in this space."
+                />
+                <div className="divide-y divide-line border-y border-line">
+                  <div className="py-3 flex items-center gap-4">
+                    <span className="w-36 shrink-0 text-[13px] text-fg-3">Name</span>
+                    <span className="flex items-center gap-2 text-[14px] font-semibold text-fg min-w-0">
+                      <span
+                        aria-hidden
+                        className="size-5 rounded-[4px] text-[11px] font-bold text-white inline-flex items-center justify-center shrink-0"
+                        style={{ background: accentSwatch(boot.space.accent) }}
+                      >
+                        {(boot.space.name[0] ?? "S").toUpperCase()}
+                      </span>
+                      <span className="truncate">{boot.space.name}</span>
+                    </span>
+                  </div>
+                  <div className="py-3 flex items-center gap-4">
+                    <span className="w-36 shrink-0 text-[13px] text-fg-3">Address</span>
+                    <span className="font-mono text-[13px] text-fg">/{boot.space.slug}</span>
+                  </div>
+                  <div className="py-3 flex items-center gap-4">
+                    <span className="w-36 shrink-0 text-[13px] text-fg-3">Your role</span>
+                    <Badge className="capitalize">{boot.current_member.access_level}</Badge>
+                  </div>
+                  <div className="py-3.5 flex items-start gap-4 flex-wrap sm:flex-nowrap">
+                    <div className="w-36 shrink-0 pt-1">
+                      <div className="text-[13px] text-fg-3">Accent</div>
+                      {boot.current_member.access_level === "member" && (
+                        <div className="text-[11.5px] text-fg-4 mt-0.5">Admins only</div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <AccentPicker
+                        spaceSlug={boot.space.slug}
+                        value={boot.space.accent}
+                        disabled={boot.current_member.access_level === "member"}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section
+                ref={(el) => {
+                  settingsRefs.current.archived = el;
+                }}
+                className="py-7 scroll-mt-6"
+              >
+                <ArchivedChannelsSection
+                  spaceSlug={boot.space.slug}
+                  canGovern={boot.current_member.access_level !== "member"}
+                  onOpenChannel={onOpenArchivedChannel}
+                />
+              </section>
+
+              <section
+                ref={(el) => {
+                  settingsRefs.current.account = el;
+                }}
+                className="pt-7 scroll-mt-6"
+              >
+                <SettingsSectionHeading title="Account" body="Your current session in this space." />
+                <div className="rounded-[6px] border border-line bg-subtle/25 px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="md" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-semibold text-fg truncate">{boot.current_member.display_name}</span>
+                        <Badge className="capitalize">{boot.current_member.access_level}</Badge>
+                      </div>
+                      <div className="font-mono text-[12px] text-fg-4 truncate">@{boot.current_member.display_name}</div>
+                    </div>
+                  </div>
+                  <Button variant="danger" size="sm" icon={<LogOut />} onClick={onLogout}>
+                    Sign out
+                  </Button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

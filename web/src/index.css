@@ -462,6 +462,22 @@ html.desktop .titlebar-drag textarea {
   animation: var(--animate-breathe);
 }
 
+/* Miniature theme preview swatches for the Appearance settings cards. */
+.theme-swatch-light {
+  --swatch-nav: #1d222b;
+  --swatch-canvas: #ffffff;
+  --swatch-line: #dfe2e8;
+  --swatch-bar: #d0d5df;
+  --swatch-bar-2: #e6e9ef;
+}
+.theme-swatch-dark {
+  --swatch-nav: #14181f;
+  --swatch-canvas: #1b1f27;
+  --swatch-line: #2d3340;
+  --swatch-bar: #495264;
+  --swatch-bar-2: #303746;
+}
+
 .scroll-thin {
   overflow-anchor: auto;
   scrollbar-gutter: stable;

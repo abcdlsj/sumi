@@ -201,17 +201,17 @@ function KindCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex-1 text-left p-3.5 rounded-[6px] border transition-[border-color,background-color,box-shadow] duration-100 ${
-        active ? "border-accent bg-accent-soft shadow-[var(--ring)]" : "border-line-strong bg-card hover:border-fg-4"
+      className={`flex-1 text-left p-3 rounded-[5px] border transition-colors duration-100 ${
+        active ? "border-accent bg-accent-soft/55" : "border-line-strong bg-card hover:bg-subtle/60"
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className={`size-7 rounded-[4px] flex items-center justify-center [&>svg]:size-4 ${active ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"}`}>
+        <span className={`size-6 rounded-[4px] flex items-center justify-center [&>svg]:size-3.5 ${active ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"}`}>
           {icon}
         </span>
-        <span className="text-[14px] font-semibold text-fg">{title}</span>
+        <span className="text-[13.5px] font-semibold text-fg">{title}</span>
       </div>
-      <p className="mt-2 text-[12.5px] text-fg-3 leading-snug">{body}</p>
+      <p className="mt-1.5 text-[12px] text-fg-3 leading-snug">{body}</p>
     </button>
   );
 }
@@ -269,7 +269,7 @@ export function DriverFields({
 
       {draft.kind === "acp" ? (
         <div className="space-y-3.5 animate-fade-in">
-          <div className="space-y-2" role="radiogroup" aria-label="ACP provider">
+          <div className="rounded-[5px] border border-line-strong bg-card divide-y divide-line overflow-hidden" role="radiogroup" aria-label="ACP provider">
             {PROVIDERS.map((p) => {
               const ok = hasCustomCommand || !available || available.includes(p.id);
               const active = draft.provider === p.id;

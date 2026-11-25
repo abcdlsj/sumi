@@ -54,8 +54,8 @@ function PaneHeader({ children, onClose, actions }: { children: ReactNode; onClo
 function KV({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <span className="text-[13px] text-fg-3 h-8 flex items-center">{label}</span>
-      <div className="min-w-0 min-h-8 flex items-center text-[14px] text-fg">{children}</div>
+      <span className="text-[12.5px] text-fg-3 min-h-7 py-1 flex items-center">{label}</span>
+      <div className="min-w-0 min-h-7 py-1 flex items-center text-[13.5px] text-fg">{children}</div>
     </>
   );
 }
@@ -1277,8 +1277,8 @@ function DriverEditor({ spaceSlug, member, boot, onDone }: { spaceSlug: string; 
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="px-5 py-4">
-      <div className="mb-2.5 flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold text-fg-2 uppercase tracking-[0.04em]">{title}</h3>
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h3 className="text-[11.5px] font-semibold text-fg-3 uppercase tracking-[0.06em]">{title}</h3>
         {action}
       </div>
       {children}
@@ -1351,7 +1351,7 @@ function AgentDetail({
     toast(`Saved template “${saved.name}”`, "success");
   }
 
-  const stateTone = st === "working" ? "busy" : st === "error" ? "danger" : "neutral";
+  const stateTone = st === "idle" ? "online" : st === "working" ? "busy" : st === "error" ? "danger" : "neutral";
 
   return (
     <>
@@ -1462,11 +1462,14 @@ function AgentDetail({
         />
       ) : (
         <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
-        <div className="px-5 py-5 flex items-center gap-4">
-          <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} />
+        <div className="px-5 py-5 flex items-center gap-3.5">
+          <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} ring="var(--panel)" />
           <div className="min-w-0 flex-1">
-            <div className="font-display text-[19px] font-bold text-fg truncate">{member.display_name}</div>
-            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <div className="font-display text-[18px] font-bold text-fg truncate">{member.display_name}</div>
+              <span className="font-mono text-[12px] text-fg-4 truncate">@{member.display_name}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
               <Badge tone={stateTone}>
                 <StatusDot state={st} size={7} ring="transparent" />
                 {stateLabel(st)}
@@ -1477,24 +1480,24 @@ function AgentDetail({
         </div>
 
         {st === "working" && (
-          <div className="px-5 py-3.5 bg-busy-soft/60 flex items-center gap-3 animate-fade-in">
-            <span className="size-8 rounded-[6px] bg-busy-soft text-busy flex items-center justify-center shrink-0">
+          <div className="px-5 py-3 bg-busy-soft/55 border-l-[3px] border-l-busy flex items-center gap-3 animate-fade-in">
+            <span className="size-8 rounded-[5px] bg-busy-soft text-busy flex items-center justify-center shrink-0">
               <RefreshCw className="size-4 animate-spin [animation-duration:2.4s]" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] text-fg-3">Working in</div>
+              <div className="text-[12px] text-fg-3">Working in</div>
               {focus?.convID || focus?.taskID ? (
                 <button
                   onClick={() => (focus.taskID ? onSelectTarget({ kind: "task", taskID: focus.taskID }) : onOpenConversation?.(focus.convID!))}
-                  className="text-[14px] font-medium text-fg hover:underline underline-offset-2 truncate block max-w-full"
+                  className="text-[13.5px] font-semibold text-fg hover:underline underline-offset-2 truncate block max-w-full"
                 >
                   {focus.label}
                 </button>
               ) : (
-                <div className="text-[14px] font-medium text-fg">{focus?.label ?? "Unknown conversation"}</div>
+                <div className="text-[13.5px] font-semibold text-fg">{focus?.label ?? "Unknown conversation"}</div>
               )}
               {activityLabel(ag.activity) && (
-                <div className={`mt-0.5 text-[12.5px] font-mono truncate ${ag.activity?.stalled_seconds ? "text-warm" : "text-fg-3"}`}>
+                <div className={`mt-0.5 text-[12px] font-mono truncate ${ag.activity?.stalled_seconds ? "text-warm" : "text-fg-3"}`}>
                   {activityLabel(ag.activity)}
                 </div>
               )}
@@ -1514,9 +1517,9 @@ function AgentDetail({
         )}
 
         {st === "error" && (
-          <div className="px-5 py-3.5 bg-danger-soft flex items-start gap-3 animate-fade-in">
+          <div className="px-5 py-3 bg-danger-soft/80 border-l-[3px] border-l-danger flex items-start gap-3 animate-fade-in">
             <AlertTriangle className="size-4 text-danger shrink-0 mt-0.5" />
-            <div className="min-w-0 text-[13.5px]">
+            <div className="min-w-0 text-[13px]">
               <div className="font-semibold text-danger font-mono">{ag.last_error_code || "error"}</div>
               {ag.last_error_detail && <div className="mt-1 text-fg-2 break-words leading-relaxed">{ag.last_error_detail}</div>}
               <div className="mt-1.5 text-fg-3">Fix the driver below or restart the agent.</div>
@@ -1613,18 +1616,24 @@ function AgentDetail({
         </Section>
 
         <Section title="Role">
-          <p className="text-[14px] text-fg-2 whitespace-pre-wrap leading-relaxed">{ag.role_text || "No role defined."}</p>
+          {ag.role_text ? (
+            <p className="rounded-[5px] border border-line bg-subtle/45 px-3 py-2.5 text-[13.5px] text-fg-2 whitespace-pre-wrap leading-relaxed">
+              {ag.role_text}
+            </p>
+          ) : (
+            <p className="text-[13px] text-fg-4 italic">No role defined.</p>
+          )}
         </Section>
 
         <Section title="Permissions">
-          <div className="rounded-[6px] border border-line divide-y divide-line overflow-hidden">
+          <div className="rounded-[5px] border border-line bg-card divide-y divide-line overflow-hidden">
             {PERMISSIONS.map((p) => {
               const on = perms.has(p.code);
               return (
-                <label key={p.code} className={`px-3.5 py-2.5 flex items-center gap-3 ${canGovern ? "cursor-pointer hover:bg-subtle" : ""}`}>
+                <label key={p.code} className={`px-3 py-2.5 flex items-center gap-3 ${canGovern ? "cursor-pointer hover:bg-subtle/60" : ""}`}>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[14px] text-fg">{p.label}</span>
-                    <span className="block text-[12.5px] text-fg-3">{p.hint}</span>
+                    <span className="block text-[13.5px] font-medium text-fg">{p.label}</span>
+                    <span className="block text-[12px] text-fg-3 mt-0.5">{p.hint}</span>
                   </span>
                   <input
                     type="checkbox"
@@ -1709,11 +1718,11 @@ function HumanDetail({
         <span className="font-semibold text-fg">Person</span>
       </PaneHeader>
       <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">
-        <div className="px-5 py-5 flex items-center gap-4">
+        <div className="px-5 py-5 flex items-center gap-3.5">
           <MemberAvatar id={member.id} name={member.display_name} kind="human" size="xl" />
           <div className="min-w-0 flex-1">
-            <div className="font-display text-[19px] font-bold text-fg truncate">{member.display_name}</div>
-            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+            <div className="font-display text-[18px] font-bold text-fg truncate">{member.display_name}</div>
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
               <Badge className="capitalize">{member.access_level}</Badge>
               {isSelf && <Badge tone="accent">You</Badge>}
             </div>

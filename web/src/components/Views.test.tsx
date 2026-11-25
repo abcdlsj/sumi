@@ -1,0 +1,208 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api, type BootstrapData } from "../api";
+import { AdminPanel, type AdminTab } from "./Views";
+
+const sampleBoot: BootstrapData = {
+  space: {
+    id: "sp-1",
+    slug: "studio",
+    name: "Sumi Studio",
+    accent: "flame",
+    owner_member_id: "m-lisi",
+    event_seq: 1,
+    created_at: "2026-11-19T10:00:00Z",
+  },
+  current_member: {
+    id: "m-lisi",
+    space_id: "sp-1",
+    kind: "human",
+    display_name: "Lisi",
+    access_level: "owner",
+    created_at: "2026-11-19T10:00:00Z",
+  },
+  members: [
+    {
+      id: "m-lisi",
+      space_id: "sp-1",
+      kind: "human",
+      display_name: "Lisi",
+      access_level: "owner",
+      created_at: "2026-11-19T10:00:00Z",
+    },
+    {
+      id: "m-sam",
+      space_id: "sp-1",
+      kind: "human",
+      display_name: "Sam",
+      access_level: "member",
+      created_at: "2026-11-19T10:00:00Z",
+    },
+    {
+      id: "m-lin",
+      space_id: "sp-1",
+      kind: "agent",
+      display_name: "Lin",
+      access_level: "member",
+      agent: {
+        computer_id: "c-1",
+        role_text: "Backend engineer",
+        driver_kind: "acp",
+        driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini" },
+        focus_conversation_id: "conv-eng",
+        runtime_state: "working",
+      },
+      created_at: "2026-11-19T10:00:00Z",
+    },
+    {
+      id: "m-kira",
+      space_id: "sp-1",
+      kind: "agent",
+      display_name: "Kira",
+      access_level: "member",
+      agent: {
+        computer_id: "c-1",
+        role_text: "Code reviewer",
+        driver_kind: "builtin",
+        driver_config: { base_url: "http://127.0.0.1:4000/v1", model: "claude-sonnet" },
+        runtime_state: "idle",
+      },
+      created_at: "2026-11-19T10:00:00Z",
+    },
+    {
+      id: "m-ops",
+      space_id: "sp-1",
+      kind: "agent",
+      display_name: "OpsBot",
+      access_level: "member",
+      agent: {
+        computer_id: "c-2",
+        role_text: "Release monitor",
+        driver_kind: "acp",
+        driver_config: { provider: "claude" },
+        runtime_state: "error",
+        last_error_code: "driver_config_invalid",
+      },
+      created_at: "2026-11-19T10:00:00Z",
+    },
+  ],
+  conversations: [
+    {
+      id: "conv-eng",
+      space_id: "sp-1",
+      kind: "public",
+      slug: "engineering",
+      topic: "Core runtime",
+      next_seq: 1,
+      read_seq: 1,
+      unread_count: 0,
+      mention_count: 0,
+      notify_level: "mentions",
+      following: false,
+    },
+  ],
+  inbox: [],
+  tasks: [],
+  computers: [
+    {
+      id: "c-1",
+      owner_member_id: "m-lisi",
+      name: "mac-studio",
+      hostname: "mac.local",
+      os: "macos",
+      connection_status: "online",
+      acp_providers: ["pi", "claude"],
+      created_at: "2026-11-19T10:00:00Z",
+    },
+    {
+      id: "c-2",
+      owner_member_id: "m-sam",
+      name: "linux-box",
+      hostname: "box.internal",
+      os: "linux",
+      connection_status: "offline",
+      acp_providers: ["codex"],
+      created_at: "2026-11-19T10:00:00Z",
+    },
+  ],
+};
+
+function renderAdmin(tab: AdminTab, overrides: Partial<Parameters<typeof AdminPanel>[0]> = {}) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const props: Parameters<typeof AdminPanel>[0] = {
+    boot: sampleBoot,
+    tab,
+    onTab: vi.fn(),
+    onInspectAgent: vi.fn(),
+    onInspectHuman: vi.fn(),
+    onOpenDM: vi.fn(),
+    onNewAgent: vi.fn(),
+    onCopyAgent: vi.fn(),
+    onConnectComputer: vi.fn(),
+    theme: "system",
+    onTheme: vi.fn(),
+    onLogout: vi.fn(),
+    ...overrides,
+  };
+  const view = render(
+    <QueryClientProvider client={qc}>
+      <AdminPanel {...props} />
+    </QueryClientProvider>,
+  );
+  return { ...view, props };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("AdminPanel", () => {
+  it("filters agents by status and search query and triggers quick DM and copy actions", () => {
+    const { props } = renderAdmin("agents");
+
+    // Status filter tabs include Error when an agent is in error state.
+    const statusTabs = screen.getByRole("tablist", { name: "Filter agents by status" });
+    expect(within(statusTabs).getByRole("tab", { name: /All 3/ })).toBeTruthy();
+    expect(within(statusTabs).getByRole("tab", { name: /Working 1/ })).toBeTruthy();
+    expect(within(statusTabs).getByRole("tab", { name: /Idle 1/ })).toBeTruthy();
+    expect(within(statusTabs).getByRole("tab", { name: /Error 1/ })).toBeTruthy();
+
+    fireEvent.click(within(statusTabs).getByRole("tab", { name: /Error 1/ }));
+    expect(screen.getByText("OpsBot")).toBeTruthy();
+    expect(screen.queryByText("Lin")).toBeNull();
+    expect(screen.queryByText("Kira")).toBeNull();
+
+    fireEvent.click(within(statusTabs).getByRole("tab", { name: /All 3/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search agents" }), { target: { value: "gpt-5-mini" } });
+    expect(screen.getByText("Lin")).toBeTruthy();
+    expect(screen.queryByText("Kira")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Lin" }));
+    expect(props.onOpenDM).toHaveBeenCalledWith("m-lin");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Lin to new agent" }));
+    expect(props.onCopyAgent).toHaveBeenCalledWith(expect.objectContaining({ id: "m-lin" }));
+  });
+
+  it("renders Settings sections with theme selection, space accent update, and sign out", async () => {
+    vi.spyOn(api, "listArchivedChannels").mockResolvedValue({ conversations: [] });
+    const updateSpace = vi.spyOn(api, "updateSpace").mockResolvedValue({
+      space: { ...sampleBoot.space, accent: "sky" },
+    });
+    const { props } = renderAdmin("settings");
+
+    const themeGroup = screen.getByRole("radiogroup", { name: "Theme" });
+    fireEvent.click(within(themeGroup).getByRole("radio", { name: "Dark" }));
+    expect(props.onTheme).toHaveBeenCalledWith("dark");
+
+    const accentGroup = screen.getByRole("radiogroup", { name: "Space accent" });
+    fireEvent.click(within(accentGroup).getByRole("radio", { name: "Sky" }));
+    await waitFor(() => expect(updateSpace).toHaveBeenCalledWith("studio", { accent: "sky" }));
+
+    expect(await screen.findByText("No archived channels in this space.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(props.onLogout).toHaveBeenCalledTimes(1);
+  });
+});
