@@ -577,6 +577,7 @@ func DefaultDriverBuilder(spec protocol.AssignedAgentSpec, homeDir string) (driv
 				SessionDir:       filepath.Join(runtimeDir, "sessions"),
 				SessionFile:      filepath.Join(homeDir, "pi-session.json"),
 				SystemPromptFile: filepath.Join(runtimeDir, "SYSTEM.md"),
+				SettingsFile:     filepath.Join(runtimeDir, "settings.json"),
 				Fingerprint:      fingerprint,
 			}), nil
 		}

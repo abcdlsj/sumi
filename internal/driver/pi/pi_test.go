@@ -116,10 +116,7 @@ func TestFakePiRPC(t *testing.T) {
 				"type":    "response",
 				"command": "get_state",
 				"success": true,
-				"data": map[string]any{
-					"sessionFile": sessionFile,
-					"sessionId":   "sess-1",
-				},
+				"data":    fakeState(sessionFile, resumePath),
 			})
 		case "prompt":
 			turns++
@@ -291,6 +288,19 @@ func TestFakePiRPC(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+// fakeState reports SUMI_FAKE_PI_MODEL ("provider/id"), or SUMI_FAKE_PI_RESUME_MODEL for a resumed session.
+func fakeState(sessionFile, resumePath string) map[string]any {
+	data := map[string]any{"sessionFile": sessionFile, "sessionId": "sess-1"}
+	model := os.Getenv("SUMI_FAKE_PI_MODEL")
+	if r := os.Getenv("SUMI_FAKE_PI_RESUME_MODEL"); r != "" && resumePath != "" {
+		model = r
+	}
+	if provider, id, ok := strings.Cut(model, "/"); ok {
+		data["model"] = map[string]any{"provider": provider, "id": id}
+	}
+	return data
 }
 
 func newFakeDriver(t *testing.T, mode string, cfg Config) (*Driver, driver.TurnInput, string) {
@@ -1061,4 +1071,110 @@ func TestStartProcessNamesMissingWorkDir(t *testing.T) {
 	if !strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), "fork/exec") {
 		t.Fatalf("error must name the missing work dir, got %v", err)
 	}
+}
+
+func TestResolvedModelMismatchFailsStart(t *testing.T) {
+	writeSettings := func(t *testing.T, path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("fallback model is rejected", func(t *testing.T) {
+		settings := filepath.Join(t.TempDir(), "settings.json")
+		writeSettings(t, settings, `{"defaultProvider":"commandcode","defaultModel":"deepseek/deepseek-v4.1-flash"}`)
+		d, in, _ := newFakeDriver(t, "ok", Config{SettingsFile: settings})
+		defer d.Close()
+		in.Env = append(in.Env, "SUMI_FAKE_PI_MODEL=anthropic/claude-opus-5-5")
+		_, err := d.RunTurn(context.Background(), in)
+		var f *driver.Failure
+		if !errors.As(err, &f) || f.Code != domain.AgentErrDriverConfigInvalid {
+			t.Fatalf("want driver_config_invalid, got %v", err)
+		}
+		want := "pi resolved anthropic/claude-opus-5-5, expected commandcode/deepseek/deepseek-v4.1-flash"
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q must name both models", err)
+		}
+		if d.proc != nil {
+			t.Fatal("mismatched pi process must be stopped")
+		}
+	})
+
+	t.Run("matching model with slash in id runs", func(t *testing.T) {
+		settings := filepath.Join(t.TempDir(), "settings.json")
+		writeSettings(t, settings, `{"defaultProvider":"commandcode","defaultModel":"deepseek/deepseek-v4.1-flash"}`)
+		d, in, _ := newFakeDriver(t, "ok", Config{SettingsFile: settings})
+		defer d.Close()
+		in.Env = append(in.Env, "SUMI_FAKE_PI_MODEL=commandcode/deepseek/deepseek-v4.1-flash")
+		if _, err := d.RunTurn(context.Background(), in); err != nil {
+			t.Fatalf("turn: %v", err)
+		}
+	})
+
+	t.Run("provider-qualified defaultModel matches", func(t *testing.T) {
+		settings := filepath.Join(t.TempDir(), "settings.json")
+		writeSettings(t, settings, `{"defaultModel":"openai/gpt-5"}`)
+		d, in, _ := newFakeDriver(t, "ok", Config{SettingsFile: settings})
+		defer d.Close()
+		in.Env = append(in.Env, "SUMI_FAKE_PI_MODEL=openai/gpt-5")
+		if _, err := d.RunTurn(context.Background(), in); err != nil {
+			t.Fatalf("turn: %v", err)
+		}
+	})
+
+	t.Run("no model selected is rejected", func(t *testing.T) {
+		settings := filepath.Join(t.TempDir(), "settings.json")
+		writeSettings(t, settings, `{"defaultProvider":"openai"}`)
+		d, in, _ := newFakeDriver(t, "ok", Config{SettingsFile: settings})
+		defer d.Close()
+		_, err := d.RunTurn(context.Background(), in)
+		if err == nil || !strings.Contains(err.Error(), "pi resolved no model, expected openai") {
+			t.Fatalf("err=%v", err)
+		}
+	})
+
+	t.Run("no settings skips the check", func(t *testing.T) {
+		d, in, _ := newFakeDriver(t, "ok", Config{SettingsFile: filepath.Join(t.TempDir(), "missing.json")})
+		defer d.Close()
+		if _, err := d.RunTurn(context.Background(), in); err != nil {
+			t.Fatalf("turn: %v", err)
+		}
+	})
+
+	t.Run("resumed session on an old model falls back to a fresh session", func(t *testing.T) {
+		settings := filepath.Join(t.TempDir(), "settings.json")
+		writeSettings(t, settings, `{"defaultProvider":"openai","defaultModel":"gpt-5"}`)
+		d, in, logPath := newFakeDriver(t, "ok", Config{SettingsFile: settings, Fingerprint: "fp"})
+		in.Env = append(in.Env, "SUMI_FAKE_PI_MODEL=openai/gpt-5")
+		if _, err := d.RunTurn(context.Background(), in); err != nil {
+			t.Fatal(err)
+		}
+		_ = d.Close()
+
+		d2 := New(d.cfg)
+		defer d2.Close()
+		in.Env = append(in.Env, "SUMI_FAKE_PI_RESUME_MODEL=deepseek/deepseek-chat")
+		if _, err := d2.RunTurn(context.Background(), in); err != nil {
+			t.Fatalf("stale model on resume must retry fresh: %v", err)
+		}
+		var prompts, opens []string
+		for _, l := range readLogLines(logPath) {
+			if strings.HasPrefix(l, "PROMPT:") {
+				prompts = append(prompts, l)
+			}
+			if strings.HasPrefix(l, "OPEN:") {
+				opens = append(opens, l)
+			}
+		}
+		if len(opens) != 3 || opens[0] != "OPEN:new" || !strings.HasPrefix(opens[1], "OPEN:resume:") || opens[2] != "OPEN:new" {
+			t.Fatalf("launches=%v, want new, rejected resume, then new", opens)
+		}
+		if last := prompts[len(prompts)-1]; !strings.Contains(last, "MEMORY SNAPSHOT") {
+			t.Fatalf("fresh session must carry startup context, got %q", last)
+		}
+	})
 }

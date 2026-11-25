@@ -73,6 +73,9 @@ type Config struct {
 	SystemPromptFile string
 	// Fingerprint pins provider, model, and packages so a changed spec never resumes a stale session.
 	Fingerprint string
+	// SettingsFile is the isolated pi settings.json. Its defaultProvider/defaultModel are the model
+	// pi must resolve at startup; a different model fails the start instead of running silently.
+	SettingsFile string
 	// SoftCompactionTokens triggers proactive `compact` after a settled turn when context usage
 	// exceeds min(SoftCompactionTokens, 75% of contextWindow). Zero uses DefaultSoftCompactionTokens;
 	// negative values disable proactive compaction.
@@ -551,8 +554,20 @@ func (d *Driver) spawnAndProbeLocked(ctx context.Context, workDir string, env []
 	}
 	var st struct {
 		SessionFile string `json:"sessionFile"`
+		Model       *struct {
+			Provider string `json:"provider"`
+			ID       string `json:"id"`
+		} `json:"model"`
 	}
 	_ = json.Unmarshal(data, &st)
+	var gotProvider, gotModel string
+	if st.Model != nil {
+		gotProvider, gotModel = st.Model.Provider, st.Model.ID
+	}
+	if err := d.checkResolvedModel(gotProvider, gotModel); err != nil {
+		d.stopLocked()
+		return err
+	}
 	if st.SessionFile != "" {
 		d.sessionFile = st.SessionFile
 	} else if resumeFile != "" {
@@ -563,6 +578,45 @@ func (d *Driver) spawnAndProbeLocked(ctx context.Context, workDir string, env []
 		_ = d.saveSession(d.sessionFile, d.lastActiveAt, d.lastContextTokens, d.lastContextWindow)
 	}
 	return nil
+}
+
+// expectedModel reads the provider and model pi should start with from SettingsFile.
+func (d *Driver) expectedModel() (provider, model string) {
+	if d.cfg.SettingsFile == "" {
+		return "", ""
+	}
+	raw, err := os.ReadFile(d.cfg.SettingsFile)
+	if err != nil {
+		return "", ""
+	}
+	var s struct {
+		DefaultProvider string `json:"defaultProvider"`
+		DefaultModel    string `json:"defaultModel"`
+	}
+	_ = json.Unmarshal(raw, &s)
+	return strings.TrimSpace(s.DefaultProvider), strings.TrimSpace(s.DefaultModel)
+}
+
+// checkResolvedModel fails the start when pi resolved a different model than its settings name,
+// which happens when the configured provider is unknown (e.g. its plugin is missing) and pi
+// falls back to another provider. defaultModel may also be written as "provider/id".
+func (d *Driver) checkResolvedModel(gotProvider, gotModel string) error {
+	wantProvider, wantModel := d.expectedModel()
+	if wantProvider == "" && wantModel == "" {
+		return nil
+	}
+	providerOK := wantProvider == "" || gotProvider == wantProvider
+	modelOK := wantModel == "" || gotModel == wantModel || gotProvider+"/"+gotModel == wantModel
+	if gotModel != "" && providerOK && modelOK {
+		return nil
+	}
+	want := strings.Trim(wantProvider+"/"+wantModel, "/")
+	got := "no model"
+	if gotModel != "" {
+		got = gotProvider + "/" + gotModel
+	}
+	return driver.Fail(domain.AgentErrDriverConfigInvalid,
+		fmt.Errorf("pi resolved %s, expected %s; check that its provider is configured or its plugin is installed", got, want))
 }
 
 type settledEvent struct {
