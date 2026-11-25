@@ -174,7 +174,7 @@ export function MentionPopup({ picker }: { picker: MentionPicker }) {
     <div
       role="listbox"
       aria-label="Mention candidates"
-      className="absolute left-2 bottom-full mb-2 z-30 w-[300px] max-h-[248px] overflow-y-auto scroll-thin bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
+      className="absolute left-2 bottom-full mb-2 z-30 w-[300px] max-h-[248px] overflow-y-auto scroll-thin bg-card border border-line-strong rounded-[6px] shadow-lg p-1 animate-pop-in"
     >
       {picker.candidates.map((m, i) => {
         const outside = i >= picker.inChannelCount;

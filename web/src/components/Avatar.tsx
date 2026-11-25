@@ -80,11 +80,11 @@ const SPRITE_FILLS: Record<SpriteCell, string> = {
   4: "var(--sprite-accent)",
 };
 
-const SIZES = { xs: 20, sm: 24, md: 32, lg: 40, xl: 56 } as const;
+const SIZES = { xs: 20, sm: 24, md: 36, lg: 40, xl: 56 } as const;
 export type AvatarSize = keyof typeof SIZES;
 
 function avatarRadius(px: number): number {
-  return Math.max(4, Math.round(px * 0.18));
+  return px <= 24 ? 4 : px <= 40 ? 5 : 6;
 }
 
 export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?: AvatarSize; label?: string }) {

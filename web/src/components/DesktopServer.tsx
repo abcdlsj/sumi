@@ -43,7 +43,7 @@ export function DesktopServerTrigger({ variant }: { variant: "rail" | "pill" }) 
           onClick={() => setOpen(true)}
           title={`Server: ${label} · Switch`}
           aria-label={`Server: ${label}`}
-          className="relative mt-1 size-9 rounded-[7px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
+          className="relative mt-1 size-9 rounded-[5px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
         >
           {isLocal ? <HardDrive className="size-[16px]" /> : <Globe className="size-[16px]" />}
           {!isLocal && <span className="absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] bg-accent" />}

@@ -72,7 +72,7 @@ export function WorkingAgentsPopover({
       role="dialog"
       aria-label="Working now"
       style={style}
-      className="z-50 bg-card border border-line rounded-[8px] shadow-lg overflow-hidden animate-pop-in"
+      className="z-50 bg-card border border-line-strong rounded-[6px] shadow-lg overflow-hidden animate-pop-in"
     >
       <div className="h-9 px-3 border-b border-line flex items-center justify-between text-[12px] font-semibold text-fg-2">
         <span>Working now</span>
@@ -303,7 +303,7 @@ export function MemberHoverCard({
             onMouseEnter={scheduleOpen}
             onMouseLeave={scheduleClose}
             style={style}
-            className="z-50 p-3 rounded-[8px] bg-card border border-line shadow-lg animate-pop-in"
+            className="z-50 p-3 rounded-[6px] bg-card border border-line-strong shadow-lg animate-pop-in"
           >
             <div className="flex items-start gap-2.5">
               <MemberAvatar id={member.id} name={member.display_name} kind={member.kind} size="md" state={st} ring="var(--card)" />

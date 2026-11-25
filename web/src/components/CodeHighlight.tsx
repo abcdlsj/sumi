@@ -244,14 +244,14 @@ function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
 
   const srcDoc = useMemo(() => {
     if (!svg) return "";
-    const bg = dark ? "#18181d" : "#ffffff";
+    const bg = dark ? "#212630" : "#ffffff";
     return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>html,body{margin:0;padding:12px;background:${bg};display:flex;justify-content:center;align-items:flex-start;overflow:auto;}svg{max-width:100%;height:auto;transform-origin:top center;transform:scale(${zoom});}</style></head><body>${svg}</body></html>`;
   }, [svg, dark, zoom]);
 
   const showDiagram = mode === "diagram" && !failed;
 
   return (
-    <div className="my-2 rounded-[7px] border border-line bg-card overflow-hidden">
+    <div className="my-2 rounded-[6px] border border-line bg-card overflow-hidden">
       <div className="h-8 px-2.5 border-b border-line bg-subtle/70 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3">
           <GitBranch className="size-3.5 text-fg-4" />
@@ -279,13 +279,13 @@ function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
               </button>
             </>
           )}
-          <div className="p-0.5 rounded-[5px] bg-subtle border border-line inline-flex items-center">
+          <div className="p-0.5 rounded-[4px] bg-subtle border border-line inline-flex items-center">
             <button
               type="button"
               onClick={() => setMode("diagram")}
               disabled={failed}
               className={`h-5 px-1.5 rounded-[3px] text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                showDiagram ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                showDiagram ? "bg-card text-fg" : "text-fg-3 hover:text-fg"
               }`}
             >
               Diagram
@@ -294,7 +294,7 @@ function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
               type="button"
               onClick={() => setMode("code")}
               className={`h-5 px-1.5 rounded-[3px] text-[11px] font-medium inline-flex items-center gap-1 transition-colors ${
-                !showDiagram ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                !showDiagram ? "bg-card text-fg" : "text-fg-3 hover:text-fg"
               }`}
             >
               <Code2 className="size-3" />
@@ -420,7 +420,7 @@ export function CodeBlock({
 
   if (rawLang) {
     return (
-      <div className={`my-2 rounded-[7px] border border-line bg-subtle overflow-hidden ${className}`}>
+      <div className={`my-2 rounded-[6px] border border-line bg-subtle overflow-hidden ${className}`}>
         <div className="h-8 px-3 border-b border-line bg-card/50 flex items-center justify-between gap-2">
           <span className="font-mono text-[11.5px] text-fg-3 select-none truncate">{rawLang}</span>
           {copyBtn}
@@ -434,7 +434,7 @@ export function CodeBlock({
 
   // Unlabelled fenced block: reserve a dedicated right column for Copy so it never overlaps line 1.
   return (
-    <div className={`group/code my-2 rounded-[7px] border border-line bg-subtle flex items-start overflow-hidden ${className}`}>
+    <div className={`group/code my-2 rounded-[6px] border border-line bg-subtle flex items-start overflow-hidden ${className}`}>
       <pre className="!m-0 !border-0 !rounded-none !bg-transparent flex-1 min-w-0 px-3.5 py-2.5 overflow-x-auto text-[13px] leading-[1.55] font-mono scroll-thin">
         {codeBody}
       </pre>

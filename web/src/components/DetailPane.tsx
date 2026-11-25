@@ -193,7 +193,7 @@ function CompactMessage({
           pickerOpen
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
-        } transition-opacity duration-100 bg-card border border-line rounded-[6px] p-0.5 shadow-sm z-20`}
+        } transition-opacity duration-100 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-sm z-20`}
       >
         <ReactionPickerButton
           reactions={m.reactions}
@@ -250,7 +250,7 @@ function ReplyBox({
     <form onSubmit={submit} className="p-3 border-t border-line shrink-0">
       <div
         {...draft.dropProps}
-        className={`relative rounded-[8px] border bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+        className={`relative rounded-[6px] border bg-card focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
           draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
         }`}
       >
@@ -284,7 +284,7 @@ function ReplyBox({
             type="submit"
             aria-label="Send"
             disabled={busy || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
-            className="size-8 rounded-[6px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
+            className="size-8 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
           >
             <ArrowUp className="size-4" />
           </button>
@@ -1402,25 +1402,27 @@ function AgentDetail({
       >
         <span className="font-semibold text-fg">Agent</span>
       </PaneHeader>
-      <div className="px-4 py-2 border-b border-line flex items-center gap-1 shrink-0 bg-panel">
+      <div className="h-10 px-4 border-b border-line flex items-stretch gap-1 shrink-0 bg-panel">
         <button
           type="button"
           onClick={() => setTab("overview")}
-          className={`h-7 px-3 rounded-[5px] text-[13px] font-medium transition-colors ${
-            tab === "overview" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
+          className={`relative px-2.5 text-[13px] inline-flex items-center transition-colors ${
+            tab === "overview" ? "text-fg font-semibold" : "text-fg-3 font-medium hover:text-fg"
           }`}
         >
           Overview
+          {tab === "overview" && <span aria-hidden className="absolute inset-x-1 bottom-0 h-[2px] bg-accent" />}
         </button>
         <button
           type="button"
           onClick={() => setTab("workspace")}
-          className={`h-7 px-3 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors ${
-            tab === "workspace" ? "bg-subtle text-fg" : "text-fg-3 hover:text-fg hover:bg-hover"
+          className={`relative px-2.5 text-[13px] inline-flex items-center gap-1.5 transition-colors ${
+            tab === "workspace" ? "text-fg font-semibold" : "text-fg-3 font-medium hover:text-fg"
           }`}
         >
           <FolderOpen className="size-3.5" />
           Workspace
+          {tab === "workspace" && <span aria-hidden className="absolute inset-x-1 bottom-0 h-[2px] bg-accent" />}
         </button>
       </div>
       {savingTemplate && (

@@ -92,7 +92,7 @@ export function ActionCard({
         data-testid="action-card"
         data-card-type={card.card_type}
         data-card-status={card.status}
-        className="mt-1.5 rounded-[8px] border border-line bg-card max-w-[440px] overflow-hidden shadow-xs"
+        className="mt-1.5 rounded-[6px] border border-line-strong bg-card max-w-[440px] overflow-hidden"
       >
         <div className="px-3.5 py-2.5 border-b border-line flex items-center justify-between gap-2 bg-subtle/35">
           <div className="flex items-center gap-2 min-w-0">

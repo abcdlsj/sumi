@@ -105,8 +105,8 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
   return kind;
 }
 
-/** Honest runtime line above the composer: shows working agents (with popover when multiple) or DM peer state. */
-function AgentStatusLine({
+/** Fixed-height status & shortcut footer below the composer so agent state transitions never shift layout. */
+function ComposerStatusFooter({
   spaceSlug,
   boot,
   conv,
@@ -121,6 +121,7 @@ function AgentStatusLine({
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const [sendKey] = useSendKey();
   const [popOpen, setPopOpen] = useState(false);
   const [stoppingID, setStoppingID] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -136,6 +137,7 @@ function AgentStatusLine({
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
+  let statusContent: React.ReactNode = null;
   if (busyHere.length > 0 && conv.kind !== "dm") {
     const names = busyHere.map((a) => a.display_name);
     const label =
@@ -144,9 +146,9 @@ function AgentStatusLine({
         : names.length === 2
           ? `${names[0]} and ${names[1]} are working here`
           : `${names[0]}, ${names[1]} and ${names.length - 2} ${names.length - 2 === 1 ? "other" : "others"} are working here`;
-    return (
-      <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
-        <StatusDot state="working" ring="var(--panel)" size={8} />
+    statusContent = (
+      <>
+        <StatusDot state="working" ring="var(--panel)" size={7} />
         <button
           ref={triggerRef}
           type="button"
@@ -186,44 +188,59 @@ function AgentStatusLine({
             onStopAgent={canGovern ? (id) => void stopAgent(id) : undefined}
           />
         )}
-      </div>
+      </>
     );
-  }
+  } else {
+    const subject: Member | undefined = peer ?? busyHere[0];
+    if (subject?.agent) {
+      const st = subject.agent.runtime_state;
+      const focus = agentFocus(boot, subject);
+      const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
+      const tone = st === "error" ? "text-danger" : st === "working" ? "text-busy" : "text-fg-3";
+      let text = agentStatusText(boot, subject);
+      if (st === "working" && !elsewhere) text = "is working on a reply…";
+      else if (elsewhere) text = `is busy in ${focus?.label ?? "another conversation"} · your message is queued`;
+      else if (st === "idle") text = "is idle · messages wake it";
+      else if (st === "offline") text = "is offline · messages wait until its computer reconnects";
+      else if (st === "error") text = `hit an error · ${subject.agent.last_error_code || "see details"}`;
 
-  const subject: Member | undefined = peer ?? busyHere[0];
-  if (!subject?.agent) {
-    return <div className="h-2 shrink-0" aria-live="polite" />;
+      statusContent = (
+        <>
+          <StatusDot state={st} ring="var(--panel)" size={7} />
+          <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
+            <span className="font-semibold">{subject.display_name}</span> {text}
+          </button>
+          {canGovern && st === "working" && (
+            <button
+              type="button"
+              disabled={stoppingID === subject.id}
+              onClick={() => void stopAgent(subject.id)}
+              aria-label={`Stop ${subject.display_name}`}
+              className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
+            >
+              <Square className="size-2.5 fill-current" />
+              Stop
+            </button>
+          )}
+        </>
+      );
+    }
   }
-  const st = subject.agent.runtime_state;
-  const focus = agentFocus(boot, subject);
-  const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
-
-  const tone = st === "error" ? "text-danger" : st === "working" ? "text-busy" : "text-fg-3";
-  let text = agentStatusText(boot, subject);
-  if (st === "working" && !elsewhere) text = "is working on a reply…";
-  else if (elsewhere) text = `is busy in ${focus?.label ?? "another conversation"} · your message is queued`;
-  else if (st === "idle") text = "is idle · messages wake it";
-  else if (st === "offline") text = "is offline · messages wait until its computer reconnects";
-  else if (st === "error") text = `hit an error · ${subject.agent.last_error_code || "see details"}`;
 
   return (
-    <div className="h-7 px-5 pt-1 flex items-center gap-2 text-[12.5px] shrink-0" aria-live="polite">
-      <StatusDot state={st} ring="var(--panel)" size={8} />
-      <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
-        <span className="font-semibold">{subject.display_name}</span> {text}
-      </button>
-      {canGovern && st === "working" && (
-        <button
-          type="button"
-          disabled={stoppingID === subject.id}
-          onClick={() => void stopAgent(subject.id)}
-          aria-label={`Stop ${subject.display_name}`}
-          className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
-        >
-          <Square className="size-2.5 fill-current" />
-          Stop
-        </button>
-      )}
+    <div className="h-6 px-5 pb-1 flex items-center justify-between gap-3 text-[12px] shrink-0" aria-live="polite">
+      <div className="flex items-center gap-1.5 min-w-0">{statusContent}</div>
+      <span className="text-[11.5px] text-fg-4 hidden md:inline shrink-0">
+        {sendKey === "mod_enter" ? (
+          <>
+            <kbd className="font-sans">{isMacPlatform() ? "⌘" : "Ctrl"}+Enter</kbd> send · <kbd className="font-sans">Enter</kbd> newline
+          </>
+        ) : (
+          <>
+            <kbd className="font-sans">Enter</kbd> send · <kbd className="font-sans">Shift+Enter</kbd> newline
+          </>
+        )}
+      </span>
     </div>
   );
 }
@@ -239,10 +256,10 @@ function ActionMessageGroup({ items }: { items: Message[] }) {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2.5 text-[12.5px] text-fg-3 hover:text-fg transition-colors py-0.5"
+        className="flex items-center gap-3 text-[12.5px] text-fg-3 hover:text-fg transition-colors py-0.5"
       >
-        <span className="w-8 flex justify-center shrink-0">
-          <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
+        <span className="w-9 flex justify-center shrink-0">
+          <span className="size-5 rounded-[4px] bg-subtle border border-line flex items-center justify-center">
             {open ? <ChevronDown className="size-3 text-fg-3" /> : <ChevronRight className="size-3 text-fg-3" />}
           </span>
         </span>
@@ -251,7 +268,7 @@ function ActionMessageGroup({ items }: { items: Message[] }) {
         {lastAt && <span className="tabular text-[11.5px] text-fg-4 shrink-0">{formatClock(lastAt)}</span>}
       </button>
       {open && (
-        <div className="mt-1 ml-11 pl-3 border-l border-line space-y-1 animate-fade-in">
+        <div className="mt-1 ml-12 pl-3 border-l border-line space-y-1 animate-fade-in">
           {items.map((m) => (
             <div key={m.id} className="text-[12.5px] text-fg-3 leading-relaxed">
               <span className="font-medium text-fg-2">{m.author_display_name}</span>{" "}
@@ -303,11 +320,11 @@ function buildStreamEntries(messages: Message[], boundary: number, selfID: strin
 function DayDivider({ iso }: { iso: string }) {
   return (
     <div className="sticky top-0 z-10 px-6 py-2.5 flex items-center gap-3 pointer-events-none">
-      <span className="flex-1 h-px bg-line/80" />
-      <span className="h-6 px-2.5 rounded-[5px] bg-panel/95 backdrop-blur border border-line text-[11.5px] font-medium text-fg-3 inline-flex items-center shadow-sm">
+      <span className="flex-1 h-px bg-line" />
+      <span className="h-6 px-2.5 rounded-[4px] bg-panel border border-line-strong text-[11.5px] font-semibold text-fg-2 inline-flex items-center">
         {formatDay(iso)}
       </span>
-      <span className="flex-1 h-px bg-line/80" />
+      <span className="flex-1 h-px bg-line" />
     </div>
   );
 }
@@ -414,16 +431,16 @@ function MessageComposer({
   }
 
   return (
-    <form onSubmit={(e) => void handleSend(e)} className="px-4 pb-4 pt-1">
+    <form onSubmit={(e) => void handleSend(e)} className="px-5 pt-2 pb-1">
       <div
         {...draft.dropProps}
-        className={`relative bg-card border rounded-[8px] shadow-sm focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
+        className={`relative bg-card border rounded-[6px] focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
           draft.dragging ? "border-accent bg-accent-soft/40" : "border-line-strong"
         }`}
       >
         <MentionPopup picker={mentions} />
         {outsideMentions.length > 0 && (
-          <div className="mx-2 mt-2 px-3 py-2 rounded-[6px] bg-busy-soft/60 border border-busy/25 flex items-center gap-2 text-[12.5px] text-fg-2 animate-fade-in">
+          <div className="mx-2 mt-2 px-3 py-2 rounded-[4px] bg-busy-soft/60 border border-busy/25 flex items-center gap-2 text-[12.5px] text-fg-2 animate-fade-in">
             <UserPlus className="size-3.5 text-busy shrink-0" />
             <span className="min-w-0 flex-1 truncate">
               <span className="font-semibold text-fg">{outsideMentions.map((m) => `@${m.display_name}`).join(", ")}</span>{" "}
@@ -452,13 +469,13 @@ function MessageComposer({
           </div>
         )}
         {replyTarget && (
-          <div className="mx-2 mt-2 px-3 py-2 rounded-[6px] bg-subtle flex items-center gap-2 text-[13px] animate-fade-in">
+          <div className="mx-2 mt-2 px-3 py-1.5 rounded-[4px] bg-subtle border border-line flex items-center gap-2 text-[13px] animate-fade-in">
             <CornerUpLeft className="size-3.5 text-fg-3 shrink-0" />
             <span className="text-fg-3 shrink-0">Replying in thread to</span>
-            <span className="font-medium text-fg shrink-0">{replyTarget.author_display_name}</span>
+            <span className="font-semibold text-fg shrink-0">{replyTarget.author_display_name}</span>
             <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
             <span className="flex-1" />
-            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[5px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
+            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[4px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
               <X className="size-3.5" />
             </button>
           </div>
@@ -484,32 +501,19 @@ function MessageComposer({
           }}
           placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
           aria-label={replyingTo ? "Reply in thread" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
-          className="block w-full px-4 pt-3 pb-1 min-h-[48px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
+          className="block w-full px-3.5 pt-2.5 pb-2 min-h-[44px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
         />
         <AttachmentDraftRow draft={draft} />
-        <div className="px-2.5 pb-2.5 flex items-center justify-between gap-2">
+        <div className="px-2 py-1.5 border-t border-line bg-subtle/45 rounded-b-[5px] flex items-center justify-between gap-2">
           <AttachmentPicker draft={draft} />
-          <div className="flex items-center gap-3">
-            <span className="text-[12px] text-fg-4 hidden md:inline">
-              {sendKey === "mod_enter" ? (
-                <>
-                  <kbd className="font-sans">{isMacPlatform() ? "⌘" : "Ctrl"} + Enter</kbd> to send · <kbd className="font-sans">Enter</kbd> for a new line
-                </>
-              ) : (
-                <>
-                  <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
-                </>
-              )}
-            </span>
-            <button
-              type="submit"
-              aria-label="Send"
-              disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
-              className="size-8 rounded-[6px] bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors active:scale-95"
-            >
-              <ArrowUp className="size-4" />
-            </button>
-          </div>
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
+            className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1 text-[12.5px] font-medium transition-colors"
+          >
+            <ArrowUp className="size-3.5" />
+          </button>
         </div>
       </div>
     </form>
@@ -914,8 +918,8 @@ export function ConversationView({
                       </div>
                     )}
                     {isActionCardMessage(m) ? (
-                      <article className="px-6 pt-3 pb-1.5 flex items-start gap-3.5">
-                        <div className="w-8 shrink-0">
+                      <article className="px-6 pt-3 pb-1.5 flex items-start gap-3">
+                        <div className="w-9 shrink-0">
                           <button
                             type="button"
                             onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
@@ -931,16 +935,16 @@ export function ConversationView({
                             />
                           </button>
                         </div>
-                        <div className="min-w-0 flex-1 max-w-[740px]">
-                          <div className="flex items-center gap-2 h-5">
+                        <div className="min-w-0 flex-1 max-w-[920px]">
+                          <div className="flex items-baseline gap-2 h-5">
                             <button
                               type="button"
                               onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                              className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                              className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
                             >
                               {m.author_display_name}
                             </button>
-                            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                            <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
                           </div>
                           <ActionCard
                             spaceSlug={spaceSlug}
@@ -953,23 +957,23 @@ export function ConversationView({
                       </article>
                     ) : m.kind !== "text" ? (
                       <div className="px-6 py-1.5 flex items-center gap-3 text-[13px] text-fg-3">
-                        <span className="w-8 flex justify-center">
-                          <span className="size-5 rounded-full bg-subtle border border-line flex items-center justify-center">
+                        <span className="w-9 flex justify-center shrink-0">
+                          <span className="size-5 rounded-[4px] bg-subtle border border-line flex items-center justify-center">
                             <Sparkles className="size-3 text-fg-3" />
                           </span>
                         </span>
                         <span className="min-w-0">
                           <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-                          <span className="ml-2 tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                          <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
                         </span>
                       </div>
                     ) : (
                       <article
-                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3.5 pb-1"} flex items-start gap-3.5 group transition-colors duration-200 ${
-                          replyingTo === m.id || highlightedMsgID === m.id ? "bg-accent-soft" : "hover:bg-subtle/60"
+                        className={`relative px-6 ${grouped ? "py-[3px]" : "pt-3 pb-1"} flex items-start gap-3 group transition-colors duration-100 ${
+                          replyingTo === m.id || highlightedMsgID === m.id ? "bg-accent-soft" : "hover:bg-subtle/85"
                         }`}
                       >
-                        <div className="w-8 shrink-0">
+                        <div className="w-9 shrink-0">
                           {grouped ? (
                             <span className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100 transition-opacity">
                               {formatClock(m.created_at)}
@@ -990,9 +994,9 @@ export function ConversationView({
                             </button>
                           )}
                         </div>
-                        <div className="min-w-0 flex-1 max-w-[740px]">
+                        <div className="min-w-0 flex-1 max-w-[920px]">
                           {!grouped && (
-                            <div className="flex items-center gap-2 h-5">
+                            <div className="flex items-baseline gap-2 h-5">
                               <MemberHoverCard
                                 boot={boot}
                                 member={author}
@@ -1002,15 +1006,15 @@ export function ConversationView({
                                 <button
                                   type="button"
                                   onClick={() => onOpenDetail(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-                                  className="text-[14px] font-semibold text-fg hover:underline underline-offset-2"
+                                  className="text-[14px] font-bold text-fg hover:underline underline-offset-2"
                                 >
                                   {m.author_display_name}
                                 </button>
                               </MemberHoverCard>
-                              <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+                              <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
                             </div>
                           )}
-                          <div className={`${grouped ? "" : "mt-1"} text-[14.5px] leading-[1.65] text-fg md`}>
+                          <div className={`${grouped ? "" : "mt-0.5"} text-[14.5px] leading-[1.6] text-fg md`}>
                             <CollapsibleMessage messageID={m.id}>
                               <MessageBody
                                 body={m.body_markdown}
@@ -1045,7 +1049,7 @@ export function ConversationView({
                           />
 
                           {m.attached_tasks && m.attached_tasks.length > 0 && (
-                            <div className="mt-2.5 rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden max-w-[560px] shadow-sm">
+                            <div className="mt-2 rounded-[6px] border border-line-strong bg-card divide-y divide-line overflow-hidden max-w-[580px]">
                               {m.attached_tasks.map((tk) => (
                                 <button
                                   key={tk.id}
@@ -1111,7 +1115,7 @@ export function ConversationView({
                               toolbarPinned
                                 ? "opacity-100 pointer-events-auto"
                                 : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
-                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line rounded-[6px] p-0.5 shadow-md z-20`}
+                            } transition-opacity duration-100 flex items-center gap-0.5 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-md z-20`}
                           >
                             <QuickReactionButton
                               reactions={m.reactions}
@@ -1128,7 +1132,7 @@ export function ConversationView({
                                 setReplyingTo(m.id);
                                 composerFocusRef.current?.();
                               }}
-                              className="h-7 px-2 rounded-[5px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                              className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                             >
                               <CornerUpLeft className="size-3.5" /> Reply
                             </button>
@@ -1137,7 +1141,7 @@ export function ConversationView({
                                 setNewTaskTitle("");
                                 setCreatingTaskOnMsg(m.id);
                               }}
-                              className="h-7 px-2 rounded-[5px] text-[13px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
+                              className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
                             >
                               <ListPlus className="size-3.5" /> Task
                             </button>
@@ -1150,7 +1154,7 @@ export function ConversationView({
                                   aria-label="More message actions"
                                   aria-expanded={open}
                                   onClick={toggle}
-                                  className={`size-7 rounded-[5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center justify-center ${
+                                  className={`size-7 rounded-[4px] text-fg-2 hover:bg-hover hover:text-fg flex items-center justify-center ${
                                     open ? "bg-hover text-fg" : ""
                                   }`}
                                 >
@@ -1227,8 +1231,7 @@ export function ConversationView({
           )}
         </div>
       ) : (
-      <div className="shrink-0 bg-bg/60 border-t border-line">
-        <AgentStatusLine spaceSlug={spaceSlug} boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
+      <div className="shrink-0 bg-panel">
         <MessageComposer
           spaceSlug={spaceSlug}
           boot={boot}
@@ -1240,6 +1243,7 @@ export function ConversationView({
           onSent={jumpToEnd}
           focusRef={composerFocusRef}
         />
+        <ComposerStatusFooter spaceSlug={spaceSlug} boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
       </div>
       )}
 

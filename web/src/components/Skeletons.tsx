@@ -26,36 +26,40 @@ export function MessageListSkeleton({ rows = 6, compact = false }: { rows?: numb
 
 export function RowListSkeleton({ rows = 7 }: { rows?: number }) {
   return (
-    <div className="px-6 py-4 space-y-2" aria-label="Loading">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="h-12 px-4 rounded-[8px] bg-card border border-line flex items-center gap-3">
-          <Skeleton className="size-4 rounded-full shrink-0" />
-          <Skeleton className="h-3.5 w-9 shrink-0" />
-          <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
-          <span className="flex-1" />
-          <Skeleton className="size-6 rounded-[5px] shrink-0" />
-        </div>
-      ))}
+    <div className="px-6 py-4 max-w-[960px]" aria-label="Loading">
+      <div className="rounded-[6px] bg-card border border-line divide-y divide-line overflow-hidden">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="h-11 px-4 flex items-center gap-3">
+            <Skeleton className="size-4 rounded-full shrink-0" />
+            <Skeleton className="h-3.5 w-9 shrink-0" />
+            <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
+            <span className="flex-1" />
+            <Skeleton className="size-6 rounded-[4px] shrink-0" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 export function InboxSkeleton() {
   return (
-    <div className="px-6 py-4 space-y-2" aria-label="Loading inbox">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="px-4 py-3.5 rounded-[8px] bg-card border border-line flex items-center gap-3.5">
-          <Skeleton className="size-9 rounded-[6px] shrink-0" />
-          <div className="flex-1 space-y-2">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-3.5 w-24" />
-              <Skeleton className="h-3.5 w-28" />
+    <div className="px-6 py-4 max-w-[960px]" aria-label="Loading inbox">
+      <div className="rounded-[6px] bg-card border border-line divide-y divide-line overflow-hidden">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="px-4 py-3 flex items-center gap-3">
+            <Skeleton className="size-8 rounded-[4px] shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-3.5 w-24" />
+                <Skeleton className="h-3.5 w-28" />
+              </div>
+              <Skeleton className={`h-3.5 ${W[i % W.length]}`} />
             </div>
-            <Skeleton className={`h-3.5 ${W[i % W.length]}`} />
+            <Skeleton className="h-7 w-16 rounded-[4px]" />
           </div>
-          <Skeleton className="h-8 w-16 rounded-[6px]" />
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -88,12 +92,12 @@ function SidebarSkeleton({ desktop }: { desktop: boolean }) {
   return (
     <aside className="bg-nav flex flex-col">
       {!desktop && (
-        <div className="h-[52px] px-4 flex items-center">
+        <div className="h-[52px] px-4 border-b border-nav-line flex items-center">
           <Skeleton nav className="h-4 w-32" />
         </div>
       )}
-      <div className={`px-3 space-y-6 ${desktop ? "pt-3" : "pt-2"}`}>
-        <Skeleton nav className="h-9 w-full rounded-[6px]" />
+      <div className="px-3 pt-3 space-y-5">
+        <Skeleton nav className="h-8 w-full rounded-[5px]" />
         <div className="space-y-3 px-1">
           <Skeleton nav className="h-4 w-24" />
           <Skeleton nav className="h-4 w-20" />
@@ -127,8 +131,8 @@ export function WorkbenchSkeleton() {
           </div>
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "56px minmax(0, 1fr)" }}>
-          <nav className="bg-nav-rail flex flex-col items-center py-3 gap-2">
-            <Skeleton nav className="size-9 rounded-[8px]" />
+          <nav className="bg-nav-rail border-r border-nav-line flex flex-col items-center py-3 gap-2">
+            <Skeleton nav className="size-9 rounded-[6px]" />
           </nav>
           <SidebarSkeleton desktop={desktop} />
         </div>
@@ -141,8 +145,8 @@ export function WorkbenchSkeleton() {
         <div className="flex-1 min-h-0 overflow-hidden">
           <MessageListSkeleton rows={6} />
         </div>
-        <div className="p-4">
-          <Skeleton className="h-[92px] w-full rounded-[8px]" />
+        <div className="px-5 pb-4 pt-2">
+          <Skeleton className="h-[88px] w-full rounded-[6px]" />
         </div>
       </main>
     </div>

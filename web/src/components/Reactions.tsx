@@ -147,7 +147,7 @@ function ReactionPopover({
       role="dialog"
       aria-label="Pick a reaction"
       style={style}
-      className="z-50 p-1 rounded-[7px] bg-card border border-line shadow-lg flex items-center justify-between gap-0.5 animate-pop-in"
+      className="z-50 p-1 rounded-[6px] bg-card border border-line-strong shadow-lg flex items-center justify-between gap-0.5 animate-pop-in"
     >
       {REACTION_EMOJIS.map((item) => {
         const active = reactedSet.has(item.code);
@@ -162,11 +162,11 @@ function ReactionPopover({
               onPick(item.code);
               onClose();
             }}
-            className={`group/emoji size-7 rounded-[5px] flex items-center justify-center transition-colors ${
+            className={`size-7 rounded-[4px] flex items-center justify-center transition-colors ${
               active ? "bg-accent-soft shadow-[var(--ring)]" : "hover:bg-hover"
             }`}
           >
-            <EmojiIcon emoji={item.code} size={17} className="transition-transform duration-100 group-hover/emoji:scale-110" />
+            <EmojiIcon emoji={item.code} size={17} />
           </button>
         );
       })}
@@ -310,7 +310,7 @@ export function MessageReactions({
           aria-label={`${g.emoji} reaction, ${g.count}`}
           aria-pressed={g.reacted}
           onClick={() => onToggle(g.emoji, g.reacted)}
-          className={`h-6 pl-1.5 pr-2 rounded-[5px] border inline-flex items-center gap-1 text-[11.5px] transition-colors ${
+          className={`h-6 pl-1.5 pr-2 rounded-[4px] border inline-flex items-center gap-1 text-[11.5px] transition-colors ${
             g.reacted
               ? "bg-accent-soft border-accent/40 text-accent-text font-medium"
               : "bg-subtle border-line text-fg-2 hover:bg-hover hover:border-line-strong"

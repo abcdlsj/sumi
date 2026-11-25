@@ -136,7 +136,7 @@ export function AttachmentPicker({
         disabled={draft.uploading}
         title="Attach files"
         aria-label="Attach files"
-        className="size-8 rounded-[6px] hover:bg-hover text-fg-3 hover:text-fg flex items-center justify-center disabled:opacity-40 transition-colors"
+        className="size-7 rounded-[4px] hover:bg-hover text-fg-3 hover:text-fg flex items-center justify-center disabled:opacity-40 transition-colors"
       >
         {draft.uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
       </button>
@@ -476,11 +476,11 @@ function DocumentPreviewModal({
       aria-modal="true"
       aria-label={attachment.name}
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-6 animate-fade-in"
+      className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-6 animate-fade-in"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[840px] max-h-[82vh] rounded-[10px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden animate-pop-in"
+        className="w-full max-w-[840px] max-h-[82vh] rounded-[8px] bg-panel border border-line-strong shadow-lg flex flex-col overflow-hidden animate-pop-in"
       >
         <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">

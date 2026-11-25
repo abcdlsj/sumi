@@ -151,11 +151,18 @@ function NavItem({
     <button
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`w-full h-8 px-2 rounded-[6px] flex items-center gap-2.5 text-[14px] transition-colors duration-100 ${
-        active ? "bg-nav-active text-nav-fg-strong" : dim ? "text-nav-fg-3 hover:bg-nav-hover" : bold ? "text-nav-fg-strong font-semibold hover:bg-nav-hover" : "text-nav-fg-2 hover:bg-nav-hover hover:text-nav-fg"
+      className={`relative w-full h-[30px] px-2 rounded-[4px] flex items-center gap-2 text-[13.5px] transition-colors duration-100 ${
+        active
+          ? "bg-nav-active text-nav-fg-strong font-semibold"
+          : dim
+            ? "text-nav-fg-3 hover:bg-nav-hover"
+            : bold
+              ? "text-nav-fg-strong font-semibold hover:bg-nav-hover"
+              : "text-nav-fg-2 hover:bg-nav-hover hover:text-nav-fg"
       }`}
     >
-      <span className="size-5 flex items-center justify-center shrink-0 [&>svg]:size-4">{icon}</span>
+      {active && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-[2.5px] rounded-r-[2px] bg-accent" />}
+      <span className="size-4 flex items-center justify-center shrink-0 [&>svg]:size-[15px] opacity-85">{icon}</span>
       <span className="truncate flex-1 text-left">{children}</span>
       {trailing}
     </button>
@@ -165,7 +172,7 @@ function NavItem({
 function Count({ n, tone = "warm" }: { n: number; tone?: "warm" | "muted" }) {
   return (
     <span
-      className={`min-w-5 h-5 px-1.5 rounded-[5px] text-[11.5px] font-semibold tabular inline-flex items-center justify-center ${
+      className={`min-w-[18px] h-[18px] px-1.5 rounded-[4px] text-[11px] font-semibold tabular inline-flex items-center justify-center ${
         tone === "warm" ? "bg-accent text-accent-fg" : "bg-nav-fill-2 text-nav-fg-2"
       }`}
     >
@@ -176,8 +183,8 @@ function Count({ n, tone = "warm" }: { n: number; tone?: "warm" | "muted" }) {
 
 function SectionLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="px-2 mb-1 h-7 flex items-center justify-between">
-      <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-nav-fg-3">{children}</span>
+    <div className="px-2 mb-1 h-6 flex items-center justify-between">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-nav-fg-3">{children}</span>
       {action}
     </div>
   );
@@ -185,7 +192,7 @@ function SectionLabel({ children, action }: { children: ReactNode; action?: Reac
 
 function SectionAdd({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} title={label} aria-label={label} className="size-6 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center">
+    <button onClick={onClick} title={label} aria-label={label} className="size-6 rounded-[4px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center">
       <Plus className="size-3.5" />
     </button>
   );
@@ -740,15 +747,16 @@ export function Workbench({
         key={m.id}
         onClick={() => void openOrCreateDM(m.id)}
         aria-current={active ? "page" : undefined}
-        className={`w-full px-2 ${m.kind === "agent" ? "h-11" : "h-9"} rounded-[6px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
+        className={`relative w-full px-2 ${m.kind === "agent" ? "h-[42px]" : "h-8"} rounded-[4px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
           active ? "bg-nav-active" : "hover:bg-nav-hover"
         }`}
       >
+        {active && <span aria-hidden className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-r-[2px] bg-accent" />}
         <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="sm" state={m.kind === "agent" ? st : undefined} ring="var(--nav)" />
         <span className="min-w-0 flex-1">
-          <span className={`block truncate text-[14px] leading-5 ${active || (conv && conv.unread_count > 0) ? "text-nav-fg-strong font-semibold" : "text-nav-fg-2"}`}>{m.display_name}</span>
+          <span className={`block truncate text-[13.5px] leading-5 ${active || (conv && conv.unread_count > 0) ? "text-nav-fg-strong font-semibold" : "text-nav-fg-2"}`}>{m.display_name}</span>
           {statusSub ? (
-            <span className={`block truncate text-[12px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{statusSub}</span>
+            <span className={`block truncate text-[11.5px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{statusSub}</span>
           ) : roleSub ? (
             <span className="block fade-truncate text-[11.5px] leading-4 text-nav-fg-3" title={roleSub}>
               {roleSub}
@@ -768,13 +776,13 @@ export function Workbench({
         onClick={() => setMainView({ kind: "admin", tab })}
         title={title}
         aria-label={title}
-        className={`relative size-9 rounded-[7px] flex items-center justify-center transition-colors [&>svg]:size-[18px] ${
+        className={`relative size-9 rounded-[5px] flex items-center justify-center transition-colors [&>svg]:size-[18px] ${
           active ? "bg-nav-active text-nav-fg-strong" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
         }`}
       >
         {icon}
         {dot !== undefined && (
-          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dot ? "bg-online" : "bg-nav-fg-3"}`} />
+          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dot ? "bg-nav-online" : "bg-nav-fg-3"}`} />
         )}
       </button>
     );
@@ -810,7 +818,7 @@ export function Workbench({
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: sidebarCollapsed ? "56px" : "56px minmax(0, 1fr)" }}>
           {/* Rail */}
-          <nav aria-label="Spaces" className="bg-nav-rail flex flex-col items-center justify-between pb-3">
+          <nav aria-label="Spaces" className={`bg-nav-rail flex flex-col items-center justify-between pb-3 ${sidebarCollapsed ? "" : "border-r border-nav-line"}`}>
             <div className="flex flex-col items-center gap-2 pt-3">
               {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
                 const active = sp.slug === spaceSlug;
@@ -823,11 +831,11 @@ export function Workbench({
                     className="relative size-9 flex items-center justify-center group"
                   >
                     <span
-                      className={`absolute -left-3 w-1 rounded-r-full bg-nav-fg-strong transition-all duration-200 ${active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
+                      className={`absolute -left-2.5 w-[3px] rounded-r-[2px] bg-nav-fg-strong transition-all duration-150 ${active ? "h-5 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
                     />
                     <span
-                      className={`size-9 rounded-[8px] text-[14px] font-semibold flex items-center justify-center transition-[background-color,border-radius,opacity] ${
-                        active ? "text-white shadow-sm" : "opacity-55 hover:opacity-90 hover:rounded-[6px] text-white"
+                      className={`size-9 rounded-[6px] text-[14px] font-semibold flex items-center justify-center transition-opacity ${
+                        active ? "text-white ring-1 ring-white/20" : "opacity-60 hover:opacity-95 text-white"
                       }`}
                       style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
                     >
@@ -840,7 +848,7 @@ export function Workbench({
                 onClick={() => setDialog("space")}
                 title="New space"
                 aria-label="New space"
-                className="size-9 rounded-[8px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
+                className="size-9 rounded-[6px] border border-dashed border-nav-line-strong text-nav-fg-3 hover:text-nav-fg-strong hover:border-nav-fg-3 flex items-center justify-center transition-colors"
               >
                 <Plus className="size-4" />
               </button>
@@ -851,7 +859,7 @@ export function Workbench({
                 onClick={() => setSidebarCollapsed((v) => !v)}
                 title={sidebarCollapsed ? `Expand sidebar (${isMacPlatform() ? "⌘B" : "Ctrl+B"})` : `Collapse sidebar (${isMacPlatform() ? "⌘B" : "Ctrl+B"})`}
                 aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className="size-9 rounded-[7px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
+                className="size-9 rounded-[5px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
               >
                 <PanelLeft className="size-[18px]" />
               </button>
@@ -867,23 +875,23 @@ export function Workbench({
           {!sidebarCollapsed && (
           <aside aria-label="Sidebar" className="bg-nav flex flex-col min-w-0 min-h-0">
             {!desktop && (
-              <div className="h-[52px] px-4 flex items-center shrink-0">
+              <div className="h-[52px] px-4 border-b border-nav-line flex items-center shrink-0">
                 <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>
               </div>
             )}
-            <div className={`px-3 pb-2 shrink-0 ${desktop ? "pt-3" : ""}`}>
+            <div className="px-3 pt-3 pb-2 shrink-0">
           <button
             onClick={() => setDialog("jump")}
-            className="w-full h-9 px-3 rounded-[6px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line text-nav-fg-3 flex items-center gap-2 text-[13.5px] transition-colors"
+            className="w-full h-8 px-2.5 rounded-[5px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line text-nav-fg-3 flex items-center gap-2 text-[13px] transition-colors"
           >
-            <Search className="size-4" />
+            <Search className="size-3.5" />
             <span className="flex-1 text-left">Jump to…</span>
-            <kbd className="text-[11.5px] font-sans px-1.5 h-5 rounded-[4px] bg-nav-fill-2 inline-flex items-center">⌘K</kbd>
+            <kbd className="text-[11px] font-mono px-1.5 h-[18px] rounded-[3px] bg-nav-fill-2 inline-flex items-center">⌘K</kbd>
           </button>
         </div>
 
         <div className="relative flex-1 min-h-0 flex flex-col">
-        <div className="flex-1 min-h-0 px-3 pb-3 space-y-5 overflow-y-auto scroll-nav">
+        <div className="flex-1 min-h-0 px-3 pb-3 space-y-4 overflow-y-auto scroll-nav">
           <div className="space-y-0.5 pt-1">
             <NavItem
               active={mainView.kind === "inbox"}
@@ -1084,9 +1092,9 @@ export function Workbench({
         {reconnecting && (
           <div
             role="status"
-            className="pointer-events-none absolute bottom-2 inset-x-3 px-2.5 h-8 rounded-[6px] bg-busy-soft border border-busy/25 text-nav-busy shadow-sm flex items-center gap-2 text-[12.5px] font-medium animate-fade-in"
+            className="pointer-events-none absolute bottom-2 inset-x-3 px-2.5 h-8 rounded-[5px] bg-nav-rail border border-nav-busy/40 text-nav-busy flex items-center gap-2 text-[12.5px] font-medium animate-fade-in"
           >
-            <span className="size-2 rounded-full bg-busy animate-breathe shrink-0" />
+            <span className="size-2 rounded-full bg-nav-busy animate-breathe shrink-0" />
             <span>Reconnecting…</span>
           </div>
         )}
@@ -1096,12 +1104,12 @@ export function Workbench({
           <div className="px-3 pb-3 shrink-0">
             <button
               onClick={() => openNewAgentDialog()}
-              className="w-full p-3 rounded-[8px] bg-gradient-to-br from-accent/30 to-accent/10 border border-accent/30 hover:border-accent/60 text-left transition-colors"
+              className="w-full p-3 rounded-[6px] bg-nav-fill hover:bg-nav-fill-2 border border-nav-line-strong border-l-2 border-l-accent text-left transition-colors"
             >
-              <div className="flex items-center gap-2 text-[14px] font-semibold text-nav-fg-strong">
-                <Sparkles className="size-4" /> Finish setup
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-nav-fg-strong">
+                <Sparkles className="size-4 text-accent" /> Finish setup
               </div>
-              <div className="mt-2 space-y-1.5 text-[13px]">
+              <div className="mt-2 space-y-1.5 text-[12.5px]">
                 <SetupLine done={myComputers.length > 0}>Connect a computer</SetupLine>
                 <SetupLine done={agents.length > 0}>Create an agent</SetupLine>
               </div>
@@ -1109,16 +1117,16 @@ export function Workbench({
           </div>
         )}
 
-        <div className="h-14 px-3 border-t border-nav-line flex items-center gap-2.5 shrink-0">
-          <button onClick={() => setMainView({ kind: "admin", tab: "settings" })} className="flex items-center gap-2.5 min-w-0 flex-1 rounded-[6px] p-1 -m-1 hover:bg-nav-hover">
+        <div className="h-[52px] px-3 border-t border-nav-line flex items-center gap-2.5 shrink-0">
+          <button onClick={() => setMainView({ kind: "admin", tab: "settings" })} className="flex items-center gap-2.5 min-w-0 flex-1 rounded-[4px] p-1 -m-1 hover:bg-nav-hover">
             <MemberAvatar id={boot.current_member.id} name={boot.current_member.display_name} kind="human" size="sm" />
-            <span className="min-w-0 flex-1 text-left text-[14px] leading-5 font-medium text-nav-fg-strong truncate">{boot.current_member.display_name}</span>
+            <span className="min-w-0 flex-1 text-left text-[13.5px] leading-5 font-medium text-nav-fg-strong truncate">{boot.current_member.display_name}</span>
           </button>
           <button
             onClick={() => setTheme(dark ? "light" : "dark")}
             aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
             title={dark ? "Light mode" : "Dark mode"}
-            className="size-8 rounded-[6px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+            className="size-8 rounded-[4px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
           >
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>
@@ -1444,7 +1452,7 @@ export function Workbench({
             aria-label={`#${ctxMenu.conv.slug} menu`}
             style={{ position: "fixed", left: ctxMenu.x, top: ctxMenu.y, width: 216 }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
+            className="z-50 bg-card border border-line-strong rounded-[6px] shadow-lg p-1 animate-pop-in"
           >
             {ctxMenu.conv.unread_count > 0 && (
               <MenuItem

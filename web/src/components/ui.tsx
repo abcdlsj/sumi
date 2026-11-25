@@ -25,16 +25,16 @@ type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
 type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg hover:bg-accent-hover shadow-sm",
-  secondary: "bg-card text-fg border border-line-strong hover:bg-subtle shadow-sm",
-  soft: "bg-accent-soft text-accent-text hover:brightness-95",
-  ghost: "text-fg-2 hover:bg-hover hover:text-fg",
-  danger: "bg-card text-danger border border-line-strong hover:bg-danger-soft hover:border-danger",
+  primary: "bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 border border-transparent",
+  secondary: "bg-card text-fg border border-line-strong hover:bg-subtle active:bg-press",
+  soft: "bg-accent-soft text-accent-text hover:brightness-95 active:brightness-90 border border-transparent",
+  ghost: "text-fg-2 hover:bg-hover hover:text-fg active:bg-press border border-transparent",
+  danger: "bg-card text-danger border border-line-strong hover:bg-danger-soft hover:border-danger active:brightness-95",
 };
 const SIZES: Record<Size, string> = {
-  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-[6px]",
-  md: "h-9 px-3.5 text-[14px] gap-2 rounded-[6px]",
-  lg: "h-11 px-5 text-[15px] gap-2 rounded-[7px]",
+  sm: "h-7 px-2.5 text-[13px] gap-1.5 rounded-[4px]",
+  md: "h-8 px-3 text-[13.5px] gap-1.5 rounded-[5px]",
+  lg: "h-10 px-4 text-[14px] gap-2 rounded-[6px]",
 };
 
 export function Button({
@@ -52,7 +52,7 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-[background-color,border-color,color,opacity,transform,filter] duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-[background-color,border-color,color,opacity,filter] duration-100 disabled:opacity-50 disabled:pointer-events-none ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
     >
       {loading ? <Loader2 className="size-4 animate-spin shrink-0" /> : icon ? <span className="shrink-0 inline-flex [&>svg]:size-4">{icon}</span> : null}
       {children}
@@ -72,8 +72,8 @@ export function IconButton({
       {...rest}
       aria-label={label}
       title={label}
-      className={`size-8 rounded-[6px] inline-flex items-center justify-center transition-colors duration-150 [&>svg]:size-4 ${
-        active ? "bg-hover text-fg" : "text-fg-3 hover:bg-hover hover:text-fg"
+      className={`size-8 rounded-[4px] inline-flex items-center justify-center transition-colors duration-100 [&>svg]:size-4 ${
+        active ? "bg-hover text-fg" : "text-fg-3 hover:bg-hover hover:text-fg active:bg-press"
       } ${className}`}
     >
       {children}
@@ -82,7 +82,7 @@ export function IconButton({
 }
 
 const inputBase =
-  "w-full rounded-[6px] border bg-card text-[14px] text-fg outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)] disabled:opacity-60";
+  "w-full rounded-[5px] border bg-card text-[14px] text-fg outline-none transition-[border-color,box-shadow] duration-100 placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)] disabled:opacity-60";
 
 function FieldShell({
   id,
@@ -366,7 +366,7 @@ export function Select<T extends string = string>({
     };
   }, [open, filtered, activeIdx, onChange]);
 
-  const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[6px]" : "h-10 px-3 text-[14px] rounded-[6px]";
+  const heightCls = size === "sm" ? "h-8 px-2.5 text-[13.5px] rounded-[5px]" : "h-9 px-3 text-[14px] rounded-[5px]";
 
   const trigger = (
     <div className={`relative ${className}`}>
@@ -379,7 +379,7 @@ export function Select<T extends string = string>({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((v) => !v)}
-        className={`w-full ${heightCls} border bg-card flex items-center gap-2 text-left transition-[border-color,box-shadow,background-color] duration-150 disabled:opacity-55 ${
+        className={`w-full ${heightCls} border bg-card flex items-center gap-2 text-left transition-[border-color,box-shadow,background-color] duration-100 disabled:opacity-55 ${
           open ? "border-accent shadow-[var(--ring)]" : "border-line-strong hover:border-fg-4"
         }`}
       >
@@ -387,7 +387,7 @@ export function Select<T extends string = string>({
         <span className={`min-w-0 flex-1 truncate ${selected ? "text-fg font-medium" : "text-fg-4"}`}>
           {selected ? selected.label : placeholder}
         </span>
-        <ChevronDown className={`size-3.5 text-fg-3 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`size-3.5 text-fg-3 shrink-0 transition-transform duration-100 ${open ? "rotate-180" : ""}`} />
       </button>
       {open &&
         createPortal(
@@ -396,7 +396,7 @@ export function Select<T extends string = string>({
             role="listbox"
             aria-label={ariaLabel ?? label ?? "Options"}
             style={floatingStyle}
-            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in"
+            className="z-50 bg-card border border-line-strong rounded-[6px] shadow-lg p-1 animate-pop-in"
           >
             {searchable && (
               <div className="relative px-1 pb-1.5">
@@ -406,7 +406,7 @@ export function Select<T extends string = string>({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={searchPlaceholder}
-                  className="w-full h-8 pl-7 pr-2.5 rounded-[5px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+                  className="w-full h-8 pl-7 pr-2.5 rounded-[4px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
                 />
               </div>
             )}
@@ -433,7 +433,7 @@ export function Select<T extends string = string>({
                         setOpen(false);
                         triggerRef.current?.focus();
                       }}
-                      className={`w-full px-2.5 py-1.5 rounded-[6px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
+                      className={`w-full px-2.5 py-1.5 rounded-[4px] flex items-center gap-2 text-left transition-colors disabled:opacity-45 disabled:pointer-events-none ${
                         isActive ? "bg-hover" : "hover:bg-hover"
                       }`}
                     >
@@ -499,7 +499,7 @@ export function MultiSelectList<T extends string = string>({
 
   return (
     <FieldShell id={id} label={label} hint={hint} optional={optional}>
-      <div className="rounded-[7px] border border-line-strong bg-card overflow-hidden">
+      <div className="rounded-[6px] border border-line-strong bg-card overflow-hidden">
         {options.length > 5 && (
           <div className="relative px-2.5 py-2 border-b border-line">
             <Search className="size-3.5 text-fg-4 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -507,7 +507,7 @@ export function MultiSelectList<T extends string = string>({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full h-7 pl-6 pr-2 rounded-[5px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
+              className="w-full h-7 pl-6 pr-2 rounded-[4px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
             />
           </div>
         )}
@@ -525,7 +525,7 @@ export function MultiSelectList<T extends string = string>({
                   aria-checked={checked}
                   disabled={opt.disabled}
                   onClick={() => toggle(opt.value)}
-                  className={`w-full px-2.5 py-1.5 rounded-[5px] flex items-center gap-2.5 text-left transition-colors ${
+                  className={`w-full px-2.5 py-1.5 rounded-[4px] flex items-center gap-2.5 text-left transition-colors ${
                     checked ? "bg-accent-soft/70" : "hover:bg-subtle"
                   }`}
                 >
@@ -571,11 +571,11 @@ export function EmptyState({
   return (
     <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6 py-10">
       {icon && (
-        <div className="size-12 rounded-[8px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
+        <div className="size-11 rounded-[6px] bg-subtle border border-line text-fg-3 flex items-center justify-center mb-4 [&>svg]:size-5">
           {icon}
         </div>
       )}
-      <div className="font-display text-[19px] font-semibold text-fg">{title}</div>
+      <div className="font-display text-[17px] font-semibold text-fg">{title}</div>
       {body && <div className="mt-1.5 text-[14px] text-fg-3 max-w-[380px] leading-relaxed">{body}</div>}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -665,7 +665,7 @@ export function Segmented<T extends string>({
   full?: boolean;
 }) {
   return (
-    <div role="tablist" className={`inline-flex items-center p-[3px] rounded-[7px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
+    <div role="tablist" className={`inline-flex items-center p-[2px] rounded-[5px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -676,11 +676,46 @@ export function Segmented<T extends string>({
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
             aria-selected={active}
-            className={`${full ? "flex-1" : ""} h-8 px-3 rounded-[5px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,box-shadow] duration-150 disabled:opacity-40 [&>svg]:size-3.5 ${
-              active ? "bg-card text-fg font-medium shadow-sm" : "text-fg-3 hover:text-fg"
+            className={`${full ? "flex-1" : ""} h-7 px-2.5 rounded-[4px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,border-color] duration-100 disabled:opacity-40 [&>svg]:size-3.5 ${
+              active ? "bg-card text-fg font-semibold border border-line-strong/80" : "border border-transparent text-fg-3 hover:text-fg"
             }`}
           >
             {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Flat underline tabs aligned flush with a 52px ViewHeader bottom border. */
+export function HeaderTabs<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: ReactNode; disabled?: boolean }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="tablist" className="h-full inline-flex items-stretch gap-1">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            disabled={o.disabled}
+            onClick={() => onChange(o.value)}
+            aria-selected={active}
+            className={`relative px-2.5 text-[13.5px] inline-flex items-center gap-1.5 transition-colors duration-100 disabled:opacity-40 [&>svg]:size-3.5 ${
+              active ? "text-fg font-semibold" : "text-fg-3 font-medium hover:text-fg"
+            }`}
+          >
+            {o.label}
+            {active && <span aria-hidden className="absolute inset-x-1 bottom-0 h-[2px] bg-accent" />}
           </button>
         );
       })}
@@ -793,19 +828,19 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-start justify-center pt-[10vh] px-4">
-      <div className="absolute inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/45 dark:bg-black/65 animate-fade-in" onClick={onClose} />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={label}
         style={{ width }}
-        className="relative max-w-full max-h-[80vh] flex flex-col bg-panel border border-line rounded-[10px] shadow-lg animate-pop-in"
+        className="relative max-w-full max-h-[80vh] flex flex-col bg-panel border border-line-strong rounded-[8px] shadow-lg animate-pop-in"
       >
         {title ? (
           <div className="px-6 pt-5 pb-1 flex items-start justify-between gap-4">
             <div>
-              <h2 className="font-display text-[20px] font-semibold text-fg leading-tight">{title}</h2>
+              <h2 className="font-display text-[18px] font-semibold text-fg leading-tight">{title}</h2>
               {description && <p className="mt-1 text-[13.5px] text-fg-3 leading-relaxed">{description}</p>}
             </div>
             <IconButton label="Close dialog" onClick={onClose} className="-mr-2 -mt-1">
@@ -843,7 +878,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className="pointer-events-auto max-w-[420px] pl-3 pr-4 py-2.5 rounded-[7px] bg-card border border-line shadow-lg text-[13.5px] text-fg flex items-start gap-2.5 animate-rise-in"
+            className="pointer-events-auto max-w-[420px] pl-3 pr-4 py-2.5 rounded-[6px] bg-card border border-line-strong shadow-lg text-[13.5px] text-fg flex items-start gap-2.5 animate-rise-in"
           >
             {t.tone === "error" ? (
               <AlertCircle className="size-4 text-danger shrink-0 mt-0.5" />
@@ -944,7 +979,7 @@ export function Menu({
             ref={menuRef}
             role="menu"
             style={floatingStyle}
-            className="z-50 bg-card border border-line rounded-[8px] shadow-lg p-1 animate-pop-in max-h-[360px] overflow-y-auto scroll-thin"
+            className="z-50 bg-card border border-line-strong rounded-[6px] shadow-lg p-1 animate-pop-in max-h-[360px] overflow-y-auto scroll-thin"
           >
             {children(() => setOpen(false))}
           </div>,
@@ -974,12 +1009,12 @@ export function MenuItem({
       role={selectable ? "menuitemradio" : "menuitem"}
       aria-checked={selectable ? active : undefined}
       onClick={onSelect}
-      className="w-full px-2.5 py-2 rounded-[6px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
+      className="w-full px-2.5 py-1.5 rounded-[4px] text-left hover:bg-hover flex items-start gap-2.5 transition-colors"
     >
       {icon != null && <span className="size-5 shrink-0 flex items-center justify-center text-fg-3 [&>svg]:size-4">{icon}</span>}
       <span className="min-w-0 flex-1">
-        <span className="block text-[14px] text-fg leading-5">{children}</span>
-        {hint && <span className="block text-[12.5px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
+        <span className="block text-[13.5px] text-fg leading-5">{children}</span>
+        {hint && <span className="block text-[12px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
       </span>
       {selectable && <span className="size-5 shrink-0 flex items-center justify-center text-accent">{active && <Check className="size-4" />}</span>}
     </button>
@@ -989,8 +1024,8 @@ export function MenuItem({
 export function SumiMark({ size = 32 }: { size?: number }) {
   return (
     <span
-      style={{ width: size, height: size, borderRadius: Math.round(size * 0.22), background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
-      className="text-accent-fg inline-flex items-center justify-center shrink-0 select-none shadow-sm"
+      style={{ width: size, height: size, borderRadius: Math.max(4, Math.round(size * 0.16)), background: "var(--accent)" }}
+      className="text-accent-fg inline-flex items-center justify-center shrink-0 select-none"
     >
       <svg viewBox="0 0 24 24" width={size * 0.56} height={size * 0.56} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
         <path d="M16.5 7.5c-1-1.3-2.6-2-4.5-2-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9 2.6 9 7.2 0 2-2 3.4-4.6 3.4-2 0-3.7-.8-4.7-2.2" />

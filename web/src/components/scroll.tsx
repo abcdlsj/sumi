@@ -191,7 +191,7 @@ export function NewMessagesPill({
       <button
         type="button"
         onClick={onClick}
-        className={`pointer-events-auto h-8 pl-3 pr-2.5 rounded-[6px] shadow-md text-[13px] font-medium inline-flex items-center gap-1.5 animate-rise-in transition-colors ${
+        className={`pointer-events-auto h-7 pl-3 pr-2.5 rounded-[5px] shadow-md text-[12.5px] font-medium inline-flex items-center gap-1.5 animate-rise-in transition-colors ${
           hasNew
             ? "bg-accent text-accent-fg hover:bg-accent-hover"
             : "bg-card text-fg-2 border border-line-strong hover:bg-subtle hover:text-fg"
