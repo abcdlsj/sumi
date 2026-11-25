@@ -383,7 +383,7 @@ export function DriverFields({
                     value={draft.piPackages}
                     onChange={(e) => set({ piPackages: e.target.value })}
                     placeholder="npm:my-pi-provider"
-                    hint="Comma-separated npm: specs loaded in the isolated pi directory."
+                    hint="Comma-separated npm: specs loaded in the isolated pi directory. With pi provider and packages both empty, the host's npm: packages load."
                     autoComplete="off"
                     spellCheck={false}
                   />

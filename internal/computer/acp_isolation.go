@@ -66,7 +66,7 @@ func sameDir(a, b string) bool {
 }
 
 // syncPiRuntimeDir symlinks host auth/models and writes a minimal settings.json with only model,
-// transport and explicitly requested package preferences, omitting skills, hooks and prompts.
+// transport and package preferences, omitting skills, hooks and prompts.
 func syncPiRuntimeDir(hostDir, runtimeDir string, cfg domain.DriverConfig) error {
 	if hostDir == "" || sameDir(hostDir, runtimeDir) {
 		return nil
@@ -77,13 +77,50 @@ func syncPiRuntimeDir(hostDir, runtimeDir string, cfg domain.DriverConfig) error
 	if err := syncPiModels(hostDir, runtimeDir, cfg); err != nil {
 		return err
 	}
-	// Provider plugins requested per agent must be loadable from the isolated dir.
-	if len(cfg.PiPackages) > 0 {
-		if err := syncDirSymlink(filepath.Join(hostDir, "npm"), filepath.Join(runtimeDir, "npm")); err != nil {
+	packages, err := piPackages(filepath.Join(hostDir, "settings.json"), cfg)
+	if err != nil {
+		return err
+	}
+	// Plugins, requested or followed from the host, must be loadable from the isolated dir.
+	npmDst := filepath.Join(runtimeDir, "npm")
+	if len(packages) > 0 {
+		if err := syncDirSymlink(filepath.Join(hostDir, "npm"), npmDst); err != nil {
+			return err
+		}
+	} else if fi, err := os.Lstat(npmDst); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := removeIfExists(npmDst); err != nil {
 			return err
 		}
 	}
-	return syncPiSettings(filepath.Join(hostDir, "settings.json"), filepath.Join(runtimeDir, "settings.json"), cfg)
+	return syncPiSettings(filepath.Join(hostDir, "settings.json"), filepath.Join(runtimeDir, "settings.json"), cfg, packages)
+}
+
+// piPackages returns the plugins to load. An agent that sets neither pi_provider nor
+// pi_packages follows the host default model, whose provider often comes from a host plugin,
+// so it inherits the host npm: packages; otherwise only the agent's own list loads.
+func piPackages(hostSettings string, cfg domain.DriverConfig) ([]string, error) {
+	if cfg.PiProvider != "" || len(cfg.PiPackages) > 0 {
+		return cfg.PiPackages, nil
+	}
+	raw, err := os.ReadFile(hostSettings)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var src struct {
+		Packages []any `json:"packages"`
+	}
+	_ = json.Unmarshal(raw, &src)
+	var out []string
+	for _, p := range src.Packages {
+		// Same npm:-only rule as pi_packages; other sources are not forwarded.
+		if s, ok := p.(string); ok && strings.HasPrefix(s, "npm:") && len(s) > len("npm:") {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 var piAllowedSettingsKeys = []string{
@@ -94,7 +131,7 @@ var piAllowedSettingsKeys = []string{
 	"compaction",
 }
 
-func syncPiSettings(srcPath, dstPath string, cfg domain.DriverConfig) error {
+func syncPiSettings(srcPath, dstPath string, cfg domain.DriverConfig, packages []string) error {
 	filtered := map[string]any{}
 	raw, err := os.ReadFile(srcPath)
 	switch {
@@ -117,8 +154,8 @@ func syncPiSettings(srcPath, dstPath string, cfg domain.DriverConfig) error {
 	if cfg.PiModel != "" {
 		filtered["defaultModel"] = cfg.PiModel
 	}
-	if len(cfg.PiPackages) > 0 {
-		filtered["packages"] = cfg.PiPackages
+	if len(packages) > 0 {
+		filtered["packages"] = packages
 	}
 	if len(filtered) == 0 {
 		return removeIfExists(dstPath)

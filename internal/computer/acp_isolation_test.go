@@ -61,10 +61,14 @@ func TestPreparePiRuntimeDirIsolatesHostExtensionsAndSkills(t *testing.T) {
 	if got["defaultProvider"] != "openai" || got["defaultModel"] != "gpt-5" || got["defaultThinkingLevel"] != "medium" {
 		t.Fatalf("unexpected allowed settings: %v", got)
 	}
-	for _, blocked := range []string{"packages", "extensions", "skills", "prompts"} {
+	for _, blocked := range []string{"extensions", "skills", "prompts"} {
 		if _, ok := got[blocked]; ok {
 			t.Fatalf("blocked key %q leaked into isolated settings.json", blocked)
 		}
+	}
+	// Following the host default model brings the host npm: plugins that may provide it.
+	if pkgs, _ := got["packages"].([]any); len(pkgs) != 1 || pkgs[0] != "npm:some-plugin" {
+		t.Fatalf("packages = %v, want host npm: plugins", got["packages"])
 	}
 
 	// Removing host auth.json cleans up the stale symlink on refresh.
@@ -89,7 +93,7 @@ func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
 	mustWrite(t, filepath.Join(hostPi, "settings.json"), `{
 		"defaultProvider": "deepseek",
 		"defaultModel": "deepseek-chat",
-		"packages": ["npm:host-only-plugin"],
+		"packages": ["npm:host-only-plugin", "git:github.com/x/y", {"source": "npm:obj"}],
 		"extensions": ["/tmp/ext.ts"]
 	}`)
 	if err := os.MkdirAll(filepath.Join(hostPi, "npm", "node_modules", "custom-provider"), 0o700); err != nil {
@@ -134,13 +138,42 @@ func TestPreparePiRuntimeDirAppliesPerAgentProviderOverride(t *testing.T) {
 		t.Fatalf("packages = %v, want only the requested plugin", got["packages"])
 	}
 
-	// Dropping the override restores the host defaults and removes the npm link.
+	// Dropping the override follows the host: host defaults and host npm: plugins only.
 	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderPi}); err != nil {
 		t.Fatalf("prepare pi runtime dir without override: %v", err)
 	}
 	got = readPiSettings(t, rtDir)
 	if got["defaultProvider"] != "deepseek" || got["defaultModel"] != "deepseek-chat" {
 		t.Fatalf("host defaults must return: %v", got)
+	}
+	if pkgs, _ := got["packages"].([]any); len(pkgs) != 1 || pkgs[0] != "npm:host-only-plugin" {
+		t.Fatalf("packages = %v, want only host npm: specs", got["packages"])
+	}
+	if target, err := os.Readlink(filepath.Join(rtDir, "npm")); err != nil || target != filepath.Join(hostPi, "npm") {
+		t.Fatalf("npm symlink=%q err=%v", target, err)
+	}
+
+	// A model-only override still follows the host provider and its plugins.
+	if err := prepareACPRuntimeDir(agentHome, domain.DriverConfig{Provider: domain.ACPProviderPi, PiModel: "deepseek-reasoner"}); err != nil {
+		t.Fatal(err)
+	}
+	if got = readPiSettings(t, rtDir); got["defaultModel"] != "deepseek-reasoner" || got["packages"] == nil {
+		t.Fatalf("model-only override settings=%v", got)
+	}
+
+	// Pinning a provider without packages drops host plugins and the npm link.
+	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.PiPackages = nil
+	if err := prepareACPRuntimeDir(agentHome, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readPiSettings(t, rtDir)["packages"]; ok {
+		t.Fatal("pinned provider must not inherit host packages")
+	}
+	if _, err := os.Lstat(filepath.Join(rtDir, "npm")); !os.IsNotExist(err) {
+		t.Fatal("npm link must be removed when no packages load")
 	}
 }
 
