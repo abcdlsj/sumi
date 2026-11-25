@@ -274,7 +274,7 @@ function ImageLightbox({
       aria-modal="true"
       aria-label={attachment.name}
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center p-6 animate-fade-in"
+      className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-6 animate-fade-in"
     >
       {hasMultiple && (
         <>
@@ -490,12 +490,12 @@ function DocumentPreviewModal({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {md && content !== null && (
-              <div className="p-0.5 rounded-[6px] bg-subtle border border-line flex items-center">
+              <div className="p-0.5 rounded-[5px] bg-subtle border border-line flex items-center">
                 <button
                   type="button"
                   onClick={() => setMdMode("preview")}
-                  className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium transition-colors ${
-                    mdMode === "preview" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                  className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium border transition-colors ${
+                    mdMode === "preview" ? "bg-card text-fg border-line-strong/80" : "border-transparent text-fg-3 hover:text-fg"
                   }`}
                 >
                   Preview
@@ -503,8 +503,8 @@ function DocumentPreviewModal({
                 <button
                   type="button"
                   onClick={() => setMdMode("raw")}
-                  className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium inline-flex items-center gap-1 transition-colors ${
-                    mdMode === "raw" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                  className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium border inline-flex items-center gap-1 transition-colors ${
+                    mdMode === "raw" ? "bg-card text-fg border-line-strong/80" : "border-transparent text-fg-3 hover:text-fg"
                   }`}
                 >
                   <Code2 className="size-3" />
@@ -583,7 +583,7 @@ function InlineImage({
       type="button"
       onClick={onPreview}
       aria-label={`Preview ${attachment.name}`}
-      className={`block border border-line rounded-[7px] overflow-hidden checkerboard-bg hover:shadow-md transition-shadow ${
+      className={`block border border-line rounded-[6px] overflow-hidden checkerboard-bg hover:border-line-strong transition-colors ${
         loaded ? "" : "min-w-[180px] min-h-[120px]"
       }`}
     >
@@ -625,7 +625,7 @@ export function MessageAttachments({
         </div>
       )}
       {files.length > 0 && (
-        <div className="border border-line rounded-[7px] divide-y divide-line overflow-hidden max-w-[460px] bg-card">
+        <div className="border border-line rounded-[6px] divide-y divide-line overflow-hidden max-w-[460px] bg-card">
           {files.map((a) => {
             const previewable = isPreviewableDocument(a);
             const url = api.attachmentURL(spaceSlug, a.id);

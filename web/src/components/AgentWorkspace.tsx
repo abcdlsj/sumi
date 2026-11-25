@@ -297,7 +297,7 @@ export function AgentWorkspace({
             title={entry.is_symlink ? "Symlinks cannot be opened" : entry.path}
             onClick={() => (entry.is_dir ? toggleDir(entry.path) : void openFile(entry.path))}
             style={{ paddingLeft: `${depth * 14 + 8}px` }}
-            className={`w-full pr-2.5 h-8 flex items-center gap-1.5 text-left rounded-[5px] text-[13px] transition-colors ${
+            className={`w-full pr-2.5 h-7 flex items-center gap-1.5 text-left rounded-[4px] text-[13px] transition-colors ${
               entry.is_symlink
                 ? "text-fg-4 cursor-not-allowed opacity-70"
                 : isSelected
@@ -364,12 +364,12 @@ export function AgentWorkspace({
             )}
           </div>
           {md && isText && (
-            <div className="p-0.5 rounded-[6px] bg-subtle border border-line flex items-center shrink-0">
+            <div className="p-0.5 rounded-[5px] bg-subtle border border-line flex items-center shrink-0">
               <button
                 type="button"
                 onClick={() => setMdMode("preview")}
-                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium transition-colors ${
-                  mdMode === "preview" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium border transition-colors ${
+                  mdMode === "preview" ? "bg-card text-fg border-line-strong/80" : "border-transparent text-fg-3 hover:text-fg"
                 }`}
               >
                 Preview
@@ -377,8 +377,8 @@ export function AgentWorkspace({
               <button
                 type="button"
                 onClick={() => setMdMode("raw")}
-                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium inline-flex items-center gap-1 transition-colors ${
-                  mdMode === "raw" ? "bg-card text-fg shadow-xs" : "text-fg-3 hover:text-fg"
+                className={`h-6 px-2 rounded-[4px] text-[11.5px] font-medium border inline-flex items-center gap-1 transition-colors ${
+                  mdMode === "raw" ? "bg-card text-fg border-line-strong/80" : "border-transparent text-fg-3 hover:text-fg"
                 }`}
               >
                 <Code2 className="size-3" />
@@ -398,7 +398,7 @@ export function AgentWorkspace({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto scroll-thin bg-canvas/40">
+        <div className="flex-1 min-h-0 overflow-auto scroll-thin bg-bg/40">
           {fileLoading ? (
             <div className="h-40 flex items-center justify-center gap-2 text-[13px] text-fg-3">
               <Loader2 className="size-4 animate-spin" />
@@ -508,7 +508,7 @@ export function AgentWorkspace({
               onChange={(e) => setTreeQuery(e.target.value)}
               placeholder="Filter files…"
               aria-label="Filter workspace files"
-              className="w-full h-7 pl-7 pr-6 rounded-[5px] border border-line bg-card text-[12.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
+              className="w-full h-7 pl-7 pr-6 rounded-[4px] border border-line-strong bg-card text-[12.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
             />
             {treeQuery && (
               <button
@@ -533,7 +533,7 @@ export function AgentWorkspace({
                   type="button"
                   disabled={entry.is_symlink}
                   onClick={() => void openFile(entry.path)}
-                  className={`w-full px-2 h-8 flex items-center gap-1.5 text-left rounded-[5px] text-[13px] transition-colors ${
+                  className={`w-full px-2 h-7 flex items-center gap-1.5 text-left rounded-[4px] text-[13px] transition-colors ${
                     selectedFile === entry.path ? "bg-accent-soft text-accent-text font-medium" : "text-fg-2 hover:bg-hover hover:text-fg"
                   }`}
                 >
@@ -553,7 +553,7 @@ export function AgentWorkspace({
   const toolbar = (
     <div className="px-3 py-2 border-b border-line flex items-center gap-1.5 bg-subtle/30 shrink-0">
       <div
-        className="flex-1 min-w-0 h-7 px-2 rounded-[5px] bg-card border border-line flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3"
+        className="flex-1 min-w-0 h-7 px-2 rounded-[4px] bg-card border border-line flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3"
         title={rootPath || "Agent workspace"}
       >
         <Folder className="size-3.5 text-fg-4 shrink-0" />
@@ -593,12 +593,12 @@ export function AgentWorkspace({
             role="dialog"
             aria-modal="true"
             aria-label={`${member.display_name} workspace`}
-            className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-6 animate-fade-in"
+            className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-6 animate-fade-in"
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) setFullscreen(false);
             }}
           >
-            <div className="w-full max-w-[1040px] h-[80vh] rounded-[10px] bg-panel border border-line shadow-lg flex flex-col overflow-hidden animate-pop-in">
+            <div className="w-full max-w-[1040px] h-[80vh] rounded-[8px] bg-panel border border-line-strong shadow-lg flex flex-col overflow-hidden animate-pop-in">
               <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <FolderOpen className="size-4 text-accent-text shrink-0" />

@@ -185,7 +185,7 @@ export function ActionCard({
       data-testid="action-card"
       data-card-type={card.card_type}
       data-card-status={card.status}
-      className="mt-1.5 rounded-[8px] border border-line bg-card max-w-[440px] px-3.5 py-2.5 flex items-center justify-between gap-2"
+      className="mt-1.5 rounded-[6px] border border-line-strong bg-card max-w-[440px] px-3.5 py-2.5 flex items-center justify-between gap-2"
     >
       <div className="flex items-center gap-2 min-w-0">
         <Sparkles className="size-3.5 text-fg-3 shrink-0" />

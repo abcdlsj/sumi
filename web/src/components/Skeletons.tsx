@@ -124,7 +124,7 @@ export function WorkbenchSkeleton() {
   const sidebarWidth = readSavedSidebarWidth();
   return (
     <div className="h-full grid bg-bg" style={{ gridTemplateColumns: `${56 + sidebarWidth}px minmax(0, 1fr)` }}>
-      <div className="flex flex-col min-h-0 border-r border-nav-line bg-nav">
+      <div className="flex flex-col min-h-0 border-r border-[var(--nav-edge)] bg-nav">
         {desktop && (
           <div className="h-[52px] pl-[92px] pr-4 border-b border-nav-line flex items-center shrink-0 titlebar-drag">
             <Skeleton nav className="h-4 w-32" />

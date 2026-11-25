@@ -49,6 +49,7 @@
   --nav-fill-2: rgba(255, 255, 255, 0.11);
   --nav-line: rgba(255, 255, 255, 0.09);
   --nav-line-strong: rgba(255, 255, 255, 0.2);
+  --nav-edge: #11151d;
   --nav-online: #3dd68c;
   --nav-busy: #f3bd4f;
   --nav-danger: #ff8585;
@@ -103,6 +104,7 @@
   --nav-fill-2: rgba(255, 255, 255, 0.1);
   --nav-line: rgba(255, 255, 255, 0.085);
   --nav-line-strong: rgba(255, 255, 255, 0.19);
+  --nav-edge: #2d3340;
   --nav-online: #3dd68c;
   --nav-busy: #f3bd4f;
   --nav-danger: #ff8585;
@@ -404,11 +406,19 @@ html.desktop .titlebar-drag textarea {
   user-select: none;
   background-color: var(--avatar-tone);
 }
-/* Dark nav surfaces keep crisp light hairlines on avatars and status dots even in light theme. */
+/* Dark nav surfaces keep crisp light hairlines and calm dark-tile agent sprites even in light theme. */
 .bg-nav,
 .bg-nav-rail {
   --avatar-border: rgba(255, 255, 255, 0.16);
   --dot-border: rgba(255, 255, 255, 0.28);
+}
+.bg-nav .agent-sprite,
+.bg-nav-rail .agent-sprite {
+  background: hsl(var(--sprite-h) 34% 24%);
+  --sprite-body: hsl(var(--sprite-h) 58% 64%);
+  --sprite-hi: hsl(var(--sprite-h) 68% 78%);
+  --sprite-eye: hsl(var(--sprite-h) 40% 12%);
+  --sprite-accent: hsl(calc(var(--sprite-h) + 150) 78% 70%);
 }
 .avatar-tone-1 { --avatar-tone: #a63f42; }
 .avatar-tone-2 { --avatar-tone: #b0503a; }
@@ -523,7 +533,8 @@ html.desktop .titlebar-drag textarea {
 .md code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  padding: 0.12em 0.38em;
+  color: var(--accent-text);
+  padding: 0.1em 0.36em;
   border-radius: 4px;
   background: var(--subtle);
   border: 1px solid var(--line);
@@ -538,6 +549,7 @@ html.desktop .titlebar-drag textarea {
   line-height: 1.55;
 }
 .md pre code {
+  color: inherit;
   padding: 0;
   border: 0;
   background: transparent;

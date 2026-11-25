@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
-  ArrowUp,
   AtSign,
   Bell,
   BellOff,
@@ -20,6 +19,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   PanelRight,
+  SendHorizontal,
   Sparkles,
   Square,
   UserPlus,
@@ -329,6 +329,18 @@ function DayDivider({ iso }: { iso: string }) {
   );
 }
 
+function UnreadDivider() {
+  return (
+    <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-2.5 animate-fade-in">
+      <div className="flex-1 h-px bg-accent/70" />
+      <span className="h-[18px] px-1.5 rounded-[3px] bg-accent text-accent-fg text-[10.5px] font-semibold uppercase tracking-[0.05em] inline-flex items-center">
+        New messages
+      </span>
+      <div className="flex-1 h-px bg-accent/70" />
+    </div>
+  );
+}
+
 /** Isolated composer so typing never re-renders the message list above it. */
 function MessageComposer({
   spaceSlug,
@@ -430,6 +442,25 @@ function MessageComposer({
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
+  function insertMentionTrigger() {
+    const el = textRef.current;
+    const start = el?.selectionStart ?? composer.length;
+    const end = el?.selectionEnd ?? composer.length;
+    const before = composer.slice(0, start);
+    const needsSpace = before.length > 0 && !/[\s(]$/.test(before);
+    const insert = needsSpace ? " @" : "@";
+    const next = before + insert + composer.slice(end);
+    const caret = before.length + insert.length;
+    setComposer(next);
+    window.requestAnimationFrame(() => {
+      const box = textRef.current;
+      if (!box) return;
+      box.focus();
+      box.setSelectionRange(caret, caret);
+      mentions.detect();
+    });
+  }
+
   return (
     <form onSubmit={(e) => void handleSend(e)} className="px-5 pt-2 pb-1">
       <div
@@ -505,14 +536,27 @@ function MessageComposer({
         />
         <AttachmentDraftRow draft={draft} />
         <div className="px-2 py-1.5 border-t border-line bg-subtle/45 rounded-b-[5px] flex items-center justify-between gap-2">
-          <AttachmentPicker draft={draft} />
+          <div className="flex items-center gap-0.5">
+            <AttachmentPicker draft={draft} />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={insertMentionTrigger}
+              title="Mention someone (@)"
+              aria-label="Mention someone"
+              className="size-7 rounded-[4px] hover:bg-hover text-fg-3 hover:text-fg flex items-center justify-center transition-colors"
+            >
+              <AtSign className="size-4" />
+            </button>
+          </div>
           <button
             type="submit"
             aria-label="Send"
             disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
-            className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1 text-[12.5px] font-medium transition-colors"
+            className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium transition-colors"
           >
-            <ArrowUp className="size-3.5" />
+            <span>Send</span>
+            <SendHorizontal className="size-3.5" />
           </button>
         </div>
       </div>
@@ -525,6 +569,7 @@ export function ConversationView({
   boot,
   conv,
   focusMessageID,
+  activeDetail,
   onOpenDetail,
   onOpenConversation,
   onOpenDM,
@@ -536,6 +581,7 @@ export function ConversationView({
   boot: BootstrapData;
   conv: Conversation;
   focusMessageID?: string;
+  activeDetail?: DetailTarget | null;
   onOpenDetail: (t: DetailTarget) => void;
   onOpenConversation?: (convID: string) => void;
   onOpenDM?: (memberID: string) => void;
@@ -743,8 +789,13 @@ export function ConversationView({
             <button
               onClick={() => onOpenDetail({ kind: "channel_tasks", convID: conv.id })}
               aria-label="Channel tasks"
+              aria-pressed={activeDetail?.kind === "channel_tasks" && activeDetail.convID === conv.id}
               title="Channel tasks"
-              className="h-8 pl-2 pr-2.5 rounded-[6px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
+              className={`h-8 pl-2 pr-2.5 rounded-[4px] border flex items-center gap-1.5 text-[13px] transition-colors ${
+                activeDetail?.kind === "channel_tasks" && activeDetail.convID === conv.id
+                  ? "bg-subtle border-line-strong text-fg font-medium"
+                  : "border-transparent text-fg-2 hover:bg-hover"
+              }`}
             >
               <CheckCircle2 className="size-4 text-fg-3" />
               <span className="tabular min-w-[1ch] text-center">{activeChannelTasks}</span>
@@ -754,8 +805,13 @@ export function ConversationView({
             <button
               onClick={() => onOpenDetail({ kind: "members", convID: conv.id })}
               aria-label="Members"
+              aria-pressed={activeDetail?.kind === "members" && activeDetail.convID === conv.id}
               title="Members"
-              className="h-8 pl-2 pr-2.5 rounded-[6px] flex items-center gap-1.5 text-[13px] text-fg-2 hover:bg-hover transition-colors"
+              className={`h-8 pl-2 pr-2.5 rounded-[4px] border flex items-center gap-1.5 text-[13px] transition-colors ${
+                activeDetail?.kind === "members" && activeDetail.convID === conv.id
+                  ? "bg-subtle border-line-strong text-fg font-medium"
+                  : "border-transparent text-fg-2 hover:bg-hover"
+              }`}
             >
               <Users className="size-4 text-fg-3" />
               <span className="tabular min-w-[1ch] text-center">{memberCount ?? "·"}</span>
@@ -831,7 +887,11 @@ export function ConversationView({
             </Menu>
           )}
           {peer?.kind === "agent" && (
-            <IconButton label="Agent details" onClick={() => onOpenDetail({ kind: "agent", memberID: peer.id })}>
+            <IconButton
+              label="Agent details"
+              active={activeDetail?.kind === "agent" && activeDetail.memberID === peer.id}
+              onClick={() => onOpenDetail({ kind: "agent", memberID: peer.id })}
+            >
               <PanelRight />
             </IconButton>
           )}
@@ -882,13 +942,7 @@ export function ConversationView({
                   return (
                     <div key={entry.key}>
                       {showDay && <DayDivider iso={first.created_at} />}
-                      {showNew && (
-                        <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-3 animate-fade-in">
-                          <div className="flex-1 h-px bg-warm/40" />
-                          <span className="text-[12px] font-semibold text-warm">New messages</span>
-                          <div className="flex-1 h-px bg-warm/40" />
-                        </div>
-                      )}
+                      {showNew && <UnreadDivider />}
                       <ActionMessageGroup items={entry.items} />
                     </div>
                   );
@@ -910,13 +964,7 @@ export function ConversationView({
                 return (
                   <div key={m.id} data-message-id={m.id} className={isNew(m.id) ? "animate-rise-in" : ""}>
                     {showDay && <DayDivider iso={m.created_at} />}
-                    {showNew && (
-                      <div data-unread-anchor="new" className="px-6 py-2 flex items-center gap-3 animate-fade-in">
-                        <div className="flex-1 h-px bg-warm/40" />
-                        <span className="text-[12px] font-semibold text-warm">New messages</span>
-                        <div className="flex-1 h-px bg-warm/40" />
-                      </div>
-                    )}
+                    {showNew && <UnreadDivider />}
                     {isActionCardMessage(m) ? (
                       <article className="px-6 pt-3 pb-1.5 flex items-start gap-3">
                         <div className="w-9 shrink-0">
@@ -1202,7 +1250,7 @@ export function ConversationView({
       {isArchived ? (
         <div className="shrink-0 px-6 py-4 bg-bg/70 border-t border-line flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="size-9 rounded-[7px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
+            <span className="size-9 rounded-[6px] bg-subtle border border-line text-fg-3 flex items-center justify-center shrink-0">
               <Archive className="size-4" />
             </span>
             <div className="min-w-0">

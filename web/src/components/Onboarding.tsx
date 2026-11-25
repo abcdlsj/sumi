@@ -26,7 +26,7 @@ function Stepper({ current }: { current: OnboardingStep }) {
         return (
           <li key={s.key} className="flex items-center gap-3 py-2" aria-current={active ? "step" : undefined}>
             <span
-              className={`size-7 rounded-full text-[12.5px] font-semibold flex items-center justify-center shrink-0 transition-colors duration-200 ${
+              className={`size-7 rounded-[5px] text-[12.5px] font-semibold flex items-center justify-center shrink-0 transition-colors duration-150 ${
                 done ? "bg-accent text-accent-fg" : active ? "bg-nav-fg-strong text-nav" : "bg-nav-fill text-nav-fg-3 border border-nav-line"
               }`}
             >
@@ -60,18 +60,13 @@ function crewSeeds(): string[] {
 function BrandPanel({ step, desktop }: { step: OnboardingStep; desktop: boolean }) {
   const [seeds] = useState(crewSeeds);
   return (
-    <aside className={`hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg flex-col justify-between px-10 pb-10 ${desktop ? "pt-[72px]" : "pt-10"} relative overflow-hidden`}>
-      <div
-        aria-hidden
-        className="absolute -top-32 -right-24 size-[380px] rounded-full opacity-25 dark:opacity-40 blur-3xl"
-        style={{ background: "radial-gradient(circle, var(--accent) 0%, transparent 65%)" }}
-      />
+    <aside className={`hidden lg:flex w-[400px] shrink-0 bg-nav text-nav-fg border-r border-[var(--nav-edge)] flex-col justify-between px-10 pb-10 ${desktop ? "pt-[72px]" : "pt-10"} relative overflow-hidden`}>
       <div className="relative">
         <div className="flex items-center gap-3">
           <SumiMark size={36} />
           <span className="text-[19px] font-semibold tracking-tight text-nav-fg-strong">Sumi</span>
         </div>
-        <p className="mt-6 font-display text-[27px] leading-[1.2] font-semibold text-nav-fg-strong">
+        <p className="mt-6 font-display text-[25px] leading-[1.25] font-semibold text-nav-fg-strong">
           One workspace for people
           <br />
           and persistent agents.
@@ -154,7 +149,7 @@ function AccountStep({ onAuthenticated }: { onAuthenticated: () => void }) {
   return (
     <form onSubmit={submit} className="space-y-5">
       {pairing && (
-        <div className="px-4 py-3 rounded-[8px] bg-accent-soft text-accent-text text-[13.5px] flex items-center gap-2.5">
+        <div className="px-4 py-3 rounded-[6px] bg-accent-soft text-accent-text text-[13.5px] flex items-center gap-2.5">
           <Laptop className="size-4 shrink-0" />
           This computer is ready to connect. Sign in, then confirm it.
         </div>
@@ -267,8 +262,8 @@ function SpaceStep({ user, onCreated }: { user: User; onCreated: (slug: string) 
         title="Create a space"
         body="A space holds your channels, tasks, agents and computers. You can invite people later."
       />
-      <div className="flex items-center gap-3.5 p-4 rounded-[8px] border border-line bg-subtle">
-        <span className="size-12 rounded-[8px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
+      <div className="flex items-center gap-3.5 p-4 rounded-[6px] border border-line bg-subtle">
+        <span className="size-12 rounded-[6px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
           {(name.trim()[0] ?? "S").toUpperCase()}
         </span>
         <div className="min-w-0">

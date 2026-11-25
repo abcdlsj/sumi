@@ -418,7 +418,7 @@ export function ThreadOutlineRail({
         <div
           role="navigation"
           aria-label="Thread outline"
-          className="mr-1.5 w-[240px] max-h-[280px] overflow-y-auto scroll-thin rounded-[8px] bg-card border border-line shadow-lg p-1.5 animate-pop-in"
+          className="mr-1.5 w-[240px] max-h-[280px] overflow-y-auto scroll-thin rounded-[6px] bg-card border border-line-strong shadow-lg p-1.5 animate-pop-in"
         >
           <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-4">
             Thread outline ({items.length})

@@ -17,9 +17,9 @@ function useSpaceBoot(spaceSlug: string, poll: boolean) {
 export function StepHeading({ icon, title, body }: { icon: ReactNode; title: string; body: ReactNode }) {
   return (
     <div className="flex items-start gap-3.5">
-      <div className="size-10 rounded-[8px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0 [&>svg]:size-5">{icon}</div>
+      <div className="size-10 rounded-[6px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0 [&>svg]:size-5">{icon}</div>
       <div className="pt-0.5">
-        <h1 className="font-display text-[21px] font-semibold text-fg leading-tight">{title}</h1>
+        <h1 className="font-display text-[20px] font-semibold text-fg leading-tight">{title}</h1>
         <p className="mt-1 text-[14px] text-fg-3 leading-relaxed">{body}</p>
       </div>
     </div>
@@ -30,7 +30,7 @@ export function ComputerRow({ c }: { c: Computer }) {
   const online = c.connection_status === "online";
   return (
     <div className="h-14 px-4 flex items-center gap-3 animate-rise-in">
-      <span className="size-9 rounded-[7px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
+      <span className="size-9 rounded-[6px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
         <Monitor className="size-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -116,10 +116,10 @@ export function PairingCard({
           onConfirmed();
         });
       }}
-      className="rounded-[8px] border border-accent shadow-[var(--ring)] bg-card overflow-hidden animate-rise-in"
+      className="rounded-[6px] border border-accent shadow-[var(--ring)] bg-card overflow-hidden animate-rise-in"
     >
       <div className="px-5 py-4 flex items-center gap-3.5 border-b border-line">
-        <span className="size-11 rounded-[8px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0">
+        <span className="size-11 rounded-[6px] bg-accent-soft text-accent-text flex items-center justify-center shrink-0">
           <Laptop className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -180,7 +180,7 @@ export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { sp
       ) : issued ? (
         <div className="space-y-2.5 animate-rise-in">
           <div className="text-[14px] font-medium text-fg">Run this on {compName}</div>
-          <div className="rounded-[8px] border border-line bg-subtle p-3.5 flex items-start gap-3">
+          <div className="rounded-[6px] border border-line bg-subtle p-3.5 flex items-start gap-3">
             <Terminal className="size-4 text-fg-3 mt-0.5 shrink-0" />
             <code className="flex-1 font-mono text-[13px] break-all text-fg-2 leading-relaxed">{command}</code>
             <CopyButton text={command} />
@@ -189,7 +189,7 @@ export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { sp
         </div>
       ) : computers.length > 0 && !manual ? null : (
         <div className="space-y-4">
-          <div className="rounded-[8px] border border-line bg-subtle px-4 py-3.5 flex items-start gap-3">
+          <div className="rounded-[6px] border border-line bg-subtle px-4 py-3.5 flex items-start gap-3">
             <Laptop className="size-5 text-fg-2 shrink-0 mt-0.5" />
             <div className="text-[13.5px] text-fg-2 leading-relaxed">
               <span className="font-medium text-fg">Using the Sumi desktop app?</span> Open it on your Mac — it asks to join and you confirm it here with one click.
@@ -228,7 +228,7 @@ export function ComputerStep({ spaceSlug, onNext, nextLabel = "Continue" }: { sp
       )}
 
       {computers.length > 0 && (
-        <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
+        <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
           {computers.map((c) => (
             <ComputerRow key={c.id} c={c} />
           ))}

@@ -796,7 +796,7 @@ export function Workbench({
       style={{ gridTemplateColumns: `${navWidth}px minmax(0, 1fr) ${detail ? panes.detail : 0}px` }}
     >
       {/* Navigation shell: in desktop mode a unified 52px header spans rail + sidebar so macOS traffic lights sit on one continuous surface. */}
-      <div className="relative flex flex-col min-w-0 min-h-0 border-r border-nav-line bg-nav select-none">
+      <div className="relative flex flex-col min-w-0 min-h-0 border-r border-[var(--nav-edge)] bg-nav select-none">
         {!sidebarCollapsed && (
           <ResizeHandle
             label="Resize sidebar"
@@ -892,7 +892,7 @@ export function Workbench({
 
         <div className="relative flex-1 min-h-0 flex flex-col">
         <div className="flex-1 min-h-0 px-3 pb-3 space-y-4 overflow-y-auto scroll-nav">
-          <div className="space-y-0.5 pt-1">
+          <div className="space-y-0.5 pt-1 pb-3 border-b border-nav-line">
             <NavItem
               active={mainView.kind === "inbox"}
               onClick={() => setMainView({ kind: "inbox" })}
@@ -917,7 +917,7 @@ export function Workbench({
               if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === "__ungrouped__" ? null : cur));
             }}
             onDrop={(e) => handleGroupDrop(e, "")}
-            className={`rounded-[7px] transition-colors ${dropTarget === "__ungrouped__" ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+            className={`rounded-[5px] transition-colors ${dropTarget === "__ungrouped__" ? "ring-1 ring-accent bg-nav-active" : ""}`}
           >
             <SectionLabel
               action={
@@ -1005,7 +1005,7 @@ export function Workbench({
                   if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget((cur) => (cur === g.id ? null : cur));
                 }}
                 onDrop={(e) => handleGroupDrop(e, g.id)}
-                className={`rounded-[7px] transition-colors ${isOver ? "ring-1 ring-accent bg-accent-soft/30" : ""}`}
+                className={`rounded-[5px] transition-colors ${isOver ? "ring-1 ring-accent bg-nav-active" : ""}`}
               >
                 <div className="group/grp px-2 mb-0.5 h-7 flex items-center gap-1">
                   <button
@@ -1150,6 +1150,7 @@ export function Workbench({
                 boot={boot}
                 conv={activeConv}
                 focusMessageID={mainView.focusMessageID}
+                activeDetail={detail}
                 onOpenDetail={setDetail}
                 onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
                 onOpenDM={(memberID) => void openOrCreateDM(memberID)}

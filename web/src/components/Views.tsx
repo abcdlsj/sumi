@@ -535,7 +535,7 @@ function AgentList({
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search agents"
             aria-label="Search agents"
-            className="w-full h-10 pl-9 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+            className="w-full h-8 pl-9 pr-3 rounded-[5px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
           />
         </div>
         <Segmented
@@ -702,13 +702,13 @@ function ArchivedChannelsSection({
     <div>
       <SectionTitle title="Archived channels" body="Read-only channels. Unarchive a channel to resume messaging and notifications." />
       {archivedQ.isLoading ? (
-        <div className="rounded-[8px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
+        <div className="rounded-[6px] border border-line bg-card px-4 py-6 text-[13.5px] text-fg-3">Loading archived channels…</div>
       ) : list.length === 0 ? (
-        <div className="rounded-[8px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
+        <div className="rounded-[6px] border border-dashed border-line-strong bg-card px-4 py-6 text-center text-[13.5px] text-fg-3">
           No archived channels.
         </div>
       ) : (
-        <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
+        <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
           {list.map((c) => (
             <div key={c.id} className="px-4 py-3 flex items-center gap-3">
               <span className="size-8 rounded-[6px] bg-subtle text-fg-3 flex items-center justify-center shrink-0">
@@ -829,7 +829,7 @@ export function AdminPanel({
                 }
               />
               {agents.length === 0 ? (
-                <div className="rounded-[8px] border border-dashed border-line-strong bg-card">
+                <div className="rounded-[6px] border border-dashed border-line-strong bg-card">
                   <EmptyState icon={<Bot />} title="No agents yet" body="Create an agent and DM it like any teammate." action={<Button onClick={onNewAgent}>Create an agent</Button>} />
                 </div>
               ) : (
@@ -901,7 +901,7 @@ export function AdminPanel({
                 }
               />
               {boot.computers.length === 0 ? (
-                <div className="rounded-[8px] border border-dashed border-line-strong bg-card">
+                <div className="rounded-[6px] border border-dashed border-line-strong bg-card">
                   <EmptyState
                     icon={<Monitor />}
                     title="No computers yet"
@@ -916,7 +916,7 @@ export function AdminPanel({
                     const online = c.connection_status === "online";
                     return (
                       <div key={c.id} className="px-4 py-3.5 flex items-center gap-3.5">
-                        <span className="size-10 rounded-[7px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
+                        <span className="size-10 rounded-[6px] bg-subtle text-fg-2 flex items-center justify-center shrink-0">
                           <Monitor className="size-5" />
                         </span>
                         <div className="min-w-0 flex-1">
@@ -931,7 +931,7 @@ export function AdminPanel({
                         </div>
                         <div className="flex -space-x-1.5">
                           {hosted.slice(0, 5).map((a) => (
-                            <span key={a.id} className="rounded-[7px] ring-2 ring-[var(--card)]">
+                            <span key={a.id} className="rounded-[5px] ring-2 ring-[var(--card)]">
                               <MemberAvatar id={a.id} name={a.display_name} kind="agent" size="sm" />
                             </span>
                           ))}
@@ -951,7 +951,7 @@ export function AdminPanel({
           {tab === "people" && (
             <>
               <SectionTitle title="People" body="Humans in this space." />
-              <div className="rounded-[8px] border border-line bg-card divide-y divide-line overflow-hidden">
+              <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
                 {humans.map((m) => {
                   const selected = m.id === selectedHumanID;
                   return (
@@ -1003,7 +1003,7 @@ export function AdminPanel({
               <div>
                 <SectionTitle title="Space" />
                 <AccentPicker spaceSlug={boot.space.slug} value={boot.space.accent} disabled={boot.current_member.access_level === "member"} />
-                <div className="rounded-[8px] border border-line bg-card divide-y divide-line text-[14px]">
+                <div className="rounded-[6px] border border-line bg-card divide-y divide-line text-[14px]">
                   {[
                     ["Name", boot.space.name],
                     ["Address", `/${boot.space.slug}`],

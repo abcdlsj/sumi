@@ -601,7 +601,7 @@ export function ErrorState({
       role="alert"
       className={`h-full flex flex-col items-center justify-center text-center px-6 ${compact ? "min-h-[160px] py-6" : "min-h-[260px] py-10"}`}
     >
-      <div className="size-10 rounded-[7px] bg-danger-soft border border-danger/20 text-danger flex items-center justify-center mb-3">
+      <div className="size-10 rounded-[6px] bg-danger-soft border border-danger/20 text-danger flex items-center justify-center mb-3">
         <AlertCircle className="size-5" />
       </div>
       <div className="text-[15px] font-semibold text-fg">{title}</div>

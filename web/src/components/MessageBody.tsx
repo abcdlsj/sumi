@@ -329,7 +329,7 @@ export const MessageBody = memo(function MessageBody({
       },
       table({ children }) {
         return (
-          <div className="my-2 overflow-x-auto rounded-[7px] border border-line bg-card/50">
+          <div className="my-2 overflow-x-auto rounded-[6px] border border-line bg-card">
             <table>{children}</table>
           </div>
         );

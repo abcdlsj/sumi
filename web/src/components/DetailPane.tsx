@@ -103,7 +103,7 @@ function CompactMessage({
             <button
               type="button"
               onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-              className="text-[13.5px] font-semibold text-fg hover:underline underline-offset-2"
+              className="text-[13.5px] font-bold text-fg hover:underline underline-offset-2"
             >
               {m.author_display_name}
             </button>
@@ -153,7 +153,7 @@ function CompactMessage({
           <button
             type="button"
             onClick={() => onSelectTarget(memberDetailTarget({ id: m.author_member_id, kind: m.author_kind ?? "human" }))}
-            className="text-[13.5px] font-semibold text-fg hover:underline underline-offset-2"
+            className="text-[13.5px] font-bold text-fg hover:underline underline-offset-2"
           >
             {m.author_display_name}
           </button>
@@ -512,7 +512,7 @@ function ChannelTasksDetail({
                   <span className="tabular font-normal text-fg-4 ml-0.5">{g.tasks.length}</span>
                 </button>
                 {!isClosed && (
-                  <div className="mt-1 rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden">
+                  <div className="mt-1 rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
                     {g.tasks.map((t) => (
                       <button
                         key={t.id}
@@ -1180,7 +1180,13 @@ function ThreadDetail({
               <div
                 key={m.id}
                 data-thread-msg-id={m.id}
-                className={`rounded-[6px] transition-colors duration-300 ${highlightedMsgID === m.id ? "bg-accent-soft/70 -mx-2 px-2 py-1" : ""}`}
+                className={`rounded-[6px] transition-colors duration-200 ${
+                  highlightedMsgID === m.id
+                    ? "bg-accent-soft/70 -mx-2 px-2 py-1"
+                    : i === 0
+                      ? "bg-subtle/45 border border-line -mx-2 px-3 py-2.5"
+                      : ""
+                }`}
               >
                 <CompactMessage
                   m={m}
@@ -1198,9 +1204,8 @@ function ThreadDetail({
                   onSelectAgent={(memberID) => onSelectTarget({ kind: "agent", memberID })}
                 />
                 {i === 0 && (msgsQ.data?.messages.length ?? 0) > 1 && (
-                  <div className="mt-4 flex items-center gap-3 text-[12.5px] text-fg-3">
+                  <div className="mt-3 pt-2 border-t border-line flex items-center gap-2 text-[12px] font-semibold text-fg-3">
                     <span className="tabular">{(msgsQ.data?.messages.length ?? 1) - 1} replies</span>
-                    <span className="flex-1 h-px bg-line" />
                   </div>
                 )}
               </div>
@@ -1460,7 +1465,7 @@ function AgentDetail({
         <div className="px-5 py-5 flex items-center gap-4">
           <MemberAvatar id={member.id} name={member.display_name} kind="agent" size="xl" state={st} />
           <div className="min-w-0 flex-1">
-            <div className="font-display text-[22px] font-semibold text-fg truncate">{member.display_name}</div>
+            <div className="font-display text-[19px] font-bold text-fg truncate">{member.display_name}</div>
             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
               <Badge tone={stateTone}>
                 <StatusDot state={st} size={7} ring="transparent" />
@@ -1612,7 +1617,7 @@ function AgentDetail({
         </Section>
 
         <Section title="Permissions">
-          <div className="rounded-[8px] border border-line divide-y divide-line overflow-hidden">
+          <div className="rounded-[6px] border border-line divide-y divide-line overflow-hidden">
             {PERMISSIONS.map((p) => {
               const on = perms.has(p.code);
               return (
@@ -1707,7 +1712,7 @@ function HumanDetail({
         <div className="px-5 py-5 flex items-center gap-4">
           <MemberAvatar id={member.id} name={member.display_name} kind="human" size="xl" />
           <div className="min-w-0 flex-1">
-            <div className="font-display text-[22px] font-semibold text-fg truncate">{member.display_name}</div>
+            <div className="font-display text-[19px] font-bold text-fg truncate">{member.display_name}</div>
             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
               <Badge className="capitalize">{member.access_level}</Badge>
               {isSelf && <Badge tone="accent">You</Badge>}
@@ -1747,7 +1752,7 @@ function HumanDetail({
 
         {openTasks.length > 0 && (
           <Section title="Assigned tasks">
-            <div className="rounded-[7px] border border-line bg-card divide-y divide-line overflow-hidden">
+            <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
               {openTasks.map((tk) => (
                 <button
                   key={tk.id}
