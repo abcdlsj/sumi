@@ -106,8 +106,8 @@ export function describeAction(kind?: string, raw?: string): string | undefined 
   return kind;
 }
 
-/** Fixed-height status & shortcut footer below the composer so agent state transitions never shift layout. */
-function ComposerStatusFooter({
+/** Fixed-height runtime line above the composer so agent state transitions stay visible without shifting layout. */
+function AgentStatusLine({
   spaceSlug,
   boot,
   conv,
@@ -122,7 +122,6 @@ function ComposerStatusFooter({
 }) {
   const qc = useQueryClient();
   const act = useAction();
-  const [sendKey] = useSendKey();
   const [popOpen, setPopOpen] = useState(false);
   const [stoppingID, setStoppingID] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -229,19 +228,8 @@ function ComposerStatusFooter({
   }
 
   return (
-    <div className="h-6 px-5 pb-1 flex items-center justify-between gap-3 text-[12px] shrink-0" aria-live="polite">
-      <div className="flex items-center gap-1.5 min-w-0">{statusContent}</div>
-      <span className="text-[11.5px] text-fg-4 hidden md:inline shrink-0">
-        {sendKey === "mod_enter" ? (
-          <>
-            <kbd className="font-sans">{isMacPlatform() ? "⌘" : "Ctrl"}+Enter</kbd> send · <kbd className="font-sans">Enter</kbd> newline
-          </>
-        ) : (
-          <>
-            <kbd className="font-sans">Enter</kbd> send · <kbd className="font-sans">Shift+Enter</kbd> newline
-          </>
-        )}
-      </span>
+    <div className="h-6 px-5 pt-1 flex items-center gap-1.5 text-[12px] shrink-0" aria-live="polite">
+      {statusContent}
     </div>
   );
 }
@@ -463,7 +451,7 @@ function MessageComposer({
   }
 
   return (
-    <form onSubmit={(e) => void handleSend(e)} className="px-5 pt-2 pb-1">
+    <form onSubmit={(e) => void handleSend(e)} className="px-5 pt-1 pb-3.5">
       <div
         {...draft.dropProps}
         className={`relative bg-card border rounded-[6px] focus-within:border-accent focus-within:shadow-[var(--ring)] transition-[border-color,box-shadow,background-color] ${
@@ -550,15 +538,28 @@ function MessageComposer({
               <AtSign className="size-4" />
             </button>
           </div>
-          <button
-            type="submit"
-            aria-label="Send"
-            disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
-            className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium transition-colors"
-          >
-            <span>Send</span>
-            <SendHorizontal className="size-3.5" />
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-[11.5px] text-fg-4 hidden md:inline">
+              {sendKey === "mod_enter" ? (
+                <>
+                  <kbd className="font-sans">{isMacPlatform() ? "⌘" : "Ctrl"}+Enter</kbd> send · <kbd className="font-sans">Enter</kbd> newline
+                </>
+              ) : (
+                <>
+                  <kbd className="font-sans">Enter</kbd> send · <kbd className="font-sans">Shift+Enter</kbd> newline
+                </>
+              )}
+            </span>
+            <button
+              type="submit"
+              aria-label="Send"
+              disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
+              className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium transition-colors"
+            >
+              <span>Send</span>
+              <SendHorizontal className="size-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </form>
@@ -1427,6 +1428,7 @@ export function ConversationView({
         </div>
       ) : (
       <div className="shrink-0 bg-panel">
+        <AgentStatusLine spaceSlug={spaceSlug} boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
         <MessageComposer
           spaceSlug={spaceSlug}
           boot={boot}
@@ -1438,7 +1440,6 @@ export function ConversationView({
           onSent={jumpToEnd}
           focusRef={composerFocusRef}
         />
-        <ComposerStatusFooter spaceSlug={spaceSlug} boot={boot} conv={conv} onOpenDetail={onOpenDetail} onOpenConversation={onOpenConversation} />
       </div>
       )}
 
