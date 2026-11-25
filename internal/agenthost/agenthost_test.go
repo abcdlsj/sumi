@@ -2,7 +2,10 @@ package agenthost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -310,5 +313,88 @@ func TestDefaultDriverBuilderRoutesPiToNativeRPC(t *testing.T) {
 	defer drv2.Close()
 	if _, ok := drv2.(*acp.Driver); !ok {
 		t.Fatalf("expected *acp.Driver for custom command, got %T", drv2)
+	}
+}
+
+func TestShutdownIgnoresMismatchedPID(t *testing.T) {
+	home := t.TempDir()
+	sock := SocketPath(home)
+	srv := NewServer(ServerConfig{
+		SocketPath: sock,
+		MetaPath:   MetaPath(home),
+		DriverBuilder: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
+			return &gatedDriver{started: make(chan struct{}, 1), release: make(chan struct{})}, nil
+		},
+	})
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer srv.Close(false)
+
+	c := NewClient(sock)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://unix/shutdown?pid=%d", os.Getpid()+99999), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("shutdown request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("mismatched pid status = %d, want 409", resp.StatusCode)
+	}
+
+	// Server must stay alive and responsive after a mismatched shutdown.
+	if _, err := c.Status(context.Background()); err != nil {
+		t.Fatalf("server died after mismatched pid shutdown: %v", err)
+	}
+
+	// Matching PID shuts down cleanly.
+	c.pid = os.Getpid()
+	if err := c.Close(); err != nil {
+		t.Fatalf("matching close: %v", err)
+	}
+	select {
+	case <-srv.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop after matching pid shutdown")
+	}
+}
+
+func TestCloseDoesNotUnlinkReplacementSocketOrMeta(t *testing.T) {
+	home := t.TempDir()
+	sock := SocketPath(home)
+	meta := MetaPath(home)
+	builder := func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
+		return &gatedDriver{started: make(chan struct{}, 1), release: make(chan struct{})}, nil
+	}
+
+	srv1 := NewServer(ServerConfig{SocketPath: sock, MetaPath: meta, DriverBuilder: builder})
+	if err := srv1.Start(); err != nil {
+		t.Fatalf("start srv1: %v", err)
+	}
+
+	// Simulate a replacement sidecar binding the same paths while srv1 is still tearing down.
+	srv2 := NewServer(ServerConfig{SocketPath: sock, MetaPath: meta, DriverBuilder: builder})
+	if err := srv2.Start(); err != nil {
+		t.Fatalf("start srv2: %v", err)
+	}
+	defer srv2.Close(false)
+	rawMeta, _ := json.Marshal(Meta{PID: os.Getpid() + 1, SocketPath: sock})
+	if err := os.WriteFile(meta, rawMeta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv1.Close(false)
+
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("srv1.Close removed replacement socket: %v", err)
+	}
+	if _, err := os.Stat(meta); err != nil {
+		t.Fatalf("srv1.Close removed replacement meta: %v", err)
+	}
+	if _, err := NewClient(sock).Status(context.Background()); err != nil {
+		t.Fatalf("replacement sidecar unreachable after srv1.Close: %v", err)
 	}
 }

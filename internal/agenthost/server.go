@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,7 @@ type Server struct {
 	startedAt time.Time
 	httpSrv   *http.Server
 	ln        net.Listener
+	sockInfo  os.FileInfo
 
 	mu            sync.Mutex
 	drv           driver.SessionDriver
@@ -149,8 +151,14 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("listen agenthost socket: %w", err)
 	}
+	if uln, ok := ln.(*net.UnixListener); ok {
+		// Unlink explicitly in Close after verifying ownership so a retiring sidecar
+		// never removes a replacement sidecar's socket bound to the same path.
+		uln.SetUnlinkOnClose(false)
+	}
 	_ = os.Chmod(s.cfg.SocketPath, 0o600)
 	s.ln = ln
+	s.sockInfo, _ = os.Stat(s.cfg.SocketPath)
 	s.writeMetaLocked("")
 	go func() {
 		_ = s.httpSrv.Serve(ln)
@@ -191,14 +199,33 @@ func (s *Server) Close(graceful bool) {
 			_ = s.httpSrv.Shutdown(ctx)
 			cancel()
 		}
-		if s.cfg.SocketPath != "" {
+		if s.cfg.SocketPath != "" && s.ownsSocket() {
 			_ = os.Remove(s.cfg.SocketPath)
 		}
-		if s.cfg.MetaPath != "" {
+		if s.cfg.MetaPath != "" && s.ownsMeta() {
 			_ = os.Remove(s.cfg.MetaPath)
 		}
 		close(s.shutdownCh)
 	})
+}
+
+// ownsSocket prevents a retiring sidecar from unlinking a replacement sidecar's host.sock.
+func (s *Server) ownsSocket() bool {
+	if s.sockInfo == nil {
+		return false
+	}
+	cur, err := os.Stat(s.cfg.SocketPath)
+	return err == nil && os.SameFile(cur, s.sockInfo)
+}
+
+// ownsMeta prevents a retiring sidecar from deleting a replacement sidecar's host.json.
+func (s *Server) ownsMeta() bool {
+	raw, err := os.ReadFile(s.cfg.MetaPath)
+	if err != nil {
+		return false
+	}
+	var m Meta
+	return json.Unmarshal(raw, &m) == nil && m.PID == os.Getpid()
 }
 
 func (s *Server) writeMetaLocked(specHash string) {
@@ -502,6 +529,13 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
+	}
+	if pidStr := r.URL.Query().Get("pid"); pidStr != "" {
+		wantPID, err := strconv.Atoi(pidStr)
+		if err != nil || wantPID != os.Getpid() {
+			writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "pid mismatch"})
+			return
+		}
 	}
 	graceful := r.URL.Query().Get("graceful") == "true"
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	mrand "math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,13 +100,16 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 
 	ag.mu.Lock()
 	defer ag.mu.Unlock()
-	if ag.drv != nil && reflect.DeepEqual(ag.spec, spec) {
-		return ag
+	sameSpec := reflect.DeepEqual(ag.spec, spec)
+	if ag.drv != nil && sameSpec {
+		if ag.busy || driverHealthy(ag.drv) {
+			return ag
+		}
 	}
-	reprovision := ag.drv != nil
+	specChanged := ag.drv != nil && !sameSpec
 	old := ag.drv
 	drv, code, detail := d.buildAgentDriver(ag, spec)
-	if drv != nil && reprovision {
+	if drv != nil && specChanged {
 		if err := drv.ResetSession(); err != nil {
 			d.logger.Warn("Reset session on re-provision failed", "agent_id", spec.MemberID, "error", err.Error())
 		}
@@ -114,8 +118,16 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	ag.stopRequested = false
 	ag.resetBreakerLocked()
 	if old != nil {
-		// Closing may wait for an in-flight turn; never block provisioning on it.
-		go func() { _ = old.Close() }()
+		oldHC, oldSidecar := old.(*agenthost.Client)
+		_, newSidecar := drv.(*agenthost.Client)
+		if oldSidecar && newSidecar {
+			// AttachOrSpawn already replaced the sidecar behind host.sock; calling old.Close()
+			// would send /shutdown to the replacement sidecar listening on the same path.
+			oldHC.Detach()
+		} else {
+			// Closing may wait for an in-flight turn; never block provisioning on it.
+			go func() { _ = old.Close() }()
+		}
 	}
 	return ag
 }
@@ -293,8 +305,25 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		d.mu.RUnlock()
 		if ag != nil {
 			ag.mu.Lock()
+			if !ag.busy && ag.spec.MemberID != "" && (ag.drv == nil || !driverHealthy(ag.drv)) {
+				old := ag.drv
+				drv, code, detail := d.buildAgentDriver(ag, ag.spec)
+				ag.drv, ag.failCode, ag.failDetail = drv, code, detail
+				if old != nil {
+					if oldHC, ok := old.(*agenthost.Client); ok && drv != nil {
+						oldHC.Detach()
+					} else {
+						go func() { _ = old.Close() }()
+					}
+				}
+			}
+			ok, failCode, failDetail := ag.drv != nil, ag.failCode, ag.failDetail
 			ag.resetBreakerLocked()
 			ag.mu.Unlock()
+			if !ok {
+				d.reportAgentState(ctrl.AgentMemberID, domain.RuntimeError, "", failCode, failDetail)
+				return
+			}
 			d.reportAgentState(ctrl.AgentMemberID, domain.RuntimeIdle, "", "", "")
 			d.scheduleWake(ctx, ctrl.AgentMemberID, "", "restarted")
 		}
@@ -475,6 +504,14 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		var runErr error
 		if hc, ok := drv.(*agenthost.Client); ok {
 			_, runErr = hc.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+			if runErr != nil && isSidecarDialError(runErr) && turnCtx.Err() == nil {
+				if recovered, recErr := d.recoverDeadSidecar(ag, hc, spec); recovered != nil {
+					drv = recovered
+					_, runErr = recovered.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+				} else if recErr != nil {
+					runErr = recErr
+				}
+			}
 		} else {
 			_, runErr = drv.RunTurn(turnCtx, turnInput)
 		}
@@ -743,6 +780,45 @@ func (d *Daemon) armRetry(ctx context.Context, ag *hostedAgent) time.Duration {
 	ag.retryTimer = timer
 	d.logger.Info("Agent retry scheduled", "agent_id", agentID, "fail_streak", ag.failStreak, "delay_ms", delay.Milliseconds())
 	return delay
+}
+
+func driverHealthy(drv driver.SessionDriver) bool {
+	hc, ok := drv.(*agenthost.Client)
+	if !ok {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err := hc.Status(ctx)
+	return err == nil
+}
+
+func isSidecarDialError(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
+}
+
+// recoverDeadSidecar respawns a missing agent-host sidecar before failing a turn whose
+// initial dial never reached any process.
+func (d *Daemon) recoverDeadSidecar(ag *hostedAgent, dead *agenthost.Client, spec protocol.AssignedAgentSpec) (*agenthost.Client, error) {
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	if ag.drv != dead || ag.stopRequested || d.isDraining() {
+		return nil, nil
+	}
+	drv, code, detail := d.buildAgentDriver(ag, spec)
+	if drv == nil {
+		return nil, driver.Fail(code, errors.New(detail))
+	}
+	hc, ok := drv.(*agenthost.Client)
+	if !ok {
+		_ = drv.Close()
+		return nil, nil
+	}
+	ag.drv = hc
+	dead.Detach()
+	d.logger.Warn("Respawned dead agent-host sidecar", "agent_id", spec.MemberID)
+	return hc, nil
 }
 
 func (d *Daemon) fetchAgentInbox(ctx context.Context, agentID string) ([]domain.InboxItem, error) {

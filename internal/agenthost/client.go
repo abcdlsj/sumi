@@ -28,9 +28,13 @@ import (
 // driver.SessionDriver + driver.GracefulCloser.
 type Client struct {
 	socketPath string
+	pid        int
 	httpClient *http.Client
 	transport  *http.Transport
 }
+
+// PID returns the sidecar process ID observed when attaching or spawning, or 0 if unknown.
+func (c *Client) PID() int { return c.pid }
 
 // NewClient creates a client bound to an existing sidecar Unix socket.
 func NewClient(socketPath string) *Client {
@@ -67,11 +71,20 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 
 	if st, err := client.Status(ctx); err == nil {
 		if st.ProtocolVersion == ProtocolVersion && st.Configured && st.SpecHash == wantHash {
+			client.pid = st.PID
 			return client, st, nil
 		}
-		// Spec or protocol changed: replace the existing sidecar cleanly.
+		// Spec or protocol changed: replace the existing sidecar cleanly and wait for it to
+		// exit before binding the same socket path with a replacement process.
+		client.pid = st.PID
 		_ = client.GracefulClose(2)
+		if st.PID > 0 && st.PID != os.Getpid() {
+			if !waitProcessGone(st.PID, 3*time.Second) {
+				terminateProcess(st.PID)
+			}
+		}
 		waitSocketGone(sockPath, 2*time.Second)
+		client.pid = 0
 	}
 
 	bin := opts.BinaryPath
@@ -141,6 +154,11 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 		return nil, StatusResponse{}, err
 	}
 	st, _ = client.Status(ctx)
+	if st.PID > 0 {
+		client.pid = st.PID
+	} else {
+		client.pid = pid
+	}
 	return client, st, nil
 }
 
@@ -166,6 +184,20 @@ func waitSocketGone(sockPath string, timeout time.Duration) {
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
+}
+
+func waitProcessGone(pid int, timeout time.Duration) bool {
+	if pid <= 0 {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return true
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	return syscall.Kill(pid, 0) != nil
 }
 
 // terminateProcess reaps a detached sidecar that never reached a usable state.
@@ -371,8 +403,15 @@ func (c *Client) shutdown(graceful bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	u := "http://unix/shutdown"
+	var params []string
 	if graceful {
-		u += "?graceful=true"
+		params = append(params, "graceful=true")
+	}
+	if c.pid > 0 {
+		params = append(params, fmt.Sprintf("pid=%d", c.pid))
+	}
+	if len(params) > 0 {
+		u += "?" + strings.Join(params, "&")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
 	if err != nil {
