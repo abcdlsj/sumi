@@ -141,8 +141,10 @@ describe("AgentForm", () => {
     const create = vi.spyOn(api, "createAgent").mockResolvedValue({ agent: created });
     render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
-    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "ak my-claude" } });
+    expect((screen.getByLabelText(/Custom command/) as HTMLInputElement).placeholder).not.toMatch(/\bak\b/i);
+    fireEvent.change(screen.getByLabelText(/Custom command/), { target: { value: "/usr/local/bin/claude --profile work" } });
     fireEvent.click(screen.getByRole("radio", { name: /Claude Code/ }));
+    expect((screen.getByLabelText(/Custom command/) as HTMLInputElement).placeholder).not.toMatch(/\bak\b/i);
     fireEvent.change(screen.getByLabelText(/Context window/), { target: { value: "64000" } });
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     expect(await screen.findByText(/between 100000 and 1000000/)).toBeTruthy();
@@ -153,7 +155,9 @@ describe("AgentForm", () => {
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(
         "s",
-        expect.objectContaining({ driver_config: { provider: "claude", command: ["ak", "my-claude"], context_window: 200000 } }),
+        expect.objectContaining({
+          driver_config: { provider: "claude", command: ["/usr/local/bin/claude", "--profile", "work"], context_window: 200000 },
+        }),
       ),
     );
   });

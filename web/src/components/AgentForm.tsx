@@ -281,16 +281,16 @@ export function DriverFields({
                   aria-checked={active}
                   disabled={!ok}
                   onClick={() => set({ provider: p.id })}
-                  className={`w-full px-3.5 py-2.5 rounded-[6px] border flex items-center gap-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    active ? "border-accent bg-accent-soft" : "border-line-strong bg-card hover:border-fg-4"
+                  className={`w-full px-3 py-2.5 flex items-center gap-3 text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
+                    active ? "bg-accent-soft/50" : "hover:bg-subtle/60"
                   }`}
                 >
                   <span className={`size-4 rounded-full border-2 shrink-0 flex items-center justify-center ${active ? "border-accent" : "border-fg-4"}`}>
                     {active && <span className="size-2 rounded-full bg-accent" />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[14px] font-medium text-fg">{p.name}</span>
-                    <span className="block text-[12.5px] text-fg-3">{ok ? p.desc : `Not found on ${computer?.name ?? "this computer"}`}</span>
+                    <span className="block text-[13.5px] font-semibold text-fg">{p.name}</span>
+                    <span className="block text-[12px] text-fg-3">{ok ? p.desc : `Not found on ${computer?.name ?? "this computer"}`}</span>
                   </span>
                 </button>
               );
@@ -317,7 +317,7 @@ export function DriverFields({
                 value={draft.command}
                 onChange={(e) => set({ command: e.target.value })}
                 placeholder={
-                  draft.provider === "pi" ? "ak my-pi-provider" : draft.provider === "claude" ? "ak my-claude-provider" : "npx -y my-acp-agent --stdio"
+                  draft.provider === "pi" ? "/path/to/pi" : draft.provider === "claude" ? "/path/to/claude" : "npx -y my-acp-agent --stdio"
                 }
                 hint={
                   draft.provider === "pi"
