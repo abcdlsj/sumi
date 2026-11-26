@@ -208,26 +208,97 @@ export function extractLanguage(children?: ReactNode): string {
   return m ? m[1] : "";
 }
 
+function useThemeSignature(): { dark: boolean; accent: string } {
+  const read = () => ({
+    dark: typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+    accent: typeof document !== "undefined" ? (document.documentElement.dataset.accent ?? "flame") : "flame",
+  });
+  const [sig, setSig] = useState(read);
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
+    const root = document.documentElement;
+    const sync = () => {
+      const next = read();
+      setSig((prev) => (prev.dark === next.dark && prev.accent === next.accent ? prev : next));
+    };
+    sync();
+    const obs = new MutationObserver(sync);
+    obs.observe(root, { attributes: true, attributeFilter: ["class", "data-accent"] });
+    return () => obs.disconnect();
+  }, []);
+  return sig;
+}
+
+function readCssToken(name: string, fallback: string): string {
+  if (typeof window === "undefined" || typeof document === "undefined") return fallback;
+  const val = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return val || fallback;
+}
+
+function parseSvgHeight(svgMarkup: string): number {
+  const vb = svgMarkup.match(/viewBox=["'][^"']*?([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)["']/i);
+  if (vb) {
+    const h = Number.parseFloat(vb[4]);
+    if (Number.isFinite(h) && h > 0) return h;
+  }
+  const hm = svgMarkup.match(/\bheight=["']([\d.]+)(?:px)?["']/i);
+  if (hm) {
+    const h = Number.parseFloat(hm[1]);
+    if (Number.isFinite(h) && h > 0) return h;
+  }
+  return 240;
+}
+
 /** Renders Mermaid source inside an empty-sandbox iframe so untrusted SVG never enters the main DOM. */
 function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
-  const dark = useIsDarkTheme();
+  const { dark, accent } = useThemeSignature();
   const [mode, setMode] = useState<"diagram" | "code">("diagram");
   const [zoom, setZoom] = useState(1);
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+
+  const cardBg = readCssToken("--card", dark ? "#212630" : "#ffffff");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     let cancelled = false;
     setFailed(false);
     setSvg(null);
+    const subtle = readCssToken("--subtle", dark ? "#252b36" : "#f1f3f6");
+    const panel = readCssToken("--panel", dark ? "#1b1f27" : "#ffffff");
+    const line = readCssToken("--line", dark ? "#2d3340" : "#dfe2e8");
+    const lineStrong = readCssToken("--line-strong", dark ? "#3d4555" : "#c5cad4");
+    const text = readCssToken("--text", dark ? "#e6e9ef" : "#16181d");
+    const text3 = readCssToken("--text-3", dark ? "#8c95a6" : "#616876");
+    const accentColor = readCssToken("--accent", dark ? "#ff7a45" : "#f0602f");
+    const accentSoft = readCssToken("--accent-soft", dark ? "#352625" : "#fdeee7");
     void import("mermaid")
       .then(async (mod) => {
         const mermaid = mod.default;
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: dark ? "dark" : "default",
+          theme: "base",
+          themeVariables: {
+            darkMode: dark,
+            background: cardBg,
+            primaryColor: subtle,
+            primaryBorderColor: lineStrong,
+            primaryTextColor: text,
+            secondaryColor: accentSoft,
+            secondaryBorderColor: accentColor,
+            secondaryTextColor: text,
+            tertiaryColor: panel,
+            tertiaryBorderColor: line,
+            tertiaryTextColor: text,
+            lineColor: text3,
+            textColor: text,
+            clusterBkg: subtle,
+            clusterBorder: lineStrong,
+            edgeLabelBackground: cardBg,
+            fontFamily: "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+            fontSize: "13px",
+          },
           fontFamily: "Inter, system-ui, sans-serif",
         });
         const id = `sumi-mmd-${Math.random().toString(36).slice(2, 10)}`;
@@ -240,13 +311,15 @@ function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [code, dark]);
+  }, [code, dark, accent, cardBg]);
+
+  const naturalHeight = useMemo(() => (svg ? parseSvgHeight(svg) : 200), [svg]);
+  const frameHeight = Math.min(520, Math.max(120, Math.ceil(naturalHeight * zoom) + 28));
 
   const srcDoc = useMemo(() => {
     if (!svg) return "";
-    const bg = dark ? "#212630" : "#ffffff";
-    return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>html,body{margin:0;padding:12px;background:${bg};display:flex;justify-content:center;align-items:flex-start;overflow:auto;}svg{max-width:100%;height:auto;transform-origin:top center;transform:scale(${zoom});}</style></head><body>${svg}</body></html>`;
-  }, [svg, dark, zoom]);
+    return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>html,body{margin:0;padding:12px;background:${cardBg};display:flex;justify-content:center;align-items:flex-start;overflow:auto;}svg{max-width:100%;height:auto;transform-origin:top center;transform:scale(${zoom});}</style></head><body>${svg}</body></html>`;
+  }, [svg, cardBg, zoom]);
 
   const showDiagram = mode === "diagram" && !failed;
 
@@ -310,7 +383,8 @@ function MermaidBlock({ code, copyBtn }: { code: string; copyBtn: ReactNode }) {
             title="Mermaid diagram"
             sandbox=""
             srcDoc={srcDoc}
-            className="w-full h-[280px] border-0 block bg-card"
+            style={{ height: frameHeight }}
+            className="w-full border-0 block bg-card"
           />
         ) : (
           <div className="px-3.5 py-4 text-[12.5px] text-fg-3 font-mono">Rendering diagram…</div>

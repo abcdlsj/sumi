@@ -311,7 +311,7 @@ export function MemberHoverCard({
                 <div className="text-[14px] font-semibold text-fg truncate">{member.display_name}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
                   {member.kind === "agent" ? (
-                    <Badge tone={st === "working" ? "busy" : st === "error" ? "danger" : "neutral"}>
+                    <Badge tone={st === "idle" ? "online" : st === "working" ? "busy" : st === "error" ? "danger" : "neutral"}>
                       <StatusDot state={st} size={6} ring="transparent" />
                       {stateLabel(st)}
                     </Badge>

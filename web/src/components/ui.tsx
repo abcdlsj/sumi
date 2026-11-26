@@ -18,7 +18,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Loader2, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Info, Loader2, RefreshCw, Search, X } from "lucide-react";
 import type { TaskStatus } from "../api";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
@@ -26,13 +26,13 @@ type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 border border-transparent",
-  secondary: "bg-card text-fg border border-line-strong hover:bg-subtle active:bg-press",
+  secondary: "bg-card text-fg border border-line-strong shadow-[var(--shadow-xs)] hover:bg-subtle active:bg-press",
   soft: "bg-accent-soft text-accent-text hover:brightness-95 active:brightness-90 border border-transparent",
   ghost: "text-fg-2 hover:bg-hover hover:text-fg active:bg-press border border-transparent",
   danger: "bg-card text-danger border border-line-strong hover:bg-danger-soft hover:border-danger active:brightness-95",
 };
 const SIZES: Record<Size, string> = {
-  sm: "h-7 px-2.5 text-[13px] gap-1.5 rounded-[4px]",
+  sm: "h-7 px-2.5 text-[13px] gap-1.5 rounded-[5px]",
   md: "h-8 px-3 text-[13.5px] gap-1.5 rounded-[5px]",
   lg: "h-10 px-4 text-[14px] gap-2 rounded-[6px]",
 };
@@ -147,7 +147,7 @@ export function Field({
           {...rest}
           id={id}
           aria-invalid={error ? true : undefined}
-          className={`${inputBase} h-10 ${leading ? "pl-9" : "pl-3"} ${trailing ? "pr-10" : "pr-3"} ${
+          className={`${inputBase} h-9 ${leading ? "pl-9" : "pl-3"} ${trailing ? "pr-10" : "pr-3"} ${
             error ? "border-danger" : "border-line-strong hover:border-fg-4"
           } ${className}`}
         />
@@ -379,7 +379,7 @@ export function Select<T extends string = string>({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((v) => !v)}
-        className={`w-full ${heightCls} border bg-card flex items-center gap-2 text-left transition-[border-color,box-shadow,background-color] duration-100 disabled:opacity-55 ${
+        className={`w-full ${heightCls} border bg-card shadow-[var(--shadow-xs)] flex items-center gap-2 text-left transition-[border-color,box-shadow,background-color] duration-100 disabled:opacity-55 ${
           open ? "border-accent shadow-[var(--ring)]" : "border-line-strong hover:border-fg-4"
         }`}
       >
@@ -679,7 +679,7 @@ export function Segmented<T extends string>({
             onClick={() => onChange(o.value)}
             aria-selected={active}
             className={`${full ? "flex-1" : ""} h-7 px-2.5 rounded-[4px] text-[13px] inline-flex items-center justify-center gap-1.5 transition-[background-color,color,border-color] duration-100 disabled:opacity-40 [&>svg]:size-3.5 ${
-              active ? "bg-card text-fg font-semibold border border-line-strong/80" : "border border-transparent text-fg-3 hover:text-fg"
+              active ? "bg-card text-fg font-semibold border border-line-strong/80 shadow-[var(--shadow-xs)]" : "border border-transparent text-fg-3 hover:text-fg"
             }`}
           >
             {o.label}
@@ -884,8 +884,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             {t.tone === "error" ? (
               <AlertCircle className="size-4 text-danger shrink-0 mt-0.5" />
-            ) : (
+            ) : t.tone === "success" ? (
               <CheckCircle2 className="size-4 text-work shrink-0 mt-0.5" />
+            ) : (
+              <Info className="size-4 text-fg-3 shrink-0 mt-0.5" />
             )}
             <span className="leading-snug">{t.text}</span>
           </div>
@@ -1073,7 +1075,7 @@ export function TaskStatusIcon({ status, size = 16 }: { status: TaskStatus; size
       {status === "done" && (
         <>
           <circle cx="8" cy="8" r="7.25" fill={c} />
-          <path d="M5 8.2l2 2 4-4.2" fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M5 8.2l2 2 4-4.2" fill="none" stroke="var(--accent-fg)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </>
       )}
       {status === "closed" && (

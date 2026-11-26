@@ -258,6 +258,11 @@ describe("Workbench", () => {
 
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull();
+    // Collapsed rail keeps quick navigation for Jump, Inbox, and Tasks.
+    const rail = screen.getByRole("navigation", { name: "Spaces" });
+    expect(within(rail).getByRole("button", { name: "Jump to…" })).toBeTruthy();
+    expect(within(rail).getByRole("button", { name: "Inbox" })).toBeTruthy();
+    expect(within(rail).getByRole("button", { name: "Tasks" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     expect(screen.getByRole("complementary", { name: "Sidebar" })).toBeTruthy();
 

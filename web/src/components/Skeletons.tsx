@@ -26,40 +26,36 @@ export function MessageListSkeleton({ rows = 6, compact = false }: { rows?: numb
 
 export function RowListSkeleton({ rows = 7 }: { rows?: number }) {
   return (
-    <div className="px-6 py-4 max-w-[960px]" aria-label="Loading">
-      <div className="rounded-[6px] bg-card border border-line divide-y divide-line overflow-hidden">
-        {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="h-11 px-4 flex items-center gap-3">
-            <Skeleton className="size-4 rounded-full shrink-0" />
-            <Skeleton className="h-3.5 w-9 shrink-0" />
-            <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
-            <span className="flex-1" />
-            <Skeleton className="size-6 rounded-[4px] shrink-0" />
-          </div>
-        ))}
-      </div>
+    <div className="divide-y divide-line border-b border-line" aria-label="Loading">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-11 px-6 flex items-center gap-3">
+          <Skeleton className="size-4 rounded-full shrink-0" />
+          <Skeleton className="h-3.5 w-9 shrink-0" />
+          <Skeleton className={`h-3.5 ${W[i % W.length]} max-w-[420px]`} />
+          <span className="flex-1" />
+          <Skeleton className="size-6 rounded-[4px] shrink-0" />
+        </div>
+      ))}
     </div>
   );
 }
 
 export function InboxSkeleton() {
   return (
-    <div className="px-6 py-4 max-w-[960px]" aria-label="Loading inbox">
-      <div className="rounded-[6px] bg-card border border-line divide-y divide-line overflow-hidden">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="px-4 py-3 flex items-center gap-3">
-            <Skeleton className="size-8 rounded-[4px] shrink-0" />
-            <div className="flex-1 space-y-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-3.5 w-24" />
-                <Skeleton className="h-3.5 w-28" />
-              </div>
-              <Skeleton className={`h-3.5 ${W[i % W.length]}`} />
+    <div className="divide-y divide-line border-b border-line" aria-label="Loading inbox">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="px-6 py-3 flex items-center gap-3">
+          <Skeleton className="size-8 rounded-[5px] shrink-0" />
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-3.5 w-24" />
+              <Skeleton className="h-3.5 w-28" />
             </div>
-            <Skeleton className="h-7 w-16 rounded-[4px]" />
+            <Skeleton className={`h-3.5 ${W[i % W.length]}`} />
           </div>
-        ))}
-      </div>
+          <Skeleton className="h-7 w-16 rounded-[5px]" />
+        </div>
+      ))}
     </div>
   );
 }

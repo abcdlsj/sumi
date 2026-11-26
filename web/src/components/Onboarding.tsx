@@ -263,7 +263,7 @@ function SpaceStep({ user, onCreated }: { user: User; onCreated: (slug: string) 
         body="A space holds your channels, tasks, agents and computers. You can invite people later."
       />
       <div className="flex items-center gap-3.5 p-4 rounded-[6px] border border-line bg-subtle">
-        <span className="size-12 rounded-[6px] bg-accent text-white text-[20px] font-semibold flex items-center justify-center shrink-0">
+        <span className="size-12 rounded-[6px] bg-accent text-accent-fg text-[20px] font-semibold flex items-center justify-center shrink-0">
           {(name.trim()[0] ?? "S").toUpperCase()}
         </span>
         <div className="min-w-0">

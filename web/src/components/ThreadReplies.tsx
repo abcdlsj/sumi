@@ -23,7 +23,7 @@ export function ThreadReplySummary({
     <button
       type="button"
       onClick={onOpen}
-      className="group/thread mt-2 -ml-1.5 w-full max-w-[580px] text-left rounded-[6px] border border-line border-l-2 border-l-line-strong bg-subtle/40 hover:bg-subtle hover:border-line-strong hover:border-l-accent px-2.5 py-1.5 transition-colors"
+      className="group/thread mt-2 w-full max-w-[580px] text-left rounded-[6px] border border-line border-l-2 border-l-line-strong bg-subtle/40 hover:bg-subtle hover:border-line-strong hover:border-l-accent px-2.5 py-1.5 transition-colors"
     >
       <span className="flex items-center gap-1.5 h-5 px-0.5">
         <MessageSquare className="size-3.5 text-accent-text shrink-0" />

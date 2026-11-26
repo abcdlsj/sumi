@@ -449,9 +449,9 @@ function ChannelTasksDetail({
         onClose={onClose}
         actions={
           !isArchived ? (
-            <Button size="sm" variant={creating ? "secondary" : "soft"} icon={<Plus />} onClick={() => setCreating((v) => !v)}>
-              New
-            </Button>
+            <IconButton label="New task" active={creating} onClick={() => setCreating((v) => !v)}>
+              <Plus />
+            </IconButton>
           ) : undefined
         }
       >
@@ -585,9 +585,9 @@ function MembersDetail({
         onClose={onClose}
         actions={
           canManage ? (
-            <Button size="sm" variant={adding ? "secondary" : "soft"} icon={<UserPlus />} onClick={() => setAdding((v) => !v)}>
-              Add
-            </Button>
+            <IconButton label="Add members" active={adding} onClick={() => setAdding((v) => !v)}>
+              <UserPlus />
+            </IconButton>
           ) : undefined
         }
       >
@@ -824,9 +824,9 @@ function TaskDetail({
         onClose={onClose}
         actions={
           !editing ? (
-            <Button size="sm" variant="secondary" icon={<Pencil />} onClick={startEdit}>
-              Edit
-            </Button>
+            <IconButton label="Edit" onClick={startEdit}>
+              <Pencil />
+            </IconButton>
           ) : undefined
         }
       >
@@ -1128,11 +1128,10 @@ function ThreadDetail({
         onClose={onClose}
         actions={
           following === undefined ? null : (
-            <Button
-              size="sm"
-              variant={following ? "secondary" : "soft"}
-              icon={following ? <Bell /> : <BellOff />}
-              loading={act.busy}
+            <IconButton
+              label={following ? "Following" : "Follow"}
+              active={following}
+              disabled={act.busy}
               onClick={() => {
                 const nextFollowing = !following;
                 const key = ["messages", spaceSlug, threadConvID];
@@ -1150,8 +1149,8 @@ function ThreadDetail({
                 });
               }}
             >
-              {following ? "Following" : "Follow"}
-            </Button>
+              {following ? <Bell className="text-accent-text" /> : <BellOff />}
+            </IconButton>
           )
         }
       >
@@ -1360,9 +1359,9 @@ function AgentDetail({
         actions={
           <>
             {onOpenDM && (
-              <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
-                Message
-              </Button>
+              <IconButton label="Message" onClick={() => onOpenDM(member.id)}>
+                <MessageSquare />
+              </IconButton>
             )}
             {canGovern && (
               <Menu
@@ -1709,9 +1708,9 @@ function HumanDetail({
         onClose={onClose}
         actions={
           !isSelf && onOpenDM ? (
-            <Button size="sm" variant="secondary" icon={<MessageSquare />} onClick={() => onOpenDM(member.id)}>
-              Message
-            </Button>
+            <IconButton label="Message" onClick={() => onOpenDM(member.id)}>
+              <MessageSquare />
+            </IconButton>
           ) : undefined
         }
       >

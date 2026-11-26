@@ -27,7 +27,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
+import { accentForeground, accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, type FontFamilyPref, type FontSizePref } from "../preferences";
@@ -110,7 +110,7 @@ export function InboxView({
 
   const items = inboxQ.data ?? [];
   return (
-    <section className="flex flex-col h-full min-h-0 bg-bg">
+    <section className="flex flex-col h-full min-h-0 bg-panel">
       <ViewHeader title="Inbox" icon={<Inbox />}>
         <span className="w-px h-4 bg-line shrink-0" />
         <HeaderTabs
@@ -139,57 +139,55 @@ export function InboxView({
             body={filter === "needs_me" ? "DMs, @mentions, followed threads and Tasks assigned to you land here." : "Nothing unread right now."}
           />
         ) : (
-          <div className={`px-6 py-4 max-w-[960px] transition-opacity duration-100 ${inboxQ.isPlaceholderData ? "opacity-65" : ""}`}>
-            <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-              {items.map((it) => {
-                const gone = leaving.has(it.conversation_id);
-                const reason = REASON[it.reason] ?? { label: it.reason, icon: <Hash /> };
-                return (
-                  <div
-                    key={it.conversation_id}
-                    className={`group px-4 py-2.5 flex items-center gap-3 hover:bg-subtle transition-[opacity,transform,background-color] duration-150 ${
-                      gone ? "opacity-0 translate-x-3 pointer-events-none" : ""
-                    } ${it.needs_attention ? "border-l-[3px] border-l-accent pl-[13px]" : ""}`}
+          <div className={`divide-y divide-line border-b border-line transition-opacity duration-100 ${inboxQ.isPlaceholderData ? "opacity-65" : ""}`}>
+            {items.map((it) => {
+              const gone = leaving.has(it.conversation_id);
+              const reason = REASON[it.reason] ?? { label: it.reason, icon: <Hash /> };
+              return (
+                <div
+                  key={it.conversation_id}
+                  className={`group px-6 py-3 flex items-center gap-3 hover:bg-subtle/60 transition-[opacity,transform,background-color] duration-150 ${
+                    gone ? "opacity-0 translate-x-3 pointer-events-none" : ""
+                  } ${it.needs_attention ? "border-l-[3px] border-l-accent pl-[21px]" : ""}`}
+                >
+                  <span
+                    className={`size-8 rounded-[5px] flex items-center justify-center shrink-0 [&>svg]:size-4 ${
+                      it.needs_attention ? "bg-warm-soft text-warm" : "bg-subtle text-fg-3"
+                    }`}
                   >
-                    <span
-                      className={`size-8 rounded-[4px] flex items-center justify-center shrink-0 [&>svg]:size-4 ${
-                        it.needs_attention ? "bg-warm-soft text-warm" : "bg-subtle text-fg-3"
-                      }`}
-                    >
-                      {reason.icon}
-                    </span>
-                    <button className="min-w-0 flex-1 text-left" onClick={() => open(it)}>
-                      <div className="flex items-center gap-2 text-[12.5px]">
-                        <span className={`font-semibold ${it.needs_attention ? "text-warm" : "text-fg-2"}`}>{reason.label}</span>
-                        <span className="text-fg-4">·</span>
-                        <span className="text-fg-2 font-medium truncate">{it.title}</span>
-                        {it.unread_count > 1 && <Badge>{it.unread_count} new</Badge>}
-                      </div>
-                      <p className="mt-0.5 text-[13.5px] text-fg truncate">
-                        {it.latest_author_name && <span className="font-semibold">{it.latest_author_name}: </span>}
-                        <span className="text-fg-2 font-body">{it.latest_preview}</span>
-                      </p>
-                    </button>
-                    <span className="tabular text-[12px] text-fg-3 shrink-0 w-12 text-right">{formatClock(it.latest_at)}</span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {(it.kind === "thread" || it.kind === "task") && it.following && (
-                        <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}>
-                          Unfollow
-                        </Button>
-                      )}
-                      {(it.kind === "public" || it.kind === "private") && it.notify_level !== "mute" && (
-                        <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}>
-                          Mute
-                        </Button>
-                      )}
-                      <Button variant="secondary" size="sm" icon={<CheckCircle2 />} onClick={() => dismiss(it, () => api.markDone(spaceSlug, it.conversation_id))}>
-                        Done
-                      </Button>
+                    {reason.icon}
+                  </span>
+                  <button className="min-w-0 flex-1 text-left" onClick={() => open(it)}>
+                    <div className="flex items-center gap-2 text-[12.5px]">
+                      <span className={`font-semibold ${it.needs_attention ? "text-warm" : "text-fg-2"}`}>{reason.label}</span>
+                      <span className="text-fg-4">·</span>
+                      <span className="text-fg-2 font-medium truncate">{it.title}</span>
+                      {it.unread_count > 1 && <Badge>{it.unread_count} new</Badge>}
                     </div>
+                    <p className="mt-0.5 text-[13.5px] text-fg truncate">
+                      {it.latest_author_name && <span className="font-semibold">{it.latest_author_name}: </span>}
+                      <span className="text-fg-2 font-body">{it.latest_preview}</span>
+                    </p>
+                  </button>
+                  <span className="tabular text-[12px] text-fg-3 shrink-0 w-12 text-right">{formatClock(it.latest_at)}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {(it.kind === "thread" || it.kind === "task") && it.following && (
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}>
+                        Unfollow
+                      </Button>
+                    )}
+                    {(it.kind === "public" || it.kind === "private") && it.notify_level !== "mute" && (
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}>
+                        Mute
+                      </Button>
+                    )}
+                    <Button variant="secondary" size="sm" icon={<CheckCircle2 />} onClick={() => dismiss(it, () => api.markDone(spaceSlug, it.conversation_id))}>
+                      Done
+                    </Button>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -201,7 +199,7 @@ const STATUS_ORDER: TaskStatus[] = ["in_progress", "in_review", "todo", "done", 
 
 function TaskRow({ t, onOpen }: { t: Task; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="w-full min-h-11 px-4 py-2 hover:bg-subtle flex items-center gap-3 text-left transition-colors">
+    <button onClick={onOpen} className="w-full min-h-11 px-6 py-2 hover:bg-subtle/60 flex items-center gap-3 text-left transition-colors">
       <TaskStatusIcon status={t.status} />
       <span className="font-mono tabular text-[12px] text-fg-3 w-10 shrink-0">#{t.number}</span>
       <span className="text-[13.5px] font-medium text-fg truncate flex-1 min-w-0">{t.title}</span>
@@ -376,7 +374,7 @@ export function TasksView({
   ];
 
   return (
-    <section className="flex flex-col h-full min-h-0 bg-bg">
+    <section className="flex flex-col h-full min-h-0 bg-panel">
       <ViewHeader
         title="Tasks"
         icon={<CheckCircle2 />}
@@ -402,15 +400,15 @@ export function TasksView({
       </ViewHeader>
       <div className="flex-1 overflow-y-auto scroll-thin">
         {allTasks.length > 0 && (
-          <div className="px-6 pt-4 max-w-[960px] flex items-center gap-2.5 flex-wrap">
+          <div className="px-6 py-2.5 border-b border-line bg-panel flex items-center gap-2.5 flex-wrap">
             <div className="relative flex-1 min-w-[200px] max-w-[320px]">
-              <Search className="size-4 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Filter by title, #number, or assignee…"
                 aria-label="Filter tasks"
-                className="w-full h-8 pl-8 pr-3 rounded-[6px] border border-line-strong bg-card text-[13.5px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+                className="w-full h-8 pl-8 pr-3 rounded-[5px] border border-line-strong bg-card text-[13px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
               />
             </div>
             {activeChannels.length > 1 && (
@@ -459,22 +457,22 @@ export function TasksView({
             />
           )
         ) : (
-          <div className="px-6 py-4 space-y-5 max-w-[960px]">
+          <div>
+            <div className="h-8 px-6 bg-subtle/60 border-b border-line flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-3 select-none">
+              <span className="size-4 shrink-0" />
+              <span className="w-10 shrink-0">ID</span>
+              <span className="flex-1 min-w-0">Task</span>
+              <span className="w-28 shrink-0 text-right">Channel</span>
+              <span className="w-36 shrink-0">Assignee</span>
+            </div>
             {groups.map((g) => (
               <div key={g.status}>
-                <div className="mb-1.5 px-1 flex items-center gap-2 text-[12.5px] font-semibold text-fg-2">
+                <div className="h-8 px-6 bg-subtle/85 border-b border-line flex items-center gap-2 text-[12px] font-semibold text-fg-2">
                   <TaskStatusIcon status={g.status} size={14} />
-                  {taskStatusLabel(g.status)}
-                  <span className="tabular font-normal text-fg-4">{g.tasks.length}</span>
+                  <span>{taskStatusLabel(g.status)}</span>
+                  <span className="ml-auto font-mono font-normal text-[11.5px] text-fg-4 tabular">{g.tasks.length}</span>
                 </div>
-                <div className="rounded-[6px] border border-line bg-card divide-y divide-line overflow-hidden">
-                  <div className="h-7 px-4 bg-subtle/60 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-4 select-none">
-                    <span className="size-4 shrink-0" />
-                    <span className="w-10 shrink-0">ID</span>
-                    <span className="flex-1 min-w-0">Task</span>
-                    <span className="w-28 shrink-0 text-right">Channel</span>
-                    <span className="w-36 shrink-0">Assignee</span>
-                  </div>
+                <div className="divide-y divide-line border-b border-line">
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} t={t} onOpen={() => onOpenDetail({ kind: "task", taskID: t.id })} />
                   ))}
@@ -1085,8 +1083,8 @@ export function AdminPanel({
         icon={
           <span
             aria-hidden
-            className="size-5 rounded-[4px] text-[11px] font-bold text-white inline-flex items-center justify-center shrink-0"
-            style={{ background: accentSwatch(boot.space.accent) }}
+            className="size-5 rounded-[4px] text-[11px] font-bold inline-flex items-center justify-center shrink-0"
+            style={{ background: accentSwatch(boot.space.accent), color: accentForeground(boot.space.accent) }}
           >
             {(boot.space.name[0] ?? "S").toUpperCase()}
           </span>

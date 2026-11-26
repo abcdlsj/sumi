@@ -32,7 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
-import { accentSwatch, applyAccent } from "../accent";
+import { accentForeground, accentSwatch, applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
 import { isMacPlatform, readLastSpaceView, useChannelSort, useSidebarCollapsed, writeLastSpaceView, type ChannelSortPref, type SavedMainView } from "../preferences";
@@ -822,6 +822,7 @@ export function Workbench({
             <div className="flex flex-col items-center gap-2 pt-3">
               {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
                 const active = sp.slug === spaceSlug;
+                const spAccent = sp.slug === spaceSlug ? boot.space.accent : sp.accent;
                 return (
                   <button
                     key={sp.id}
@@ -835,9 +836,9 @@ export function Workbench({
                     />
                     <span
                       className={`size-9 rounded-[6px] text-[14px] font-semibold flex items-center justify-center transition-opacity ${
-                        active ? "text-white ring-1 ring-white/20" : "opacity-60 hover:opacity-95 text-white"
+                        active ? "ring-1 ring-white/20" : "opacity-60 hover:opacity-95"
                       }`}
-                      style={{ background: accentSwatch(sp.slug === spaceSlug ? boot.space.accent : sp.accent) }}
+                      style={{ background: accentSwatch(spAccent), color: accentForeground(spAccent) }}
                     >
                       {(sp.name[0] ?? "S").toUpperCase()}
                     </span>
@@ -852,6 +853,49 @@ export function Workbench({
               >
                 <Plus className="size-4" />
               </button>
+              {sidebarCollapsed && (
+                <>
+                  <span aria-hidden className="w-6 h-px bg-nav-line my-0.5" />
+                  <button
+                    type="button"
+                    onClick={() => setDialog("jump")}
+                    title={`Jump to… (${isMacPlatform() ? "⌘K" : "Ctrl+K"})`}
+                    aria-label="Jump to…"
+                    className="size-9 rounded-[5px] flex items-center justify-center text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong transition-colors"
+                  >
+                    <Search className="size-[18px]" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMainView({ kind: "inbox" })}
+                    title="Inbox"
+                    aria-label="Inbox"
+                    className={`relative size-9 rounded-[5px] flex items-center justify-center transition-colors ${
+                      mainView.kind === "inbox" ? "bg-nav-active text-nav-fg-strong" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
+                    }`}
+                  >
+                    <Inbox className="size-[18px]" />
+                    {needsMe > 0 ? (
+                      <span className="absolute top-1 right-0.5 min-w-[15px] h-[15px] px-1 rounded-[4px] bg-accent text-accent-fg text-[10px] font-bold tabular inline-flex items-center justify-center ring-2 ring-[var(--nav-rail)]">
+                        {needsMe > 9 ? "9+" : needsMe}
+                      </span>
+                    ) : boot.inbox.length > 0 ? (
+                      <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-nav-fg-2 ring-2 ring-[var(--nav-rail)]" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMainView({ kind: "tasks" })}
+                    title="Tasks"
+                    aria-label="Tasks"
+                    className={`size-9 rounded-[5px] flex items-center justify-center transition-colors ${
+                      mainView.kind === "tasks" ? "bg-nav-active text-nav-fg-strong" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
+                    }`}
+                  >
+                    <CheckCircle2 className="size-[18px]" />
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex flex-col items-center gap-1">
               <button
@@ -931,7 +975,7 @@ export function Workbench({
                         aria-expanded={open}
                         title={`Sort channels (${channelSort})`}
                         aria-label="Sort channels"
-                        className={`size-6 rounded-[5px] flex items-center justify-center transition-colors ${
+                        className={`size-6 rounded-[4px] flex items-center justify-center transition-colors ${
                           open || channelSort !== "default" ? "text-nav-fg-strong bg-nav-hover" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
                         }`}
                       >
@@ -969,7 +1013,7 @@ export function Workbench({
                     }}
                     title="New channel group"
                     aria-label="New channel group"
-                    className="size-6 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+                    className="size-6 rounded-[4px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
                   >
                     <FolderPlus className="size-3.5" />
                   </button>
@@ -1007,12 +1051,12 @@ export function Workbench({
                 onDrop={(e) => handleGroupDrop(e, g.id)}
                 className={`rounded-[5px] transition-colors ${isOver ? "ring-1 ring-accent bg-nav-active" : ""}`}
               >
-                <div className="group/grp px-2 mb-0.5 h-7 flex items-center gap-1">
+                <div className="group/grp px-2 mb-1 h-6 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => toggleGroupCollapse(g)}
                     aria-expanded={!g.collapsed}
-                    className="min-w-0 flex-1 flex items-center gap-1 text-left text-[12px] font-semibold uppercase tracking-[0.05em] text-nav-fg-3 hover:text-nav-fg transition-colors"
+                    className="min-w-0 flex-1 flex items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-nav-fg-3 hover:text-nav-fg transition-colors"
                   >
                     <ChevronRight className={`size-3.5 shrink-0 transition-transform duration-150 ${g.collapsed ? "" : "rotate-90"}`} />
                     <span className="truncate">{g.name}</span>
@@ -1028,7 +1072,7 @@ export function Workbench({
                         setEditingGroup(g);
                         setDialog("group");
                       }}
-                      className="size-5 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
+                      className="size-5 rounded-[4px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong flex items-center justify-center"
                     >
                       <Pencil className="size-3" />
                     </button>
@@ -1042,7 +1086,7 @@ export function Workbench({
                           await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
                         })
                       }
-                      className="size-5 rounded-[5px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-danger flex items-center justify-center"
+                      className="size-5 rounded-[4px] text-nav-fg-3 hover:bg-nav-hover hover:text-nav-danger flex items-center justify-center"
                     >
                       <Trash2 className="size-3" />
                     </button>

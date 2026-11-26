@@ -45,10 +45,10 @@ import { MessageListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, ErrorState, IconButton, Menu, MenuItem, Modal, TaskStatusIcon, useAction, useToast } from "./ui";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
-const NOTIFY: { value: NotifyLevel; label: string; short: string; hint: string; icon: React.ReactNode }[] = [
-  { value: "mentions", label: "Mentions only", short: "Mentions", hint: "Notify on @mentions and followed threads", icon: <AtSign /> },
-  { value: "all", label: "All messages", short: "All", hint: "Every new message counts as unread", icon: <Bell /> },
-  { value: "mute", label: "Muted", short: "Muted", hint: "Dim in sidebar; @mentions still reach you", icon: <BellOff /> },
+const NOTIFY: { value: NotifyLevel; label: string; hint: string; icon: React.ReactNode }[] = [
+  { value: "mentions", label: "Mentions only", hint: "Notify on @mentions and followed threads", icon: <AtSign /> },
+  { value: "all", label: "All messages", hint: "Every new message counts as unread", icon: <Bell /> },
+  { value: "mute", label: "Muted", hint: "Dim in sidebar; @mentions still reach you", icon: <BellOff /> },
 ];
 
 function sameDay(a: string, b: string) {
@@ -1126,21 +1126,20 @@ export function ConversationView({
         <div className="flex items-center gap-1.5 shrink-0">
           {conv.kind !== "dm" && !isArchived && (
             <Menu
-              trigger={(open, toggle) => (
-                <button
-                  onClick={toggle}
-                  aria-expanded={open}
-                  aria-label={`Notifications: ${NOTIFY.find((n) => n.value === level)?.label}`}
-                  title={NOTIFY.find((n) => n.value === level)?.label}
-                  className={`h-8 px-2 rounded-[6px] text-[13px] flex items-center gap-1.5 transition-colors [&>svg]:size-4 ${
-                    open ? "bg-hover text-fg" : level === "mute" ? "text-fg-4 hover:bg-hover" : "text-fg-2 hover:bg-hover"
-                  }`}
-                >
-                  {NOTIFY.find((n) => n.value === level)?.icon}
-                  <span>{NOTIFY.find((n) => n.value === level)?.short}</span>
-                  <ChevronDown className="size-3.5 text-fg-3" />
-                </button>
-              )}
+              trigger={(open, toggle) => {
+                const cur = NOTIFY.find((n) => n.value === level);
+                return (
+                  <IconButton
+                    label={`Notifications: ${cur?.label}`}
+                    active={open}
+                    aria-expanded={open}
+                    onClick={toggle}
+                    className={level === "mute" && !open ? "text-fg-4" : ""}
+                  >
+                    {cur?.icon}
+                  </IconButton>
+                );
+              }}
             >
               {(close) =>
                 NOTIFY.map((n) => (
