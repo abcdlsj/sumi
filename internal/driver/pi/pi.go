@@ -48,8 +48,8 @@ const (
 
 	// DefaultMaxTurnSteps and DefaultMaxTurnToolCalls bound runaway multi-step / tool-call
 	// loops within a single wake turn.
-	DefaultMaxTurnSteps     = 60
-	DefaultMaxTurnToolCalls = 120
+	DefaultMaxTurnSteps     = 120
+	DefaultMaxTurnToolCalls = 240
 
 	rpcCallTimeout     = 30 * time.Second
 	statsCallTimeout   = 5 * time.Second

@@ -43,7 +43,7 @@ func (c *Config) normalize() {
 		c.KeepRecentMessages = 16
 	}
 	if c.MaxStepsPerTurn <= 0 {
-		c.MaxStepsPerTurn = 24
+		c.MaxStepsPerTurn = 48
 	}
 }
 

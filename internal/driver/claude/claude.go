@@ -39,8 +39,10 @@ const (
 	DefaultCompactTimeout  = 5 * time.Minute
 	maxCompactBackoffTurns = 4
 
-	DefaultMaxTurnSteps     = 60
-	DefaultMaxTurnToolCalls = 120
+	// A single wake turn routinely covers a whole feature (read, edit, test, fix), which
+	// needs well over 60 model round-trips; 60 cut real work off mid-turn.
+	DefaultMaxTurnSteps     = 120
+	DefaultMaxTurnToolCalls = 240
 
 	controlCallTimeout     = 10 * time.Second
 	interruptSettleTimeout = 5 * time.Second
