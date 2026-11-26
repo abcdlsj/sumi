@@ -43,6 +43,11 @@ func SpecHash(spec protocol.AssignedAgentSpec) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// BuildHash fields (Meta, StatusResponse) carry the lowercase hex SHA-256 of the sidecar's own
+// executable. Semver alone cannot tell local rebuilds apart, so AttachOrSpawn compares this
+// against the binary it would spawn and retires idle sidecars still running an older build.
+// An empty value means the sidecar predates build reporting and is treated as a mismatch.
+
 // Meta is persisted at <agentHome>/host.json (0600) without secrets or prompts.
 type Meta struct {
 	ProtocolVersion int       `json:"protocol_version"`
@@ -50,6 +55,7 @@ type Meta struct {
 	HostVersion     string    `json:"host_version"`
 	SocketPath      string    `json:"socket_path"`
 	SpecHash        string    `json:"spec_hash"`
+	BuildHash       string    `json:"build_hash,omitempty"`
 	StartedAt       time.Time `json:"started_at"`
 }
 
@@ -58,6 +64,7 @@ type StatusResponse struct {
 	PID             int              `json:"pid"`
 	HostVersion     string           `json:"host_version"`
 	SpecHash        string           `json:"spec_hash"`
+	BuildHash       string           `json:"build_hash,omitempty"`
 	Configured      bool             `json:"configured"`
 	Busy            bool             `json:"busy"`
 	TurnID          string           `json:"turn_id,omitempty"`

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -69,13 +72,26 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 	wantHash := SpecHash(opts.Spec)
 	client := NewClient(sockPath)
 
+	bin := opts.BinaryPath
+	if bin == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("resolve executable for agent-host: %w", err))
+		}
+		bin = exe
+	}
+
 	if st, err := client.Status(ctx); err == nil {
 		if st.ProtocolVersion == ProtocolVersion && st.Configured && st.SpecHash == wantHash {
-			client.pid = st.PID
-			return client, st, nil
+			// A busy sidecar is always re-attached so a hot upgrade never interrupts its turn;
+			// an idle one is replaced when it runs a different build than the one we would spawn.
+			if st.Busy || !buildStale(st.BuildHash, bin) {
+				client.pid = st.PID
+				return client, st, nil
+			}
 		}
-		// Spec or protocol changed: replace the existing sidecar cleanly and wait for it to
-		// exit before binding the same socket path with a replacement process.
+		// Spec, protocol, or build changed: replace the existing sidecar cleanly and wait for it
+		// to exit before binding the same socket path with a replacement process.
 		client.pid = st.PID
 		_ = client.GracefulClose(2)
 		if st.PID > 0 && st.PID != os.Getpid() {
@@ -87,14 +103,6 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 		client.pid = 0
 	}
 
-	bin := opts.BinaryPath
-	if bin == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("resolve executable for agent-host: %w", err))
-		}
-		bin = exe
-	}
 	if err := os.MkdirAll(opts.AgentHome, 0o700); err != nil {
 		return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("create agent home: %w", err))
 	}
@@ -160,6 +168,52 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 		client.pid = pid
 	}
 	return client, st, nil
+}
+
+// buildStale reports whether a sidecar's build differs from the binary at bin. If bin cannot be
+// hashed the sidecar is kept: restarting it would not be known to help.
+func buildStale(running, bin string) bool {
+	want, err := BinaryHash(bin)
+	if err != nil {
+		return false
+	}
+	return running != want
+}
+
+type binaryHashKey struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+var binaryHashCache sync.Map // binaryHashKey -> string
+
+// BinaryHash returns the hex SHA-256 of the file at path (symlinks resolved), cached by size and
+// mtime so re-provisioning many agents does not re-read a large executable each time.
+func BinaryHash(path string) (string, error) {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	key := binaryHashKey{path: path, size: fi.Size(), modTime: fi.ModTime()}
+	if v, ok := binaryHashCache.Load(key); ok {
+		return v.(string), nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	binaryHashCache.Store(key, sum)
+	return sum, nil
 }
 
 func cleanHostEnv(computerToken string) []string {

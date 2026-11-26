@@ -43,9 +43,13 @@ func TestAgentHostHelperProcess(t *testing.T) {
 			meta = args[i+1]
 		}
 	}
+	// Report the wrapper script's hash as the build identity, as a real sidecar reports the
+	// hash of the binary it was spawned from, so unchanged builds are re-attached.
+	buildHash, _ := agenthost.BinaryHash(os.Getenv("SUMI_TEST_AGENTHOST_BIN"))
 	srv := agenthost.NewServer(agenthost.ServerConfig{
 		SocketPath: sock,
 		MetaPath:   meta,
+		BuildHash:  buildHash,
 		DriverBuilder: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
 			return stubSidecarDriver{}, nil
 		},
@@ -61,7 +65,7 @@ func TestAgentHostHelperProcess(t *testing.T) {
 func fakeSumiBinary(t *testing.T) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "sumi")
-	body := fmt.Sprintf("#!/bin/sh\nSUMI_TEST_AGENTHOST=1 exec %q -test.run=^TestAgentHostHelperProcess$ -- \"$@\"\n", os.Args[0])
+	body := fmt.Sprintf("#!/bin/sh\nSUMI_TEST_AGENTHOST=1 SUMI_TEST_AGENTHOST_BIN=%q exec %q -test.run=^TestAgentHostHelperProcess$ -- \"$@\"\n", script, os.Args[0])
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}

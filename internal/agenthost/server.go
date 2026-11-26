@@ -30,9 +30,11 @@ type DriverBuilder func(spec protocol.AssignedAgentSpec, agentHome string) (driv
 
 // ServerConfig configures an agenthost HTTP-over-Unix server.
 type ServerConfig struct {
-	SocketPath    string
-	MetaPath      string
-	HostVersion   string
+	SocketPath  string
+	MetaPath    string
+	HostVersion string
+	// BuildHash is the SHA-256 of this sidecar's executable, reported in /status and host.json.
+	BuildHash     string
 	DriverBuilder DriverBuilder
 }
 
@@ -239,6 +241,7 @@ func (s *Server) writeMetaLocked(specHash string) {
 		HostVersion:     s.cfg.HostVersion,
 		SocketPath:      s.cfg.SocketPath,
 		SpecHash:        specHash,
+		BuildHash:       s.cfg.BuildHash,
 		StartedAt:       s.startedAt,
 	})
 	tmp := s.cfg.MetaPath + ".tmp"
@@ -258,6 +261,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		PID:             os.Getpid(),
 		HostVersion:     s.cfg.HostVersion,
 		SpecHash:        s.specHash,
+		BuildHash:       s.cfg.BuildHash,
 		Configured:      s.drv != nil,
 		StartedAt:       s.startedAt,
 	}

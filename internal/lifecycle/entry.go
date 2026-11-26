@@ -200,10 +200,19 @@ func RunAgentHost(args []string) int {
 		fmt.Fprintln(os.Stderr, "--socket is required")
 		return 2
 	}
+	// Without a build hash the next Computer treats this sidecar as stale and replaces it when
+	// idle, which is the safe direction, so a hashing failure is only logged.
+	var buildHash string
+	if info, err := CurrentBuildInfo(); err == nil {
+		buildHash = info.BinaryHash
+	} else {
+		fmt.Fprintln(os.Stderr, "agent-host build identity:", err)
+	}
 	srv := agenthost.NewServer(agenthost.ServerConfig{
 		SocketPath:  *sockPath,
 		MetaPath:    *metaPath,
 		HostVersion: version.Value(),
+		BuildHash:   buildHash,
 	})
 	if err := srv.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "start agent-host:", err)
