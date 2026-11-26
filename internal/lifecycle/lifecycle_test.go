@@ -304,3 +304,23 @@ func TestComputerHotUpgradePreservesAgentHostSidecar(t *testing.T) {
 	}
 	fmt.Printf("verified hot upgrade: computer %d->%d, agent-host PID %d untouched\n", upResp.OldPID, upResp.NewPID, hostSt2.PID)
 }
+
+// Sumi.app is the GUI binary, so an unhandled --version falls through to the desktop shell and
+// boots (plus hot-upgrades) the local server. Version flags must be consumed headlessly.
+func TestDispatchServiceCommandHandlesVersionFlags(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-version"} {
+		code, handled := DispatchServiceCommand([]string{arg})
+		if !handled {
+			t.Fatalf("%q must be handled as a service command", arg)
+		}
+		if code != 0 {
+			t.Fatalf("%q exited with %d, want 0", arg, code)
+		}
+	}
+	// Anything unrecognised must still fall through to the desktop shell / CLI.
+	for _, arg := range []string{"--unknown", "-x", "gui"} {
+		if _, handled := DispatchServiceCommand([]string{arg}); handled {
+			t.Fatalf("%q must not be treated as a service command", arg)
+		}
+	}
+}

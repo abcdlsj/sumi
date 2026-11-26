@@ -33,7 +33,9 @@ func DispatchServiceCommand(args []string) (int, bool) {
 		return RunComputer(args[1:]), true
 	case "agent-host":
 		return RunAgentHost(args[1:]), true
-	case "version":
+	case "version", "--version", "-version":
+		// Sumi.app is a GUI binary: `Sumi --version` must answer and exit instead of falling
+		// through to the desktop shell, which would boot and hot-upgrade the local server.
 		return RunVersion(args[1:]), true
 	case "status":
 		return RunStatus(args[1:]), true
