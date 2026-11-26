@@ -31,13 +31,26 @@ func (d *Daemon) startCapabilitySocket() error {
 	if err != nil {
 		return fmt.Errorf("listen capability socket: %w", err)
 	}
+	// Go unlinks a unix listener's path on Close by name, not by inode. http.Server.Serve closes
+	// the listener on its own goroutine, possibly after a hot-upgrade successor bound the same
+	// path, which would delete the successor's socket. closeSocketLocked unlinks explicitly.
+	if ul, ok := ln.(*net.UnixListener); ok {
+		ul.SetUnlinkOnClose(false)
+	}
 	_ = os.Chmod(sockPath, 0o600)
+	owned, err := os.Lstat(sockPath)
+	if err != nil {
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
+		return fmt.Errorf("stat capability socket: %w", err)
+	}
 
 	srv := &http.Server{Handler: http.HandlerFunc(d.handleCapabilityProxy)}
 	d.mu.Lock()
 	d.socketPath = sockPath
 	d.socketLn = ln
 	d.socketServer = srv
+	d.socketFile = owned
 	d.mu.Unlock()
 
 	go func() {

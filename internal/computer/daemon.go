@@ -111,6 +111,7 @@ type Daemon struct {
 	socketPath      string
 	socketServer    *http.Server
 	socketLn        net.Listener
+	socketFile      os.FileInfo // the socket inode this daemon bound; only that one is unlinked
 	binDir          string
 	draining        bool
 	drainRequestID  string
@@ -310,20 +311,34 @@ func (d *Daemon) Detach() {
 
 func (d *Daemon) closeSocketLocked() {
 	d.mu.Lock()
-	srv, ln, sock := d.socketServer, d.socketLn, d.socketPath
-	d.socketServer, d.socketLn = nil, nil
+	srv, ln, sock, owned := d.socketServer, d.socketLn, d.socketPath, d.socketFile
+	d.socketServer, d.socketLn, d.socketFile = nil, nil, nil
 	d.mu.Unlock()
 	if srv != nil {
 		_ = srv.Close()
 	} else if ln != nil {
 		_ = ln.Close()
 	}
-	// Only unlink capability.sock while this daemon still owns the listener;
-	// during hot upgrade ReleaseCapabilitySocket already released it before the
-	// candidate bound the same path, so Detach/Stop must not delete the successor's socket.
+	// Only unlink capability.sock while this daemon still owns the listener, and only if the
+	// path still names the socket it bound. During hot upgrade a successor may already have
+	// bound the same deterministic path, and deleting by path would remove its socket.
 	if (srv != nil || ln != nil) && sock != "" {
-		_ = os.Remove(sock)
+		removeOwnedSocket(sock, owned)
 	}
+}
+
+// removeOwnedSocket unlinks path only when it is still the same file as owned (same dev and
+// inode). The check and the unlink are not atomic, but this runs synchronously inside
+// ReleaseCapabilitySocket and a successor binds only after that returns.
+func removeOwnedSocket(path string, owned os.FileInfo) {
+	if owned == nil {
+		return
+	}
+	cur, err := os.Lstat(path)
+	if err != nil || !os.SameFile(cur, owned) {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // RebindCapabilitySocket re-opens capability.sock after a failed hot-upgrade rollback.
