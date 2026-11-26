@@ -83,7 +83,45 @@ static int sumiDisable60FPSCapOnPreferences(WKPreferences *prefs) {
 	return 0;
 }
 
-static int sumiUnlockWindowHighRefreshRate(void *nsWindowPtr) {
+// Disables macOS WKWebView rubber-banding/bounce and browser swipe/zoom gestures so
+// pulling past viewport bounds never exposes a blank under-page background.
+static int sumiDisableWebViewOverscroll(WKWebView *webView) {
+	if (!webView) {
+		return 0;
+	}
+	webView.allowsBackForwardNavigationGestures = NO;
+	webView.allowsMagnification = NO;
+
+	int applied = 0;
+	NSString *selectors[3] = {
+		@"_setRubberBandingEnabled:",
+		@"_setAlwaysBounceVertical:",
+		@"_setAlwaysBounceHorizontal:",
+	};
+	for (int i = 0; i < 3; i++) {
+		SEL sel = NSSelectorFromString(selectors[i]);
+		if ([webView respondsToSelector:sel]) {
+			((void (*)(id, SEL, BOOL))objc_msgSend)(webView, sel, NO);
+			applied++;
+		}
+	}
+	return applied;
+}
+
+static int sumiReadBoolSelector(id obj, NSString *selName) {
+	if (!obj) {
+		return -1;
+	}
+	SEL sel = NSSelectorFromString(selName);
+	if (![obj respondsToSelector:sel]) {
+		return -1;
+	}
+	return ((BOOL (*)(id, SEL))objc_msgSend)(obj, sel) ? 1 : 0;
+}
+
+static int sumiConfigureNativeWindowWebView(void *nsWindowPtr, int *refreshUnlockedOut, int *overscrollAppliedOut) {
+	if (refreshUnlockedOut) *refreshUnlockedOut = 0;
+	if (overscrollAppliedOut) *overscrollAppliedOut = 0;
 	if (!nsWindowPtr || ![NSThread isMainThread]) {
 		return 0;
 	}
@@ -93,7 +131,29 @@ static int sumiUnlockWindowHighRefreshRate(void *nsWindowPtr) {
 		if (!webView) {
 			return 0;
 		}
-		return sumiDisable60FPSCapOnPreferences(webView.configuration.preferences);
+		int unlocked = sumiDisable60FPSCapOnPreferences(webView.configuration.preferences);
+		int overscroll = sumiDisableWebViewOverscroll(webView);
+		if (refreshUnlockedOut) *refreshUnlockedOut = unlocked;
+		if (overscrollAppliedOut) *overscrollAppliedOut = overscroll;
+		return 1;
+	}
+}
+
+static void sumiProbeWebViewOverscrollDisable(
+	int *rbBefore, int *rbAfter,
+	int *bvBefore, int *bvAfter,
+	int *bhBefore, int *bhAfter,
+	int *appliedOut
+) {
+	@autoreleasepool {
+		WKWebView *webView = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 320, 240)];
+		*rbBefore = sumiReadBoolSelector(webView, @"_rubberBandingEnabled");
+		*bvBefore = sumiReadBoolSelector(webView, @"_alwaysBounceVertical");
+		*bhBefore = sumiReadBoolSelector(webView, @"_alwaysBounceHorizontal");
+		*appliedOut = sumiDisableWebViewOverscroll(webView);
+		*rbAfter = sumiReadBoolSelector(webView, @"_rubberBandingEnabled");
+		*bvAfter = sumiReadBoolSelector(webView, @"_alwaysBounceVertical");
+		*bhAfter = sumiReadBoolSelector(webView, @"_alwaysBounceHorizontal");
 	}
 }
 
@@ -145,11 +205,13 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-func unlockNativeWindowRefreshRate(nativeWindow unsafe.Pointer) bool {
+func configureNativeWindowWebView(nativeWindow unsafe.Pointer) (found, refreshUnlocked bool, overscrollApplied int) {
 	if nativeWindow == nil {
-		return false
+		return false, false, 0
 	}
-	return C.sumiUnlockWindowHighRefreshRate(nativeWindow) != 0
+	var unlocked, overscroll C.int
+	ok := C.sumiConfigureNativeWindowWebView(nativeWindow, &unlocked, &overscroll)
+	return ok != 0, unlocked != 0, int(overscroll)
 }
 
 func probeHighRefreshRateToggle() (before, after int, ok bool) {
@@ -158,11 +220,32 @@ func probeHighRefreshRateToggle() (before, after int, ok bool) {
 	return int(b), int(a), o != 0
 }
 
-// attachHighRefreshRate disables WebKit's 60fps cap on the main WebviewWindow as soon as its
-// native NSWindow/WKWebView exists.
-func attachHighRefreshRate(app *application.App, window *application.WebviewWindow, logger *slog.Logger) {
+type overscrollProbeResult struct {
+	rubberBandBefore, rubberBandAfter int
+	bounceVBefore, bounceVAfter       int
+	bounceHBefore, bounceHAfter       int
+	applied                           int
+}
+
+func probeWebViewOverscrollDisable() overscrollProbeResult {
+	var rbB, rbA, bvB, bvA, bhB, bhA, applied C.int
+	C.sumiProbeWebViewOverscrollDisable(&rbB, &rbA, &bvB, &bvA, &bhB, &bhA, &applied)
+	return overscrollProbeResult{
+		rubberBandBefore: int(rbB),
+		rubberBandAfter:  int(rbA),
+		bounceVBefore:    int(bvB),
+		bounceVAfter:     int(bvA),
+		bounceHBefore:    int(bhB),
+		bounceHAfter:     int(bhA),
+		applied:          int(applied),
+	}
+}
+
+// attachNativeWebViewConfig applies macOS WKWebView settings (120Hz ProMotion refresh and
+// overscroll/rubber-band disable) as soon as the main WebviewWindow's native NSWindow exists.
+func attachNativeWebViewConfig(app *application.App, window *application.WebviewWindow, logger *slog.Logger) {
 	var done atomic.Bool
-	tryUnlock := func() {
+	tryConfigure := func() {
 		if done.Load() {
 			return
 		}
@@ -170,16 +253,22 @@ func attachHighRefreshRate(app *application.App, window *application.WebviewWind
 			if done.Load() {
 				return
 			}
-			if unlockNativeWindowRefreshRate(window.NativeWindow()) {
-				done.Store(true)
-				logger.Info("Unlocked native WKWebView high refresh rate (120Hz)")
+			found, refreshUnlocked, overscrollApplied := configureNativeWindowWebView(window.NativeWindow())
+			if !found {
+				return
 			}
+			done.Store(true)
+			logger.Info(
+				"Configured native WKWebView",
+				"high_refresh_unlocked", refreshUnlocked,
+				"overscroll_flags_disabled", overscrollApplied,
+			)
 		})
 	}
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		tryUnlock()
+		tryConfigure()
 	})
 	window.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) {
-		tryUnlock()
+		tryConfigure()
 	})
 }

@@ -8,4 +8,4 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-func attachHighRefreshRate(_ *application.App, _ *application.WebviewWindow, _ *slog.Logger) {}
+func attachNativeWebViewConfig(_ *application.App, _ *application.WebviewWindow, _ *slog.Logger) {}

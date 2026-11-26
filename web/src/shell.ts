@@ -1,6 +1,40 @@
 const SHELL_KEY = "sumi.shell";
 const CONTROL_KEY = "sumi.desktop.control";
 const TOKEN_KEY = "sumi.desktop.token";
+const EDITABLE_INPUT_TYPES = new Set(["", "text", "search", "url", "email", "tel", "password", "number"]);
+
+/** True when a right-click target is an enabled text-editing control that should keep the native edit menu. */
+export function isEditableTextTarget(target: EventTarget | null): boolean {
+  if (!target || typeof target !== "object") return false;
+  const node = target as Node;
+  const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+  if (!el || typeof el.closest !== "function") return false;
+  const editable = el.closest("textarea, input, [contenteditable]");
+  if (!editable) return false;
+  if (editable instanceof HTMLTextAreaElement) {
+    return !editable.disabled;
+  }
+  if (editable instanceof HTMLInputElement) {
+    return !editable.disabled && EDITABLE_INPUT_TYPES.has((editable.type || "").toLowerCase());
+  }
+  if (editable instanceof HTMLElement) {
+    if (editable.isContentEditable) return true;
+    const attr = editable.getAttribute("contenteditable");
+    return attr !== null && attr.toLowerCase() !== "false";
+  }
+  return false;
+}
+
+/** Suppresses the default browser context menu outside text inputs while letting Sumi menus run first. */
+export function installContextMenuGuard(target: Window = window): () => void {
+  const onContextMenu = (e: MouseEvent) => {
+    if (e.defaultPrevented) return;
+    if (isEditableTextTarget(e.target)) return;
+    e.preventDefault();
+  };
+  target.addEventListener("contextmenu", onContextMenu);
+  return () => target.removeEventListener("contextmenu", onContextMenu);
+}
 
 export interface DesktopBridge {
   controlUrl: string;

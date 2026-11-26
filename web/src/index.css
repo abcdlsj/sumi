@@ -305,8 +305,11 @@ html.desktop {
   body,
   #root {
     height: 100%;
+    width: 100%;
     margin: 0;
     padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-ui);
@@ -514,6 +517,7 @@ html.desktop .titlebar-drag textarea {
 
 .scroll-thin {
   overflow-anchor: auto;
+  overscroll-behavior: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -536,6 +540,7 @@ html.desktop .titlebar-drag textarea {
   background-clip: content-box;
 }
 .scroll-nav {
+  overscroll-behavior: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -599,6 +604,7 @@ html.desktop .titlebar-drag textarea {
   background: var(--subtle);
   border: 1px solid var(--line);
   overflow-x: auto;
+  overscroll-behavior: none;
   font-size: var(--code-font-size);
   line-height: 1.55;
 }

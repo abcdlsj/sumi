@@ -183,15 +183,16 @@ func main() {
 	})
 
 	window = app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "main",
-		Title:            "Sumi",
-		Width:            1360,
-		Height:           900,
-		MinWidth:         900,
-		MinHeight:        600,
-		BackgroundColour: application.NewRGBA(244, 244, 247, 255),
-		URL:              startURL,
-		JS:               desktopWindowDragJS,
+		Name:                       "main",
+		Title:                      "Sumi",
+		Width:                      1360,
+		Height:                     900,
+		MinWidth:                   900,
+		MinHeight:                  600,
+		BackgroundColour:           application.NewRGBA(244, 244, 247, 255),
+		URL:                        startURL,
+		JS:                         desktopWindowDragJS,
+		DefaultContextMenuDisabled: true,
 		// Unified 52pt transparent toolbar centers macOS traffic lights on the same
 		// horizontal axis as the 52px pane headers; CSS --wails-draggable drives drag.
 		Mac: application.MacWindow{
@@ -202,7 +203,7 @@ func main() {
 		window.Hide()
 		e.Cancel()
 	})
-	attachHighRefreshRate(app, window, logger)
+	attachNativeWebViewConfig(app, window, logger)
 
 	tray := app.SystemTray.New()
 	tray.SetTemplateIcon(trayTemplatePNG)

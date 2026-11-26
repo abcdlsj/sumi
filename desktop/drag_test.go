@@ -13,6 +13,8 @@ func TestDesktopWindowDragBridgeScript(t *testing.T) {
 		"wails:drag:doubleclick",
 		"event.detail !== 1",
 		"messageHandlers.external",
+		"contextmenu",
+		"isEditableTarget",
 	} {
 		if !strings.Contains(desktopWindowDragJS, want) {
 			t.Fatalf("desktopWindowDragJS missing %q", want)
