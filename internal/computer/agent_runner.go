@@ -805,8 +805,6 @@ func isSidecarDialError(err error) bool {
 	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
-// recoverDeadSidecar respawns a missing agent-host sidecar before failing a turn whose
-// initial dial never reached any process.
 // replaceStaleSidecar swaps a sidecar flagged staleBuild for one spawned from the current binary.
 // It runs at the top of each agent-loop iteration, so the sidecar's previous turn has ended and
 // AttachOrSpawn retires it through the graceful shutdown path instead of re-attaching.
@@ -833,6 +831,8 @@ func (d *Daemon) replaceStaleSidecar(ag *hostedAgent) {
 	d.logger.Info("Replaced agent-host sidecar running an older build", "agent_id", ag.spec.MemberID)
 }
 
+// recoverDeadSidecar respawns a missing agent-host sidecar before failing a turn whose
+// initial dial never reached any process.
 func (d *Daemon) recoverDeadSidecar(ag *hostedAgent, dead *agenthost.Client, spec protocol.AssignedAgentSpec) (*agenthost.Client, error) {
 	ag.mu.Lock()
 	defer ag.mu.Unlock()
