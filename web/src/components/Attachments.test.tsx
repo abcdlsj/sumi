@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "../api";
 import { MessageAttachments } from "./Attachments";
@@ -40,9 +40,10 @@ describe("MessageAttachments", () => {
     render(<MessageAttachments spaceSlug="studio" attachments={[img1, img2]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Preview diagram.png" }));
-    expect(screen.getByRole("dialog", { name: "diagram.png" })).toBeTruthy();
-    expect(screen.getByText("1 / 2")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Download/ }).getAttribute("href")).toBe("/api/v1/spaces/studio/attachments/att-1");
+    const dialog = screen.getByRole("dialog", { name: "diagram.png" });
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByText("1 / 2")).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: /Download/ }).getAttribute("href")).toBe("/api/v1/spaces/studio/attachments/att-1");
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(screen.getByRole("dialog", { name: "architecture.png" })).toBeTruthy();
@@ -57,19 +58,25 @@ describe("MessageAttachments", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("previews text and markdown attachments inline inside a modal", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+  it("renders text and markdown attachments inline and opens the full preview modal from the preview button", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       text: async () => "# Release Notes\n\nAll checks passed.",
     } as Response);
 
     render(<MessageAttachments spaceSlug="studio" attachments={[doc]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview notes.md" }));
-    const dialog = await screen.findByRole("dialog", { name: "notes.md" });
-    expect(dialog).toBeTruthy();
+    // Inline preview renders immediately in the message stream without opening a modal.
     await waitFor(() => expect(screen.getByText("Release Notes")).toBeTruthy());
     expect(screen.getByText("All checks passed.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Clicking the preview button opens the modal and reuses the loaded content.
+    fireEvent.click(screen.getByRole("button", { name: "Preview notes.md" }));
+    const dialog = await screen.findByRole("dialog", { name: "notes.md" });
+    expect(within(dialog).getByText("Release Notes")).toBeTruthy();
+    expect(within(dialog).getByText("All checks passed.")).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();

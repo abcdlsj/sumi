@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Eye, FileText, Loader2, Paperclip, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Eye, FileText, Loader2, Maximize2, Paperclip, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Attachment } from "../api";
 import { CodeBlock, languageFromPath } from "./CodeHighlight";
 import { MessageBody } from "./MessageBody";
@@ -419,14 +419,16 @@ function ImageLightbox({
 function DocumentPreviewModal({
   spaceSlug,
   attachment,
+  initialContent,
   onClose,
 }: {
   spaceSlug: string;
   attachment: Attachment;
+  initialContent?: string | null;
   onClose: () => void;
 }) {
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [content, setContent] = useState<string | null>(initialContent ?? null);
+  const [loading, setLoading] = useState(initialContent === undefined || initialContent === null);
   const [error, setError] = useState<string | null>(null);
   const [mdMode, setMdMode] = useState<"preview" | "raw">("preview");
   const [copied, setCopied] = useState(false);
@@ -443,6 +445,12 @@ function DocumentPreviewModal({
   }, [onClose]);
 
   useEffect(() => {
+    if (initialContent !== undefined && initialContent !== null) {
+      setContent(initialContent);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (attachment.size_bytes > MAX_INLINE_PREVIEW_BYTES) {
       setLoading(false);
       setError("File is larger than 1 MB. Download it to inspect locally.");
@@ -468,7 +476,7 @@ function DocumentPreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [url, attachment.size_bytes]);
+  }, [url, attachment.size_bytes, initialContent]);
 
   return createPortal(
     <div
@@ -568,6 +576,20 @@ function DocumentPreviewModal({
   );
 }
 
+const INLINE_DOC_MAX_CHARS = 4000;
+const INLINE_DOC_MAX_LINES = 24;
+
+function truncateInlinePreview(text: string): { snippet: string; truncated: boolean } {
+  const lines = text.split("\n");
+  if (lines.length > INLINE_DOC_MAX_LINES) {
+    return { snippet: lines.slice(0, INLINE_DOC_MAX_LINES).join("\n"), truncated: true };
+  }
+  if (text.length > INLINE_DOC_MAX_CHARS) {
+    return { snippet: text.slice(0, INLINE_DOC_MAX_CHARS), truncated: true };
+  }
+  return { snippet: text, truncated: lines.length > 8 || text.length > 600 };
+}
+
 function InlineImage({
   spaceSlug,
   attachment,
@@ -578,30 +600,156 @@ function InlineImage({
   onPreview: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
+  const url = api.attachmentURL(spaceSlug, attachment.id);
   return (
-    <button
-      type="button"
-      onClick={onPreview}
-      aria-label={`Preview ${attachment.name}`}
-      className={`block border border-line rounded-[6px] overflow-hidden checkerboard-bg hover:border-line-strong transition-colors ${
+    <div
+      className={`group/img relative inline-block border border-line rounded-[6px] overflow-hidden checkerboard-bg hover:border-line-strong transition-colors ${
         loaded ? "" : "min-w-[180px] min-h-[120px]"
       }`}
     >
       <img
-        src={api.attachmentURL(spaceSlug, attachment.id)}
+        src={url}
         alt={attachment.name}
         loading="lazy"
+        onClick={onPreview}
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
-        className={`max-h-[280px] max-w-[360px] object-contain block transition-opacity duration-150 ${
+        className={`max-h-[280px] max-w-[360px] object-contain block cursor-zoom-in transition-opacity duration-150 ${
           loaded ? "opacity-100" : "opacity-0"
         }`}
       />
-    </button>
+      <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover/img:opacity-100 focus-within:opacity-100 transition-opacity">
+        <button
+          type="button"
+          onClick={onPreview}
+          title={`Preview ${attachment.name}`}
+          aria-label={`Preview ${attachment.name}`}
+          className="size-7 rounded-[5px] bg-card/90 backdrop-blur-xs border border-line-strong text-fg-2 hover:text-fg hover:bg-card shadow-sm inline-flex items-center justify-center"
+        >
+          <Maximize2 className="size-3.5" />
+        </button>
+        <a
+          href={url}
+          download={attachment.name}
+          title={`Download ${attachment.name}`}
+          aria-label={`Download ${attachment.name}`}
+          className="size-7 rounded-[5px] bg-card/90 backdrop-blur-xs border border-line-strong text-fg-2 hover:text-fg hover:bg-card shadow-sm inline-flex items-center justify-center"
+        >
+          <Download className="size-3.5" />
+        </a>
+      </div>
+    </div>
   );
 }
 
-/** Renders already-sent attachments: inline images with zoomable gallery lightbox, previewable docs, and downloads. */
+/** Inline preview card for text, Markdown, JSON, and code attachments; clicking Preview opens the full modal. */
+function InlineDocumentCard({
+  spaceSlug,
+  attachment,
+  onPreview,
+}: {
+  spaceSlug: string;
+  attachment: Attachment;
+  onPreview: (content: string | null) => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(attachment.size_bytes <= MAX_INLINE_PREVIEW_BYTES);
+  const [error, setError] = useState<string | null>(
+    attachment.size_bytes > MAX_INLINE_PREVIEW_BYTES ? "File is larger than 1 MB. Download to inspect locally." : null,
+  );
+  const url = api.attachmentURL(spaceSlug, attachment.id);
+  const md = isMarkdownFile(attachment.name);
+  const lang = languageFromPath(attachment.name);
+
+  useEffect(() => {
+    if (attachment.size_bytes > MAX_INLINE_PREVIEW_BYTES) {
+      setLoading(false);
+      setError("File is larger than 1 MB. Download to inspect locally.");
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void fetch(url, { credentials: "include" })
+      .then(async (resp) => {
+        if (!resp.ok) throw new Error(`Failed to load preview (HTTP ${resp.status})`);
+        return resp.text();
+      })
+      .then((text) => {
+        if (!cancelled) setContent(text);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Preview unavailable");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url, attachment.size_bytes]);
+
+  const preview = content !== null ? truncateInlinePreview(content) : null;
+
+  return (
+    <div className="border border-line rounded-[6px] overflow-hidden max-w-[560px] bg-card">
+      <div className="h-9 px-3 border-b border-line bg-subtle/45 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <FileText className="size-3.5 text-fg-3 shrink-0" />
+          <span className="truncate text-[13px] font-medium text-fg">{attachment.name}</span>
+          <span className="tabular text-[11.5px] text-fg-4 shrink-0">{formatBytes(attachment.size_bytes)}</span>
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onPreview(content)}
+            title={`Preview ${attachment.name}`}
+            aria-label={`Preview ${attachment.name}`}
+            className="size-7 rounded-[5px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center justify-center transition-colors"
+          >
+            <Eye className="size-3.5" />
+          </button>
+          <a
+            href={url}
+            download={attachment.name}
+            title={`Download ${attachment.name}`}
+            aria-label={`Download ${attachment.name}`}
+            className="size-7 rounded-[5px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center justify-center transition-colors"
+          >
+            <Download className="size-3.5" />
+          </a>
+        </div>
+      </div>
+      {loading ? (
+        <div className="px-3.5 py-3 space-y-2">
+          <span className="skeleton block h-3 w-3/4" />
+          <span className="skeleton block h-3 w-1/2" />
+        </div>
+      ) : error ? (
+        <div className="px-3.5 py-2.5 text-[12.5px] text-fg-3">{error}</div>
+      ) : preview ? (
+        <div
+          className={`max-h-[180px] overflow-hidden bg-bg/30 ${preview.truncated ? "mask-fade-b" : ""}`}
+        >
+          {md ? (
+            <div className="px-3.5 py-2.5 text-[13.5px] leading-relaxed text-fg md">
+              <MessageBody body={preview.snippet} members={[]} />
+            </div>
+          ) : (
+            <CodeBlock
+              code={preview.snippet}
+              language={lang}
+              bare
+              className="!px-3.5 !py-2.5 !text-[12px] !leading-[1.55]"
+            />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Renders already-sent attachments: inline images & previewable documents with modal viewers, plus binary downloads. */
 export function MessageAttachments({
   spaceSlug,
   attachments,
@@ -610,10 +758,11 @@ export function MessageAttachments({
   attachments?: Attachment[];
 }) {
   const [imagePreviewIdx, setImagePreviewIdx] = useState<number | null>(null);
-  const [docPreview, setDocPreview] = useState<Attachment | null>(null);
+  const [docPreview, setDocPreview] = useState<{ attachment: Attachment; content: string | null } | null>(null);
   if (!attachments || attachments.length === 0) return null;
   const images = attachments.filter((a) => isImage(a.media_type));
-  const files = attachments.filter((a) => !isImage(a.media_type));
+  const previewableDocs = attachments.filter((a) => !isImage(a.media_type) && isPreviewableDocument(a));
+  const otherFiles = attachments.filter((a) => !isImage(a.media_type) && !isPreviewableDocument(a));
 
   return (
     <div className="mt-2 space-y-2">
@@ -624,41 +773,29 @@ export function MessageAttachments({
           ))}
         </div>
       )}
-      {files.length > 0 && (
+      {previewableDocs.length > 0 && (
+        <div className="space-y-2">
+          {previewableDocs.map((a) => (
+            <InlineDocumentCard
+              key={a.id}
+              spaceSlug={spaceSlug}
+              attachment={a}
+              onPreview={(content) => setDocPreview({ attachment: a, content })}
+            />
+          ))}
+        </div>
+      )}
+      {otherFiles.length > 0 && (
         <div className="border border-line rounded-[6px] divide-y divide-line overflow-hidden max-w-[460px] bg-card">
-          {files.map((a) => {
-            const previewable = isPreviewableDocument(a);
+          {otherFiles.map((a) => {
             const url = api.attachmentURL(spaceSlug, a.id);
             return (
               <div key={a.id} className="h-11 px-3 flex items-center justify-between gap-2 hover:bg-subtle text-[14px] transition-colors">
-                {previewable ? (
-                  <button
-                    type="button"
-                    onClick={() => setDocPreview(a)}
-                    aria-label={`Preview ${a.name}`}
-                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                  >
-                    <FileText className="size-4 text-fg-3 shrink-0" />
-                    <span className="truncate text-fg">{a.name}</span>
-                  </button>
-                ) : (
-                  <a href={url} download={a.name} className="flex items-center gap-2 min-w-0 flex-1">
-                    <FileText className="size-4 text-fg-3 shrink-0" />
-                    <span className="truncate text-fg">{a.name}</span>
-                  </a>
-                )}
+                <a href={url} download={a.name} className="flex items-center gap-2 min-w-0 flex-1">
+                  <FileText className="size-4 text-fg-3 shrink-0" />
+                  <span className="truncate text-fg">{a.name}</span>
+                </a>
                 <span className="tabular text-[12.5px] text-fg-3 shrink-0">{formatBytes(a.size_bytes)}</span>
-                {previewable && (
-                  <button
-                    type="button"
-                    onClick={() => setDocPreview(a)}
-                    title={`Preview ${a.name}`}
-                    aria-label={`Open ${a.name}`}
-                    className="size-7 rounded-[5px] text-fg-3 hover:text-fg hover:bg-hover inline-flex items-center justify-center shrink-0"
-                  >
-                    <Eye className="size-3.5" />
-                  </button>
-                )}
                 <a
                   href={url}
                   download={a.name}
@@ -684,7 +821,8 @@ export function MessageAttachments({
       {docPreview && (
         <DocumentPreviewModal
           spaceSlug={spaceSlug}
-          attachment={docPreview}
+          attachment={docPreview.attachment}
+          initialContent={docPreview.content}
           onClose={() => setDocPreview(null)}
         />
       )}
