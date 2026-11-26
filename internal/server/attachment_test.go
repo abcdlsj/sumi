@@ -173,3 +173,72 @@ func TestAttachmentUploadRejectsMissingFile(t *testing.T) {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
+
+func TestAttachmentInfersSafeImageMediaTypeFromOctetStream(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	svc := app.NewService(st, app.NewEventHub(), nil)
+	srv := New(svc, Config{}, nil)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	jar, _ := cookiejar.New(nil)
+	human := &http.Client{Jar: jar}
+	if resp, _ := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/auth/register", map[string]any{
+		"email": "img@sumi.dev", "password": "password123", "display_name": "Lisi",
+	}, ""); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register status=%d", resp.StatusCode)
+	}
+	if resp, _ := doJSON(t, human, http.MethodPost, ts.URL+"/api/v1/spaces", map[string]any{
+		"slug": "studio", "name": "Sumi Studio",
+	}, ""); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create space status=%d", resp.StatusCode)
+	}
+
+	uploadOctetStream := func(name, content string) map[string]any {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", name)
+		if err != nil {
+			t.Fatalf("create form file: %v", err)
+		}
+		_, _ = io.WriteString(part, content)
+		_ = mw.Close()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/spaces/studio/attachments", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		resp, err := human.Do(req)
+		if err != nil {
+			t.Fatalf("upload %s: %v", name, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("upload %s status=%d", name, resp.StatusCode)
+		}
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return out["attachment"].(map[string]any)
+	}
+
+	pngAtt := uploadOctetStream("chart.png", "png-bytes")
+	if pngAtt["media_type"] != "image/png" {
+		t.Fatalf("expected inferred image/png, got %v", pngAtt["media_type"])
+	}
+	dl, err := human.Get(ts.URL + "/api/v1/spaces/studio/attachments/" + pngAtt["id"].(string))
+	if err != nil {
+		t.Fatalf("download png: %v", err)
+	}
+	defer dl.Body.Close()
+	if ct := dl.Header.Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("expected served Content-Type image/png, got %q", ct)
+	}
+
+	// Active web types (like HTML) must never be promoted from application/octet-stream.
+	htmlAtt := uploadOctetStream("page.html", "<script>alert(1)</script>")
+	if htmlAtt["media_type"] != "application/octet-stream" {
+		t.Fatalf("expected html upload to stay application/octet-stream, got %v", htmlAtt["media_type"])
+	}
+}

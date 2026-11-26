@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -165,7 +167,16 @@ func (c *Client) Upload(filePath string) (int, []byte, error) {
 	mw := multipart.NewWriter(pw)
 	go func() {
 		defer pw.Close()
-		part, err := mw.CreateFormFile("file", filepath.Base(filePath))
+		base := filepath.Base(filePath)
+		ct := mime.TypeByExtension(filepath.Ext(base))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		h := make(textproto.MIMEHeader)
+		escaped := strings.NewReplacer("\\", "\\\\", `"`, `\"`).Replace(base)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escaped))
+		h.Set("Content-Type", ct)
+		part, err := mw.CreatePart(h)
 		if err != nil {
 			_ = pw.CloseWithError(err)
 			return

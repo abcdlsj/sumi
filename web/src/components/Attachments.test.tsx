@@ -81,4 +81,12 @@ describe("MessageAttachments", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("renders agent-uploaded images inline even when media_type is application/octet-stream", () => {
+    const octetImg: Attachment = { ...img1, id: "att-octet", name: "agent-chart.png", media_type: "application/octet-stream" };
+    render(<MessageAttachments spaceSlug="studio" attachments={[octetImg]} />);
+    expect(screen.getByAltText("agent-chart.png")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Preview agent-chart.png" }));
+    expect(screen.getByRole("dialog", { name: "agent-chart.png" })).toBeTruthy();
+  });
 });

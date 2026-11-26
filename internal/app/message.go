@@ -715,6 +715,7 @@ func loadBoundAttachmentsTx(ctx context.Context, tx *sql.Tx, messageID string) [
 			return nil
 		}
 		att.MessageID = messageID
+		att.MediaType = inferAttachmentMediaType(att.Name, att.MediaType)
 		att.CreatedAt = store.ParseTime(createdAt)
 		out = append(out, att)
 	}

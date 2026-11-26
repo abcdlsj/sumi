@@ -12,8 +12,14 @@ const PREVIEWABLE_EXTS = new Set([
 ]);
 const MAX_INLINE_PREVIEW_BYTES = 1024 * 1024;
 
-export function isImage(mediaType: string): boolean {
-  return mediaType.startsWith("image/");
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif"]);
+
+export function isImage(mediaType: string, name?: string): boolean {
+  if (mediaType.startsWith("image/")) return true;
+  if (name && (!mediaType || mediaType === "application/octet-stream")) {
+    return IMAGE_EXTS.has(fileExtension(name));
+  }
+  return false;
 }
 
 function fileExtension(name: string): string {
@@ -27,7 +33,7 @@ export function isMarkdownFile(name: string): boolean {
 }
 
 export function isPreviewableDocument(a: Attachment): boolean {
-  if (isImage(a.media_type)) return false;
+  if (isImage(a.media_type, a.name)) return false;
   if (a.media_type.startsWith("text/")) return true;
   if (a.media_type === "application/json" || a.media_type === "application/xml" || a.media_type === "application/javascript") return true;
   return PREVIEWABLE_EXTS.has(fileExtension(a.name));
@@ -157,7 +163,7 @@ export function AttachmentDraftRow({
           key={a.id}
           className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-1 rounded-[6px] border border-line bg-subtle text-[13px] text-fg-2 max-w-[260px] animate-pop-in"
         >
-          {isImage(a.media_type) ? (
+          {isImage(a.media_type, a.name) ? (
             <img
               src={api.attachmentURL(draft.spaceSlug, a.id)}
               alt=""
@@ -760,9 +766,9 @@ export function MessageAttachments({
   const [imagePreviewIdx, setImagePreviewIdx] = useState<number | null>(null);
   const [docPreview, setDocPreview] = useState<{ attachment: Attachment; content: string | null } | null>(null);
   if (!attachments || attachments.length === 0) return null;
-  const images = attachments.filter((a) => isImage(a.media_type));
-  const previewableDocs = attachments.filter((a) => !isImage(a.media_type) && isPreviewableDocument(a));
-  const otherFiles = attachments.filter((a) => !isImage(a.media_type) && !isPreviewableDocument(a));
+  const images = attachments.filter((a) => isImage(a.media_type, a.name));
+  const previewableDocs = attachments.filter((a) => !isImage(a.media_type, a.name) && isPreviewableDocument(a));
+  const otherFiles = attachments.filter((a) => !isImage(a.media_type, a.name) && !isPreviewableDocument(a));
 
   return (
     <div className="mt-2 space-y-2">
