@@ -412,7 +412,7 @@ export function CodeBlock({
 
   if (bare) {
     return (
-      <pre className={`p-3.5 text-[12.5px] leading-[1.6] font-mono text-fg whitespace-pre overflow-x-auto ${className}`}>
+      <pre className={`p-3.5 text-[length:var(--code-font-size)] leading-[1.6] font-mono text-fg whitespace-pre overflow-x-auto ${className}`}>
         {codeBody}
       </pre>
     );
@@ -425,7 +425,7 @@ export function CodeBlock({
           <span className="font-mono text-[11.5px] text-fg-3 select-none truncate">{rawLang}</span>
           {copyBtn}
         </div>
-        <pre className="!m-0 !border-0 !rounded-none !bg-transparent px-3.5 py-2.5 overflow-x-auto text-[13px] leading-[1.55] font-mono scroll-thin">
+        <pre className="!m-0 !border-0 !rounded-none !bg-transparent px-3.5 py-2.5 overflow-x-auto text-[length:var(--code-font-size)] leading-[1.55] font-mono scroll-thin">
           {codeBody}
         </pre>
       </div>
@@ -435,7 +435,7 @@ export function CodeBlock({
   // Unlabelled fenced block: reserve a dedicated right column for Copy so it never overlaps line 1.
   return (
     <div className={`group/code my-2 rounded-[6px] border border-line bg-subtle flex items-start overflow-hidden ${className}`}>
-      <pre className="!m-0 !border-0 !rounded-none !bg-transparent flex-1 min-w-0 px-3.5 py-2.5 overflow-x-auto text-[13px] leading-[1.55] font-mono scroll-thin">
+      <pre className="!m-0 !border-0 !rounded-none !bg-transparent flex-1 min-w-0 px-3.5 py-2.5 overflow-x-auto text-[length:var(--code-font-size)] leading-[1.55] font-mono scroll-thin">
         {codeBody}
       </pre>
       <div className="p-1.5 shrink-0 opacity-0 group-hover/code:opacity-100 focus-within:opacity-100 transition-opacity">

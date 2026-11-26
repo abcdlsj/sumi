@@ -521,7 +521,7 @@ function MessageComposer({
           }}
           placeholder={replyingTo ? "Reply in thread…" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
           aria-label={replyingTo ? "Reply in thread" : `Message ${conv.kind === "dm" ? title : "#" + title}`}
-          className="block w-full px-3.5 pt-2.5 pb-2 min-h-[44px] text-[14px] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
+          className="block w-full px-3.5 pt-2.5 pb-2 min-h-[44px] text-[length:var(--msg-font-size)] leading-relaxed bg-transparent outline-none resize-none placeholder:text-fg-4 scroll-thin"
         />
         <AttachmentDraftRow draft={draft} />
         <div className="px-2 py-1.5 border-t border-line bg-subtle/45 rounded-b-[5px] flex items-center justify-between gap-2">
@@ -736,7 +736,7 @@ const MessageRow = memo(function MessageRow({
                 <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
               </div>
             )}
-            <div className={`${grouped ? "" : "mt-0.5"} text-[14.5px] leading-[1.6] text-fg md`}>
+            <div className={`${grouped ? "" : "mt-0.5"} text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md`}>
               <CollapsibleMessage messageID={m.id}>
                 <MessageBody
                   body={m.body_markdown}

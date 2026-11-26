@@ -424,7 +424,7 @@ export function AgentWorkspace({
               />
             </div>
           ) : fileContent && md && mdMode === "preview" ? (
-            <div className="p-4 text-[14px] leading-relaxed text-fg md">
+            <div className="p-4 text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md">
               <MessageBody
                 body={fileContent.content}
                 members={boot.members}

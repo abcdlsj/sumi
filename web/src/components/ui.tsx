@@ -658,14 +658,16 @@ export function Segmented<T extends string>({
   options,
   onChange,
   full = false,
+  ariaLabel,
 }: {
   value: T;
   options: { value: T; label: ReactNode; disabled?: boolean }[];
   onChange: (v: T) => void;
   full?: boolean;
+  ariaLabel?: string;
 }) {
   return (
-    <div role="tablist" className={`inline-flex items-center p-[2px] rounded-[5px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
+    <div role="tablist" aria-label={ariaLabel} className={`inline-flex items-center p-[2px] rounded-[5px] bg-subtle border border-line ${full ? "w-full" : ""}`}>
       {options.map((o) => {
         const active = o.value === value;
         return (

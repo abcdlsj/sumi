@@ -159,7 +159,7 @@ function CompactMessage({
           </button>
           <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
         </div>
-        <div className="mt-0.5 text-[14px] leading-relaxed text-fg md">
+        <div className="mt-0.5 text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md">
           <MessageBody
             body={m.body_markdown}
             members={boot.members}

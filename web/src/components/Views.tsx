@@ -13,7 +13,7 @@ import {
   Copy,
   Hash,
   Inbox,
-  Keyboard,
+  Layers,
   Lock,
   LogOut,
   MessageSquare,
@@ -22,7 +22,6 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
-  SunMoon,
   Trash2,
   User,
   Users,
@@ -31,7 +30,7 @@ import {
 import { accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
-import { isMacPlatform, useSendKey } from "../preferences";
+import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, type FontFamilyPref, type FontSizePref } from "../preferences";
 import type { ThemePref } from "../theme";
 import { AgentTemplateDialog } from "./AgentForm";
 import type { DetailTarget } from "./DetailPane";
@@ -823,11 +822,13 @@ function ThemeCard({
   value,
   active,
   label,
+  caption,
   onSelect,
 }: {
   value: ThemePref;
   active: boolean;
   label: string;
+  caption: string;
   onSelect: () => void;
 }) {
   const preview = (cls: string) => (
@@ -850,6 +851,7 @@ function ThemeCard({
       type="button"
       role="radio"
       aria-checked={active}
+      aria-label={label}
       onClick={onSelect}
       className={`text-left rounded-[6px] border p-2 transition-colors ${
         active
@@ -871,7 +873,10 @@ function ThemeCard({
         )}
       </div>
       <div className="mt-2 px-0.5 flex items-center justify-between gap-2">
-        <span className={`text-[13px] ${active ? "font-semibold text-fg" : "font-medium text-fg-2"}`}>{label}</span>
+        <span className="min-w-0">
+          <span className={`block text-[13px] leading-tight ${active ? "font-semibold text-fg" : "font-medium text-fg-2"}`}>{label}</span>
+          <span className="block text-[11px] text-fg-4 leading-tight mt-0.5">{caption}</span>
+        </span>
         <span
           aria-hidden
           className={`size-4 rounded-full border flex items-center justify-center shrink-0 ${
@@ -982,15 +987,28 @@ function ArchivedChannelsSection({
   );
 }
 
-type SettingsSectionID = "appearance" | "composer" | "space" | "archived" | "account";
+type SettingsSectionID = "general" | "space" | "archived" | "account";
 
 const SETTINGS_NAV: { id: SettingsSectionID; label: string; icon: ReactNode }[] = [
-  { id: "appearance", label: "Appearance", icon: <SunMoon /> },
-  { id: "composer", label: "Messages & composer", icon: <Keyboard /> },
-  { id: "space", label: "Space", icon: <SlidersHorizontal /> },
+  { id: "general", label: "General", icon: <SlidersHorizontal /> },
+  { id: "space", label: "Space", icon: <Layers /> },
   { id: "archived", label: "Archived channels", icon: <Archive /> },
   { id: "account", label: "Account", icon: <User /> },
 ];
+
+const FONT_FAMILY_LABELS: Record<FontFamilyPref, string> = {
+  inter: "Inter",
+  system: "System",
+  serif: "Serif",
+  mono: "Mono",
+};
+
+const FONT_SIZE_LABELS: Record<FontSizePref, string> = {
+  sm: "13px",
+  md: "14.5px",
+  lg: "16px",
+  xl: "18px",
+};
 
 export function AdminPanel({
   boot,
@@ -1031,9 +1049,12 @@ export function AdminPanel({
   const { templates, remove: removeTemplate } = useAgentTemplates();
   const [editingTemplate, setEditingTemplate] = useState<AgentTemplate | null>(null);
   const [peopleQuery, setPeopleQuery] = useState("");
-  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionID>("appearance");
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionID>("general");
   const settingsRefs = useRef<Partial<Record<SettingsSectionID, HTMLElement | null>>>({});
   const [sendKey, setSendKey] = useSendKey();
+  const [longMessages, setLongMessages] = useLongMessagesPref();
+  const [fontFamily, setFontFamily] = useFontFamily();
+  const [fontSize, setFontSize] = useFontSize();
 
   const filteredHumans = humans.filter((m) => {
     const q = peopleQuery.trim().toLowerCase();
@@ -1442,48 +1463,124 @@ export function AdminPanel({
             <div className="max-w-[740px] px-7 py-6 divide-y divide-line">
               <section
                 ref={(el) => {
-                  settingsRefs.current.appearance = el;
+                  settingsRefs.current.general = el;
                 }}
                 className="pb-7 scroll-mt-6"
               >
                 <SettingsSectionHeading
-                  title="Appearance"
-                  body="Choose how Sumi looks on this device."
+                  title="General"
+                  body="Appearance, typography, and message preferences on this device."
                 />
-                <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-3 max-w-[460px]">
-                  <ThemeCard value="system" active={theme === "system"} label="System" onSelect={() => onTheme("system")} />
-                  <ThemeCard value="light" active={theme === "light"} label="Light" onSelect={() => onTheme("light")} />
-                  <ThemeCard value="dark" active={theme === "dark"} label="Dark" onSelect={() => onTheme("dark")} />
-                </div>
-              </section>
 
-              <section
-                ref={(el) => {
-                  settingsRefs.current.composer = el;
-                }}
-                className="py-7 scroll-mt-6"
-              >
-                <SettingsSectionHeading
-                  title="Messages & composer"
-                  body="Control how messages are sent in channels, direct messages, and threads."
-                />
-                <div className="flex items-center justify-between gap-4 flex-wrap py-1">
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-medium text-fg">Send message shortcut</div>
+                <div className="pb-6">
+                  <div className="mb-3">
+                    <div className="text-[14px] font-medium text-fg">Theme</div>
                     <div className="text-[12.5px] text-fg-3 mt-0.5">
-                      {sendKey === "enter"
-                        ? "Press Enter to send, Shift + Enter for a new line."
-                        : `Press ${isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter"} to send, Enter for a new line.`}
+                      Choose Light or Dark mode, or follow your system appearance automatically.
                     </div>
                   </div>
-                  <Segmented
-                    value={sendKey}
-                    onChange={setSendKey}
-                    options={[
-                      { value: "enter", label: "Enter" },
-                      { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
-                    ]}
-                  />
+                  <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-3 max-w-[460px]">
+                    <ThemeCard value="system" active={theme === "system"} label="System" caption="Follow OS" onSelect={() => onTheme("system")} />
+                    <ThemeCard value="light" active={theme === "light"} label="Light" caption="Always light" onSelect={() => onTheme("light")} />
+                    <ThemeCard value="dark" active={theme === "dark"} label="Dark" caption="Always dark" onSelect={() => onTheme("dark")} />
+                  </div>
+                </div>
+
+                <div className="divide-y divide-line border-t border-line">
+                  <div className="py-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-medium text-fg">Font family</div>
+                      <div className="text-[12.5px] text-fg-3 mt-0.5">
+                        Typeface used across the workspace and messages.
+                      </div>
+                    </div>
+                    <Segmented
+                      ariaLabel="Font family"
+                      value={fontFamily}
+                      onChange={setFontFamily}
+                      options={[
+                        { value: "inter", label: "Inter" },
+                        { value: "system", label: "System" },
+                        { value: "serif", label: "Serif" },
+                        { value: "mono", label: "Mono" },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="py-4">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-medium text-fg">Text size</div>
+                        <div className="text-[12.5px] text-fg-3 mt-0.5">
+                          Reading size for messages, threads, and markdown previews.
+                        </div>
+                      </div>
+                      <Segmented
+                        ariaLabel="Text size"
+                        value={fontSize}
+                        onChange={setFontSize}
+                        options={[
+                          { value: "sm", label: "Small" },
+                          { value: "md", label: "Default" },
+                          { value: "lg", label: "Large" },
+                          { value: "xl", label: "XL" },
+                        ]}
+                      />
+                    </div>
+                    <div className="mt-3 rounded-[6px] border border-line bg-subtle/30 px-3.5 py-2.5">
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-[0.05em] text-fg-4">
+                        <span>Preview</span>
+                        <span className="font-mono normal-case tracking-normal">
+                          {FONT_FAMILY_LABELS[fontFamily]} · {FONT_SIZE_LABELS[fontSize]}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md">
+                        <p>
+                          Shipped the update to <code>compaction-fit.mjs</code> — ready for review when you have a moment.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="py-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-medium text-fg">Long messages</div>
+                      <div className="text-[12.5px] text-fg-3 mt-0.5">
+                        {longMessages === "expanded"
+                          ? "Show full messages by default. Click Show less on tall messages to fold them."
+                          : "Fold tall messages by default. Click Show more to expand them."}
+                      </div>
+                    </div>
+                    <Segmented
+                      ariaLabel="Long messages"
+                      value={longMessages}
+                      onChange={setLongMessages}
+                      options={[
+                        { value: "expanded", label: "Expanded" },
+                        { value: "collapsed", label: "Collapsed" },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="pt-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-medium text-fg">Send message shortcut</div>
+                      <div className="text-[12.5px] text-fg-3 mt-0.5">
+                        {sendKey === "enter"
+                          ? "Press Enter to send, Shift + Enter for a new line."
+                          : `Press ${isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter"} to send, Enter for a new line.`}
+                      </div>
+                    </div>
+                    <Segmented
+                      ariaLabel="Send message shortcut"
+                      value={sendKey}
+                      onChange={setSendKey}
+                      options={[
+                        { value: "enter", label: "Enter" },
+                        { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
+                      ]}
+                    />
+                  </div>
                 </div>
               </section>
 

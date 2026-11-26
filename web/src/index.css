@@ -260,7 +260,38 @@
   --font-body: var(--font-ui);
   --font-display: var(--font-ui);
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --base-font-size: 14px;
+  --msg-font-size: 14.5px;
+  --msg-line-height: 1.6;
+  --code-font-size: 13px;
   --titlebar: 0px;
+}
+html[data-font="system"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+html[data-font="serif"] {
+  --font-ui: "Iowan Old Style", Georgia, Cambria, "Songti SC", "STSong", "Noto Serif CJK SC", "Times New Roman", serif;
+}
+html[data-font="mono"] {
+  --font-ui: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace;
+}
+html[data-font-size="sm"] {
+  --base-font-size: 13px;
+  --msg-font-size: 13px;
+  --msg-line-height: 1.55;
+  --code-font-size: 12px;
+}
+html[data-font-size="lg"] {
+  --base-font-size: 15px;
+  --msg-font-size: 16px;
+  --msg-line-height: 1.65;
+  --code-font-size: 14px;
+}
+html[data-font-size="xl"] {
+  --base-font-size: 16px;
+  --msg-font-size: 18px;
+  --msg-line-height: 1.65;
+  --code-font-size: 15px;
 }
 html.desktop {
   --titlebar: 52px;
@@ -276,7 +307,7 @@ html.desktop {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-ui);
-    font-size: 14px;
+    font-size: var(--base-font-size);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
@@ -565,7 +596,7 @@ html.desktop .titlebar-drag textarea {
   background: var(--subtle);
   border: 1px solid var(--line);
   overflow-x: auto;
-  font-size: 13px;
+  font-size: var(--code-font-size);
   line-height: 1.55;
 }
 .md pre code {

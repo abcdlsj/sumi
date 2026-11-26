@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { ToastProvider } from "./components/ui";
 import { capturePairingFromURL } from "./pairing";
+import { applyTypographyPreferences } from "./preferences";
 import { captureShellFromURL } from "./shell";
 import { applyTheme } from "./theme";
 import "@fontsource-variable/inter";
@@ -22,6 +23,7 @@ const queryClient = new QueryClient({
 captureShellFromURL();
 capturePairingFromURL();
 applyTheme();
+applyTypographyPreferences();
 
 // Gate focus rings by input modality: pointer clicks stay quiet, keyboard navigation stays crisp.
 window.addEventListener("pointerdown", () => {

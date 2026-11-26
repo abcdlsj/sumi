@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
+import { clearPreferencesForTests, readFontFamily, readFontSize, readLongMessagesPref } from "../preferences";
 import { AdminPanel, type AdminTab } from "./Views";
 
 const sampleBoot: BootstrapData = {
@@ -155,6 +156,9 @@ function renderAdmin(tab: AdminTab, overrides: Partial<Parameters<typeof AdminPa
 
 afterEach(() => {
   vi.restoreAllMocks();
+  clearPreferencesForTests();
+  delete document.documentElement.dataset.font;
+  delete document.documentElement.dataset.fontSize;
 });
 
 describe("AdminPanel", () => {
@@ -185,16 +189,35 @@ describe("AdminPanel", () => {
     expect(props.onCopyAgent).toHaveBeenCalledWith(expect.objectContaining({ id: "m-lin" }));
   });
 
-  it("renders Settings sections with theme selection, space accent update, and sign out", async () => {
+  it("renders Settings General section with theme, typography, long messages, space accent, and sign out", async () => {
     vi.spyOn(api, "listArchivedChannels").mockResolvedValue({ conversations: [] });
     const updateSpace = vi.spyOn(api, "updateSpace").mockResolvedValue({
       space: { ...sampleBoot.space, accent: "sky" },
     });
     const { props } = renderAdmin("settings");
 
+    expect(screen.getByRole("heading", { name: "General" })).toBeTruthy();
+
     const themeGroup = screen.getByRole("radiogroup", { name: "Theme" });
     fireEvent.click(within(themeGroup).getByRole("radio", { name: "Dark" }));
     expect(props.onTheme).toHaveBeenCalledWith("dark");
+    fireEvent.click(within(themeGroup).getByRole("radio", { name: "System" }));
+    expect(props.onTheme).toHaveBeenCalledWith("system");
+
+    const fontGroup = screen.getByRole("tablist", { name: "Font family" });
+    fireEvent.click(within(fontGroup).getByRole("tab", { name: "Serif" }));
+    expect(document.documentElement.dataset.font).toBe("serif");
+    expect(readFontFamily()).toBe("serif");
+
+    const sizeGroup = screen.getByRole("tablist", { name: "Text size" });
+    fireEvent.click(within(sizeGroup).getByRole("tab", { name: "Large" }));
+    expect(document.documentElement.dataset.fontSize).toBe("lg");
+    expect(readFontSize()).toBe("lg");
+
+    const longMsgGroup = screen.getByRole("tablist", { name: "Long messages" });
+    expect(within(longMsgGroup).getByRole("tab", { name: "Expanded" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(longMsgGroup).getByRole("tab", { name: "Collapsed" }));
+    expect(readLongMessagesPref()).toBe("collapsed");
 
     const accentGroup = screen.getByRole("radiogroup", { name: "Space accent" });
     fireEvent.click(within(accentGroup).getByRole("radio", { name: "Sky" }));

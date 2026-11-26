@@ -555,7 +555,7 @@ function DocumentPreviewModal({
           ) : error ? (
             <div className="p-6 text-center text-[13.5px] text-fg-3">{error}</div>
           ) : content !== null && md && mdMode === "preview" ? (
-            <div className="p-5 text-[14.5px] leading-relaxed text-fg md">
+            <div className="p-5 text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md">
               <MessageBody body={content} members={[]} />
             </div>
           ) : content !== null ? (

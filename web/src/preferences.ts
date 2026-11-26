@@ -2,12 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 
 export type SendKeyPref = "enter" | "mod_enter";
 export type ChannelSortPref = "default" | "unread" | "name";
+export type LongMessagesPref = "expanded" | "collapsed";
+export type FontFamilyPref = "inter" | "system" | "serif" | "mono";
+export type FontSizePref = "sm" | "md" | "lg" | "xl";
 
 const SEND_KEY = "sumi.pref.send_key";
 const CHANNEL_SORT_KEY = "sumi.pref.channel_sort";
 const SIDEBAR_COLLAPSED_KEY = "sumi.pref.sidebar_collapsed";
 const TASK_DETAILS_COLLAPSED_KEY = "sumi.pref.task_details_collapsed";
 const LAST_LOCATION_KEY = "sumi.pref.last_location";
+const LONG_MESSAGES_KEY = "sumi.pref.long_messages";
+const FONT_FAMILY_KEY = "sumi.pref.font_family";
+const FONT_SIZE_KEY = "sumi.pref.font_size";
 const EVENT = "sumi:prefs";
 
 export type SavedMainView =
@@ -100,21 +106,35 @@ export function clearLastLocation() {
   }
 }
 
+const memoryLS = new Map<string, string>();
+
 function readLS(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    const v = window.localStorage?.getItem(key);
+    if (v !== null && v !== undefined) return v;
   } catch {
-    return null;
+    // ignore storage failures
   }
+  return memoryLS.get(key) ?? null;
 }
 
 function writeLS(key: string, value: string) {
+  memoryLS.set(key, value);
   try {
-    localStorage.setItem(key, value);
+    window.localStorage?.setItem(key, value);
   } catch {
     // ignore storage failures
   }
   window.dispatchEvent(new Event(EVENT));
+}
+
+export function clearPreferencesForTests() {
+  memoryLS.clear();
+  try {
+    window.localStorage?.clear();
+  } catch {
+    // ignore storage failures
+  }
 }
 
 export function isMacPlatform(): boolean {
@@ -185,4 +205,124 @@ export function useTaskDetailsCollapsed(): [boolean, (next: boolean | ((prev: bo
     });
   }, []);
   return [collapsed, update];
+}
+
+let longMessagesVersion = 0;
+
+export function readLongMessagesPref(): LongMessagesPref {
+  return readLS(LONG_MESSAGES_KEY) === "collapsed" ? "collapsed" : "expanded";
+}
+
+export function writeLongMessagesPref(next: LongMessagesPref): void {
+  longMessagesVersion += 1;
+  writeLS(LONG_MESSAGES_KEY, next);
+}
+
+export function useLongMessagesPref(): [LongMessagesPref, (next: LongMessagesPref) => void, number] {
+  const [state, setState] = useState(() => ({ pref: readLongMessagesPref(), version: longMessagesVersion }));
+  useEffect(() => {
+    const sync = (e: Event) => {
+      if (e.type === "storage") {
+        const se = e as StorageEvent;
+        if (se.key && se.key !== LONG_MESSAGES_KEY) return;
+        longMessagesVersion += 1;
+      }
+      const next = readLongMessagesPref();
+      setState((prev) =>
+        prev.pref === next && prev.version === longMessagesVersion
+          ? prev
+          : { pref: next, version: longMessagesVersion },
+      );
+    };
+    window.addEventListener(EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const update = useCallback((next: LongMessagesPref) => {
+    writeLongMessagesPref(next);
+    setState({ pref: next, version: longMessagesVersion });
+  }, []);
+  return [state.pref, update, state.version];
+}
+
+export function readFontFamily(): FontFamilyPref {
+  const v = readLS(FONT_FAMILY_KEY);
+  return v === "system" || v === "serif" || v === "mono" ? v : "inter";
+}
+
+export function applyFontFamily(pref: FontFamilyPref = readFontFamily()): void {
+  if (typeof document === "undefined") return;
+  if (pref === "inter") delete document.documentElement.dataset.font;
+  else document.documentElement.dataset.font = pref;
+}
+
+export function useFontFamily(): [FontFamilyPref, (next: FontFamilyPref) => void] {
+  const [pref, setPref] = useState<FontFamilyPref>(readFontFamily);
+  useEffect(() => {
+    applyFontFamily(pref);
+  }, [pref]);
+  useEffect(() => {
+    const sync = () => {
+      const next = readFontFamily();
+      applyFontFamily(next);
+      setPref(next);
+    };
+    window.addEventListener(EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const update = useCallback((next: FontFamilyPref) => {
+    applyFontFamily(next);
+    setPref(next);
+    writeLS(FONT_FAMILY_KEY, next);
+  }, []);
+  return [pref, update];
+}
+
+export function readFontSize(): FontSizePref {
+  const v = readLS(FONT_SIZE_KEY);
+  return v === "sm" || v === "lg" || v === "xl" ? v : "md";
+}
+
+export function applyFontSize(pref: FontSizePref = readFontSize()): void {
+  if (typeof document === "undefined") return;
+  if (pref === "md") delete document.documentElement.dataset.fontSize;
+  else document.documentElement.dataset.fontSize = pref;
+}
+
+export function useFontSize(): [FontSizePref, (next: FontSizePref) => void] {
+  const [pref, setPref] = useState<FontSizePref>(readFontSize);
+  useEffect(() => {
+    applyFontSize(pref);
+  }, [pref]);
+  useEffect(() => {
+    const sync = () => {
+      const next = readFontSize();
+      applyFontSize(next);
+      setPref(next);
+    };
+    window.addEventListener(EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const update = useCallback((next: FontSizePref) => {
+    applyFontSize(next);
+    setPref(next);
+    writeLS(FONT_SIZE_KEY, next);
+  }, []);
+  return [pref, update];
+}
+
+export function applyTypographyPreferences(): void {
+  applyFontFamily();
+  applyFontSize();
 }
