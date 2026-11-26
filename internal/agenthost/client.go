@@ -72,20 +72,16 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 	wantHash := SpecHash(opts.Spec)
 	client := NewClient(sockPath)
 
-	bin := opts.BinaryPath
-	if bin == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, fmt.Errorf("resolve executable for agent-host: %w", err))
-		}
-		bin = exe
+	bin, err := SpawnBinary(opts.BinaryPath)
+	if err != nil {
+		return nil, StatusResponse{}, driver.Fail(domain.AgentErrDriverStartFailed, err)
 	}
 
 	if st, err := client.Status(ctx); err == nil {
 		if st.ProtocolVersion == ProtocolVersion && st.Configured && st.SpecHash == wantHash {
 			// A busy sidecar is always re-attached so a hot upgrade never interrupts its turn;
 			// an idle one is replaced when it runs a different build than the one we would spawn.
-			if st.Busy || !buildStale(st.BuildHash, bin) {
+			if st.Busy || !BuildStale(st.BuildHash, bin) {
 				client.pid = st.PID
 				return client, st, nil
 			}
@@ -170,9 +166,22 @@ func AttachOrSpawn(ctx context.Context, opts AttachOptions) (*Client, StatusResp
 	return client, st, nil
 }
 
-// buildStale reports whether a sidecar's build differs from the binary at bin. If bin cannot be
+// SpawnBinary returns the executable AttachOrSpawn launches for a sidecar: path when set,
+// otherwise the current process's own executable.
+func SpawnBinary(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve executable for agent-host: %w", err)
+	}
+	return exe, nil
+}
+
+// BuildStale reports whether a sidecar's build differs from the binary at bin. If bin cannot be
 // hashed the sidecar is kept: restarting it would not be known to help.
-func buildStale(running, bin string) bool {
+func BuildStale(running, bin string) bool {
 	want, err := BinaryHash(bin)
 	if err != nil {
 		return false

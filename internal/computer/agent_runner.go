@@ -164,6 +164,7 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 	}
 	var drv driver.SessionDriver
 	var err error
+	ag.staleBuild = false
 	if d.cfg.DriverFactory != nil {
 		drv, err = d.cfg.DriverFactory(spec, ag.homeDir)
 	} else if d.cfg.UseSidecar {
@@ -179,6 +180,11 @@ func (d *Daemon) buildAgentDriver(ag *hostedAgent, spec protocol.AssignedAgentSp
 		if err == nil && st.Busy && st.TurnID != "" {
 			ag.attachedTurnID = st.TurnID
 			ag.focusConvID = st.FocusConvID
+		}
+		if err == nil && st.Busy {
+			if bin, binErr := agenthost.SpawnBinary(d.cfg.SumiBinary); binErr == nil {
+				ag.staleBuild = agenthost.BuildStale(st.BuildHash, bin)
+			}
 		}
 	} else {
 		drv, err = agenthost.DefaultDriverBuilder(spec, ag.homeDir)
@@ -406,6 +412,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 	}()
 	for {
+		d.replaceStaleSidecar(ag)
 		ag.mu.Lock()
 		spec, drv := ag.spec, ag.drv
 		failCode, failDetail := ag.failCode, ag.failDetail
@@ -800,6 +807,32 @@ func isSidecarDialError(err error) bool {
 
 // recoverDeadSidecar respawns a missing agent-host sidecar before failing a turn whose
 // initial dial never reached any process.
+// replaceStaleSidecar swaps a sidecar flagged staleBuild for one spawned from the current binary.
+// It runs at the top of each agent-loop iteration, so the sidecar's previous turn has ended and
+// AttachOrSpawn retires it through the graceful shutdown path instead of re-attaching.
+func (d *Daemon) replaceStaleSidecar(ag *hostedAgent) {
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	if !ag.staleBuild || ag.stopRequested || d.isDraining() {
+		return
+	}
+	old, ok := ag.drv.(*agenthost.Client)
+	if !ok {
+		ag.staleBuild = false
+		return
+	}
+	drv, code, detail := d.buildAgentDriver(ag, ag.spec)
+	ag.drv, ag.failCode, ag.failDetail = drv, code, detail
+	if drv == nil {
+		d.logger.Warn("Replace stale-build agent-host sidecar failed", "agent_id", ag.spec.MemberID, "error_code", code)
+		go func() { _ = old.Close() }()
+		return
+	}
+	// AttachOrSpawn already shut the old sidecar down; Close would hit its replacement.
+	old.Detach()
+	d.logger.Info("Replaced agent-host sidecar running an older build", "agent_id", ag.spec.MemberID)
+}
+
 func (d *Daemon) recoverDeadSidecar(ag *hostedAgent, dead *agenthost.Client, spec protocol.AssignedAgentSpec) (*agenthost.Client, error) {
 	ag.mu.Lock()
 	defer ag.mu.Unlock()

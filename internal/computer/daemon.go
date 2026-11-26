@@ -60,10 +60,13 @@ type hostedAgent struct {
 	dirty          bool
 	focusConvID    string
 	attachedTurnID string
-	cancelTurn     context.CancelCauseFunc
-	stopRequested  bool
-	lastReason     string
-	lastConvID     string
+	// staleBuild marks a sidecar that was re-attached while busy although it runs an older
+	// build than the one we would spawn; the agent loop replaces it once that turn has ended.
+	staleBuild    bool
+	cancelTurn    context.CancelCauseFunc
+	stopRequested bool
+	lastReason    string
+	lastConvID    string
 
 	// Failure breaker: after failurePauseThreshold consecutive failed turns the Agent stops
 	// taking wakes until a probe timer, Restart, Reset session or a new spec. Unread triggers stay

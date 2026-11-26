@@ -51,6 +51,9 @@ func TestAgentHostHelperProcess(t *testing.T) {
 		MetaPath:   meta,
 		BuildHash:  buildHash,
 		DriverBuilder: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
+			if gate := os.Getenv("SUMI_TEST_AGENTHOST_GATE"); gate != "" {
+				return gatedSidecarDriver{gate: gate}, nil
+			}
 			return stubSidecarDriver{}, nil
 		},
 	})
