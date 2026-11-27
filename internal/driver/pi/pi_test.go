@@ -179,10 +179,20 @@ func TestFakePiRPC(t *testing.T) {
 					},
 					"willRetry": false,
 				})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+			} else if mode == "unexpected_abort" {
+				_ = out.Encode(map[string]any{
+					"type": "agent_end",
+					"messages": []map[string]any{
+						{"role": "assistant", "stopReason": "aborted", "errorMessage": "Connection error.: read ECONNRESET"},
+					},
+					"willRetry": false,
+				})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": true})
 			} else {
 				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
 			}
-			_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
 		case "extension_ui_response":
 			if cmd.ID == "ui-1" && cmd.Cancelled {
 				logLine("UI_CANCELLED:ui-1")
@@ -1177,4 +1187,30 @@ func TestResolvedModelMismatchFailsStart(t *testing.T) {
 			t.Fatalf("fresh session must carry startup context, got %q", last)
 		}
 	})
+}
+
+func TestUnexpectedAbortReturnsErrorAndClassifiesSocketErrors(t *testing.T) {
+	d, in, _ := newFakeDriver(t, "unexpected_abort", Config{})
+	defer d.Close()
+
+	_, err := d.RunTurn(context.Background(), in)
+	if err == nil {
+		t.Fatal("unexpected abort without context cancellation must return an error")
+	}
+	var f *driver.Failure
+	if !errors.As(err, &f) || f.Code != domain.AgentErrModelUnreachable {
+		t.Fatalf("err = %v (code %q), want %q", err, f.Code, domain.AgentErrModelUnreachable)
+	}
+
+	for _, msg := range []string{
+		"terminated: other side closed (UND_ERR_SOCKET)",
+		"Request timed out.: Connect Timeout Error",
+		"socket hang up",
+	} {
+		err := classifyError(msg)
+		var cf *driver.Failure
+		if !errors.As(err, &cf) || cf.Code != domain.AgentErrModelUnreachable {
+			t.Fatalf("classifyError(%q) = %v, want %q", msg, err, domain.AgentErrModelUnreachable)
+		}
+	}
 }

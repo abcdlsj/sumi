@@ -761,8 +761,17 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 		d.sentFirstTurn = true
 		d.lastActiveAt = d.now()
 		d.persistSessionIfPresent()
-		if settled.aborted && ctx.Err() != nil {
-			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("pi turn cancelled: %w", ctx.Err()))
+		if settled.aborted {
+			if ctx.Err() != nil {
+				return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("pi turn cancelled: %w", ctx.Err()))
+			}
+			errMu.Lock()
+			finalErr := lastRunErr
+			errMu.Unlock()
+			if finalErr != "" {
+				return driver.TurnResult{}, classifyError(finalErr)
+			}
+			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, errors.New("pi turn aborted unexpectedly"))
 		}
 		errMu.Lock()
 		finalErr := lastRunErr
@@ -1031,9 +1040,12 @@ func extractAssistantError(rawMessages json.RawMessage) string {
 		if msgs[i].Role != "assistant" {
 			continue
 		}
-		if msgs[i].StopReason == "error" {
+		if msgs[i].StopReason == "error" || msgs[i].StopReason == "aborted" {
 			if msgs[i].ErrorMessage != "" {
 				return msgs[i].ErrorMessage
+			}
+			if msgs[i].StopReason == "aborted" {
+				return "pi assistant turn aborted"
 			}
 			return "pi assistant turn ended with error"
 		}
@@ -1054,10 +1066,15 @@ func classifyError(msg string) error {
 		strings.Contains(lower, "no api key"):
 		return driver.Fail(domain.AgentErrModelAuthFailed, errors.New(msg))
 	case strings.Contains(lower, "econnrefused"),
+		strings.Contains(lower, "econnreset"),
 		strings.Contains(lower, "enotfound"),
 		strings.Contains(lower, "etimedout"),
 		strings.Contains(lower, "fetch failed"),
 		strings.Contains(lower, "connection refused"),
+		strings.Contains(lower, "connection error"),
+		strings.Contains(lower, "connect timeout"),
+		strings.Contains(lower, "socket hang up"),
+		strings.Contains(lower, "und_err_socket"),
 		strings.Contains(lower, "unreachable"),
 		strings.Contains(lower, "dial tcp"):
 		return driver.Fail(domain.AgentErrModelUnreachable, errors.New(msg))
