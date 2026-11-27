@@ -12,7 +12,7 @@ DB          ?= $(DATA_DIR)/sumi.db
 SERVE_URL   ?= http://127.0.0.1:$(PORT)
 BIN             ?= bin/sumi
 DESKTOP_BIN     ?= bin/Sumi.app
-INSTALL_APP_DIR ?= $(HOME)/Applications
+INSTALL_APP_DIR ?= /Applications
 GO              ?= go
 NODE_PKG    ?= pnpm
 # Single source of truth for the release version. Release automation overrides this,
@@ -89,7 +89,7 @@ desktop: web-assets ## Build the Wails v3 desktop shell into bin/Sumi.app
 	@scripts/package-macos-app.sh --version "$(VERSION)" --goarch $(DESKTOP_GOARCH) --out $(DESKTOP_BIN)
 
 .PHONY: install-app
-install-app: desktop ## Install Sumi.app into INSTALL_APP_DIR (default ~/Applications)
+install-app: desktop ## Install Sumi.app into INSTALL_APP_DIR (default /Applications)
 	@mkdir -p "$(INSTALL_APP_DIR)"
 	@target="$(INSTALL_APP_DIR)/Sumi.app"; \
 		staging="$$target.staging"; \
