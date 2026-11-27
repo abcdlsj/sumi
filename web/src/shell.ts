@@ -125,3 +125,77 @@ export async function switchDesktopServer(bridge: DesktopBridge, serverUrl: stri
   }
   return body as DesktopServerState;
 }
+
+export async function openDesktopURL(bridge: DesktopBridge, targetUrl: string): Promise<void> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/open-url`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bridge.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url: targetUrl }),
+  });
+  if (!res.ok) {
+    throw new Error("Unable to open URL in browser");
+  }
+}
+
+/**
+ * Resolves an anchor element's href if it should be opened in the OS default browser
+ * instead of navigating inside the desktop WebView.
+ */
+export function resolveExternalHref(anchor: HTMLAnchorElement, currentHref: string = window.location.href): string | null {
+  if (anchor.hasAttribute("download")) return null;
+  const raw = anchor.getAttribute("href")?.trim();
+  if (!raw || raw.startsWith("#")) return null;
+  let parsed: URL;
+  let current: URL;
+  try {
+    current = new URL(currentHref);
+    parsed = new URL(raw, current);
+  } catch {
+    return null;
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol === "mailto:") {
+    return parsed.href;
+  }
+  if (protocol !== "http:" && protocol !== "https:") {
+    return null;
+  }
+  if (parsed.origin !== current.origin || anchor.target === "_blank") {
+    return parsed.href;
+  }
+  return null;
+}
+
+/**
+ * In the desktop shell, intercepts external anchor clicks (including `target="_blank"`
+ * links that WKWebView otherwise drops) and delegates them to the OS default browser.
+ */
+export function installExternalLinkHandler(target: Window = window): () => void {
+  const handle = (e: MouseEvent, expectedButton: number) => {
+    if (e.defaultPrevented || e.button !== expectedButton) return;
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    const node = e.target as Node | null;
+    const el = node && node.nodeType === 1 ? (node as HTMLElement) : node?.parentElement;
+    if (!el || typeof el.closest !== "function") return;
+    const anchor = el.closest("a[href]") as HTMLAnchorElement | null;
+    if (!anchor) return;
+    const externalUrl = resolveExternalHref(anchor, target.location.href);
+    if (!externalUrl) return;
+    e.preventDefault();
+    void openDesktopURL(bridge, externalUrl).catch(() => {
+      // Ignore bridge errors; the desktop shell logs failures locally.
+    });
+  };
+  const onClick = (e: MouseEvent) => handle(e, 0);
+  const onAuxClick = (e: MouseEvent) => handle(e, 1);
+  target.addEventListener("click", onClick);
+  target.addEventListener("auxclick", onAuxClick);
+  return () => {
+    target.removeEventListener("click", onClick);
+    target.removeEventListener("auxclick", onAuxClick);
+  };
+}

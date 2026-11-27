@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { installContextMenuGuard, isEditableTextTarget } from "./shell";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { installContextMenuGuard, installExternalLinkHandler, isEditableTextTarget, resolveExternalHref } from "./shell";
 
 function dispatchContextMenu(target: EventTarget): MouseEvent {
   const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
@@ -83,6 +83,101 @@ describe("installContextMenuGuard", () => {
     } finally {
       cleanup();
       row.remove();
+    }
+  });
+});
+
+describe("installExternalLinkHandler", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("identifies external http/https/mailto links and skips downloads, hashes, and unsafe schemes", () => {
+    const mk = (href: string, opts?: { target?: string; download?: boolean }) => {
+      const a = document.createElement("a");
+      a.setAttribute("href", href);
+      if (opts?.target) a.target = opts.target;
+      if (opts?.download) a.setAttribute("download", "file.txt");
+      return a;
+    };
+    const current = "http://127.0.0.1:8087/";
+
+    expect(resolveExternalHref(mk("https://example.com/path?a=1"), current)).toBe("https://example.com/path?a=1");
+    expect(resolveExternalHref(mk("http://127.0.0.1:3000/app"), current)).toBe("http://127.0.0.1:3000/app");
+    expect(resolveExternalHref(mk("mailto:hi@example.com"), current)).toBe("mailto:hi@example.com");
+    expect(resolveExternalHref(mk("/api/v1/spaces/s/attachments/1", { target: "_blank" }), current)).toBe(
+      "http://127.0.0.1:8087/api/v1/spaces/s/attachments/1",
+    );
+
+    expect(resolveExternalHref(mk("/api/v1/spaces/s/attachments/1", { download: true }), current)).toBeNull();
+    expect(resolveExternalHref(mk("https://example.com/file.zip", { download: true }), current)).toBeNull();
+    expect(resolveExternalHref(mk("#workspace:docs%2Fplan.md"), current)).toBeNull();
+    expect(resolveExternalHref(mk("/spaces/studio"), current)).toBeNull();
+    expect(resolveExternalHref(mk("javascript:alert(1)"), current)).toBeNull();
+  });
+
+  it("opens external links via the desktop bridge and leaves normal browsers untouched", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const cleanup = installExternalLinkHandler(window);
+    const link = document.createElement("a");
+    link.href = "https://example.com/docs";
+    link.target = "_blank";
+    link.innerHTML = "<span>Docs</span>";
+    document.body.appendChild(link);
+
+    try {
+      // Without a desktop bridge, browser navigation stays native.
+      const webClick = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      link.firstChild!.dispatchEvent(webClick);
+      expect(webClick.defaultPrevented).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      // With a desktop bridge, left-click and middle-click open in the system browser.
+      sessionStorage.setItem("sumi.desktop.control", "http://127.0.0.1:54321");
+      sessionStorage.setItem("sumi.desktop.token", "tok-123");
+
+      const desktopClick = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      link.firstChild!.dispatchEvent(desktopClick);
+      expect(desktopClick.defaultPrevented).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:54321/desktop/open-url", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer tok-123",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: "https://example.com/docs" }),
+      });
+
+      const middleClick = new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
+      link.dispatchEvent(middleClick);
+      expect(middleClick.defaultPrevented).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup();
+      link.remove();
+    }
+  });
+
+  it("respects already prevented clicks such as workspace file links", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    sessionStorage.setItem("sumi.desktop.control", "http://127.0.0.1:54321");
+    sessionStorage.setItem("sumi.desktop.token", "tok-123");
+
+    const cleanup = installExternalLinkHandler(window);
+    const link = document.createElement("a");
+    link.href = "https://example.com/intercepted";
+    link.addEventListener("click", (e) => e.preventDefault());
+    document.body.appendChild(link);
+
+    try {
+      const ev = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      link.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      link.remove();
     }
   });
 });

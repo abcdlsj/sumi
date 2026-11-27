@@ -353,7 +353,7 @@ export const MessageBody = memo(function MessageBody({
           );
         }
         return (
-          <a {...props} href={href} target="_blank" rel="noreferrer">
+          <a {...props} href={href} target="_blank" rel="noopener noreferrer">
             {children}
           </a>
         );
