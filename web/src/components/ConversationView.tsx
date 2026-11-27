@@ -19,6 +19,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   PanelRight,
+  RefreshCw,
   SendHorizontal,
   Sparkles,
   Square,
@@ -26,7 +27,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
+import { activityLabel, api, formatClock, formatDay, formatTimestamp, type AgentCreateProposal, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import { readDraft, writeDraft } from "../drafts";
 import { isComposerSendEvent, isMacPlatform, useSendKey, useSpellCheckAttr } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
@@ -123,23 +124,24 @@ function AgentStatusLine({
   const qc = useQueryClient();
   const act = useAction();
   const [popOpen, setPopOpen] = useState(false);
-  const [stoppingID, setStoppingID] = useState<string | null>(null);
+  const [actingID, setActingID] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const canGovern = boot.current_member.access_level !== "member";
   const agents = boot.members.filter((m) => m.kind === "agent");
   const peer = conv.kind === "dm" ? agents.find((a) => a.id === conv.peer_member_id) : undefined;
   const busyHere = agents.filter((a) => a.agent?.runtime_state === "working" && a.agent.focus_conversation_id === conv.id);
 
-  async function stopAgent(agentID: string) {
-    setStoppingID(agentID);
-    await act.run(() => api.controlAgent(spaceSlug, agentID, "stop_turn"));
-    setStoppingID(null);
+  async function controlAgent(agentID: string, action: "stop_turn" | "restart") {
+    setActingID(agentID);
+    await act.run(() => api.controlAgent(spaceSlug, agentID, action));
+    setActingID(null);
     void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
   }
 
   let statusContent: React.ReactNode = null;
   if (busyHere.length > 0 && conv.kind !== "dm") {
     const names = busyHere.map((a) => a.display_name);
+    const singleActivity = busyHere.length === 1 ? activityLabel(busyHere[0].agent?.activity) : null;
     const label =
       names.length === 1
         ? `${names[0]} is working on a reply…`
@@ -152,6 +154,7 @@ function AgentStatusLine({
         <button
           ref={triggerRef}
           type="button"
+          title={busyHere.length === 1 ? (singleActivity ? `${names[0]} · ${singleActivity}` : `Inspect ${names[0]}`) : label}
           onClick={() => (busyHere.length === 1 ? onOpenDetail({ kind: "agent", memberID: busyHere[0].id }) : setPopOpen((v) => !v))}
           className="min-w-0 truncate text-busy hover:underline underline-offset-2"
         >
@@ -163,12 +166,21 @@ function AgentStatusLine({
             <span className="font-medium">{label}</span>
           )}
         </button>
+        {singleActivity && (
+          <span
+            title={singleActivity}
+            className={`font-mono text-[11.5px] truncate ${busyHere[0].agent?.activity?.stalled_seconds ? "text-warm" : "text-fg-3"}`}
+          >
+            · {singleActivity}
+          </span>
+        )}
         {canGovern && busyHere.length === 1 && (
           <button
             type="button"
-            disabled={stoppingID === busyHere[0].id}
-            onClick={() => void stopAgent(busyHere[0].id)}
+            disabled={actingID === busyHere[0].id}
+            onClick={() => void controlAgent(busyHere[0].id, "stop_turn")}
             aria-label={`Stop ${busyHere[0].display_name}`}
+            title={`Stop ${busyHere[0].display_name}'s current turn`}
             className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
           >
             <Square className="size-2.5 fill-current" />
@@ -185,7 +197,7 @@ function AgentStatusLine({
             onClose={() => setPopOpen(false)}
             onOpenConversation={onOpenConversation}
             onOpenDetail={onOpenDetail}
-            onStopAgent={canGovern ? (id) => void stopAgent(id) : undefined}
+            onStopAgent={canGovern ? (id) => void controlAgent(id, "stop_turn") : undefined}
           />
         )}
       </>
@@ -196,30 +208,65 @@ function AgentStatusLine({
       const st = subject.agent.runtime_state;
       const focus = agentFocus(boot, subject);
       const elsewhere = st === "working" && subject.agent.focus_conversation_id !== conv.id;
+      const liveActivity = st === "working" ? activityLabel(subject.agent.activity) : null;
       const tone = st === "error" ? "text-danger" : st === "working" ? "text-busy" : "text-fg-3";
       let text = agentStatusText(boot, subject);
       if (st === "working" && !elsewhere) text = "is working on a reply…";
       else if (elsewhere) text = `is busy in ${focus?.label ?? "another conversation"} · your message is queued`;
-      else if (st === "idle") text = "is idle · messages wake it";
+      else if (st === "idle") text = "is idle · ready for messages";
       else if (st === "offline") text = "is offline · messages wait until its computer reconnects";
       else if (st === "error") text = `hit an error · ${subject.agent.last_error_code || "see details"}`;
+
+      const statusTitle =
+        st === "error" && subject.agent.last_error_detail
+          ? subject.agent.last_error_detail
+          : liveActivity
+            ? `${subject.display_name} · ${liveActivity}`
+            : `Inspect ${subject.display_name}`;
 
       statusContent = (
         <>
           <StatusDot state={st} ring="var(--panel)" size={7} />
-          <button onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })} className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}>
+          <button
+            type="button"
+            title={statusTitle}
+            onClick={() => onOpenDetail({ kind: "agent", memberID: subject.id })}
+            className={`min-w-0 truncate hover:underline underline-offset-2 ${tone}`}
+          >
             <span className="font-semibold">{subject.display_name}</span> {text}
           </button>
+          {liveActivity && (
+            <span
+              title={liveActivity}
+              className={`font-mono text-[11.5px] truncate ${subject.agent.activity?.stalled_seconds ? "text-warm" : "text-fg-3"}`}
+            >
+              · {liveActivity}
+            </span>
+          )}
           {canGovern && st === "working" && (
             <button
               type="button"
-              disabled={stoppingID === subject.id}
-              onClick={() => void stopAgent(subject.id)}
+              disabled={actingID === subject.id}
+              onClick={() => void controlAgent(subject.id, "stop_turn")}
               aria-label={`Stop ${subject.display_name}`}
+              title={`Stop ${subject.display_name}'s current turn`}
               className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-danger hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
             >
               <Square className="size-2.5 fill-current" />
               Stop
+            </button>
+          )}
+          {canGovern && st === "error" && (
+            <button
+              type="button"
+              disabled={actingID === subject.id}
+              onClick={() => void controlAgent(subject.id, "restart")}
+              aria-label={`Restart ${subject.display_name}`}
+              title={`Restart ${subject.display_name}`}
+              className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] text-[11.5px] font-medium text-fg-3 hover:text-fg hover:bg-hover disabled:opacity-50 shrink-0 transition-colors"
+            >
+              <RefreshCw className="size-2.5" />
+              Restart
             </button>
           )}
         </>
@@ -254,7 +301,11 @@ function ActionMessageGroup({ items }: { items: Message[] }) {
         </span>
         <span className="font-medium text-fg-2">{items.length} updates</span>
         {summaryAuthors && <span className="text-fg-4 truncate">· {summaryAuthors}</span>}
-        {lastAt && <span className="tabular text-[11.5px] text-fg-4 shrink-0">{formatClock(lastAt)}</span>}
+        {lastAt && (
+          <span title={formatTimestamp(lastAt)} className="tabular text-[11.5px] text-fg-4 shrink-0">
+            {formatClock(lastAt)}
+          </span>
+        )}
       </button>
       {open && (
         <div className="mt-1 ml-12 pl-3 border-l border-line space-y-1 animate-fade-in">
@@ -262,7 +313,9 @@ function ActionMessageGroup({ items }: { items: Message[] }) {
             <div key={m.id} className="text-[12.5px] text-fg-3 leading-relaxed">
               <span className="font-medium text-fg-2">{m.author_display_name}</span>{" "}
               {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-              <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+              <span title={formatTimestamp(m.created_at)} className="ml-2 tabular text-[11.5px] text-fg-4">
+                {formatClock(m.created_at)}
+              </span>
             </div>
           ))}
         </div>
@@ -496,7 +549,13 @@ function MessageComposer({
             <span className="font-semibold text-fg shrink-0">{replyTarget.author_display_name}</span>
             <span className="truncate text-fg-3">{replyTarget.body_markdown.slice(0, 140)}</span>
             <span className="flex-1" />
-            <button type="button" onClick={onCancelReply} aria-label="Cancel thread reply" className="size-6 rounded-[4px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0">
+            <button
+              type="button"
+              onClick={onCancelReply}
+              title="Cancel thread reply (Esc)"
+              aria-label="Cancel thread reply"
+              className="size-6 rounded-[4px] hover:bg-hover text-fg-3 flex items-center justify-center shrink-0"
+            >
               <X className="size-3.5" />
             </button>
           </div>
@@ -555,6 +614,7 @@ function MessageComposer({
             <button
               type="submit"
               aria-label="Send"
+              title={sendKey === "mod_enter" ? `Send (${isMacPlatform() ? "⌘" : "Ctrl"}+Enter)` : "Send (Enter)"}
               disabled={(!composer.trim() && draft.ids.length === 0) || draft.uploading || send.busy}
               className="h-7 px-2.5 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium transition-colors"
             >
@@ -670,7 +730,9 @@ const MessageRow = memo(function MessageRow({
               >
                 {m.author_display_name}
               </button>
-              <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+              <span title={formatTimestamp(m.created_at)} className="tabular text-[11.5px] text-fg-4">
+                {formatClock(m.created_at)}
+              </span>
             </div>
             <ActionCard
               spaceSlug={spaceSlug}
@@ -690,7 +752,9 @@ const MessageRow = memo(function MessageRow({
           </span>
           <span className="min-w-0">
             <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
-            <span className="ml-2 tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+            <span title={formatTimestamp(m.created_at)} className="ml-2 tabular text-[11.5px] text-fg-4">
+              {formatClock(m.created_at)}
+            </span>
           </span>
         </div>
       ) : (
@@ -701,7 +765,7 @@ const MessageRow = memo(function MessageRow({
         >
           <div className="w-9 shrink-0">
             {grouped ? (
-              <span className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100">
+              <span title={formatTimestamp(m.created_at)} className="block pt-[3px] text-right tabular text-[11px] leading-5 text-fg-4 opacity-0 group-hover:opacity-100">
                 {formatClock(m.created_at)}
               </span>
             ) : (
@@ -737,7 +801,9 @@ const MessageRow = memo(function MessageRow({
                     {m.author_display_name}
                   </button>
                 </MemberHoverCard>
-                <span className="tabular text-[11.5px] text-fg-4">{formatClock(m.created_at)}</span>
+                <span title={formatTimestamp(m.created_at)} className="tabular text-[11.5px] text-fg-4">
+                  {formatClock(m.created_at)}
+                </span>
               </div>
             )}
             <div className={`${grouped ? "" : "mt-0.5"} text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md`}>
@@ -856,12 +922,16 @@ const MessageRow = memo(function MessageRow({
                 onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
               />
               <button
+                type="button"
+                title="Reply in thread"
                 onClick={() => onReply(m.id)}
                 className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
               >
                 <CornerUpLeft className="size-3.5" /> Reply
               </button>
               <button
+                type="button"
+                title="Create task from message"
                 onClick={() => onStartTask(m.id)}
                 className="h-7 px-2 rounded-[4px] text-[12.5px] text-fg-2 hover:bg-hover hover:text-fg flex items-center gap-1.5"
               >
@@ -873,6 +943,7 @@ const MessageRow = memo(function MessageRow({
                 trigger={(open, toggle) => (
                   <button
                     type="button"
+                    title="More message actions"
                     aria-label="More message actions"
                     aria-expanded={open}
                     onClick={toggle}
@@ -1100,19 +1171,49 @@ export function ConversationView({
       <header className="h-[52px] px-5 border-b border-line flex items-center justify-between gap-4 shrink-0 titlebar-drag">
         <div className="flex items-center gap-2.5 min-w-0">
           {conv.kind === "dm" ? (
-            <MemberAvatar
-              id={conv.peer_member_id ?? ""}
-              name={title}
-              kind={conv.peer_kind ?? "human"}
-              size="sm"
-              state={peer?.agent?.runtime_state}
-            />
+            peer ? (
+              <button
+                type="button"
+                onClick={() => onOpenDetail(memberDetailTarget(peer))}
+                title={peer.kind === "agent" ? `Inspect ${title}` : `View ${title}`}
+                aria-label={peer.kind === "agent" ? `Inspect ${title}` : `View ${title}`}
+                className="shrink-0"
+              >
+                <MemberAvatar
+                  id={conv.peer_member_id ?? ""}
+                  name={title}
+                  kind={conv.peer_kind ?? "human"}
+                  size="sm"
+                  state={peer.agent?.runtime_state}
+                />
+              </button>
+            ) : (
+              <MemberAvatar
+                id={conv.peer_member_id ?? ""}
+                name={title}
+                kind={conv.peer_kind ?? "human"}
+                size="sm"
+              />
+            )
           ) : conv.kind === "private" ? (
             <Lock className="size-4 text-fg-3 shrink-0" />
           ) : (
             <Hash className="size-4 text-fg-3 shrink-0" />
           )}
-          <h1 className="text-[15px] font-semibold text-fg shrink-0">{title}</h1>
+          <h1 className="text-[15px] font-semibold text-fg shrink-0">
+            {conv.kind === "dm" && peer ? (
+              <button
+                type="button"
+                onClick={() => onOpenDetail(memberDetailTarget(peer))}
+                title={peer.kind === "agent" ? `Inspect ${title}` : `View ${title}`}
+                className="hover:underline underline-offset-2"
+              >
+                {title}
+              </button>
+            ) : (
+              title
+            )}
+          </h1>
           {isArchived && (
             <Badge tone="neutral">
               <Archive className="size-3" />
@@ -1281,11 +1382,14 @@ export function ConversationView({
               }}
             </Menu>
           )}
-          {peer?.kind === "agent" && (
+          {peer && (
             <IconButton
-              label="Agent details"
-              active={activeDetail?.kind === "agent" && activeDetail.memberID === peer.id}
-              onClick={() => onOpenDetail({ kind: "agent", memberID: peer.id })}
+              label={peer.kind === "agent" ? "Agent details" : "Person details"}
+              active={
+                (peer.kind === "agent" && activeDetail?.kind === "agent" && activeDetail.memberID === peer.id) ||
+                (peer.kind === "human" && activeDetail?.kind === "human" && activeDetail.memberID === peer.id)
+              }
+              onClick={() => onOpenDetail(memberDetailTarget(peer))}
             >
               <PanelRight />
             </IconButton>

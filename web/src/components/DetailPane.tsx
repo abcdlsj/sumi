@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, Brain, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateDriverSummary, templateFromAgent, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
-import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
-import { isComposerSendEvent, useSendKey, useSpellCheckAttr, useTaskDetailsCollapsed } from "../preferences";
+import { activityLabel, api, formatClock, formatDay, formatTimestamp, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
+import { isComposerSendEvent, isMacPlatform, useSendKey, useSpellCheckAttr, useTaskDetailsCollapsed } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
@@ -79,6 +79,7 @@ function CompactMessage({
   onPickerOpenChange: (open: boolean) => void;
   onToggleReaction: (messageID: string, emoji: Parameters<typeof api.addReaction>[2], reacted: boolean) => void;
 }) {
+  const toast = useToast();
   const canGovern = boot.current_member.access_level !== "member";
   if (isActionCardMessage(m)) {
     const author = boot.members.find((x) => x.id === m.author_member_id);
@@ -107,7 +108,9 @@ function CompactMessage({
             >
               {m.author_display_name}
             </button>
-            <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+            <span className="tabular text-[12px] text-fg-4" title={formatTimestamp(m.created_at)}>
+              {formatClock(m.created_at)}
+            </span>
           </div>
           <ActionCard
             spaceSlug={spaceSlug}
@@ -127,7 +130,9 @@ function CompactMessage({
         <span className="min-w-0">
           <span className="font-medium text-fg-2">{m.author_display_name}</span> {describeAction(m.action_kind, m.payload_json) ?? m.body_markdown}
         </span>
-        <span className="tabular text-[12px] text-fg-4 shrink-0">{formatClock(m.created_at)}</span>
+        <span className="tabular text-[12px] text-fg-4 shrink-0" title={formatTimestamp(m.created_at)}>
+          {formatClock(m.created_at)}
+        </span>
       </div>
     );
   }
@@ -157,7 +162,9 @@ function CompactMessage({
           >
             {m.author_display_name}
           </button>
-          <span className="tabular text-[12px] text-fg-4">{formatClock(m.created_at)}</span>
+          <span className="tabular text-[12px] text-fg-4" title={formatTimestamp(m.created_at)}>
+            {formatClock(m.created_at)}
+          </span>
         </div>
         <div className="mt-0.5 text-[length:var(--msg-font-size)] leading-[var(--msg-line-height)] text-fg md">
           <MessageBody
@@ -193,7 +200,7 @@ function CompactMessage({
           pickerOpen
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
-        } bg-card border border-line-strong rounded-[5px] p-0.5 shadow-sm z-20`}
+        } flex items-center gap-0.5 bg-card border border-line-strong rounded-[5px] p-0.5 shadow-sm z-20`}
       >
         <ReactionPickerButton
           reactions={m.reactions}
@@ -202,6 +209,15 @@ function CompactMessage({
           onToggle={(emoji, reacted) => onToggleReaction(m.id, emoji, reacted)}
           compact
         />
+        <button
+          type="button"
+          aria-label="Copy message text"
+          title="Copy text"
+          onClick={() => void navigator.clipboard?.writeText(m.body_markdown).then(() => toast("Copied message text", "success"))}
+          className="size-6 rounded-[4px] text-fg-3 hover:bg-hover hover:text-fg flex items-center justify-center transition-colors"
+        >
+          <Copy className="size-3.5" />
+        </button>
       </div>
     </article>
   );
@@ -285,6 +301,7 @@ function ReplyBox({
           <button
             type="submit"
             aria-label="Send"
+            title={sendKey === "mod_enter" ? `Send (${isMacPlatform() ? "⌘" : "Ctrl"}+Enter)` : "Send (Enter)"}
             disabled={busy || (!reply.trim() && draft.ids.length === 0) || draft.uploading}
             className="size-8 rounded-[4px] bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95 disabled:bg-subtle disabled:text-fg-4 flex items-center justify-center transition-colors shrink-0"
           >
@@ -326,6 +343,7 @@ export function DetailPane({
           taskID={target.taskID}
           onClose={onClose}
           onSelectTarget={onSelectTarget}
+          onOpenConversation={onOpenConversation}
           onReviewAgentProposal={onReviewAgentProposal}
         />
       )}
@@ -713,6 +731,7 @@ function TaskDetail({
   taskID,
   onClose,
   onSelectTarget,
+  onOpenConversation,
   onReviewAgentProposal,
 }: {
   spaceSlug: string;
@@ -720,6 +739,7 @@ function TaskDetail({
   taskID: string;
   onClose: () => void;
   onSelectTarget: (t: DetailTarget) => void;
+  onOpenConversation?: (convID: string) => void;
   onReviewAgentProposal?: (proposal: AgentCreateProposal) => void;
 }) {
   const qc = useQueryClient();
@@ -840,7 +860,18 @@ function TaskDetail({
         <TaskStatusIcon status={task.status} />
         <span className="tabular font-semibold text-fg">#{task.number}</span>
         <span className="text-fg-4">in</span>
-        <span className="text-fg-2 truncate">{task.channel_slug ? `#${task.channel_slug}` : "Direct message"}</span>
+        {task.channel_slug && task.channel_id && onOpenConversation ? (
+          <button
+            type="button"
+            onClick={() => onOpenConversation(task.channel_id)}
+            title={`Open #${task.channel_slug}`}
+            className="text-fg-2 hover:text-fg hover:underline underline-offset-2 truncate"
+          >
+            #{task.channel_slug}
+          </button>
+        ) : (
+          <span className="text-fg-2 truncate">{task.channel_slug ? `#${task.channel_slug}` : "Direct message"}</span>
+        )}
       </PaneHeader>
 
       {detailsCollapsed && !editing ? (
@@ -1474,7 +1505,9 @@ function AgentDetail({
           </>
         }
       >
-        <span className="font-semibold text-fg">Agent</span>
+        <span className="font-semibold text-fg shrink-0">Agent</span>
+        <span className="text-fg-4 shrink-0">·</span>
+        <span className="text-fg-2 truncate">{member.display_name}</span>
       </PaneHeader>
       <div className="h-10 px-4 border-b border-line flex items-stretch gap-1 shrink-0 bg-panel">
         <button
@@ -1549,7 +1582,14 @@ function AgentDetail({
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2 min-w-0">
               <div className="font-display text-[18px] font-bold text-fg truncate">{member.display_name}</div>
-              <span className="font-mono text-[12px] text-fg-4 truncate">@{member.display_name}</span>
+              <button
+                type="button"
+                title={`Copy @${member.display_name}`}
+                onClick={() => void navigator.clipboard?.writeText(`@${member.display_name}`).then(() => toast(`Copied @${member.display_name}`, "success"))}
+                className="font-mono text-[12px] text-fg-4 hover:text-fg-2 transition-colors truncate"
+              >
+                @{member.display_name}
+              </button>
             </div>
             <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
               <Badge tone={stateTone}>

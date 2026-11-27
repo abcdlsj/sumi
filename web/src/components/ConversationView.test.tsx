@@ -449,3 +449,56 @@ describe("channel workflow and out-of-channel mentions", () => {
     await waitFor(() => expect(box.getAttribute("spellcheck")).toBeNull());
   });
 });
+
+describe("live agent status and DM header details", () => {
+  it("shows live tool activity inline in AgentStatusLine when an agent works in the channel", async () => {
+    const busyLin: Member = {
+      ...lin,
+      agent: {
+        ...lin.agent!,
+        runtime_state: "working",
+        focus_conversation_id: conv.id,
+        activity: { tool: "bash" },
+      },
+    };
+    renderView(conv, { ...boot, members: [lisi, busyLin, sam] });
+    await screen.findByText("message 2");
+    expect(screen.getByText(/Running bash/)).toBeTruthy();
+  });
+
+  it("offers inline Restart on DM agent error and opens agent detail from the DM header", async () => {
+    const errLin: Member = {
+      ...lin,
+      agent: {
+        ...lin.agent!,
+        runtime_state: "error",
+        last_error_code: "model_unreachable",
+        last_error_detail: "ENOTFOUND api.example.com",
+      },
+    };
+    const dmConv: Conversation = {
+      id: "dm-lin",
+      space_id: "s",
+      kind: "dm",
+      peer_member_id: errLin.id,
+      peer_display_name: errLin.display_name,
+      peer_kind: "agent",
+      next_seq: 1,
+      read_seq: 0,
+      unread_count: 0,
+      mention_count: 0,
+      following: false,
+    };
+    const ctrlSpy = vi.spyOn(api, "controlAgent").mockResolvedValue({ ok: true });
+    const { onOpenDetail } = renderView(dmConv, { ...boot, members: [lisi, errLin, sam], conversations: [conv, dmConv] });
+    await screen.findByText("message 2");
+
+    const restartBtn = screen.getByRole("button", { name: "Restart Lin" });
+    fireEvent.click(restartBtn);
+    await waitFor(() => expect(ctrlSpy).toHaveBeenCalledWith("studio", errLin.id, "restart"));
+
+    const heading = screen.getByRole("heading", { name: "Lin" });
+    fireEvent.click(within(heading).getByRole("button", { name: "Lin" }));
+    expect(onOpenDetail).toHaveBeenCalledWith({ kind: "agent", memberID: errLin.id });
+  });
+});

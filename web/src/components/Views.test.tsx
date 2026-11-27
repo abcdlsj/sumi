@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
 import { applySpellCheck, clearPreferencesForTests, readFontFamily, readFontSize, readLongMessagesPref, readSpellCheck } from "../preferences";
-import { AdminPanel, type AdminTab } from "./Views";
+import { AdminPanel, InboxView, TasksView, type AdminTab } from "./Views";
 
 const sampleBoot: BootstrapData = {
   space: {
@@ -237,5 +237,96 @@ describe("AdminPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(props.onLogout).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("InboxView and TasksView polish", () => {
+  it("supports Mark all done in InboxView when multiple items need attention", async () => {
+    vi.spyOn(api, "listInbox").mockResolvedValue({
+      items: [
+        {
+          conversation_id: "conv-1",
+          kind: "public",
+          title: "#eng",
+          unread_count: 1,
+          mention_count: 1,
+          needs_attention: true,
+          reason: "mention",
+          latest_seq: 2,
+          latest_author_name: "Lin",
+          latest_preview: "@Lisi check this",
+          latest_at: "2026-11-19T10:20:00Z",
+          following: false,
+          notify_level: "mentions",
+        },
+        {
+          conversation_id: "conv-2",
+          kind: "dm",
+          title: "Kira",
+          unread_count: 1,
+          mention_count: 0,
+          needs_attention: true,
+          reason: "dm",
+          latest_seq: 3,
+          latest_author_name: "Kira",
+          latest_preview: "PR ready",
+          latest_at: "2026-11-19T10:22:00Z",
+          following: false,
+          notify_level: "all",
+        },
+      ],
+    });
+    const doneSpy = vi.spyOn(api, "markDone").mockResolvedValue({ ok: true });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <InboxView spaceSlug="studio" filter="needs_me" onFilter={vi.fn()} onOpenConversation={vi.fn()} onOpenDetail={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const markAll = await screen.findByRole("button", { name: "Mark all done" });
+    fireEvent.click(markAll);
+    await waitFor(() => {
+      expect(doneSpy).toHaveBeenCalledWith("studio", "conv-1");
+      expect(doneSpy).toHaveBeenCalledWith("studio", "conv-2");
+    });
+  });
+
+  it("clears task search filter and resets empty-filter state in TasksView", async () => {
+    const taskBoot: BootstrapData = {
+      ...sampleBoot,
+      tasks: [
+        {
+          id: "t-1",
+          space_id: "sp-1",
+          number: 1,
+          channel_id: "conv-eng",
+          channel_slug: "engineering",
+          title: "Fix retry loop",
+          description: "",
+          status: "todo",
+          creator_member_id: "m-lisi",
+          revision: 1,
+          message_count: 0,
+          created_at: "2026-11-19T10:00:00Z",
+          updated_at: "2026-11-19T10:00:00Z",
+        },
+      ],
+    };
+    vi.spyOn(api, "listTasks").mockResolvedValue({ tasks: taskBoot.tasks });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <TasksView spaceSlug="studio" boot={taskBoot} filter="active" onFilter={vi.fn()} onOpenDetail={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Fix retry loop")).toBeTruthy();
+    const input = screen.getByRole("textbox", { name: "Filter tasks" });
+    fireEvent.change(input, { target: { value: "nonexistent" } });
+    expect(screen.getByText("No tasks match the current filter")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(screen.getByText("Fix retry loop")).toBeTruthy();
   });
 });

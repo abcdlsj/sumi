@@ -1,5 +1,5 @@
 import { ChevronRight, MessageSquare } from "lucide-react";
-import { formatClock, type ThreadReplyPreview } from "../api";
+import { formatClock, formatTimestamp, type ThreadReplyPreview } from "../api";
 import { MemberAvatar } from "./Avatar";
 
 /**
@@ -30,7 +30,11 @@ export function ThreadReplySummary({
         <span className="text-[12.5px] font-semibold text-accent-text">
           {replyCount} {replyCount === 1 ? "reply" : "replies"}
         </span>
-        {lastReplyAt && <span className="ml-auto tabular text-[11.5px] text-fg-4">Last {formatClock(lastReplyAt)}</span>}
+        {lastReplyAt && (
+          <span className="ml-auto tabular text-[11.5px] text-fg-4" title={formatTimestamp(lastReplyAt)}>
+            Last {formatClock(lastReplyAt)}
+          </span>
+        )}
         <ChevronRight className="size-3.5 text-fg-4 opacity-0 group-hover/thread:opacity-100 transition-opacity shrink-0" />
       </span>
       {replies.map((reply) => (
@@ -43,7 +47,9 @@ export function ThreadReplySummary({
           />
           <span className="shrink-0 max-w-[132px] truncate text-[12.5px] font-semibold text-fg-2">{reply.author_display_name}</span>
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-fg-3">{reply.preview}</span>
-          <span className="shrink-0 tabular text-[11px] text-fg-4">{formatClock(reply.created_at)}</span>
+          <span className="shrink-0 tabular text-[11px] text-fg-4" title={formatTimestamp(reply.created_at)}>
+            {formatClock(reply.created_at)}
+          </span>
         </span>
       ))}
     </button>

@@ -7,31 +7,38 @@ import {
   Bell,
   BellOff,
   Bot,
+  Brain,
   Check,
   CheckCircle2,
   ChevronRight,
   Clock,
   Copy,
   FolderInput,
+  FolderOpen,
   FolderPlus,
   Hash,
   Inbox,
   Keyboard,
   Lock,
+  MessageSquare,
   Monitor,
   Moon,
   PanelLeft,
+  PanelRight,
   Pencil,
   Plus,
+  RefreshCw,
+  RotateCcw,
   Search,
   Settings,
   Sparkles,
+  Square,
   Sun,
   Trash2,
   Users,
   X,
 } from "lucide-react";
-import { api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
+import { activityLabel, api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
 import { accentForeground, accentSwatch, applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
@@ -39,6 +46,7 @@ import { isMacPlatform, readLastSpaceView, useChannelSort, useSidebarCollapsed, 
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
+import { WorkingAgentsPopover } from "./AgentVisibility";
 import { agentStatusText, MemberAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
 import { DesktopServerTrigger } from "./DesktopServer";
@@ -138,6 +146,7 @@ function NavItem({
   trailing,
   dim,
   bold,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
@@ -146,10 +155,12 @@ function NavItem({
   trailing?: ReactNode;
   dim?: boolean;
   bold?: boolean;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       aria-current={active ? "page" : undefined}
       className={`relative w-full h-[30px] px-2 rounded-[4px] flex items-center gap-2 text-[13.5px] transition-colors duration-100 ${
         active
@@ -245,6 +256,9 @@ export function Workbench({
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
   const [recentConvIDs, setRecentConvIDs] = useState<string[]>(() => readRecentConvs(spaceSlug));
   const [ctxMenu, setCtxMenu] = useState<{ conv: Conversation; x: number; y: number } | null>(null);
+  const [agentCtxMenu, setAgentCtxMenu] = useState<{ member: Member; x: number; y: number } | null>(null);
+  const [workingPopOpen, setWorkingPopOpen] = useState(false);
+  const workingTriggerRef = useRef<HTMLButtonElement | null>(null);
   const dm = useAction();
   const groupAct = useAction();
   const landed = useRef(false);
@@ -299,10 +313,13 @@ export function Workbench({
     [spaceSlug],
   );
 
-  // Dismiss channel right-click context menu on outside click or Escape.
+  // Dismiss sidebar context menus on outside click or Escape.
   useEffect(() => {
-    if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
+    if (!ctxMenu && !agentCtxMenu) return;
+    const close = () => {
+      setCtxMenu(null);
+      setAgentCtxMenu(null);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -315,7 +332,7 @@ export function Workbench({
       window.removeEventListener("mousedown", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [ctxMenu]);
+  }, [ctxMenu, agentCtxMenu]);
 
   // First landing: open the agent created during onboarding, restore last visited view,
   // or fall back to the first channel when Inbox is empty.
@@ -500,6 +517,26 @@ export function Workbench({
     };
   }, [spaceSlug, qc]);
 
+  const unreadConvIDs = useMemo(() => {
+    if (!boot) return [];
+    const list: Conversation[] = [];
+    for (const c of boot.conversations) {
+      if (c.archived_at) continue;
+      if (c.kind === "public" || c.kind === "private") {
+        if (c.mention_count > 0 || (c.unread_count > 0 && c.notify_level !== "mute")) {
+          list.push(c);
+        }
+      } else if (c.kind === "dm" && c.unread_count > 0) {
+        list.push(c);
+      }
+    }
+    list.sort((a, b) => {
+      const score = (c: Conversation) => (c.mention_count > 0 ? 3 : c.kind === "dm" ? 2 : 1);
+      return score(b) - score(a);
+    });
+    return list.map((c) => c.id);
+  }, [boot]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -516,6 +553,20 @@ export function Workbench({
       if (mod && e.key === "/") {
         e.preventDefault();
         setDialog((d) => (d === "shortcuts" ? null : "shortcuts"));
+        return;
+      }
+      if (e.altKey && e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        if (unreadConvIDs.length === 0) return;
+        e.preventDefault();
+        const curIdx = mainView.kind === "conversation" ? unreadConvIDs.indexOf(mainView.convID) : -1;
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        const nextIdx =
+          curIdx === -1
+            ? step === 1
+              ? 0
+              : unreadConvIDs.length - 1
+            : (curIdx + step + unreadConvIDs.length) % unreadConvIDs.length;
+        setMainView({ kind: "conversation", convID: unreadConvIDs[nextIdx] });
         return;
       }
       if ((e.metaKey && e.key === "[") || (!isMacPlatform() && e.altKey && e.key === "ArrowLeft")) {
@@ -544,7 +595,7 @@ export function Workbench({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog, detail, setSidebarCollapsed, stepHistory, spaces, spaceSlug, onSwitchSpace]);
+  }, [dialog, detail, setSidebarCollapsed, stepHistory, spaces, spaceSlug, onSwitchSpace, unreadConvIDs, mainView, setMainView]);
 
   const activeConvID = mainView.kind === "conversation" ? mainView.convID : "";
   const activeConv = useMemo(
@@ -594,6 +645,8 @@ export function Workbench({
   );
   const dms = boot.conversations.filter((c) => c.kind === "dm");
   const agents = boot.members.filter((m) => m.kind === "agent");
+  const workingAgents = agents.filter((a) => a.agent?.runtime_state === "working");
+  const errorAgents = agents.filter((a) => a.agent?.runtime_state === "error");
   const people = boot.members.filter((m) => m.kind === "human" && m.id !== boot.current_member.id);
   const onlineComputers = boot.computers.filter((c) => c.connection_status === "online").length;
   const canGovern = boot.current_member.access_level !== "member";
@@ -681,9 +734,18 @@ export function Workbench({
 
   function openChannelContextMenu(e: ReactMouseEvent, c: Conversation) {
     e.preventDefault();
+    setAgentCtxMenu(null);
     const x = Math.min(e.clientX, (window.innerWidth || 1024) - 224);
     const y = Math.min(e.clientY, (window.innerHeight || 768) - 260);
     setCtxMenu({ conv: c, x: Math.max(8, x), y: Math.max(8, y) });
+  }
+
+  function openAgentContextMenu(e: ReactMouseEvent, m: Member) {
+    e.preventDefault();
+    setCtxMenu(null);
+    const x = Math.min(e.clientX, (window.innerWidth || 1024) - 224);
+    const y = Math.min(e.clientY, (window.innerHeight || 768) - 300);
+    setAgentCtxMenu({ member: m, x: Math.max(8, x), y: Math.max(8, y) });
   }
 
   function setChannelNotify(c: Conversation, level: NotifyLevel) {
@@ -721,11 +783,16 @@ export function Workbench({
           active={activeConvID === c.id}
           onClick={() => setMainView({ kind: "conversation", convID: c.id })}
           icon={c.kind === "private" ? <Lock /> : <Hash />}
+          title={c.topic ? `#${c.slug} — ${c.topic}` : `#${c.slug}`}
           dim={muted}
           bold={c.unread_count > 0 && !muted}
           trailing={
             <span className="flex items-center gap-1.5 shrink-0">
-              {hasDraft && <Pencil className="size-3 text-nav-fg-3" aria-label="Has draft" />}
+              {hasDraft && (
+                <span title="Unsent draft" className="inline-flex">
+                  <Pencil className="size-3 text-nav-fg-3" aria-label="Has draft" />
+                </span>
+              )}
               {c.mention_count > 0 ? <Count n={c.mention_count} /> : c.unread_count > 0 && !muted ? <span className="size-2 rounded-full bg-nav-fg-strong shrink-0 mr-1" /> : null}
             </span>
           }
@@ -739,13 +806,22 @@ export function Workbench({
   const memberRow = (m: Member) => {
     const conv = dms.find((d) => d.peer_member_id === m.id);
     const active = Boolean(conv && activeConvID === conv.id);
+    const hasDraft = Boolean(conv && draftConvIDs.has(conv.id) && activeConvID !== conv.id);
     const st = m.agent?.runtime_state;
     const statusSub = m.kind === "agent" && (st === "working" || st === "error") ? agentStatusText(boot, m) : "";
+    const liveAct = m.kind === "agent" && st === "working" ? activityLabel(m.agent?.activity) : null;
+    const statusTitle =
+      st === "error" && m.agent?.last_error_detail
+        ? m.agent.last_error_detail
+        : liveAct
+          ? `${statusSub} · ${liveAct}`
+          : statusSub;
     const roleSub = m.kind === "agent" && !statusSub ? (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() : "";
     return (
       <button
         key={m.id}
         onClick={() => void openOrCreateDM(m.id)}
+        onContextMenu={m.kind === "agent" ? (e) => openAgentContextMenu(e, m) : undefined}
         aria-current={active ? "page" : undefined}
         className={`relative w-full px-2 ${m.kind === "agent" ? "h-[42px]" : "h-8"} rounded-[4px] flex items-center gap-2.5 text-left transition-colors duration-100 ${
           active ? "bg-nav-active" : "hover:bg-nav-hover"
@@ -756,33 +832,57 @@ export function Workbench({
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[13.5px] leading-5 ${active || (conv && conv.unread_count > 0) ? "text-nav-fg-strong font-semibold" : "text-nav-fg-2"}`}>{m.display_name}</span>
           {statusSub ? (
-            <span className={`block truncate text-[11.5px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>{statusSub}</span>
+            <span title={statusTitle} className={`block truncate text-[11.5px] leading-4 ${st === "error" ? "text-nav-danger" : "text-nav-busy"}`}>
+              {statusSub}
+            </span>
           ) : roleSub ? (
             <span className="block fade-truncate text-[11.5px] leading-4 text-nav-fg-3" title={roleSub}>
               {roleSub}
             </span>
           ) : null}
         </span>
-        {conv && conv.unread_count > 0 && <Count n={conv.unread_count} />}
+        {(hasDraft || (conv && conv.unread_count > 0)) && (
+          <span className="flex items-center gap-1.5 shrink-0">
+            {hasDraft && (
+              <span title="Unsent draft" className="inline-flex">
+                <Pencil className="size-3 text-nav-fg-3" aria-label="Has draft" />
+              </span>
+            )}
+            {conv && conv.unread_count > 0 && <Count n={conv.unread_count} />}
+          </span>
+        )}
       </button>
     );
   };
 
-  const railBtn = (tab: AdminTab, icon: ReactNode, title: string, dot?: boolean) => {
+  const railBtn = (
+    tab: AdminTab,
+    icon: ReactNode,
+    label: string,
+    opts?: { title?: string; dotTone?: "online" | "busy" | "danger" | "muted" },
+  ) => {
     const active = mainView.kind === "admin" && mainView.tab === tab;
+    const dotClass =
+      opts?.dotTone === "online"
+        ? "bg-nav-online"
+        : opts?.dotTone === "busy"
+          ? "bg-nav-busy animate-breathe"
+          : opts?.dotTone === "danger"
+            ? "bg-nav-danger"
+            : "bg-nav-fg-3";
     return (
       <button
         key={tab}
         onClick={() => setMainView({ kind: "admin", tab })}
-        title={title}
-        aria-label={title}
+        title={opts?.title ?? label}
+        aria-label={label}
         className={`relative size-9 rounded-[5px] flex items-center justify-center transition-colors [&>svg]:size-[18px] ${
           active ? "bg-nav-active text-nav-fg-strong" : "text-nav-fg-3 hover:bg-nav-hover hover:text-nav-fg-strong"
         }`}
       >
         {icon}
-        {dot !== undefined && (
-          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dot ? "bg-nav-online" : "bg-nav-fg-3"}`} />
+        {opts?.dotTone && (
+          <span className={`absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-[var(--nav-rail)] ${dotClass}`} />
         )}
       </button>
     );
@@ -820,14 +920,15 @@ export function Workbench({
           {/* Rail */}
           <nav aria-label="Spaces" className={`bg-nav-rail flex flex-col items-center justify-between pb-3 ${sidebarCollapsed ? "" : "border-r border-nav-line"}`}>
             <div className="flex flex-col items-center gap-2 pt-3">
-              {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
+              {(spaces.length > 0 ? spaces : [boot.space]).map((sp, idx) => {
                 const active = sp.slug === spaceSlug;
                 const spAccent = sp.slug === spaceSlug ? boot.space.accent : sp.accent;
+                const spaceHint = spaces.length > 1 && idx < 9 ? `${sp.name} (${isMacPlatform() ? "⌘" : "Ctrl+"}${idx + 1})` : sp.name;
                 return (
                   <button
                     key={sp.id}
                     onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(sp.slug))}
-                    title={sp.name}
+                    title={spaceHint}
                     aria-label={`Space ${sp.name}`}
                     className="relative size-9 flex items-center justify-center group"
                   >
@@ -907,8 +1008,18 @@ export function Workbench({
               >
                 <PanelLeft className="size-[18px]" />
               </button>
-              {railBtn("agents", <Bot />, "Agents")}
-              {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, onlineComputers > 0)}
+              {railBtn("agents", <Bot />, "Agents", {
+                title:
+                  errorAgents.length > 0
+                    ? `Agents · ${errorAgents.length} error`
+                    : workingAgents.length > 0
+                      ? `Agents · ${workingAgents.length} working`
+                      : "Agents",
+                dotTone: errorAgents.length > 0 ? "danger" : workingAgents.length > 0 ? "busy" : undefined,
+              })}
+              {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, {
+                dotTone: onlineComputers > 0 ? "online" : "muted",
+              })}
               {railBtn("people", <Users />, "People")}
               {railBtn("settings", <Settings />, "Settings")}
               <DesktopServerTrigger variant="rail" />
@@ -930,7 +1041,9 @@ export function Workbench({
           >
             <Search className="size-3.5" />
             <span className="flex-1 text-left">Jump to…</span>
-            <kbd className="text-[11px] font-mono px-1.5 h-[18px] rounded-[3px] bg-nav-fill-2 inline-flex items-center">⌘K</kbd>
+            <kbd className="text-[11px] font-mono px-1.5 h-[18px] rounded-[3px] bg-nav-fill-2 inline-flex items-center">
+              {isMacPlatform() ? "⌘K" : "Ctrl+K"}
+            </kbd>
           </button>
         </div>
 
@@ -1106,7 +1219,48 @@ export function Workbench({
           })}
 
           <div>
-            <SectionLabel action={canGovern ? <SectionAdd label="New agent" onClick={() => openNewAgentDialog()} /> : undefined}>
+            <SectionLabel
+              action={
+                <div className="flex items-center gap-1">
+                  {workingAgents.length > 0 && (
+                    <>
+                      <button
+                        ref={workingTriggerRef}
+                        type="button"
+                        onClick={() => setWorkingPopOpen((v) => !v)}
+                        aria-expanded={workingPopOpen}
+                        aria-label={`${workingAgents.length} working`}
+                        title={`${workingAgents.length} ${workingAgents.length === 1 ? "agent" : "agents"} working right now`}
+                        className="h-5 px-1.5 rounded-[4px] bg-nav-fill hover:bg-nav-fill-2 text-[11px] font-medium text-nav-busy inline-flex items-center gap-1 transition-colors"
+                      >
+                        <span className="size-1.5 rounded-full bg-nav-busy animate-breathe shrink-0" />
+                        <span className="tabular">{workingAgents.length}</span>
+                      </button>
+                      <WorkingAgentsPopover
+                        boot={boot}
+                        agents={workingAgents}
+                        open={workingPopOpen}
+                        triggerRef={workingTriggerRef}
+                        align="left"
+                        onClose={() => setWorkingPopOpen(false)}
+                        onOpenConversation={(id) => setMainView({ kind: "conversation", convID: id })}
+                        onOpenDetail={setDetail}
+                        onStopAgent={
+                          canGovern
+                            ? (id) =>
+                                void groupAct.run(async () => {
+                                  await api.controlAgent(spaceSlug, id, "stop_turn");
+                                  void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                                })
+                            : undefined
+                        }
+                      />
+                    </>
+                  )}
+                  {canGovern && <SectionAdd label="New agent" onClick={() => openNewAgentDialog()} />}
+                </div>
+              }
+            >
               Agents
             </SectionLabel>
             <div className="space-y-0.5">
@@ -1410,6 +1564,38 @@ export function Workbench({
           }
         }}
         items={[
+          ...unreadConvIDs
+            .map((id) => boot.conversations.find((c) => c.id === id))
+            .filter((c): c is Conversation => Boolean(c))
+            .map((c): JumpItem => {
+              const peer = c.kind === "dm" ? boot.members.find((m) => m.id === c.peer_member_id) : undefined;
+              const count = c.mention_count > 0 ? c.mention_count : c.unread_count;
+              return {
+                key: `unread:${c.id}`,
+                label: c.kind === "dm" ? c.peer_display_name ?? "Direct message" : `#${c.slug ?? ""}`,
+                subtitle: c.kind === "dm" ? peer?.agent?.role_text?.replace(/\s+/g, " ").trim() || undefined : c.topic || undefined,
+                keywords: `unread ${c.topic ?? ""} ${peer?.agent?.role_text ?? ""}`,
+                group: "Unread",
+                icon:
+                  c.kind === "dm" && peer ? (
+                    <MemberAvatar id={peer.id} name={peer.display_name} kind={peer.kind} size="xs" state={peer.agent?.runtime_state} />
+                  ) : c.kind === "private" ? (
+                    <Lock className="size-4" />
+                  ) : (
+                    <Hash className="size-4" />
+                  ),
+                badge: (
+                  <span
+                    className={`min-w-[18px] h-[18px] px-1.5 rounded-[4px] text-[11px] font-semibold tabular inline-flex items-center justify-center ${
+                      c.mention_count > 0 || c.kind === "dm" ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"
+                    }`}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
+                ),
+                run: () => setMainView({ kind: "conversation", convID: c.id }),
+              };
+            }),
           ...recentConvIDs
             .map((id) => boot.conversations.find((c) => c.id === id))
             .filter((c): c is Conversation => Boolean(c && (c.kind === "public" || c.kind === "private" || c.kind === "dm")))
@@ -1424,25 +1610,70 @@ export function Workbench({
                 run: () => setMainView({ kind: "conversation", convID: c.id }),
               }),
             ),
-          { key: "inbox", label: "Inbox", group: "Go to", icon: <Inbox className="size-4" />, run: () => setMainView({ kind: "inbox" }) },
+          {
+            key: "inbox",
+            label: "Inbox",
+            group: "Go to",
+            icon: <Inbox className="size-4" />,
+            badge:
+              needsMe > 0 ? (
+                <span className="min-w-[18px] h-[18px] px-1.5 rounded-[4px] text-[11px] font-semibold tabular inline-flex items-center justify-center bg-accent text-accent-fg">
+                  {needsMe > 99 ? "99+" : needsMe}
+                </span>
+              ) : undefined,
+            run: () => setMainView({ kind: "inbox" }),
+          },
           { key: "tasks", label: "Tasks", group: "Go to", icon: <CheckCircle2 className="size-4" />, run: () => setMainView({ kind: "tasks" }) },
+          { key: "agents-admin", label: "Agents", keywords: "manage directory", group: "Go to", icon: <Bot className="size-4" />, run: () => setMainView({ kind: "admin", tab: "agents" }) },
+          { key: "computers-admin", label: "Computers", keywords: "daemons machines", group: "Go to", icon: <Monitor className="size-4" />, run: () => setMainView({ kind: "admin", tab: "computers" }) },
           { key: "settings", label: "Settings", group: "Go to", icon: <Settings className="size-4" />, run: () => setMainView({ kind: "admin", tab: "settings" }) },
-          ...channels.map((c) => ({
-            key: c.id,
-            label: `#${c.slug ?? ""}`,
-            keywords: c.topic ?? "",
-            group: "Channels",
-            icon: c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />,
-            run: () => setMainView({ kind: "conversation", convID: c.id }),
-          })),
-          ...[...agents, ...people].map((m) => ({
-            key: m.id,
-            label: m.display_name,
-            keywords: m.agent?.role_text ?? "",
-            group: m.kind === "agent" ? "Agents" : "People",
-            icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" />,
-            run: () => void openOrCreateDM(m.id),
-          })),
+          ...channels.map((c): JumpItem => {
+            const count = c.mention_count > 0 ? c.mention_count : c.notify_level !== "mute" ? c.unread_count : 0;
+            return {
+              key: c.id,
+              label: `#${c.slug ?? ""}`,
+              subtitle: c.topic || undefined,
+              keywords: c.topic ?? "",
+              group: "Channels",
+              icon: c.kind === "private" ? <Lock className="size-4" /> : <Hash className="size-4" />,
+              badge:
+                count > 0 ? (
+                  <span
+                    className={`min-w-[18px] h-[18px] px-1.5 rounded-[4px] text-[11px] font-semibold tabular inline-flex items-center justify-center ${
+                      c.mention_count > 0 ? "bg-accent text-accent-fg" : "bg-subtle text-fg-2"
+                    }`}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
+                ) : undefined,
+              run: () => setMainView({ kind: "conversation", convID: c.id }),
+            };
+          }),
+          ...[...agents, ...people].map((m): JumpItem => {
+            const conv = dms.find((d) => d.peer_member_id === m.id);
+            const st = m.agent?.runtime_state;
+            const subtitle =
+              m.kind === "agent"
+                ? st === "working" || st === "error"
+                  ? agentStatusText(boot, m)
+                  : (m.agent?.role_text ?? "").replace(/\s+/g, " ").trim() || undefined
+                : undefined;
+            return {
+              key: m.id,
+              label: m.display_name,
+              subtitle,
+              keywords: m.agent?.role_text ?? "",
+              group: m.kind === "agent" ? "Agents" : "People",
+              icon: <MemberAvatar id={m.id} name={m.display_name} kind={m.kind} size="xs" state={m.kind === "agent" ? st : undefined} />,
+              badge:
+                conv && conv.unread_count > 0 ? (
+                  <span className="min-w-[18px] h-[18px] px-1.5 rounded-[4px] text-[11px] font-semibold tabular inline-flex items-center justify-center bg-accent text-accent-fg">
+                    {conv.unread_count > 99 ? "99+" : conv.unread_count}
+                  </span>
+                ) : undefined,
+              run: () => void openOrCreateDM(m.id),
+            };
+          }),
           ...boot.tasks.map((t) => ({
             key: t.id,
             label: `#${t.number} ${t.title}`,
@@ -1587,6 +1818,117 @@ export function Workbench({
               }}
             >
               Copy #{ctxMenu.conv.slug}
+            </MenuItem>
+          </div>,
+          document.body,
+        )}
+      {agentCtxMenu &&
+        createPortal(
+          <div
+            role="menu"
+            aria-label={`${agentCtxMenu.member.display_name} menu`}
+            style={{ position: "fixed", left: agentCtxMenu.x, top: agentCtxMenu.y, width: 216 }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="z-50 bg-card border border-line-strong rounded-[6px] shadow-lg p-1 animate-pop-in"
+          >
+            <MenuItem
+              icon={<MessageSquare />}
+              onSelect={() => {
+                const id = agentCtxMenu.member.id;
+                setAgentCtxMenu(null);
+                void openOrCreateDM(id);
+              }}
+            >
+              Message {agentCtxMenu.member.display_name}
+            </MenuItem>
+            <MenuItem
+              icon={<PanelRight />}
+              onSelect={() => {
+                const id = agentCtxMenu.member.id;
+                setAgentCtxMenu(null);
+                setDetail({ kind: "agent", memberID: id });
+              }}
+            >
+              Inspect
+            </MenuItem>
+            <MenuItem
+              icon={<FolderOpen />}
+              onSelect={() => {
+                const id = agentCtxMenu.member.id;
+                setAgentCtxMenu(null);
+                setDetail({ kind: "agent", memberID: id, tab: "workspace" });
+              }}
+            >
+              Open workspace
+            </MenuItem>
+            <MenuItem
+              icon={<Brain />}
+              onSelect={() => {
+                const id = agentCtxMenu.member.id;
+                setAgentCtxMenu(null);
+                setDetail({ kind: "agent", memberID: id, tab: "memory" });
+              }}
+            >
+              Open memory
+            </MenuItem>
+            {canGovern && (
+              <>
+                <div className="my-1 border-t border-line" />
+                {agentCtxMenu.member.agent?.runtime_state === "working" && (
+                  <MenuItem
+                    icon={<Square className="text-danger" />}
+                    onSelect={() => {
+                      const target = agentCtxMenu.member;
+                      setAgentCtxMenu(null);
+                      void groupAct.run(async () => {
+                        await api.controlAgent(spaceSlug, target.id, "stop_turn");
+                        void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                      });
+                    }}
+                  >
+                    Stop turn
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon={<RefreshCw />}
+                  onSelect={() => {
+                    const target = agentCtxMenu.member;
+                    setAgentCtxMenu(null);
+                    void groupAct.run(async () => {
+                      await api.controlAgent(spaceSlug, target.id, "restart");
+                      toast(`Restarted ${target.display_name}`, "success");
+                      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                    });
+                  }}
+                >
+                  Restart
+                </MenuItem>
+                <MenuItem
+                  icon={<RotateCcw />}
+                  onSelect={() => {
+                    const target = agentCtxMenu.member;
+                    setAgentCtxMenu(null);
+                    void groupAct.run(async () => {
+                      await api.controlAgent(spaceSlug, target.id, "reset_session");
+                      toast(`Session reset for ${target.display_name}`, "success");
+                      void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+                    });
+                  }}
+                >
+                  Reset session
+                </MenuItem>
+              </>
+            )}
+            <div className="my-1 border-t border-line" />
+            <MenuItem
+              icon={<Copy />}
+              onSelect={() => {
+                const name = agentCtxMenu.member.display_name;
+                setAgentCtxMenu(null);
+                void navigator.clipboard?.writeText(`@${name}`).then(() => toast(`Copied @${name}`, "success"));
+              }}
+            >
+              Copy @{agentCtxMenu.member.display_name}
             </MenuItem>
           </div>,
           document.body,

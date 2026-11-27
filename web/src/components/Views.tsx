@@ -7,6 +7,7 @@ import {
   Bookmark,
   Bot,
   Check,
+  CheckCheck,
   CheckCircle2,
   ChevronRight,
   CircleDot,
@@ -29,7 +30,7 @@ import {
 } from "lucide-react";
 import { accentForeground, accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
-import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
+import { activityLabel, api, formatClock, formatDay, formatShortTime, formatTimestamp, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, useSpellCheck, useSpellCheckAttr, type FontFamilyPref, type FontSizePref } from "../preferences";
 import type { ThemePref } from "../theme";
 import { AgentTemplateDialog } from "./AgentForm";
@@ -80,7 +81,9 @@ export function InboxView({
   onOpenDetail: (t: DetailTarget) => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const { run } = useAction();
+  const clearAllAct = useAction();
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const inboxQ = useQuery({
     queryKey: ["inbox", spaceSlug, filter],
@@ -109,9 +112,46 @@ export function InboxView({
   }
 
   const items = inboxQ.data ?? [];
+
+  async function markAllDone() {
+    if (items.length === 0) return;
+    const targets = items.map((it) => it.conversation_id);
+    setLeaving((prev) => new Set([...prev, ...targets]));
+    const ok = await clearAllAct.run(async () => {
+      await Promise.all(targets.map((id) => api.markDone(spaceSlug, id)));
+    });
+    if (!ok) {
+      setLeaving((prev) => {
+        const next = new Set(prev);
+        for (const id of targets) next.delete(id);
+        return next;
+      });
+    } else {
+      toast(`Marked ${targets.length} items as done`, "success");
+    }
+    void qc.invalidateQueries({ queryKey: ["inbox", spaceSlug] });
+    void qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
+  }
+
   return (
     <section className="flex flex-col h-full min-h-0 bg-panel">
-      <ViewHeader title="Inbox" icon={<Inbox />}>
+      <ViewHeader
+        title="Inbox"
+        icon={<Inbox />}
+        actions={
+          filter !== "all" && items.length > 1 ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<CheckCheck />}
+              loading={clearAllAct.busy}
+              onClick={() => void markAllDone()}
+            >
+              Mark all done
+            </Button>
+          ) : undefined
+        }
+      >
         <span className="w-px h-4 bg-line shrink-0" />
         <HeaderTabs
           value={filter}
@@ -169,15 +209,17 @@ export function InboxView({
                       <span className="text-fg-2 font-body">{it.latest_preview}</span>
                     </p>
                   </button>
-                  <span className="tabular text-[12px] text-fg-3 shrink-0 w-12 text-right">{formatClock(it.latest_at)}</span>
+                  <span className="tabular text-[12px] text-fg-3 shrink-0 min-w-[48px] text-right" title={formatTimestamp(it.latest_at)}>
+                    {formatShortTime(it.latest_at)}
+                  </span>
                   <div className="flex items-center gap-1 shrink-0">
                     {(it.kind === "thread" || it.kind === "task") && it.following && (
-                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}>
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" onClick={() => dismiss(it, () => api.setFollowing(spaceSlug, it.conversation_id, false))}>
                         Unfollow
                       </Button>
                     )}
                     {(it.kind === "public" || it.kind === "private") && it.notify_level !== "mute" && (
-                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}>
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" onClick={() => dismiss(it, () => api.setNotifyLevel(spaceSlug, it.conversation_id, "mute"))}>
                         Mute
                       </Button>
                     )}
@@ -410,8 +452,18 @@ export function TasksView({
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Filter by title, #number, or assignee…"
                 aria-label="Filter tasks"
-                className="w-full h-8 pl-8 pr-3 rounded-[5px] border border-line-strong bg-card text-[13px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
+                className="w-full h-8 pl-8 pr-7 rounded-[5px] border border-line-strong bg-card text-[13px] outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-[var(--ring)]"
               />
+              {q && (
+                <button
+                  type="button"
+                  aria-label="Clear filter"
+                  onClick={() => setQ("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 size-5 rounded-[4px] text-fg-4 hover:text-fg hover:bg-hover flex items-center justify-center"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
             </div>
             {activeChannels.length > 1 && (
               <Select
@@ -435,7 +487,21 @@ export function TasksView({
           />
         ) : groups.length === 0 ? (
           allTasks.length > 0 ? (
-            <div className="px-6 py-12 text-center text-[14px] text-fg-3">No tasks match the current filter.</div>
+            <div className="px-6 py-14 text-center">
+              <p className="text-[14px] text-fg-2 font-medium">No tasks match the current filter</p>
+              <div className="mt-3">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setQ("");
+                    setChannelFilter("");
+                  }}
+                >
+                  Reset filters
+                </Button>
+              </div>
+            </div>
           ) : (
             <EmptyState
               icon={<CheckCircle2 />}
@@ -718,8 +784,14 @@ function AgentList({
                           <span className="flex items-baseline gap-2 min-w-0">
                             <span className="text-[14px] font-semibold text-fg truncate">{m.display_name}</span>
                             {st === "working" || st === "error" ? (
-                              <span className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`} title={agentStatusText(boot, m)}>
+                              <span
+                                className={`text-[12.5px] truncate ${st === "error" ? "text-danger" : "text-busy"}`}
+                                title={[agentStatusText(boot, m), st === "working" ? activityLabel(ag?.activity) : ag?.last_error_detail].filter(Boolean).join(" · ")}
+                              >
                                 {agentStatusText(boot, m)}
+                                {st === "working" && activityLabel(ag?.activity) && (
+                                  <span className="font-mono text-[11.5px] opacity-80"> · {activityLabel(ag?.activity)}</span>
+                                )}
                               </span>
                             ) : null}
                           </span>
@@ -1167,7 +1239,7 @@ export function AdminPanel({
                   <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.05em] text-fg-2">Templates</h2>
                   <span className="font-mono text-[11.5px] text-fg-4 tabular">{templates.length}</span>
                 </div>
-                <span className="text-[12px] text-fg-3 hidden @[560px]:inline">Saved locally for creating agents faster</span>
+                <span className="text-[12px] text-fg-3 hidden @[560px]:inline">Saved on this device for creating or updating agents</span>
               </div>
               <div className="divide-y divide-line border-b border-line">
                 {templates.map((tpl) => {
@@ -1624,8 +1696,8 @@ export function AdminPanel({
                     <span className="flex items-center gap-2 text-[14px] font-semibold text-fg min-w-0">
                       <span
                         aria-hidden
-                        className="size-5 rounded-[4px] text-[11px] font-bold text-white inline-flex items-center justify-center shrink-0"
-                        style={{ background: accentSwatch(boot.space.accent) }}
+                        className="size-5 rounded-[4px] text-[11px] font-bold inline-flex items-center justify-center shrink-0"
+                        style={{ background: accentSwatch(boot.space.accent), color: accentForeground(boot.space.accent) }}
                       >
                         {(boot.space.name[0] ?? "S").toUpperCase()}
                       </span>

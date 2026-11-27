@@ -643,4 +643,39 @@ describe("HumanDetail and thread @mentions", () => {
     fireEvent.click(screen.getByRole("button", { name: "@Sam" }));
     expect(onSelectTarget).toHaveBeenCalledWith({ kind: "human", memberID: sam.id });
   });
+
+  it("shows agent display name in AgentDetail header and navigates to task channel from TaskDetail", async () => {
+    const onOpenConversation = vi.fn();
+    vi.spyOn(api, "getTask").mockResolvedValue({ task });
+    vi.spyOn(api, "listMessages").mockResolvedValue({ messages: [reply(1, lisi, "copyable text")], read_seq: 0, following: true });
+
+    const qc1 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const first = render(
+      <QueryClientProvider client={qc1}>
+        <DetailPane spaceSlug="s" boot={roster} target={{ kind: "agent", memberID: lin.id }} onClose={() => {}} onSelectTarget={() => {}} />
+      </QueryClientProvider>,
+    );
+    const header = first.container.querySelector("header") as HTMLElement;
+    expect(within(header).getByText("Agent")).toBeTruthy();
+    expect(within(header).getByText("Lin")).toBeTruthy();
+    first.unmount();
+
+    const qc2 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc2}>
+        <DetailPane
+          spaceSlug="s"
+          boot={roster}
+          target={{ kind: "task", taskID: task.id }}
+          onClose={() => {}}
+          onSelectTarget={() => {}}
+          onOpenConversation={onOpenConversation}
+        />
+      </QueryClientProvider>,
+    );
+    const channelBtn = await screen.findByRole("button", { name: "#engineering" });
+    fireEvent.click(channelBtn);
+    expect(onOpenConversation).toHaveBeenCalledWith(task.channel_id);
+    expect(await screen.findByRole("button", { name: "Copy message text" })).toBeTruthy();
+  });
 });

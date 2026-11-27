@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
 import { App } from "../App";
+import { clearAllDraftsForTests, writeDraft } from "../drafts";
 import { clearLastLocation, writeLastSpaceView } from "../preferences";
 import { Workbench } from "./Workbench";
 
@@ -152,6 +153,7 @@ describe("Workbench", () => {
   });
 
   afterEach(() => {
+    clearAllDraftsForTests();
     clearLastLocation();
     sessionStorage.clear();
     vi.restoreAllMocks();
@@ -402,5 +404,70 @@ describe("Workbench", () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
+  });
+
+  it("exposes working-agents popover, agent context menu, DM draft indicator, unread jump shortcut, and Unread palette group", async () => {
+    const dmLin = {
+      id: "dm-lin",
+      space_id: "sp-1",
+      kind: "dm" as const,
+      peer_member_id: "m-lin",
+      peer_display_name: "Lin",
+      peer_kind: "agent" as const,
+      next_seq: 3,
+      read_seq: 1,
+      unread_count: 2,
+      mention_count: 0,
+      following: false,
+    };
+    const unreadBoot: BootstrapData = {
+      ...sampleBoot,
+      conversations: [
+        { ...sampleBoot.conversations[0], unread_count: 1, mention_count: 1 },
+        dmLin,
+      ],
+    };
+    vi.spyOn(api, "bootstrap").mockResolvedValue(unreadBoot);
+    const ctrlSpy = vi.spyOn(api, "controlAgent").mockResolvedValue({ ok: true });
+    writeDraft("dm-lin", { text: "follow up later", replyTo: null });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <Workbench spaceSlug="studio" onLogout={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+
+    // DM row shows unsent draft pencil indicator.
+    expect(within(sidebar).getByLabelText("Has draft")).toBeTruthy();
+
+    // Working-agents badge opens the shared popover.
+    fireEvent.click(within(sidebar).getByRole("button", { name: "1 working" }));
+    const pop = await screen.findByRole("dialog", { name: "Working now" });
+    expect(within(pop).getByText("Lin")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // Agent right-click context menu allows quick stop/inspect actions.
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /Lin/ }));
+    const menu = await screen.findByRole("menu", { name: "Lin menu" });
+    expect(within(menu).getByRole("menuitem", { name: "Open workspace" })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Stop turn" }));
+    await waitFor(() => expect(ctrlSpy).toHaveBeenCalledWith("studio", "m-lin", "stop_turn"));
+
+    // Cmd+K surfaces the Unread group at the top.
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    expect(within(palette).getByText("Unread")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // Alt+Shift+ArrowDown jumps directly to the first unread conversation (#engineering).
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true, shiftKey: true });
+    expect(await screen.findByRole("heading", { name: "engineering" })).toBeTruthy();
+
+    // Pressing Alt+Shift+ArrowDown again cycles to the next unread conversation (DM with Lin).
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true, shiftKey: true });
+    expect(await screen.findByRole("heading", { name: "Lin" })).toBeTruthy();
   });
 });

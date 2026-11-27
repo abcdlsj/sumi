@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Hash, Keyboard, Loader2, Lock, MessageSquare, Search } from "lucide-react";
-import { api, formatClock, slugInput, slugify, type ChannelGroup, type Member, type SearchHit } from "../api";
-import { isMacPlatform, useSpellCheckAttr } from "../preferences";
+import { api, formatShortTime, formatTimestamp, slugInput, slugify, type ChannelGroup, type Member, type SearchHit } from "../api";
+import { isMacPlatform, useSendKey, useSpellCheckAttr } from "../preferences";
 import { MemberAvatar } from "./Avatar";
 import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
 
 export interface JumpItem {
   key: string;
   label: string;
+  subtitle?: string;
   keywords?: string;
   group: string;
   icon: ReactNode;
+  badge?: ReactNode;
   shortcut?: string;
   run: () => void;
 }
@@ -405,9 +407,13 @@ export function JumpDialog({
                   }`}
                 >
                   <span className="size-5 flex items-center justify-center text-fg-3 shrink-0">{it.icon}</span>
-                  <span className="truncate flex-1">{it.label}</span>
+                  <span className="truncate flex-1 min-w-0 flex items-baseline gap-2">
+                    <span className="truncate">{it.label}</span>
+                    {it.subtitle && <span className="truncate text-[12px] text-fg-4 font-normal">{it.subtitle}</span>}
+                  </span>
+                  {it.badge}
                   {it.shortcut && (
-                    <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[4px] bg-subtle border border-line text-fg-3">{it.shortcut}</kbd>
+                    <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded-[4px] bg-subtle border border-line text-fg-3 shrink-0">{it.shortcut}</kbd>
                   )}
                 </button>
               </div>
@@ -438,7 +444,9 @@ export function JumpDialog({
                           <span className="font-semibold text-fg">{h.author_display_name}</span>
                           <span>in</span>
                           <span className="font-medium text-fg-2 truncate">{h.conversation_title}</span>
-                          <span className="ml-auto tabular text-[11px] text-fg-4 shrink-0">{formatClock(h.created_at)}</span>
+                          <span className="ml-auto tabular text-[11px] text-fg-4 shrink-0" title={formatTimestamp(h.created_at)}>
+                            {formatShortTime(h.created_at)}
+                          </span>
                         </span>
                         <span className="mt-0.5 block text-[13px] text-fg-2 truncate font-body">
                           <HighlightText text={h.snippet} query={q} />
@@ -461,23 +469,26 @@ export function JumpDialog({
 }
 
 export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const mod = isMacPlatform() ? "⌘" : "Ctrl";
+  const [sendKey] = useSendKey();
+  const mac = isMacPlatform();
+  const mod = mac ? "⌘" : "Ctrl";
   const groups = [
     {
       title: "Navigation",
       rows: [
         { label: "Command palette & message search", keys: `${mod} K` },
+        { label: "Next / previous unread conversation", keys: mac ? "⌥ ⇧ ↓ / ↑" : "Alt Shift ↓ / ↑" },
         { label: "Toggle sidebar", keys: `${mod} B` },
-        { label: "Back / Forward in history", keys: isMacPlatform() ? "⌘ [ / ⌘ ]" : "Alt ← / Alt →" },
+        { label: "Back / forward in history", keys: mac ? "⌘ [ / ⌘ ]" : "Alt ← / Alt →" },
         { label: "Switch space", keys: `${mod} 1–9` },
-        { label: "Close detail panel / dialog", keys: "Esc" },
+        { label: "Close detail panel or dialog", keys: "Esc" },
       ],
     },
     {
       title: "Composer & Reading",
       rows: [
-        { label: "Send message (default)", keys: "Enter" },
-        { label: "New line (default)", keys: "Shift Enter" },
+        { label: "Send message", keys: sendKey === "mod_enter" ? `${mod} Enter` : "Enter" },
+        { label: "New line", keys: sendKey === "mod_enter" ? "Enter" : "Shift Enter" },
         { label: "Mention agent or person", keys: "@" },
         { label: "Keyboard shortcuts", keys: `${mod} /` },
       ],
