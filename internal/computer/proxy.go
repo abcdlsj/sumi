@@ -144,6 +144,7 @@ func (d *Daemon) handleCapabilityProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	d.recordProxyTelemetry(agentID, r.Method, r.URL.Path, resp.StatusCode)
 	for k, vals := range resp.Header {
 		for _, v := range vals {
 			w.Header().Add(k, v)
@@ -151,4 +152,43 @@ func (d *Daemon) handleCapabilityProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// recordProxyTelemetry updates metadata-only turn side-effects (read/sent/held/reacted) for the
+// agent's in-flight turn without inspecting or logging request or response bodies.
+func (d *Daemon) recordProxyTelemetry(agentID, method, reqPath string, status int) {
+	d.mu.RLock()
+	ag := d.agents[agentID]
+	d.mu.RUnlock()
+	if ag == nil {
+		return
+	}
+	ag.mu.Lock()
+	tel := ag.activeTelemetry
+	ag.mu.Unlock()
+	if tel == nil {
+		return
+	}
+
+	parts := strings.Split(strings.Trim(reqPath, "/"), "/")
+	ok := status >= 200 && status < 300
+	switch {
+	case len(parts) == 3 && parts[0] == "conversations" && parts[2] == "messages":
+		convID := parts[1]
+		switch {
+		case method == http.MethodGet && ok:
+			tel.recordRead(convID)
+		case method == http.MethodPost && ok:
+			tel.recordSent(convID)
+		case method == http.MethodPost && status == http.StatusConflict:
+			tel.recordHeld(convID)
+		}
+	case len(parts) == 4 && parts[0] == "messages" && parts[2] == "reactions" && method == http.MethodPut && ok:
+		tel.recordReacted()
+	case ok && (method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch) && len(parts) >= 1:
+		switch parts[0] {
+		case "tasks", "channels", "agents":
+			tel.recordOtherWrite()
+		}
+	}
 }

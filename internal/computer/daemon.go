@@ -77,6 +77,108 @@ type hostedAgent struct {
 	probeTimer *time.Timer
 	// retryTimer re-runs the loop after a failed turn; wakes during the backoff only set dirty.
 	retryTimer *time.Timer
+
+	// activeTelemetry records proxy-observed sumi CLI side-effects for the in-flight turn.
+	activeTelemetry *turnTelemetry
+	// pendingRetry preserves the focus conversation if a turn fails after `sumi read` already
+	// advanced read_seq on the Server before any reply was sent.
+	pendingRetry *retryContext
+}
+
+// turnTelemetry records metadata-only capability proxy outcomes for a single active turn.
+type turnTelemetry struct {
+	mu         sync.Mutex
+	readConvs  map[string]bool
+	sentConvs  map[string]bool
+	heldConvs  map[string]bool
+	reacted    bool
+	otherWrite bool
+}
+
+func newTurnTelemetry() *turnTelemetry {
+	return &turnTelemetry{
+		readConvs: make(map[string]bool),
+		sentConvs: make(map[string]bool),
+		heldConvs: make(map[string]bool),
+	}
+}
+
+func (t *turnTelemetry) recordRead(convID string) {
+	if t == nil || convID == "" {
+		return
+	}
+	t.mu.Lock()
+	t.readConvs[convID] = true
+	t.mu.Unlock()
+}
+
+func (t *turnTelemetry) recordSent(convID string) {
+	if t == nil || convID == "" {
+		return
+	}
+	t.mu.Lock()
+	t.sentConvs[convID] = true
+	delete(t.heldConvs, convID)
+	t.mu.Unlock()
+}
+
+func (t *turnTelemetry) recordHeld(convID string) {
+	if t == nil || convID == "" {
+		return
+	}
+	t.mu.Lock()
+	t.heldConvs[convID] = true
+	t.mu.Unlock()
+}
+
+func (t *turnTelemetry) recordReacted() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.reacted = true
+	t.mu.Unlock()
+}
+
+func (t *turnTelemetry) recordOtherWrite() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.otherWrite = true
+	t.mu.Unlock()
+}
+
+func (t *turnTelemetry) didRead(convID string) bool {
+	if t == nil || convID == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.readConvs[convID]
+}
+
+func (t *turnTelemetry) didReply(convID string) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.sentConvs[convID] || t.reacted || t.otherWrite
+}
+
+func (t *turnTelemetry) hasUnresolvedHeld(convID string) bool {
+	if t == nil || convID == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.heldConvs[convID]
+}
+
+type retryContext struct {
+	focus   domain.InboxItem
+	errCode string
 }
 
 // resetBreakerLocked clears the failure breaker; caller holds ag.mu.

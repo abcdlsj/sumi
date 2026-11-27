@@ -46,7 +46,7 @@ Sumi 是一个面向 Human 与持久化 AI Agent 的协同工作空间。在这�
 
 **权衡**：为每条消息或每个频道并发起多个会话虽然吞吐高，但会击穿 prompt cache，并让同一 Agent 在不同对话中自相矛盾。
 
-**设计**：每个 Agent 同一时刻最多只有一个活跃 Turn 和一个持久化 Runtime Session，在保住 prompt cache 的同时维持跨对话的记忆连贯性。服务端下发的唤醒帧（`wake`）只携带极简触发摘要，Agent 醒来后自行通过 CLI 拉取所需上下文。Owner/Admin 可随时通过显式 `stop_turn` 中止在途 Turn：该操作仅取消当前 Turn 并回到 `idle`，保留 Runtime Session 与 Memory，不触发失败熔断。
+**设计**：每个 Agent 同一时刻最多只有一个活跃 Turn 和一个持久化 Runtime Session，在保住 prompt cache 的同时维持跨对话的记忆连贯性。服务端下发的唤醒帧（`wake`）只携带极简触发摘要，Agent 醒来后自行通过 CLI 拉取所需上下文。为避免多对话并发唤醒时 Agent 提前批量 `sumi read` 推进水位后遗忘其余对话，每个 Turn 严格聚焦单条待处理对话（按最早等待时间 FIFO 选取，仅告知其余排队对话并提示本轮不要预读），Turn 结束后循环重查 `needs_me` 收件箱直至排空（对连续无进展条目施加有界防空转保护）；若 Turn 在已调用 `sumi read` 后因网络/驱动异常中断且尚未回复，重试时仍会携带该中断对话上下文续接，不因水位已推进而丢消息；若 Turn 读取了直接唤醒（DM、`@mention`）、触发 Freshness Guard `held` 未重发或执行了实质工具调用却未调用 `sumi send` / `sumi react`，Runner 会追加至多一次轻量提醒以兜底纯文本自言自语。Owner/Admin 可随时通过显式 `stop_turn` 中止在途 Turn：该操作仅取消当前 Turn 并回到 `idle`，保留 Runtime Session 与 Memory，不触发失败熔断。
 
 ### 2.2 并发写防错：先读后写（Freshness Guard）
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -116,6 +117,9 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	}
 	ag.spec, ag.drv, ag.failCode, ag.failDetail = spec, drv, code, detail
 	ag.stopRequested = false
+	if specChanged {
+		ag.pendingRetry = nil
+	}
 	ag.resetBreakerLocked()
 	if old != nil {
 		oldHC, oldSidecar := old.(*agenthost.Client)
@@ -298,6 +302,7 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		}
 		ag.mu.Lock()
 		drv := ag.drv
+		ag.pendingRetry = nil
 		ag.resetBreakerLocked()
 		ag.mu.Unlock()
 		if drv != nil {
@@ -347,6 +352,9 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		if wasBusy {
 			ag.dirty = false
 			ag.stopRequested = true
+			ag.pendingRetry = nil
+		} else {
+			ag.pendingRetry = nil
 		}
 		ag.mu.Unlock()
 		if cancelTurn != nil {
@@ -398,6 +406,34 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 	go d.runAgentLoop(ctx, ag)
 }
 
+type silentNudge struct {
+	focus domain.InboxItem
+	held  bool
+}
+
+// orderInboxItems drops items that already failed to advance read_seq and orders the rest FIFO
+// (oldest LatestAt first) so earlier conversations are never starved by newer activity elsewhere.
+func orderInboxItems(items []domain.InboxItem, skipped map[string]int64) []domain.InboxItem {
+	out := make([]domain.InboxItem, 0, len(items))
+	for _, it := range items {
+		if skipSeq, ok := skipped[it.ConversationID]; ok && it.LatestSeq <= skipSeq {
+			continue
+		}
+		out = append(out, it)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ti, tj := out[i].LatestAt, out[j].LatestAt
+		if ti.IsZero() != tj.IsZero() {
+			return !ti.IsZero()
+		}
+		if ti.IsZero() {
+			return false
+		}
+		return ti.Before(tj)
+	})
+	return out
+}
+
 func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 	released := false
 	defer func() {
@@ -406,11 +442,19 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.busy = false
 			ag.focusConvID = ""
 			ag.cancelTurn = nil
+			ag.activeTelemetry = nil
 			ag.stopRequested = false
 			ag.mu.Unlock()
 			d.notifyDrainCheck()
 		}
 	}()
+
+	skipped := make(map[string]int64)
+	unreadNudged := make(map[string]int64)
+	var pendingNudge *silentNudge
+	var prevConvID string
+	var prevSeq int64
+
 	for {
 		d.replaceStaleSidecar(ag)
 		ag.mu.Lock()
@@ -429,37 +473,106 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			released = true
 			ag.mu.Unlock()
 			d.notifyDrainCheck()
-			return
-		}
-
-		items, err := d.fetchAgentInbox(ctx, spec.MemberID)
-		if err != nil {
-			d.reportAgentState(spec.MemberID, domain.RuntimeError, "", domain.AgentErrInboxUnreachable, domain.BoundErrorDetail(err.Error()))
-			return
-		}
-		if len(items) == 0 {
-			// Check dirty and clear busy under the same lock so wakes arriving during fetchAgentInbox are never lost.
-			ag.mu.Lock()
-			if ag.dirty && !ag.paused && !d.isDraining() {
-				ag.dirty = false
-				ag.mu.Unlock()
-				continue
-			}
-			ag.busy = false
-			ag.focusConvID = ""
-			released = true
-			ag.mu.Unlock()
-			d.notifyDrainCheck()
 			d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 			return
 		}
 
-		focus := items[0]
+		var focus domain.InboxItem
+		var userPrompt string
+		var inboxCount int
+		var isNudge, isRecovery bool
+
+		if pendingNudge != nil {
+			nudge := pendingNudge
+			pendingNudge = nil
+			focus = nudge.focus
+			inboxCount = 1
+			isNudge = true
+			userPrompt = buildSilentReplyNudgePrompt(focus, nudge.held)
+		} else {
+			items, err := d.fetchAgentInbox(ctx, spec.MemberID)
+			if err != nil {
+				d.reportAgentState(spec.MemberID, domain.RuntimeError, "", domain.AgentErrInboxUnreachable, domain.BoundErrorDetail(err.Error()))
+				return
+			}
+
+			// Detect when the previous normal turn finished without advancing read_seq on its focus.
+			if prevConvID != "" {
+				for _, it := range items {
+					if it.ConversationID == prevConvID && it.LatestSeq == prevSeq {
+						if prevSeq == 0 || unreadNudged[prevConvID] == prevSeq {
+							// Already nudged once (or mock inbox without seq): skip to avoid spinning.
+							skipped[prevConvID] = prevSeq
+						} else {
+							unreadNudged[prevConvID] = prevSeq
+						}
+						break
+					}
+				}
+				prevConvID, prevSeq = "", 0
+			}
+
+			var recovery *retryContext
+			ag.mu.Lock()
+			if ag.pendingRetry != nil {
+				foundFresh := false
+				for _, it := range items {
+					if it.ConversationID == ag.pendingRetry.focus.ConversationID {
+						foundFresh = true
+						break
+					}
+				}
+				if foundFresh {
+					ag.pendingRetry = nil
+				} else {
+					cp := *ag.pendingRetry
+					recovery = &cp
+				}
+			}
+			ag.mu.Unlock()
+
+			ordered := orderInboxItems(items, skipped)
+			if recovery != nil {
+				focus = recovery.focus
+				inboxCount = len(ordered) + 1
+				isRecovery = true
+				userPrompt = buildRetryWakePrompt(focus, recovery.errCode, ordered)
+			} else {
+				if len(ordered) == 0 {
+					// Check dirty and clear busy under the same lock so wakes arriving during fetchAgentInbox are never lost.
+					ag.mu.Lock()
+					if ag.dirty && !ag.paused && !d.isDraining() {
+						ag.dirty = false
+						ag.mu.Unlock()
+						clear(skipped)
+						continue
+					}
+					ag.busy = false
+					ag.focusConvID = ""
+					released = true
+					ag.mu.Unlock()
+					d.notifyDrainCheck()
+					d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
+					return
+				}
+				focus = ordered[0]
+				inboxCount = len(ordered)
+				if focus.LatestSeq > 0 && unreadNudged[focus.ConversationID] == focus.LatestSeq {
+					isNudge = true
+					userPrompt = buildUnreadNudgePrompt(focus)
+				} else {
+					userPrompt = buildWakePrompt(ordered)
+				}
+			}
+		}
+
+		tel := newTurnTelemetry()
 		ag.mu.Lock()
 		ag.focusConvID = focus.ConversationID
+		ag.activeTelemetry = tel
 		ag.mu.Unlock()
 		turnStart := time.Now()
-		d.logger.Info("Agent turn started", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "inbox_items", len(items), "reason", focus.Reason)
+		d.logger.Info("Agent turn started", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "inbox_items", inboxCount, "reason", focus.Reason, "nudge", isNudge, "recovery", isRecovery)
 		d.reportAgentState(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "")
 
 		turnCtx, cancel := context.WithCancelCause(ctx)
@@ -484,7 +597,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		turnInput := driver.TurnInput{
 			SystemPrompt:   buildSystemPrompt(spec, ag.workDir, ag.memoryDir),
 			StartupContext: buildStartupContext(spec, ag.memoryDir),
-			UserPrompt:     buildWakePrompt(items),
+			UserPrompt:     userPrompt,
 			WorkDir:        ag.workDir,
 			MemoryDir:      ag.memoryDir,
 			Env:            d.agentEnv(ag, spec.DriverKind, spec.DriverConfig.Provider),
@@ -495,7 +608,9 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.stopRequested = false
 			ag.busy = false
 			ag.focusConvID = ""
+			ag.activeTelemetry = nil
 			ag.dirty = false
+			ag.pendingRetry = nil
 			released = true
 			ag.mu.Unlock()
 			stopDetachWatch()
@@ -508,19 +623,20 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 		ag.cancelTurn = cancel
 		ag.mu.Unlock()
+		var turnRes driver.TurnResult
 		var runErr error
 		if hc, ok := drv.(*agenthost.Client); ok {
-			_, runErr = hc.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+			turnRes, runErr = hc.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
 			if runErr != nil && isSidecarDialError(runErr) && turnCtx.Err() == nil {
 				if recovered, recErr := d.recoverDeadSidecar(ag, hc, spec); recovered != nil {
 					drv = recovered
-					_, runErr = recovered.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+					turnRes, runErr = recovered.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
 				} else if recErr != nil {
 					runErr = recErr
 				}
 			}
 		} else {
-			_, runErr = drv.RunTurn(turnCtx, turnInput)
+			turnRes, runErr = drv.RunTurn(turnCtx, turnInput)
 		}
 		cause := context.Cause(turnCtx)
 		if errors.Is(cause, errTurnStalled) {
@@ -532,6 +648,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 
 		ag.mu.Lock()
 		ag.cancelTurn = nil
+		ag.activeTelemetry = nil
 		stopped := ag.stopRequested || errors.Is(cause, errTurnStopped)
 		ag.stopRequested = false
 		replaced := ag.drv != drv
@@ -552,6 +669,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.busy = false
 			ag.focusConvID = ""
 			ag.dirty = false
+			ag.pendingRetry = nil
 			released = true
 			ag.mu.Unlock()
 			d.logger.Info("Agent turn stopped", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "duration_ms", time.Since(turnStart).Milliseconds())
@@ -561,6 +679,13 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 		if runErr != nil {
 			code, detail := failureOf(runErr, spec)
+			// If `sumi read` already advanced read_seq before the failure and no reply was sent,
+			// preserve the focus so retry/probe resumes this conversation instead of seeing an empty inbox.
+			if (tel.didRead(focus.ConversationID) || isRecovery) && !tel.didReply(focus.ConversationID) {
+				ag.mu.Lock()
+				ag.pendingRetry = &retryContext{focus: focus, errCode: code}
+				ag.mu.Unlock()
+			}
 			d.logger.Warn("Agent turn failed", "agent_id", spec.MemberID, "error_code", code, "error", detail)
 			if delay, paused := d.recordFailure(ctx, ag); paused {
 				d.logger.Warn("Agent paused after consecutive failures", "agent_id", spec.MemberID, "error_code", code, "probe_in", delay.String())
@@ -572,23 +697,43 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			d.reportAgentState(spec.MemberID, domain.RuntimeError, focus.ConversationID, code, detail)
 			return
 		}
+
 		ag.mu.Lock()
 		ag.resetBreakerLocked()
+		if ag.pendingRetry != nil && ag.pendingRetry.focus.ConversationID == focus.ConversationID {
+			ag.pendingRetry = nil
+		}
 		ag.focusConvID = ""
+		paused := ag.paused
 		ag.mu.Unlock()
 		d.logger.Info("Agent turn completed", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "duration_ms", time.Since(turnStart).Milliseconds())
-		d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 
-		// Check if new wakes arrived while busy; clear busy under the same lock to prevent lost wakes.
-		ag.mu.Lock()
-		if !ag.dirty || ag.paused || d.isDraining() {
+		if paused || d.isDraining() {
+			ag.mu.Lock()
 			ag.busy = false
 			ag.focusConvID = ""
 			released = true
 			ag.mu.Unlock()
 			d.notifyDrainCheck()
+			d.reportAgentState(spec.MemberID, domain.RuntimeIdle, "", "", "")
 			return
 		}
+
+		// Catch turns where the agent read the focus conversation (or hit Freshness Guard `held`)
+		// and stopped without posting via `sumi send` or reacting via `sumi react`.
+		readFocus := tel.didRead(focus.ConversationID)
+		repliedFocus := tel.didReply(focus.ConversationID)
+		heldUnresolved := tel.hasUnresolvedHeld(focus.ConversationID)
+		if !isNudge && (readFocus || isRecovery) && !repliedFocus && (heldUnresolved || focus.Reason == "dm" || focus.Reason == "mention" || turnRes.ToolCalls >= 2) {
+			pendingNudge = &silentNudge{focus: focus, held: heldUnresolved}
+			continue
+		}
+
+		// Remember the just-handled conversation so the next inbox drain can detect zero progress.
+		if !isRecovery {
+			prevConvID, prevSeq = focus.ConversationID, focus.LatestSeq
+		}
+		ag.mu.Lock()
 		ag.dirty = false
 		ag.mu.Unlock()
 	}
@@ -705,7 +850,7 @@ func (d *Daemon) resumeAttachedTurn(ctx context.Context, ag *hostedAgent, turnID
 	ag.mu.Lock()
 	ag.resetBreakerLocked()
 	ag.focusConvID = ""
-	shouldContinue := ag.dirty && !ag.paused && !d.isDraining()
+	shouldContinue := !ag.paused && !d.isDraining()
 	if !shouldContinue {
 		ag.busy = false
 	} else {

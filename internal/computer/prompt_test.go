@@ -42,6 +42,31 @@ func TestWakePromptPreviewsLatestMessage(t *testing.T) {
 	if !strings.Contains(p, "do not count as reading") {
 		t.Fatalf("wake prompt must say previews are not reads")
 	}
+	if !strings.Contains(p, "do NOT read or reply to them in this turn") {
+		t.Fatalf("wake prompt must tell agent not to pre-read queued conversations: %s", p)
+	}
+}
+
+func TestReliabilityPromptBuilders(t *testing.T) {
+	focus := domain.InboxItem{Title: "@Owner", Target: "dm:@Owner", ConversationID: "c1", Reason: "dm", UnreadCount: 1}
+	retry := buildRetryWakePrompt(focus, domain.AgentErrModelUnreachable, []domain.InboxItem{
+		{Title: "#ops", Target: "#ops", ConversationID: "c2", Reason: "mention", UnreadCount: 1},
+	})
+	if !strings.Contains(retry, "model_unreachable") || !strings.Contains(retry, "sumi read dm:@Owner --limit 10") || !strings.Contains(retry, "target=#ops") {
+		t.Fatalf("unexpected retry prompt: %s", retry)
+	}
+	unread := buildUnreadNudgePrompt(focus)
+	if !strings.Contains(unread, "sumi read dm:@Owner --unread") {
+		t.Fatalf("unexpected unread nudge: %s", unread)
+	}
+	silent := buildSilentReplyNudgePrompt(focus, false)
+	if !strings.Contains(silent, "assistant text output is NOT visible") {
+		t.Fatalf("unexpected silent nudge: %s", silent)
+	}
+	held := buildSilentReplyNudgePrompt(focus, true)
+	if !strings.Contains(held, "Freshness Guard") || !strings.Contains(held, "--draft") {
+		t.Fatalf("unexpected held nudge: %s", held)
+	}
 }
 
 func TestSystemPromptGuidesLongTaskProgressSync(t *testing.T) {
