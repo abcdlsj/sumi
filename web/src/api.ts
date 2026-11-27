@@ -507,6 +507,17 @@ export const api = {
     const qs = new URLSearchParams({ path });
     return request<WorkspaceFileContent>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/workspace/file?${qs.toString()}`);
   },
+  listAgentMemory: (spaceSlug: string, agentID: string, path = "", includeHidden = false) => {
+    const qs = new URLSearchParams();
+    if (path) qs.set("path", path);
+    if (includeHidden) qs.set("include_hidden", "true");
+    const q = qs.toString();
+    return request<WorkspaceListing>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/memory${q ? `?${q}` : ""}`);
+  },
+  readAgentMemoryFile: (spaceSlug: string, agentID: string, path: string) => {
+    const qs = new URLSearchParams({ path });
+    return request<WorkspaceFileContent>(`/api/v1/spaces/${spaceSlug}/agents/${agentID}/memory/file?${qs.toString()}`);
+  },
   createDM: (spaceSlug: string, peer_member_id: string) =>
     request<{ conversation: Conversation }>(`/api/v1/spaces/${spaceSlug}/dm`, {
       method: "POST",

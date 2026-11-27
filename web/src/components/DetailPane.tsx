@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, Brain, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey, useTaskDetailsCollapsed } from "../preferences";
@@ -21,7 +21,7 @@ import { Badge, Button, EmptyState, ErrorState, IconButton, Menu, MenuItem, Segm
 export type DetailTarget =
   | { kind: "task"; taskID: string }
   | { kind: "thread"; threadConvID: string; rootMessageID: string; parentSlug: string }
-  | { kind: "agent"; memberID: string; tab?: "overview" | "workspace"; filePath?: string; openNonce?: number }
+  | { kind: "agent"; memberID: string; tab?: "overview" | "workspace" | "memory"; filePath?: string; openNonce?: number }
   | { kind: "human"; memberID: string }
   | { kind: "members"; convID: string }
   | { kind: "channel_tasks"; convID: string };
@@ -1301,7 +1301,7 @@ function AgentDetail({
   spaceSlug: string;
   boot: BootstrapData;
   memberID: string;
-  initialTab?: "overview" | "workspace";
+  initialTab?: "overview" | "workspace" | "memory";
   initialFilePath?: string;
   openNonce?: number;
   onClose: () => void;
@@ -1317,7 +1317,7 @@ function AgentDetail({
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [tplName, setTplName] = useState("");
-  const [tab, setTab] = useState<"overview" | "workspace">(initialFilePath ? "workspace" : (initialTab ?? "overview"));
+  const [tab, setTab] = useState<"overview" | "workspace" | "memory">(initialFilePath ? "workspace" : (initialTab ?? "overview"));
 
   useEffect(() => {
     if (initialFilePath) setTab("workspace");
@@ -1428,6 +1428,17 @@ function AgentDetail({
           Workspace
           {tab === "workspace" && <span aria-hidden className="absolute inset-x-1 bottom-0 h-[2px] bg-accent" />}
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("memory")}
+          className={`relative px-2.5 text-[13px] inline-flex items-center gap-1.5 transition-colors ${
+            tab === "memory" ? "text-fg font-semibold" : "text-fg-3 font-medium hover:text-fg"
+          }`}
+        >
+          <Brain className="size-3.5" />
+          Memory
+          {tab === "memory" && <span aria-hidden className="absolute inset-x-1 bottom-0 h-[2px] bg-accent" />}
+        </button>
       </div>
       {savingTemplate && (
         <form onSubmit={submitTemplate} className="px-4 py-2.5 border-b border-line bg-subtle/40 flex items-center gap-1.5 shrink-0 animate-fade-in">
@@ -1449,15 +1460,16 @@ function AgentDetail({
           </Button>
         </form>
       )}
-      {tab === "workspace" ? (
+      {tab === "workspace" || tab === "memory" ? (
         <AgentWorkspace
-          key={member.id}
+          key={`${member.id}:${tab}`}
+          scope={tab}
           spaceSlug={spaceSlug}
           member={member}
           computer={comp}
           boot={boot}
-          initialFilePath={initialFilePath}
-          openNonce={openNonce}
+          initialFilePath={tab === "workspace" ? initialFilePath : undefined}
+          openNonce={tab === "workspace" ? openNonce : undefined}
         />
       ) : (
         <div className="flex-1 overflow-y-auto scroll-thin divide-y divide-line">

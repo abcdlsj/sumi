@@ -315,6 +315,47 @@ describe("AgentDetail activity", () => {
     expect(await screen.findByText("Hello world!")).toBeTruthy();
   });
 
+  it("switches to the Memory tab and renders MEMORY.md", async () => {
+    const listSpy = vi.spyOn(api, "listAgentMemory").mockResolvedValue({
+      root_path: "/tmp/agents/a1/memory",
+      path: "",
+      entries: [
+        { name: "notes", path: "notes", is_dir: true, size: 0, mtime_ms: Date.now() },
+        { name: "MEMORY.md", path: "MEMORY.md", is_dir: false, size: 28, mtime_ms: Date.now() },
+      ],
+    });
+    const readSpy = vi.spyOn(api, "readAgentMemoryFile").mockResolvedValue({
+      path: "MEMORY.md",
+      size: 28,
+      mtime_ms: Date.now(),
+      binary: false,
+      encoding: "utf8",
+      content: "# Long-term memory\n\nOwns API.",
+    });
+
+    renderAgent({});
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledWith("s", "a1", "", false));
+    fireEvent.click(await screen.findByRole("button", { name: /MEMORY\.md/ }));
+    await waitFor(() => expect(readSpy).toHaveBeenCalledWith("s", "a1", "MEMORY.md"));
+    expect(await screen.findByText("Long-term memory")).toBeTruthy();
+    expect(screen.getByText("Owns API.")).toBeTruthy();
+  });
+
+  it("shows a clear empty state when the agent has no memory files yet", async () => {
+    const listSpy = vi.spyOn(api, "listAgentMemory").mockResolvedValue({
+      root_path: "/tmp/agents/a1/memory",
+      path: "",
+      entries: [],
+    });
+
+    renderAgent({});
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledWith("s", "a1", "", false));
+    expect(await screen.findByText("No memory yet")).toBeTruthy();
+    expect(screen.getByText("Lin doesn't have any memory files yet.")).toBeTruthy();
+  });
+
   it("opens directly to a targeted file in the Workspace tab when jumped from an agent message", async () => {
     const listSpy = vi.spyOn(api, "listAgentWorkspace").mockResolvedValue({
       root_path: "/tmp/agents/a1/workspace",

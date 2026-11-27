@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowLeft,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -93,6 +94,7 @@ export function AgentWorkspace({
   member,
   computer,
   boot,
+  scope = "workspace",
   initialFilePath,
   openNonce,
 }: {
@@ -100,9 +102,13 @@ export function AgentWorkspace({
   member: Member;
   computer?: Computer;
   boot: BootstrapData;
+  scope?: "workspace" | "memory";
   initialFilePath?: string;
   openNonce?: number;
 }) {
+  const isMemory = scope === "memory";
+  const scopeLabel = isMemory ? "memory" : "workspace";
+  const scopeTitle = isMemory ? "Memory" : "Workspace";
   const [includeHidden, setIncludeHiddenState] = useState(readHiddenPref);
   const [treeQuery, setTreeQuery] = useState("");
   const [treeWidth, setTreeWidth] = useState(280);
@@ -146,12 +152,14 @@ export function AgentWorkspace({
         setLoadingDirs((prev) => ({ ...prev, [dirPath]: true }));
       }
       try {
-        const res = await api.listAgentWorkspace(spaceSlug, member.id, dirPath, hidden);
+        const res = isMemory
+          ? await api.listAgentMemory(spaceSlug, member.id, dirPath, hidden)
+          : await api.listAgentWorkspace(spaceSlug, member.id, dirPath, hidden);
         if (isRoot && seq !== listSeqRef.current) return;
         if (isRoot) setRootPath(res.root_path);
         setDirEntries((prev) => ({ ...prev, [dirPath]: res.entries }));
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to load workspace";
+        const msg = err instanceof Error ? err.message : `Failed to load ${scopeLabel}`;
         if (isRoot) {
           setRootError(msg);
           setDirEntries({});
@@ -164,7 +172,7 @@ export function AgentWorkspace({
         }
       }
     },
-    [spaceSlug, member.id],
+    [spaceSlug, member.id, isMemory, scopeLabel],
   );
 
   const openFile = useCallback(
@@ -176,7 +184,9 @@ export function AgentWorkspace({
       setFileContent(null);
       setMdMode("preview");
       try {
-        const res = await api.readAgentWorkspaceFile(spaceSlug, member.id, relPath);
+        const res = isMemory
+          ? await api.readAgentMemoryFile(spaceSlug, member.id, relPath)
+          : await api.readAgentWorkspaceFile(spaceSlug, member.id, relPath);
         if (seq !== fileSeqRef.current) return;
         setFileContent(res);
       } catch (err) {
@@ -186,7 +196,7 @@ export function AgentWorkspace({
         if (seq === fileSeqRef.current) setFileLoading(false);
       }
     },
-    [spaceSlug, member.id],
+    [spaceSlug, member.id, isMemory],
   );
 
   const expandAncestors = useCallback(
@@ -332,9 +342,11 @@ export function AgentWorkspace({
     if (!selectedFile) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center text-fg-3">
-          <FolderOpen className="size-7 text-fg-4 mb-2" />
+          {isMemory ? <Brain className="size-7 text-fg-4 mb-2" /> : <FolderOpen className="size-7 text-fg-4 mb-2" />}
           <div className="text-[13.5px] font-medium text-fg-2">Select a file to inspect</div>
-          <div className="mt-1 text-[12.5px] text-fg-4">Read-only view of {member.display_name}&apos;s workspace.</div>
+          <div className="mt-1 text-[12.5px] text-fg-4">
+            Read-only view of {member.display_name}&apos;s {scopeLabel}.
+          </div>
         </div>
       );
     }
@@ -392,7 +404,7 @@ export function AgentWorkspace({
             </IconButton>
           )}
           {!fullscreen && (
-            <IconButton label="Expand workspace viewer" onClick={() => setFullscreen(true)}>
+            <IconButton label={`Expand ${scopeLabel} viewer`} onClick={() => setFullscreen(true)}>
               <Maximize2 />
             </IconButton>
           )}
@@ -459,7 +471,7 @@ export function AgentWorkspace({
       return (
         <div className="flex-1 flex items-center justify-center gap-2 text-[13px] text-fg-3">
           <Loader2 className="size-4 animate-spin" />
-          Loading workspace…
+          Loading {scopeLabel}…
         </div>
       );
     }
@@ -468,7 +480,7 @@ export function AgentWorkspace({
         <div className="flex-1 p-5 flex flex-col items-center justify-center text-center">
           {offline ? <WifiOff className="size-6 text-fg-4 mb-2" /> : <AlertTriangle className="size-6 text-fg-4 mb-2" />}
           <div className="text-[13.5px] font-medium text-fg-2">
-            {offline ? "Computer is offline" : "Workspace unavailable"}
+            {offline ? "Computer is offline" : `${scopeTitle} unavailable`}
           </div>
           <div className="mt-1 text-[12.5px] text-fg-3 max-w-[260px] break-words">{rootError}</div>
           <button
@@ -485,9 +497,13 @@ export function AgentWorkspace({
     if (rootItems.length === 0) {
       return (
         <div className="flex-1 p-6 flex flex-col items-center justify-center text-center text-fg-3">
-          <Folder className="size-7 text-fg-4 mb-2" />
-          <div className="text-[13.5px] font-medium text-fg-2">Workspace is empty</div>
-          <div className="mt-1 text-[12.5px] text-fg-4">Files created by {member.display_name} will appear here.</div>
+          {isMemory ? <Brain className="size-7 text-fg-4 mb-2" /> : <Folder className="size-7 text-fg-4 mb-2" />}
+          <div className="text-[13.5px] font-medium text-fg-2">{isMemory ? "No memory yet" : "Workspace is empty"}</div>
+          <div className="mt-1 text-[12.5px] text-fg-4">
+            {isMemory
+              ? `${member.display_name} doesn't have any memory files yet.`
+              : `Files created by ${member.display_name} will appear here.`}
+          </div>
         </div>
       );
     }
@@ -507,7 +523,7 @@ export function AgentWorkspace({
               value={treeQuery}
               onChange={(e) => setTreeQuery(e.target.value)}
               placeholder="Filter files…"
-              aria-label="Filter workspace files"
+              aria-label={`Filter ${scopeLabel} files`}
               className="w-full h-7 pl-7 pr-6 rounded-[4px] border border-line-strong bg-card text-[12.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
             />
             {treeQuery && (
@@ -554,13 +570,13 @@ export function AgentWorkspace({
     <div className="px-3 py-2 border-b border-line flex items-center gap-1.5 bg-subtle/30 shrink-0">
       <div
         className="flex-1 min-w-0 h-7 px-2 rounded-[4px] bg-card border border-line flex items-center gap-1.5 text-[11.5px] font-mono text-fg-3"
-        title={rootPath || "Agent workspace"}
+        title={rootPath || `Agent ${scopeLabel}`}
       >
-        <Folder className="size-3.5 text-fg-4 shrink-0" />
-        <span className="truncate direction-rtl">{rootPath || "workspace"}</span>
+        {isMemory ? <Brain className="size-3.5 text-fg-4 shrink-0" /> : <Folder className="size-3.5 text-fg-4 shrink-0" />}
+        <span className="truncate direction-rtl">{rootPath || scopeLabel}</span>
       </div>
       {rootPath && (
-        <IconButton label={copiedPath ? "Copied path" : "Copy workspace path"} onClick={copyRootPath}>
+        <IconButton label={copiedPath ? "Copied path" : `Copy ${scopeLabel} path`} onClick={copyRootPath}>
           {copiedPath ? <Check className="text-work" /> : <Copy />}
         </IconButton>
       )}
@@ -571,11 +587,11 @@ export function AgentWorkspace({
       >
         {includeHidden ? <Eye /> : <EyeOff />}
       </IconButton>
-      <IconButton label="Refresh workspace" onClick={refresh}>
+      <IconButton label={`Refresh ${scopeLabel}`} onClick={refresh}>
         <RefreshCw />
       </IconButton>
       {!fullscreen && (
-        <IconButton label="Expand workspace" onClick={() => setFullscreen(true)}>
+        <IconButton label={`Expand ${scopeLabel}`} onClick={() => setFullscreen(true)}>
           <Maximize2 />
         </IconButton>
       )}
@@ -592,7 +608,7 @@ export function AgentWorkspace({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`${member.display_name} workspace`}
+            aria-label={`${member.display_name} ${scopeLabel}`}
             className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-6 animate-fade-in"
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) setFullscreen(false);
@@ -601,9 +617,9 @@ export function AgentWorkspace({
             <div className="w-full max-w-[1040px] h-[80vh] rounded-[8px] bg-panel border border-line-strong shadow-lg flex flex-col overflow-hidden animate-pop-in">
               <div className="h-12 px-4 border-b border-line flex items-center justify-between gap-3 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
-                  <FolderOpen className="size-4 text-accent-text shrink-0" />
+                  {isMemory ? <Brain className="size-4 text-accent-text shrink-0" /> : <FolderOpen className="size-4 text-accent-text shrink-0" />}
                   <span className="text-[14.5px] font-semibold text-fg truncate">
-                    {member.display_name} · Workspace
+                    {member.display_name} · {scopeTitle}
                   </span>
                   {rootPath && (
                     <span className="hidden sm:inline font-mono text-[12px] text-fg-4 truncate max-w-[420px]" title={rootPath}>
@@ -619,7 +635,7 @@ export function AgentWorkspace({
                   >
                     {includeHidden ? <Eye /> : <EyeOff />}
                   </IconButton>
-                  <IconButton label="Refresh workspace" onClick={refresh}>
+                  <IconButton label={`Refresh ${scopeLabel}`} onClick={refresh}>
                     <RefreshCw />
                   </IconButton>
                   <IconButton label="Close" onClick={() => setFullscreen(false)}>
