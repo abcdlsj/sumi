@@ -51,6 +51,7 @@ func main() {
 	rt.startDaemon(bootCtx)
 
 	var (
+		app        *application.App
 		window     *application.WebviewWindow
 		statusItem *application.MenuItem
 		ctrl       *controlServer
@@ -160,7 +161,14 @@ func main() {
 		return state, nil
 	}
 
-	ctrl, err = startControlServer(rt, onSwitch, logger)
+	onOpenURL := func(rawURL string) error {
+		if app == nil {
+			return nil
+		}
+		return app.Browser.OpenURL(rawURL)
+	}
+
+	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, logger)
 	if err != nil {
 		logger.Warn("Desktop control server unavailable", "error", err.Error())
 	}
@@ -172,7 +180,7 @@ func main() {
 	}
 	startURL := buildStartURL(cfg.ServerURL, initTicket)
 
-	app := application.New(application.Options{
+	app = application.New(application.Options{
 		Name:        "Sumi",
 		Description: "Sumi collaboration workspace",
 		Icon:        appIconPNG,

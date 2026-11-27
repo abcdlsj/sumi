@@ -32,8 +32,14 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 		return cs.currentState(), nil
 	}
 
+	var opened []string
+	onOpenURL := func(rawURL string) error {
+		opened = append(opened, rawURL)
+		return nil
+	}
+
 	var err error
-	cs, err = startControlServer(rt, onSwitch, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, onOpenURL, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -135,5 +141,65 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 	}
 	if state.IsLocal || state.ServerURL != "https://sumi.team" {
 		t.Fatalf("unexpected switched state: %+v", state)
+	}
+
+	// Open-URL rejects wrong origin, invalid schemes, and forwards safe http/https/mailto URLs.
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/open-url", bytes.NewBufferString(`{"url":"https://example.com"}`))
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open-url wrong origin: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for foreign origin on open-url, got %d", resp.StatusCode)
+	}
+
+	for _, bad := range []string{
+		"",
+		"javascript:alert(1)",
+		"file:///etc/passwd",
+		"data:text/html,hi",
+		"https:///no-host",
+		"mailto:",
+	} {
+		payload, _ := json.Marshal(map[string]string{"url": bad})
+		req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/open-url", bytes.NewReader(payload))
+		req.Header.Set("Origin", "https://sumi.team")
+		req.Header.Set("Authorization", "Bearer "+cs.token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("open-url bad %q: %v", bad, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %q, got %d", bad, resp.StatusCode)
+		}
+	}
+
+	for _, good := range []string{
+		"https://example.com/docs?q=1#top",
+		"http://127.0.0.1:3000/preview",
+		"mailto:team@example.com",
+	} {
+		payload, _ := json.Marshal(map[string]string{"url": good})
+		req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/open-url", bytes.NewReader(payload))
+		req.Header.Set("Origin", "https://sumi.team")
+		req.Header.Set("Authorization", "Bearer "+cs.token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("open-url good %q: %v", good, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 for %q, got %d", good, resp.StatusCode)
+		}
+	}
+	if len(opened) != 3 || opened[0] != "https://example.com/docs?q=1#top" || opened[1] != "http://127.0.0.1:3000/preview" || opened[2] != "mailto:team@example.com" {
+		t.Fatalf("unexpected opened URLs: %+v", opened)
 	}
 }
