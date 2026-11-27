@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -23,19 +23,18 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
-  Upload,
   User,
   Users,
   X,
 } from "lucide-react";
-import { SPACE_ACCENTS, type SpaceAccent } from "../accent";
+import { accentForeground, accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
-import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Space, type Task, type TaskStatus } from "../api";
+import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
 import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, type FontFamilyPref, type FontSizePref } from "../preferences";
 import type { ThemePref } from "../theme";
 import { AgentTemplateDialog } from "./AgentForm";
 import type { DetailTarget } from "./DetailPane";
-import { agentStatusText, MemberAvatar, SpaceAvatar, StatusDot } from "./Avatar";
+import { agentStatusText, MemberAvatar, StatusDot } from "./Avatar";
 import { InboxSkeleton, RowListSkeleton } from "./Skeletons";
 import { Badge, Button, EmptyState, ErrorState, Field, HeaderTabs, IconButton, Modal, Segmented, Select, TaskStatusIcon, taskStatusLabel, TextArea, useAction, useToast, type SelectOption } from "./ui";
 
@@ -779,133 +778,6 @@ function AgentList({
   );
 }
 
-const SPACE_AVATAR_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif";
-const MAX_SPACE_AVATAR_BYTES = 4 * 1024 * 1024;
-
-function SpaceNameEditor({ spaceSlug, value, disabled }: { spaceSlug: string; value: string; disabled: boolean }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const { busy, run } = useAction();
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  const trimmed = draft.trim();
-  const dirty = trimmed !== value.trim();
-
-  if (disabled) {
-    return <span className="text-[14px] font-semibold text-fg truncate">{value}</span>;
-  }
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!trimmed || !dirty || busy) return;
-    void run(async () => {
-      await api.updateSpace(spaceSlug, { name: trimmed });
-      await qc.invalidateQueries({ queryKey: ["bootstrap", spaceSlug] });
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      toast("Space name updated");
-    });
-  }
-
-  return (
-    <form onSubmit={submit} className="flex items-center gap-2 flex-1 min-w-0 max-w-[360px]">
-      <input
-        type="text"
-        aria-label="Space name"
-        value={draft}
-        maxLength={64}
-        disabled={busy}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder="Space name"
-        className="flex-1 min-w-0 h-8 px-2.5 rounded-[5px] border border-line-strong bg-card text-[13.5px] font-medium text-fg focus:outline-none focus:border-accent"
-      />
-      <Button type="submit" size="sm" variant={dirty ? "primary" : "secondary"} disabled={!dirty || !trimmed} loading={busy}>
-        Save
-      </Button>
-    </form>
-  );
-}
-
-function SpaceAvatarEditor({ space, disabled }: { space: Space; disabled: boolean }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const { busy, run } = useAction();
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [inlineError, setInlineError] = useState("");
-
-  function onFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setInlineError("");
-    if (file.size > MAX_SPACE_AVATAR_BYTES) {
-      setInlineError("Image must be 4 MB or smaller.");
-      return;
-    }
-    void run(async () => {
-      try {
-        await api.uploadSpaceAvatar(space.slug, file);
-        await qc.invalidateQueries({ queryKey: ["bootstrap", space.slug] });
-        await qc.invalidateQueries({ queryKey: ["me"] });
-        toast("Space avatar updated");
-      } catch (err) {
-        setInlineError(err instanceof Error ? err.message : "Unable to upload avatar.");
-        throw err;
-      }
-    });
-  }
-
-  function onRemove() {
-    setInlineError("");
-    void run(async () => {
-      await api.removeSpaceAvatar(space.slug);
-      await qc.invalidateQueries({ queryKey: ["bootstrap", space.slug] });
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      toast("Space avatar removed");
-    });
-  }
-
-  return (
-    <div className="flex items-center gap-4 flex-wrap">
-      <SpaceAvatar space={space} size="lg" />
-      <div className="space-y-1.5 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            ref={fileRef}
-            type="file"
-            accept={SPACE_AVATAR_ACCEPT}
-            aria-label="Upload space avatar"
-            className="hidden"
-            disabled={disabled || busy}
-            onChange={onFileChange}
-          />
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Upload />}
-            disabled={disabled || busy}
-            loading={busy}
-            onClick={() => fileRef.current?.click()}
-          >
-            {space.avatar_hash ? "Change image" : "Upload image"}
-          </Button>
-          {space.avatar_hash && (
-            <Button size="sm" variant="ghost" disabled={disabled || busy} onClick={onRemove}>
-              Remove
-            </Button>
-          )}
-        </div>
-        <div className="text-[12px] text-fg-4">
-          {inlineError ? <span className="text-danger">{inlineError}</span> : "PNG, JPEG, WebP, GIF, or AVIF up to 4 MB."}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AccentPicker({ spaceSlug, value, disabled }: { spaceSlug: string; value: SpaceAccent; disabled: boolean }) {
   const qc = useQueryClient();
   const { busy, run } = useAction();
@@ -1208,7 +1080,15 @@ export function AdminPanel({
     <section className="flex flex-col h-full min-h-0 bg-panel">
       <ViewHeader
         title={boot.space.name}
-        icon={<SpaceAvatar space={boot.space} size="sm" />}
+        icon={
+          <span
+            aria-hidden
+            className="size-5 rounded-[4px] text-[11px] font-bold inline-flex items-center justify-center shrink-0"
+            style={{ background: accentSwatch(boot.space.accent), color: accentForeground(boot.space.accent) }}
+          >
+            {(boot.space.name[0] ?? "S").toUpperCase()}
+          </span>
+        }
         actions={headerActions}
       >
         <span className="w-px h-4 bg-line shrink-0" />
@@ -1713,32 +1593,18 @@ export function AdminPanel({
                   body="Workspace identity and accent color shared by everyone in this space."
                 />
                 <div className="divide-y divide-line border-y border-line">
-                  <div className="py-3.5 flex items-start gap-4 flex-wrap sm:flex-nowrap">
-                    <div className="w-36 shrink-0 pt-1">
-                      <div className="text-[13px] text-fg-3">Avatar</div>
-                      {boot.current_member.access_level === "member" && (
-                        <div className="text-[11.5px] text-fg-4 mt-0.5">Admins only</div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <SpaceAvatarEditor
-                        space={boot.space}
-                        disabled={boot.current_member.access_level === "member"}
-                      />
-                    </div>
-                  </div>
-                  <div className="py-3 flex items-center gap-4 flex-wrap sm:flex-nowrap">
-                    <div className="w-36 shrink-0">
-                      <div className="text-[13px] text-fg-3">Name</div>
-                      {boot.current_member.access_level === "member" && (
-                        <div className="text-[11.5px] text-fg-4 mt-0.5">Admins only</div>
-                      )}
-                    </div>
-                    <SpaceNameEditor
-                      spaceSlug={boot.space.slug}
-                      value={boot.space.name}
-                      disabled={boot.current_member.access_level === "member"}
-                    />
+                  <div className="py-3 flex items-center gap-4">
+                    <span className="w-36 shrink-0 text-[13px] text-fg-3">Name</span>
+                    <span className="flex items-center gap-2 text-[14px] font-semibold text-fg min-w-0">
+                      <span
+                        aria-hidden
+                        className="size-5 rounded-[4px] text-[11px] font-bold text-white inline-flex items-center justify-center shrink-0"
+                        style={{ background: accentSwatch(boot.space.accent) }}
+                      >
+                        {(boot.space.name[0] ?? "S").toUpperCase()}
+                      </span>
+                      <span className="truncate">{boot.space.name}</span>
+                    </span>
                   </div>
                   <div className="py-3 flex items-center gap-4">
                     <span className="w-36 shrink-0 text-[13px] text-fg-3">Address</span>

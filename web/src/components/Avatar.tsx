@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
-import { accentForeground, accentGradient } from "../accent";
-import { api, type BootstrapData, type Member, type MemberKind, type RuntimeState, type Space } from "../api";
+import { useMemo } from "react";
+import type { BootstrapData, Member, MemberKind, RuntimeState } from "../api";
 
 function fnv(seed: string): number {
   let h = 2166136261;
@@ -118,113 +117,6 @@ export function PixelAvatar({ seed, size = "md", label }: { seed: string; size?:
 function initial(name: string): string {
   const first = Array.from(name.trim())[0];
   return first ? first.toUpperCase() : "?";
-}
-
-const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
-
-/**
- * Builds a compact Discord-style acronym from a Space name:
- * - Multi-word Latin names take up to 3 initials ("Sumi Studio" -> "SS", "AI Research Lab" -> "ARL").
- * - Single CamelCase words take up to 2 capitals ("SumiLab" -> "SL"); plain words take 2 chars ("Research" -> "Re").
- * - CJK names take up to 2 characters ("墨研社" -> "墨研").
- */
-export function spaceAcronym(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "S";
-  const words = trimmed.split(/[\s\-_/·.]+/).filter(Boolean);
-  if (words.length >= 2) {
-    const picked = words.map((w) => Array.from(w)[0]).filter(Boolean);
-    const hasCJK = picked.some((ch) => CJK_RE.test(ch));
-    const cap = hasCJK ? 2 : 3;
-    return picked
-      .slice(0, cap)
-      .map((ch) => (CJK_RE.test(ch) ? ch : ch.toUpperCase()))
-      .join("");
-  }
-  const chars = Array.from(words[0] ?? trimmed);
-  if (chars.some((ch) => CJK_RE.test(ch))) {
-    return chars.slice(0, 2).join("");
-  }
-  const upperRuns = (words[0] ?? trimmed).match(/[A-Z][a-z0-9]*/g);
-  if (upperRuns && upperRuns.length >= 2) {
-    return upperRuns
-      .slice(0, 3)
-      .map((part) => part[0].toUpperCase())
-      .join("");
-  }
-  if (chars.length === 1) return chars[0].toUpperCase();
-  const isAllUpper = (words[0] ?? "").length <= 3 && (words[0] ?? "") === (words[0] ?? "").toUpperCase();
-  if (isAllUpper) return chars.slice(0, 3).join("");
-  return chars[0].toUpperCase() + chars[1].toLowerCase();
-}
-
-const SPACE_AVATAR_SIZES = { sm: 20, md: 36, lg: 56 } as const;
-export type SpaceAvatarSize = keyof typeof SPACE_AVATAR_SIZES;
-
-/**
- * Space identity tile: renders the Space's uploaded image when present, otherwise a
- * multi-word acronym on the Space's accent gradient. In the navigation rail (`morph`),
- * inactive spaces sit as circles and smoothly morph into squircles on hover or selection.
- */
-export function SpaceAvatar({
-  space,
-  size = "md",
-  active = true,
-  morph = false,
-  className = "",
-}: {
-  space: Pick<Space, "slug" | "name" | "accent" | "avatar_hash">;
-  size?: SpaceAvatarSize;
-  active?: boolean;
-  morph?: boolean;
-  className?: string;
-}) {
-  const px = SPACE_AVATAR_SIZES[size];
-  const [failedHash, setFailedHash] = useState<string>("");
-  const hash = space.avatar_hash ?? "";
-  const showImage = Boolean(hash && failedHash !== hash);
-  const acronym = useMemo(() => spaceAcronym(space.name), [space.name]);
-  const chars = Array.from(acronym);
-  const hasCJK = chars.some((ch) => CJK_RE.test(ch));
-  const fontSize = hasCJK
-    ? Math.max(9, Math.round(px * (chars.length >= 2 ? 0.34 : 0.46)))
-    : Math.max(9, Math.round(px * (chars.length >= 3 ? 0.3 : chars.length === 2 ? 0.38 : 0.46)));
-
-  const radiusClass = morph
-    ? active
-      ? "rounded-[10px]"
-      : "rounded-[18px] group-hover:rounded-[10px]"
-    : size === "sm"
-      ? "rounded-[5px]"
-      : size === "md"
-        ? "rounded-[10px]"
-        : "rounded-[14px]";
-
-  return (
-    <span
-      aria-hidden
-      className={`relative inline-flex items-center justify-center shrink-0 overflow-hidden select-none font-bold leading-none ring-1 ring-inset ring-white/20 transition-[border-radius,opacity] duration-200 ${radiusClass} ${className}`}
-      style={{
-        width: px,
-        height: px,
-        background: showImage ? "var(--nav-fill)" : accentGradient(space.accent),
-        color: accentForeground(space.accent),
-        fontSize,
-        letterSpacing: chars.length >= 2 && !hasCJK ? "-0.03em" : undefined,
-      }}
-    >
-      {showImage ? (
-        <img
-          src={api.spaceAvatarURL(space.slug, hash)}
-          alt=""
-          className="w-full h-full object-cover block"
-          onError={() => setFailedHash(hash)}
-        />
-      ) : (
-        acronym
-      )}
-    </span>
-  );
 }
 
 /** One letter on a rounded-square tile; the tone is seeded by the member id, not the name. */

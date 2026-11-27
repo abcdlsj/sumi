@@ -153,7 +153,6 @@ type Space struct {
 	Slug          string    `json:"slug"`
 	Name          string    `json:"name"`
 	Accent        string    `json:"accent"`
-	AvatarHash    string    `json:"avatar_hash,omitempty"`
 	OwnerMemberID string    `json:"owner_member_id"`
 	EventSeq      int64     `json:"event_seq"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -460,20 +459,7 @@ const (
 	MaxAttachmentBytes int64 = 25 << 20
 	// MaxAttachmentsPerMessage bounds attachments carried by one message.
 	MaxAttachmentsPerMessage = 10
-	// MaxSpaceAvatarBytes bounds a custom Space avatar image upload.
-	MaxSpaceAvatarBytes int64 = 4 << 20
-	// MaxSpaceNameRunes bounds a Space display name.
-	MaxSpaceNameRunes = 64
 )
-
-func ValidateSpaceName(name string) error {
-	trimmed := strings.TrimSpace(name)
-	n := len([]rune(trimmed))
-	if n < 1 || n > MaxSpaceNameRunes {
-		return NewError(CodeInvalidArgument, "space name must be 1-64 characters")
-	}
-	return nil
-}
 
 func ValidateAttachmentName(name string) error {
 	trimmed := strings.TrimSpace(name)

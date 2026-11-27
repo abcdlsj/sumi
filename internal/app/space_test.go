@@ -1,12 +1,9 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"strings"
 	"testing"
 	"time"
 
@@ -199,122 +196,5 @@ func TestComputerIsAccountOwnedAndSharedAcrossSpaces(t *testing.T) {
 	}
 	if _, err := svc.CreateAgent(ctx, studioAgent, CreateAgentInput{DisplayName: "Far", RoleText: "r", ComputerID: second.ID, DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig}); !errors.As(err, &domErr) || domErr.Code != domain.CodePermissionDenied {
 		t.Fatalf("agent child on another computer: want permission_denied, got %v", err)
-	}
-}
-
-var minimalPNG = []byte{
-	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-	0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
-	0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
-	0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-	0x42, 0x60, 0x82,
-}
-
-func TestSpaceRenameAndAvatarLifecycleAndSecurity(t *testing.T) {
-	svc, _, space, owner, comp := setupTestService(t)
-	ctx := context.Background()
-
-	// Rename validation and persistence.
-	var domErr *domain.Error
-	if _, err := svc.UpdateSpace(ctx, owner, strings.Repeat("x", domain.MaxSpaceNameRunes+1), ""); !errors.As(err, &domErr) || domErr.Code != domain.CodeInvalidArgument {
-		t.Fatalf("overlong name: want invalid_argument, got %v", err)
-	}
-	renamed, err := svc.UpdateSpace(ctx, owner, "  Ink Lab  ", "")
-	if err != nil {
-		t.Fatalf("rename space: %v", err)
-	}
-	if renamed.Name != "Ink Lab" {
-		t.Fatalf("renamed.Name = %q, want Ink Lab", renamed.Name)
-	}
-
-	// Reject empty, SVG, non-image, and oversized uploads.
-	for _, tc := range []struct {
-		name string
-		data []byte
-	}{
-		{"empty", nil},
-		{"svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
-		{"text", []byte("plain text not an image")},
-		{"oversized", append(append([]byte(nil), minimalPNG...), make([]byte, domain.MaxSpaceAvatarBytes)...)},
-	} {
-		if _, err := svc.SetSpaceAvatar(ctx, owner, bytes.NewReader(tc.data)); !errors.As(err, &domErr) || domErr.Code != domain.CodeInvalidArgument {
-			t.Fatalf("avatar %s: want invalid_argument, got %v", tc.name, err)
-		}
-	}
-
-	// Non-admin human and agent cannot upload or remove the Space avatar.
-	agent, err := svc.CreateAgent(ctx, owner, CreateAgentInput{
-		DisplayName: "Lin", RoleText: "Helper", ComputerID: comp.ID,
-		DriverKind: domain.DriverBuiltin, DriverConfig: testBuiltinConfig,
-	})
-	if err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	other, err := svc.Register(ctx, "member@sumi.dev", "secret1234", "Sam")
-	if err != nil {
-		t.Fatalf("register member: %v", err)
-	}
-	if err := svc.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(
-			`INSERT INTO members (id, space_id, user_id, kind, display_name, access_level, created_at) VALUES ('m-sam', ?, ?, 'human', 'Sam', 'member', ?)`,
-			space.ID, other.User.ID, store.FormatTime(time.Now().UTC()),
-		)
-		return err
-	}); err != nil {
-		t.Fatalf("insert member: %v", err)
-	}
-	sam, err := loadMember(ctx, svc.store.ReadDB(), "m-sam")
-	if err != nil {
-		t.Fatalf("load member: %v", err)
-	}
-	for _, unpriv := range []domain.Member{agent, sam} {
-		if _, err := svc.SetSpaceAvatar(ctx, unpriv, bytes.NewReader(minimalPNG)); !errors.As(err, &domErr) || domErr.Code != domain.CodePermissionDenied {
-			t.Fatalf("%s SetSpaceAvatar: want permission_denied, got %v", unpriv.DisplayName, err)
-		}
-		if _, err := svc.RemoveSpaceAvatar(ctx, unpriv); !errors.As(err, &domErr) || domErr.Code != domain.CodePermissionDenied {
-			t.Fatalf("%s RemoveSpaceAvatar: want permission_denied, got %v", unpriv.DisplayName, err)
-		}
-	}
-
-	// Owner uploads PNG avatar, members can read it, and owner can remove it.
-	updated, err := svc.SetSpaceAvatar(ctx, owner, bytes.NewReader(minimalPNG))
-	if err != nil {
-		t.Fatalf("SetSpaceAvatar: %v", err)
-	}
-	if len(updated.AvatarHash) != 64 {
-		t.Fatalf("expected 64-char avatar hash, got %q", updated.AvatarHash)
-	}
-
-	avatar, err := svc.OpenSpaceAvatar(ctx, sam)
-	if err != nil {
-		t.Fatalf("member OpenSpaceAvatar: %v", err)
-	}
-	gotBytes, err := io.ReadAll(avatar.File)
-	_ = avatar.File.Close()
-	if err != nil {
-		t.Fatalf("read avatar: %v", err)
-	}
-	if avatar.MediaType != "image/png" || !bytes.Equal(gotBytes, minimalPNG) {
-		t.Fatalf("unexpected avatar media=%q len=%d", avatar.MediaType, len(gotBytes))
-	}
-
-	spaces, err := svc.ListUserSpaces(ctx, mustOwnerUserID(t, svc, owner))
-	if err != nil || len(spaces) != 1 || spaces[0].AvatarHash != updated.AvatarHash || spaces[0].Name != "Ink Lab" {
-		t.Fatalf("ListUserSpaces after updates = %+v err=%v", spaces, err)
-	}
-
-	cleared, err := svc.RemoveSpaceAvatar(ctx, owner)
-	if err != nil {
-		t.Fatalf("RemoveSpaceAvatar: %v", err)
-	}
-	if cleared.AvatarHash != "" {
-		t.Fatalf("expected empty avatar hash after remove, got %q", cleared.AvatarHash)
-	}
-	if _, err := svc.OpenSpaceAvatar(ctx, owner); !errors.As(err, &domErr) || domErr.Code != domain.CodeNotFound {
-		t.Fatalf("OpenSpaceAvatar after remove: want not_found, got %v", err)
 	}
 }
