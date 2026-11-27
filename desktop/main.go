@@ -168,7 +168,15 @@ func main() {
 		return app.Browser.OpenURL(rawURL)
 	}
 
-	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, logger)
+	onHideWindow := func() error {
+		if window == nil {
+			return nil
+		}
+		window.Hide()
+		return nil
+	}
+
+	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, logger)
 	if err != nil {
 		logger.Warn("Desktop control server unavailable", "error", err.Error())
 	}
@@ -212,6 +220,7 @@ func main() {
 		e.Cancel()
 	})
 	attachNativeWebViewConfig(app, window, logger)
+	installApplicationMenu(app, window)
 
 	tray := app.SystemTray.New()
 	tray.SetTemplateIcon(trayTemplatePNG)

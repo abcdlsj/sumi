@@ -38,8 +38,14 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 		return nil
 	}
 
+	var hideCalls int
+	onHideWindow := func() error {
+		hideCalls++
+		return nil
+	}
+
 	var err error
-	cs, err = startControlServer(rt, onSwitch, onOpenURL, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -201,5 +207,77 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 	}
 	if len(opened) != 3 || opened[0] != "https://example.com/docs?q=1#top" || opened[1] != "http://127.0.0.1:3000/preview" || opened[2] != "mailto:team@example.com" {
 		t.Fatalf("unexpected opened URLs: %+v", opened)
+	}
+}
+
+func TestControlServerHideWindow(t *testing.T) {
+	rt := newRuntime(Config{
+		ServerURL:     defaultServerURL,
+		ComputerToken: "secret-computer-token",
+		DataDir:       t.TempDir(),
+	}, slog.New(slog.DiscardHandler))
+	rt.healthCheck = func(_ context.Context, u string) bool { return u == defaultServerURL }
+	rt.stopComputer = func(context.Context, string) error { return nil }
+	defer rt.detach()
+
+	var cs *controlServer
+	onSwitch := func(ctx context.Context, rawURL string) (desktopServerState, error) {
+		return cs.currentState(), nil
+	}
+
+	var hideCalls int
+	onHideWindow := func() error {
+		hideCalls++
+		return nil
+	}
+
+	var err error
+	cs, err = startControlServer(rt, onSwitch, func(string) error { return nil }, onHideWindow, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("start control server: %v", err)
+	}
+	defer cs.shutdown()
+
+	req, _ := http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/hide-window", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("hide-window foreign origin: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for a foreign origin, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, cs.baseURL+"/desktop/hide-window", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("hide-window GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET, got %d", resp.StatusCode)
+	}
+
+	if hideCalls != 0 {
+		t.Fatalf("hide-window ran for rejected requests: %d", hideCalls)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/hide-window", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("hide-window POST: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if hideCalls != 1 {
+		t.Fatalf("expected exactly one hide call, got %d", hideCalls)
 	}
 }
