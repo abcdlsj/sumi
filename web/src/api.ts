@@ -22,6 +22,7 @@ export interface Space {
   slug: string;
   name: string;
   accent: SpaceAccent;
+  avatar_hash?: string;
   owner_member_id: string;
   event_seq: number;
   created_at: string;
@@ -380,6 +381,25 @@ export const api = {
     }),
   updateSpace: (spaceSlug: string, patch: { name?: string; accent?: SpaceAccent }) =>
     request<{ space: Space }>(`/api/v1/spaces/${spaceSlug}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  spaceAvatarURL: (spaceSlug: string, avatarHash: string) =>
+    `/api/v1/spaces/${spaceSlug}/avatar?v=${encodeURIComponent(avatarHash)}`,
+  uploadSpaceAvatar: async (spaceSlug: string, file: File): Promise<{ space: Space }> => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const resp = await fetch(`/api/v1/spaces/${spaceSlug}/avatar`, {
+      method: "PUT",
+      credentials: "include",
+      body: form,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = data?.error;
+      throw new ApiError(resp.status, err?.code ?? "internal", err?.message ?? `HTTP ${resp.status}`);
+    }
+    return data as { space: Space };
+  },
+  removeSpaceAvatar: (spaceSlug: string) =>
+    request<{ space: Space }>(`/api/v1/spaces/${spaceSlug}/avatar`, { method: "DELETE" }),
   listConversationMembers: (spaceSlug: string, convID: string) =>
     request<{ members: Member[] }>(`/api/v1/spaces/${spaceSlug}/conversations/${convID}/members`),
   inviteToChannel: (spaceSlug: string, convID: string, member_id: string) =>

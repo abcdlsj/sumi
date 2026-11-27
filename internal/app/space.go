@@ -1,9 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"io"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,8 +22,8 @@ func (s *Service) CreateSpace(ctx context.Context, user domain.User, slug, name 
 		return domain.Space{}, domain.Member{}, err
 	}
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return domain.Space{}, domain.Member{}, domain.NewError(domain.CodeInvalidArgument, "space name is required")
+	if err := domain.ValidateSpaceName(name); err != nil {
+		return domain.Space{}, domain.Member{}, err
 	}
 	now := time.Now().UTC()
 	spaceID := uuid.NewString()
@@ -81,7 +85,7 @@ func (s *Service) CreateSpace(ctx context.Context, user domain.User, slug, name 
 
 func (s *Service) ListUserSpaces(ctx context.Context, userID string) ([]domain.Space, error) {
 	rows, err := s.store.ReadDB().QueryContext(ctx,
-		`SELECT s.id, s.slug, s.name, s.accent, s.owner_member_id, s.event_seq, s.created_at
+		`SELECT s.id, s.slug, s.name, s.accent, s.avatar_sha256, s.owner_member_id, s.event_seq, s.created_at
 		 FROM spaces s JOIN members m ON m.space_id = s.id
 		 WHERE m.user_id = ? AND m.retired_at IS NULL
 		 ORDER BY s.created_at ASC`,
@@ -95,7 +99,7 @@ func (s *Service) ListUserSpaces(ctx context.Context, userID string) ([]domain.S
 	for rows.Next() {
 		var sp domain.Space
 		var createdAt string
-		if err := rows.Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &createdAt); err != nil {
+		if err := rows.Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.AvatarHash, &sp.OwnerMemberID, &sp.EventSeq, &createdAt); err != nil {
 			return nil, domain.WrapError(domain.CodeInternal, "scan space", err)
 		}
 		sp.CreatedAt = store.ParseTime(createdAt)
@@ -108,9 +112,9 @@ func (s *Service) ResolveHumanMemberInSpace(ctx context.Context, userID, spaceSl
 	var sp domain.Space
 	var spCreated string
 	err := s.store.ReadDB().QueryRowContext(ctx,
-		`SELECT id, slug, name, accent, owner_member_id, event_seq, created_at FROM spaces WHERE slug = ?`,
+		`SELECT id, slug, name, accent, avatar_sha256, owner_member_id, event_seq, created_at FROM spaces WHERE slug = ?`,
 		spaceSlug,
-	).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &spCreated)
+	).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.AvatarHash, &sp.OwnerMemberID, &sp.EventSeq, &spCreated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Space{}, domain.Member{}, domain.NewError(domain.CodeNotFound, "space not found")
 	}
@@ -286,6 +290,11 @@ func (s *Service) UpdateSpace(ctx context.Context, actor domain.Member, name, ac
 		return domain.Space{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can change space settings")
 	}
 	name = strings.TrimSpace(name)
+	if name != "" {
+		if err := domain.ValidateSpaceName(name); err != nil {
+			return domain.Space{}, err
+		}
+	}
 	if accent != "" {
 		if err := domain.ValidateSpaceAccent(accent); err != nil {
 			return domain.Space{}, err
@@ -297,9 +306,9 @@ func (s *Service) UpdateSpace(ctx context.Context, actor domain.Member, name, ac
 		var created string
 		if err := tx.QueryRowContext(ctx,
 			`UPDATE spaces SET name = COALESCE(NULLIF(?, ''), name), accent = COALESCE(NULLIF(?, ''), accent)
-			 WHERE id = ? RETURNING id, slug, name, accent, owner_member_id, event_seq, created_at`,
+			 WHERE id = ? RETURNING id, slug, name, accent, avatar_sha256, owner_member_id, event_seq, created_at`,
 			name, accent, actor.SpaceID,
-		).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.OwnerMemberID, &sp.EventSeq, &created); err != nil {
+		).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.AvatarHash, &sp.OwnerMemberID, &sp.EventSeq, &created); err != nil {
 			return domain.WrapError(domain.CodeInternal, "update space", err)
 		}
 		sp.CreatedAt = store.ParseTime(created)
@@ -315,6 +324,143 @@ func (s *Service) UpdateSpace(ctx context.Context, actor domain.Member, name, ac
 	}
 	s.dispatchPostCommit(events, nil)
 	return sp, nil
+}
+
+// sniffSpaceAvatarMediaType detects safe raster image formats strictly from magic bytes,
+// rejecting active web types (SVG, HTML, scripts) regardless of client-supplied headers.
+func sniffSpaceAvatarMediaType(head []byte) (string, bool) {
+	if len(head) == 0 {
+		return "", false
+	}
+	detected := http.DetectContentType(head)
+	switch detected {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return detected, true
+	}
+	if len(head) >= 12 && string(head[4:8]) == "ftyp" {
+		brand := string(head[8:12])
+		if brand == "avif" || brand == "avis" {
+			return "image/avif", true
+		}
+	}
+	return "", false
+}
+
+// SetSpaceAvatar stores a verified raster image in the content-addressed object store and
+// binds it as the Space's custom avatar.
+func (s *Service) SetSpaceAvatar(ctx context.Context, actor domain.Member, content io.Reader) (domain.Space, error) {
+	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
+		return domain.Space{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can change space settings")
+	}
+	var headBuf [512]byte
+	n, readErr := io.ReadFull(content, headBuf[:])
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return domain.Space{}, domain.WrapError(domain.CodeInvalidArgument, "read avatar upload", readErr)
+	}
+	head := headBuf[:n]
+	if len(head) == 0 {
+		return domain.Space{}, domain.NewError(domain.CodeInvalidArgument, "avatar image is empty")
+	}
+	mediaType, ok := sniffSpaceAvatarMediaType(head)
+	if !ok {
+		return domain.Space{}, domain.NewError(domain.CodeInvalidArgument, "avatar must be a PNG, JPEG, WebP, GIF, or AVIF image")
+	}
+
+	combined := io.MultiReader(bytes.NewReader(head), content)
+	sha, _, err := s.store.Objects().Put(combined, domain.MaxSpaceAvatarBytes)
+	if err != nil {
+		if errors.Is(err, store.ErrObjectTooLarge) {
+			return domain.Space{}, domain.NewError(domain.CodeInvalidArgument, "avatar image exceeds 4 MiB limit")
+		}
+		return domain.Space{}, domain.WrapError(domain.CodeInternal, "store space avatar", err)
+	}
+
+	var sp domain.Space
+	var events []domain.SpaceEvent
+	// Objects are content-addressed and may be shared across attachments or spaces, so previous
+	// avatars are left untouched in the object store.
+	err = s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var created string
+		if err := tx.QueryRowContext(ctx,
+			`UPDATE spaces SET avatar_sha256 = ?, avatar_media_type = ?
+			 WHERE id = ? RETURNING id, slug, name, accent, avatar_sha256, owner_member_id, event_seq, created_at`,
+			sha, mediaType, actor.SpaceID,
+		).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.AvatarHash, &sp.OwnerMemberID, &sp.EventSeq, &created); err != nil {
+			return domain.WrapError(domain.CodeInternal, "update space avatar", err)
+		}
+		sp.CreatedAt = store.ParseTime(created)
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "space.updated", map[string]any{"space_id": sp.ID})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+		return nil
+	})
+	if err != nil {
+		return domain.Space{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	return sp, nil
+}
+
+// RemoveSpaceAvatar clears a Space's custom avatar so it falls back to the default acronym avatar.
+func (s *Service) RemoveSpaceAvatar(ctx context.Context, actor domain.Member) (domain.Space, error) {
+	if actor.Kind != domain.MemberKindHuman || (actor.AccessLevel != domain.AccessOwner && actor.AccessLevel != domain.AccessAdmin) {
+		return domain.Space{}, domain.NewError(domain.CodePermissionDenied, "only owners and admins can change space settings")
+	}
+	var sp domain.Space
+	var events []domain.SpaceEvent
+	err := s.store.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var created string
+		if err := tx.QueryRowContext(ctx,
+			`UPDATE spaces SET avatar_sha256 = '', avatar_media_type = ''
+			 WHERE id = ? RETURNING id, slug, name, accent, avatar_sha256, owner_member_id, event_seq, created_at`,
+			actor.SpaceID,
+		).Scan(&sp.ID, &sp.Slug, &sp.Name, &sp.Accent, &sp.AvatarHash, &sp.OwnerMemberID, &sp.EventSeq, &created); err != nil {
+			return domain.WrapError(domain.CodeInternal, "remove space avatar", err)
+		}
+		sp.CreatedAt = store.ParseTime(created)
+		ev, err := store.AppendEvent(ctx, tx, actor.SpaceID, "space.updated", map[string]any{"space_id": sp.ID})
+		if err != nil {
+			return err
+		}
+		events = append(events, ev)
+		return nil
+	})
+	if err != nil {
+		return domain.Space{}, err
+	}
+	s.dispatchPostCommit(events, nil)
+	return sp, nil
+}
+
+type SpaceAvatarContent struct {
+	SHA256    string
+	MediaType string
+	File      *os.File
+}
+
+// OpenSpaceAvatar opens the Space's custom avatar for an authorized Space member.
+func (s *Service) OpenSpaceAvatar(ctx context.Context, viewer domain.Member) (SpaceAvatarContent, error) {
+	var sha, mediaType string
+	err := s.store.ReadDB().QueryRowContext(ctx,
+		`SELECT avatar_sha256, avatar_media_type FROM spaces WHERE id = ?`,
+		viewer.SpaceID,
+	).Scan(&sha, &mediaType)
+	if errors.Is(err, sql.ErrNoRows) || sha == "" {
+		return SpaceAvatarContent{}, domain.NewError(domain.CodeNotFound, "space avatar not found")
+	}
+	if err != nil {
+		return SpaceAvatarContent{}, domain.WrapError(domain.CodeInternal, "query space avatar", err)
+	}
+	file, err := s.store.Objects().Open(sha)
+	if err != nil {
+		return SpaceAvatarContent{}, domain.WrapError(domain.CodeNotFound, "space avatar content missing", err)
+	}
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	return SpaceAvatarContent{SHA256: sha, MediaType: mediaType, File: file}, nil
 }
 
 // placeableComputerStatusTx enforces who may place an Agent on a Computer: a Human only on a

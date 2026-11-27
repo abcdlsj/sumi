@@ -20,12 +20,12 @@ func TestMigrationsUpgradeFromBaselineAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if ver != 6 {
-		t.Fatalf("expected baseline schema version 6, got %d", ver)
+	if ver != 7 {
+		t.Fatalf("expected latest schema version 7, got %d", ver)
 	}
 
 	var appliedAt string
-	if err := s.ReadDB().QueryRow(`SELECT applied_at FROM schema_meta WHERE version = 6`).Scan(&appliedAt); err != nil {
+	if err := s.ReadDB().QueryRow(`SELECT applied_at FROM schema_meta WHERE version = 7`).Scan(&appliedAt); err != nil {
 		t.Fatalf("read applied_at: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -38,14 +38,14 @@ func TestMigrationsUpgradeFromBaselineAndIdempotency(t *testing.T) {
 		t.Fatalf("re-open db: %v", err)
 	}
 	var appliedAt2 string
-	if err := s.ReadDB().QueryRow(`SELECT applied_at FROM schema_meta WHERE version = 6`).Scan(&appliedAt2); err != nil {
+	if err := s.ReadDB().QueryRow(`SELECT applied_at FROM schema_meta WHERE version = 7`).Scan(&appliedAt2); err != nil {
 		t.Fatalf("read applied_at after reopen: %v", err)
 	}
 	if appliedAt != appliedAt2 {
-		t.Fatalf("expected baseline migration to be idempotent, applied_at changed %q -> %q", appliedAt, appliedAt2)
+		t.Fatalf("expected migrations to be idempotent, applied_at changed %q -> %q", appliedAt, appliedAt2)
 	}
 
-	// Seed a user row on v6 to verify incremental forward migrations preserve data.
+	// Seed a user row on v7 to verify incremental forward migrations preserve data.
 	if _, err := s.writeDB.Exec(
 		`INSERT INTO users (id, email_normalized, password_hash, display_name, created_at) VALUES ('u1', 'a@b.com', 'h', 'Alice', ?)`,
 		appliedAt,
@@ -59,12 +59,12 @@ func TestMigrationsUpgradeFromBaselineAndIdempotency(t *testing.T) {
 	}
 	extended := append(append([]Migration(nil), base...),
 		Migration{
-			Version: 7,
+			Version: 8,
 			Name:    "add_user_bio",
 			SQL:     `ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '';`,
 		},
 		Migration{
-			Version: 8,
+			Version: 9,
 			Name:    "backfill_user_bio",
 			SQL:     `UPDATE users SET bio = 'migrated' WHERE id = 'u1';`,
 		},
@@ -78,8 +78,8 @@ func TestMigrationsUpgradeFromBaselineAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion after upgrade: %v", err)
 	}
-	if ver != 8 {
-		t.Fatalf("expected schema version 8, got %d", ver)
+	if ver != 9 {
+		t.Fatalf("expected schema version 9, got %d", ver)
 	}
 
 	var bio string
@@ -112,7 +112,7 @@ func TestMigrationFailureRollsBackAtomically(t *testing.T) {
 	}
 	broken := append(append([]Migration(nil), base...),
 		Migration{
-			Version: 7,
+			Version: 8,
 			Name:    "partial_then_fail",
 			SQL: `
 				CREATE TABLE rollback_probe (id TEXT PRIMARY KEY);
@@ -129,8 +129,8 @@ func TestMigrationFailureRollsBackAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if ver != 6 {
-		t.Fatalf("expected schema version to stay at 6 after rollback, got %d", ver)
+	if ver != 7 {
+		t.Fatalf("expected schema version to stay at 7 after rollback, got %d", ver)
 	}
 
 	var probe string
@@ -146,7 +146,7 @@ func TestMigrationsRejectPreReleaseAndFutureVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := s.writeDB.Exec(`UPDATE schema_meta SET version = 5`); err != nil {
+	if _, err := s.writeDB.Exec(`DELETE FROM schema_meta; INSERT INTO schema_meta (version, applied_at) VALUES (5, '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("downgrade version: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -162,7 +162,7 @@ func TestMigrationsRejectPreReleaseAndFutureVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open raw sqlite: %v", err)
 	}
-	if _, err := rawDB.Exec(`UPDATE schema_meta SET version = 99`); err != nil {
+	if _, err := rawDB.Exec(`DELETE FROM schema_meta; INSERT INTO schema_meta (version, applied_at) VALUES (99, '2026-01-01T00:00:00Z')`); err != nil {
 		_ = rawDB.Close()
 		t.Fatalf("set future version: %v", err)
 	}

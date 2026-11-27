@@ -85,7 +85,10 @@ func TestOpenSchemaVersionCheckAndWALConcurrency(t *testing.T) {
 
 	// Bump schema version to simulate incompatible DB and verify Open rejects it.
 	if err := s.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE schema_meta SET version = 99`)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM schema_meta`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO schema_meta (version, applied_at) VALUES (99, ?)`, FormatTime(time.Now()))
 		return err
 	}); err != nil {
 		t.Fatalf("bump version: %v", err)

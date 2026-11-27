@@ -32,14 +32,14 @@ import {
   X,
 } from "lucide-react";
 import { api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
-import { accentForeground, accentSwatch, applyAccent } from "../accent";
+import { applyAccent } from "../accent";
 import { useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
 import { isMacPlatform, readLastSpaceView, useChannelSort, useSidebarCollapsed, writeLastSpaceView, type ChannelSortPref, type SavedMainView } from "../preferences";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
 import { AgentForm } from "./AgentForm";
-import { agentStatusText, MemberAvatar } from "./Avatar";
+import { agentStatusText, MemberAvatar, SpaceAvatar } from "./Avatar";
 import { ConversationView } from "./ConversationView";
 import { DesktopServerTrigger } from "./DesktopServer";
 import { DetailPane, type DetailTarget } from "./DetailPane";
@@ -822,26 +822,25 @@ export function Workbench({
             <div className="flex flex-col items-center gap-2 pt-3">
               {(spaces.length > 0 ? spaces : [boot.space]).map((sp) => {
                 const active = sp.slug === spaceSlug;
-                const spAccent = sp.slug === spaceSlug ? boot.space.accent : sp.accent;
+                const current = active ? boot.space : sp;
                 return (
                   <button
-                    key={sp.id}
-                    onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(sp.slug))}
-                    title={sp.name}
-                    aria-label={`Space ${sp.name}`}
+                    key={current.id}
+                    onClick={() => (active ? setMainView({ kind: "inbox" }) : onSwitchSpace?.(current.slug))}
+                    title={current.name}
+                    aria-label={`Space ${current.name}`}
                     className="relative size-9 flex items-center justify-center group"
                   >
                     <span
-                      className={`absolute -left-2.5 w-[3px] rounded-r-[2px] bg-nav-fg-strong transition-all duration-150 ${active ? "h-5 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
+                      className={`absolute -left-2.5 w-[3px] rounded-r-[2px] bg-nav-fg-strong transition-all duration-200 ${active ? "h-5 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"}`}
                     />
-                    <span
-                      className={`size-9 rounded-[6px] text-[14px] font-semibold flex items-center justify-center transition-opacity ${
-                        active ? "ring-1 ring-white/20" : "opacity-60 hover:opacity-95"
-                      }`}
-                      style={{ background: accentSwatch(spAccent), color: accentForeground(spAccent) }}
-                    >
-                      {(sp.name[0] ?? "S").toUpperCase()}
-                    </span>
+                    <SpaceAvatar
+                      space={current}
+                      size="md"
+                      active={active}
+                      morph
+                      className={active ? "" : "opacity-75 group-hover:opacity-100"}
+                    />
                   </button>
                 );
               })}

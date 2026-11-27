@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
 import { clearPreferencesForTests, readFontFamily, readFontSize, readLongMessagesPref } from "../preferences";
+import { spaceAcronym } from "./Avatar";
 import { AdminPanel, type AdminTab } from "./Views";
 
 const sampleBoot: BootstrapData = {
@@ -227,5 +228,70 @@ describe("AdminPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(props.onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("edits space name and uploads or removes a custom space avatar", async () => {
+    vi.spyOn(api, "listArchivedChannels").mockResolvedValue({ conversations: [] });
+    const updateSpace = vi.spyOn(api, "updateSpace").mockResolvedValue({
+      space: { ...sampleBoot.space, name: "Ink Lab" },
+    });
+    const uploadAvatar = vi.spyOn(api, "uploadSpaceAvatar").mockResolvedValue({
+      space: { ...sampleBoot.space, avatar_hash: "a".repeat(64) },
+    });
+    const removeAvatar = vi.spyOn(api, "removeSpaceAvatar").mockResolvedValue({
+      space: { ...sampleBoot.space, avatar_hash: "" },
+    });
+
+    const { rerender } = renderAdmin("settings");
+
+    const nameInput = screen.getByRole("textbox", { name: "Space name" }) as HTMLInputElement;
+    expect(nameInput.value).toBe("Sumi Studio");
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    expect((saveBtn as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(nameInput, { target: { value: "  Ink Lab  " } });
+    expect((saveBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(saveBtn);
+    await waitFor(() => expect(updateSpace).toHaveBeenCalledWith("studio", { name: "Ink Lab" }));
+
+    const fileInput = screen.getByLabelText("Upload space avatar") as HTMLInputElement;
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "icon.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [png] } });
+    await waitFor(() => expect(uploadAvatar).toHaveBeenCalledWith("studio", png));
+
+    // When a custom avatar exists, the Remove button appears and triggers removal.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <AdminPanel
+          boot={{ ...sampleBoot, space: { ...sampleBoot.space, avatar_hash: "a".repeat(64) } }}
+          tab="settings"
+          onTab={vi.fn()}
+          onInspectAgent={vi.fn()}
+          onInspectHuman={vi.fn()}
+          onOpenDM={vi.fn()}
+          onNewAgent={vi.fn()}
+          onCopyAgent={vi.fn()}
+          onConnectComputer={vi.fn()}
+          theme="system"
+          onTheme={vi.fn()}
+          onLogout={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(removeAvatar).toHaveBeenCalledWith("studio"));
+  });
+
+  it("computes multi-word and CJK space acronyms cleanly", () => {
+    expect(spaceAcronym("Sumi Studio")).toBe("SS");
+    expect(spaceAcronym("AI Research Lab")).toBe("ARL");
+    expect(spaceAcronym("Design Ops Team Core")).toBe("DOT");
+    expect(spaceAcronym("Research")).toBe("Re");
+    expect(spaceAcronym("SumiLab")).toBe("SL");
+    expect(spaceAcronym("AI")).toBe("AI");
+    expect(spaceAcronym("墨研社")).toBe("墨研");
+    expect(spaceAcronym("道")).toBe("道");
+    expect(spaceAcronym("  ")).toBe("S");
   });
 });

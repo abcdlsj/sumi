@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -120,6 +121,62 @@ func (s *Server) handleUpdateSpace(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 	sp, err := s.svc.UpdateSpace(r.Context(), actor, body.Name, body.Accent)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"space": sp})
+}
+
+func (s *Server) handleGetSpaceAvatar(w http.ResponseWriter, r *http.Request, viewer domain.Member) {
+	avatar, err := s.svc.OpenSpaceAvatar(r.Context(), viewer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	defer avatar.File.Close()
+
+	info, statErr := avatar.File.Stat()
+	etag := `"` + avatar.SHA256 + `"`
+	if statErr == nil {
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Content-Type", avatar.MediaType)
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Query().Get("v") == avatar.SHA256 {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	http.ServeContent(w, r, "", info.ModTime(), avatar.File)
+}
+
+func (s *Server) handleUploadSpaceAvatar(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	r.Body = http.MaxBytesReader(w, r.Body, domain.MaxSpaceAvatarBytes+(1<<20))
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, domain.NewError(domain.CodeInvalidArgument, "multipart field 'file' is required"))
+		return
+	}
+	defer file.Close()
+
+	sp, err := s.svc.SetSpaceAvatar(r.Context(), actor, file)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"space": sp})
+}
+
+func (s *Server) handleDeleteSpaceAvatar(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	sp, err := s.svc.RemoveSpaceAvatar(r.Context(), actor)
 	if err != nil {
 		writeError(w, err)
 		return

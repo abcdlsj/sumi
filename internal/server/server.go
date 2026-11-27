@@ -135,6 +135,9 @@ func (s *Server) registerRoutes() {
 	r.Route("/api/v1/spaces/{spaceSlug}", func(r chi.Router) {
 		r.Get("/bootstrap", s.handleBootstrap)
 		r.Patch("/", s.asHuman(s.handleUpdateSpace))
+		r.Get("/avatar", s.asHuman(s.handleGetSpaceAvatar))
+		r.Put("/avatar", s.asHuman(s.handleUploadSpaceAvatar))
+		r.Delete("/avatar", s.asHuman(s.handleDeleteSpaceAvatar))
 		r.Get("/events", s.handleSSE)
 
 		r.Get("/members", s.asHuman(s.handleListMembers))
