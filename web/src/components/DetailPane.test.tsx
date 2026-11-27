@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAgentTemplatesForTests, listAgentTemplates } from "../agentTemplates";
+import { clearAgentTemplatesForTests, listAgentTemplates, saveAgentTemplate } from "../agentTemplates";
 import { api, type BootstrapData, type Member, type Message, type Task } from "../api";
 import { DetailPane } from "./DetailPane";
 
@@ -451,6 +451,114 @@ describe("AgentDetail activity", () => {
       driver_kind: "acp",
       driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini" },
     });
+  });
+
+  it("applies a saved template when editing an agent driver, keeping blank fields and saving back to the agent", async () => {
+    saveAgentTemplate({
+      name: "Pi Anthropic",
+      role_text: "Unused during driver edit",
+      driver_kind: "acp",
+      driver_config: { provider: "pi", pi_provider: "anthropic", pi_model: "claude-sonnet" },
+    });
+    const member: Member = {
+      id: "a1",
+      space_id: "s",
+      kind: "agent",
+      display_name: "Lin",
+      access_level: "member",
+      agent: {
+        computer_id: "c1",
+        role_text: "Backend engineer",
+        driver_kind: "acp",
+        driver_config: { provider: "pi", pi_provider: "openai", pi_model: "gpt-5-mini", context_window: 272000 },
+        runtime_state: "idle",
+      },
+      created_at: "",
+    };
+    const updateDriver = vi.spyOn(api, "updateAgentDriver").mockResolvedValue({ agent: member });
+    const data = {
+      ...boot,
+      members: [member],
+      computers: [
+        { id: "c1", name: "mac", hostname: "mac.local", os: "macos", connection_status: "online", acp_providers: ["pi", "claude"], created_at: "" },
+      ],
+    } as unknown as BootstrapData;
+    renderPane({ kind: "agent", memberID: "a1" }, data);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const group = screen.getByRole("group", { name: "Driver templates" });
+    fireEvent.click(within(group).getByRole("button", { name: /Pi Anthropic/ }));
+
+    expect((screen.getByLabelText(/pi provider/) as HTMLInputElement).value).toBe("anthropic");
+    expect((screen.getByLabelText(/pi model/) as HTMLInputElement).value).toBe("claude-sonnet");
+    // Blank context_window in the template preserves the agent's existing value.
+    expect((screen.getByLabelText(/Context window/) as HTMLInputElement).value).toBe("272000");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save and restart" }));
+    await waitFor(() =>
+      expect(updateDriver).toHaveBeenCalledWith("s", "a1", "acp", {
+        provider: "pi",
+        pi_provider: "anthropic",
+        pi_model: "claude-sonnet",
+        context_window: 272000,
+      }),
+    );
+  });
+
+  it("never copies API keys from templates in edit mode, preserves typed keys, and supports reset", async () => {
+    saveAgentTemplate({
+      name: "New Gateway",
+      role_text: "",
+      driver_kind: "builtin",
+      driver_config: { base_url: "http://127.0.0.1:4000/v1", model: "gpt-5" },
+    });
+    const member: Member = {
+      id: "a2",
+      space_id: "s",
+      kind: "agent",
+      display_name: "Kira",
+      access_level: "member",
+      agent: {
+        computer_id: "c1",
+        role_text: "Reviewer",
+        driver_kind: "builtin",
+        driver_config: { base_url: "http://127.0.0.1:3000/v1", model: "old-model", api_key_set: true },
+        runtime_state: "idle",
+      },
+      created_at: "",
+    };
+    const updateDriver = vi.spyOn(api, "updateAgentDriver").mockResolvedValue({ agent: member });
+    const data = { ...boot, members: [member] } as unknown as BootstrapData;
+    renderPane({ kind: "agent", memberID: "a2" }, data);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const group = screen.getByRole("group", { name: "Driver templates" });
+    fireEvent.click(within(group).getByRole("button", { name: /New Gateway/ }));
+
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:4000/v1");
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("gpt-5");
+    expect((screen.getByLabelText(/^API key/) as HTMLInputElement).value).toBe("");
+
+    // Reset restores the agent's original driver fields.
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("http://127.0.0.1:3000/v1");
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("old-model");
+
+    // Re-applying after typing an API key keeps the typed key intact; omitting it leaves server key unchanged.
+    fireEvent.click(within(group).getByRole("button", { name: /New Gateway/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save and restart" }));
+    await waitFor(() =>
+      expect(updateDriver).toHaveBeenCalledWith("s", "a2", "builtin", {
+        base_url: "http://127.0.0.1:4000/v1",
+        model: "gpt-5",
+      }),
+    );
+
+    // Reopen and verify an explicitly typed API key is preserved across template application.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText(/^API key/), { target: { value: "sk-typed-by-user" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "Driver templates" })).getByRole("button", { name: /New Gateway/ }));
+    expect((screen.getByLabelText(/^API key/) as HTMLInputElement).value).toBe("sk-typed-by-user");
   });
 
   it("exposes Stop button for working agents to owners/admins and sends stop_turn", async () => {

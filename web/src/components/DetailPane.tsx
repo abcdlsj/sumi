@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, Brain, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
-import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
+import { saveAgentTemplate, templateDriverSummary, templateFromAgent, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, useSendKey, useSpellCheckAttr, useTaskDetailsCollapsed } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
 import { AttachmentDraftRow, AttachmentPicker, MessageAttachments, useAttachmentDraft } from "./Attachments";
-import { draftFromAgent, driverInput, DriverFields, validateDriver, type DriverDraft } from "./AgentForm";
+import { draftFromAgent, draftFromTemplate, driverInput, DriverFields, mergeDraft, validateDriver, type DriverDraft } from "./AgentForm";
 import { AgentWorkspace } from "./AgentWorkspace";
 import { describeAction } from "./ConversationView";
 import { MentionPopup, useMentionMembers, useMentionPicker } from "./MentionPicker";
@@ -1243,10 +1243,27 @@ function ThreadDetail({
 function DriverEditor({ spaceSlug, member, boot, onDone }: { spaceSlug: string; member: Member; boot: BootstrapData; onDone: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(member));
+  const { templates } = useAgentTemplates();
+  const computer = boot.computers.find((c) => c.id === member.agent?.computer_id);
+  const [draft, setDraft] = useState<DriverDraft>(() => draftFromAgent(member, computer));
+  const [activeTemplateID, setActiveTemplateID] = useState("");
   const [errors, setErrors] = useState<ReturnType<typeof validateDriver>>({});
   const { busy, run } = useAction();
-  const computer = boot.computers.find((c) => c.id === member.agent?.computer_id);
+  const activeTemplate = templates.find((t) => t.id === activeTemplateID) ?? null;
+
+  function applyTemplate(tpl: AgentTemplate) {
+    setActiveTemplateID(tpl.id);
+    setErrors({});
+    // Blank template fields keep existing values; templates never carry API keys.
+    setDraft((cur) => mergeDraft(cur, draftFromTemplate(tpl, computer)));
+  }
+
+  function resetDraft() {
+    setActiveTemplateID("");
+    setErrors({});
+    setDraft(draftFromAgent(member, computer));
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -1263,6 +1280,49 @@ function DriverEditor({ spaceSlug, member, boot, onDone }: { spaceSlug: string; 
       }}
       className="space-y-4 animate-fade-in"
     >
+      {templates.length > 0 && (
+        <div className="space-y-1.5 pb-3 border-b border-line">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[12.5px] font-medium text-fg-3">Apply template</span>
+            {activeTemplate && (
+              <button
+                type="button"
+                onClick={resetDraft}
+                className="text-[12px] text-fg-3 hover:text-fg transition-colors"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Driver templates">
+            {templates.map((tpl) => {
+              const active = activeTemplateID === tpl.id;
+              return (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => applyTemplate(tpl)}
+                  title={tpl.role_text || templateDriverSummary(tpl)}
+                  className={`h-7 px-2.5 rounded-[5px] border text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+                    active
+                      ? "border-accent text-accent-text bg-accent-soft"
+                      : "border-line text-fg-2 bg-subtle/50 hover:border-line-strong hover:text-fg"
+                  }`}
+                >
+                  <span className="truncate max-w-[140px] font-medium">{tpl.name}</span>
+                  <span className="font-mono text-[11px] opacity-65">{templateDriverSummary(tpl)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[12px] text-fg-3 leading-snug">
+            {activeTemplate
+              ? `Applied “${activeTemplate.name}”. Blank fields and API keys stay untouched — review before saving.`
+              : "Fills driver fields defined by a template; blank fields and API keys are kept."}
+          </p>
+        </div>
+      )}
       <DriverFields
         draft={draft}
         onChange={setDraft}
