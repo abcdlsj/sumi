@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Info, Loader2, RefreshCw, Search, X } from "lucide-react";
 import type { TaskStatus } from "../api";
 import { isTopLayer, pushLayer, releaseLayer } from "../layers";
+import { useSpellCheckAttr } from "../preferences";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
 type Size = "sm" | "md" | "lg";
@@ -129,6 +130,7 @@ export function Field({
   leading,
   optional,
   className = "",
+  spellCheck,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & {
   label?: string;
@@ -140,6 +142,7 @@ export function Field({
 }) {
   const auto = useId();
   const id = rest.id ?? auto;
+  const resolvedSpellCheck = useSpellCheckAttr(spellCheck);
   return (
     <FieldShell id={id} label={label} hint={hint} error={error} optional={optional}>
       <div className="relative">
@@ -147,6 +150,7 @@ export function Field({
         <input
           {...rest}
           id={id}
+          spellCheck={resolvedSpellCheck}
           aria-invalid={error ? true : undefined}
           className={`${inputBase} h-9 ${leading ? "pl-9" : "pl-3"} ${trailing ? "pr-10" : "pr-3"} ${
             error ? "border-danger" : "border-line-strong hover:border-fg-4"
@@ -164,15 +168,18 @@ export function TextArea({
   error,
   optional,
   className = "",
+  spellCheck,
   ...rest
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; hint?: ReactNode; error?: string; optional?: boolean }) {
   const auto = useId();
   const id = rest.id ?? auto;
+  const resolvedSpellCheck = useSpellCheckAttr(spellCheck);
   return (
     <FieldShell id={id} label={label} hint={hint} error={error} optional={optional}>
       <textarea
         {...rest}
         id={id}
+        spellCheck={resolvedSpellCheck}
         className={`${inputBase} px-3 py-2.5 leading-relaxed resize-none ${error ? "border-danger" : "border-line-strong hover:border-fg-4"} ${className}`}
       />
     </FieldShell>
@@ -287,6 +294,7 @@ export function Select<T extends string = string>({
   menuWidth?: number;
 }) {
   const id = useId();
+  const spellCheck = useSpellCheckAttr();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -405,6 +413,7 @@ export function Select<T extends string = string>({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={searchPlaceholder}
+                  spellCheck={spellCheck}
                   className="w-full h-8 pl-7 pr-2.5 rounded-[4px] bg-subtle border border-line text-[13px] text-fg outline-none placeholder:text-fg-4 focus:border-accent"
                 />
               </div>
@@ -483,6 +492,7 @@ export function MultiSelectList<T extends string = string>({
   searchPlaceholder?: string;
 }) {
   const id = useId();
+  const spellCheck = useSpellCheckAttr();
   const [q, setQ] = useState("");
   const selected = useMemo(() => new Set(values), [values]);
   const filtered = useMemo(() => {
@@ -506,6 +516,7 @@ export function MultiSelectList<T extends string = string>({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={searchPlaceholder}
+              spellCheck={spellCheck}
               className="w-full h-7 pl-6 pr-2 rounded-[4px] bg-subtle text-[13px] text-fg outline-none placeholder:text-fg-4"
             />
           </div>

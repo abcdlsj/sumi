@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, formatClock, type BootstrapData, type Conversation, type Member, type Message } from "../api";
 import { clearAllDraftsForTests } from "../drafts";
+import { applySpellCheck, clearPreferencesForTests, writeSpellCheck } from "../preferences";
 import { ConversationView } from "./ConversationView";
 
 const lisi: Member = { id: "m-lisi", space_id: "s", kind: "human", display_name: "Lisi", access_level: "owner", created_at: "2026-11-19T10:00:00Z" };
@@ -104,7 +105,11 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  clearPreferencesForTests();
+  applySpellCheck("on");
+  vi.restoreAllMocks();
+});
 
 describe("message stream", () => {
   it("opens at the end and follows new messages", async () => {
@@ -429,5 +434,18 @@ describe("channel workflow and out-of-channel mentions", () => {
     expect(await screen.findByText(/isn't in #engineering/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
     await waitFor(() => expect(inviteSpy).toHaveBeenCalledWith("studio", conv.id, kira.id));
+  });
+
+  it("sets spellcheck=false on the composer textarea when spell check is disabled", async () => {
+    renderView();
+    await screen.findByText("message 2");
+    const box = screen.getByRole("textbox", { name: "Message #engineering" });
+    expect(box.getAttribute("spellcheck")).toBeNull();
+
+    act(() => writeSpellCheck("off"));
+    await waitFor(() => expect(box.getAttribute("spellcheck")).toBe("false"));
+
+    act(() => writeSpellCheck("on"));
+    await waitFor(() => expect(box.getAttribute("spellcheck")).toBeNull());
   });
 });

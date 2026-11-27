@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearAgentTemplatesForTests, listAgentTemplates, saveAgentTemplate, suggestCopyName } from "../agentTemplates";
 import { api, type Computer, type Member } from "../api";
+import { applySpellCheck, clearPreferencesForTests, writeSpellCheck } from "../preferences";
 import { AgentForm } from "./AgentForm";
 import { agentSprite } from "./Avatar";
 
@@ -366,6 +367,29 @@ describe("AgentForm", () => {
         }),
       ),
     );
+  });
+
+  it("follows the spell check preference for Role while keeping technical driver fields always spellcheck=false", async () => {
+    try {
+      render(<AgentForm spaceSlug="s" computers={[computer]} onCreated={() => {}} />);
+      const role = screen.getByLabelText("Role");
+      expect(role.getAttribute("spellcheck")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: /Model API/ }));
+      const baseURL = screen.getByLabelText("Base URL");
+      expect(baseURL.getAttribute("spellcheck")).toBe("false");
+
+      act(() => writeSpellCheck("off"));
+      await waitFor(() => expect(role.getAttribute("spellcheck")).toBe("false"));
+      expect(baseURL.getAttribute("spellcheck")).toBe("false");
+
+      act(() => writeSpellCheck("on"));
+      await waitFor(() => expect(role.getAttribute("spellcheck")).toBeNull());
+      expect(baseURL.getAttribute("spellcheck")).toBe("false");
+    } finally {
+      clearPreferencesForTests();
+      applySpellCheck("on");
+    }
   });
 });
 

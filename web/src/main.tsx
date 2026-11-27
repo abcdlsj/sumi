@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { ToastProvider } from "./components/ui";
 import { capturePairingFromURL } from "./pairing";
-import { applyTypographyPreferences } from "./preferences";
+import { applySpellCheck, applyTypographyPreferences } from "./preferences";
 import {
   captureShellFromURL,
   installContextMenuGuard,
@@ -29,6 +29,7 @@ captureShellFromURL();
 capturePairingFromURL();
 applyTheme();
 applyTypographyPreferences();
+applySpellCheck();
 installContextMenuGuard();
 installExternalLinkHandler();
 installWindowCloseHandler();

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useQueryClient } from "@tanstack/react-query";
 import { Hash, Keyboard, Loader2, Lock, MessageSquare, Search } from "lucide-react";
 import { api, formatClock, slugInput, slugify, type ChannelGroup, type Member, type SearchHit } from "../api";
-import { isMacPlatform } from "../preferences";
+import { isMacPlatform, useSpellCheckAttr } from "../preferences";
 import { MemberAvatar } from "./Avatar";
 import { Button, Field, Modal, MultiSelectList, Segmented, useAction } from "./ui";
 
@@ -272,6 +272,7 @@ export function JumpDialog({
   onSelectMessageHit?: (hit: SearchHit) => void;
 }) {
   const [q, setQ] = useState("");
+  const spellCheck = useSpellCheckAttr();
   const [sel, setSel] = useState(0);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -361,6 +362,7 @@ export function JumpDialog({
         <input
           autoFocus
           value={q}
+          spellCheck={spellCheck}
           onChange={(e) => {
             setQ(e.target.value);
             setSel(0);

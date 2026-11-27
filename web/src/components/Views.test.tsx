@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, type BootstrapData } from "../api";
-import { clearPreferencesForTests, readFontFamily, readFontSize, readLongMessagesPref } from "../preferences";
+import { applySpellCheck, clearPreferencesForTests, readFontFamily, readFontSize, readLongMessagesPref, readSpellCheck } from "../preferences";
 import { AdminPanel, type AdminTab } from "./Views";
 
 const sampleBoot: BootstrapData = {
@@ -159,6 +159,7 @@ afterEach(() => {
   clearPreferencesForTests();
   delete document.documentElement.dataset.font;
   delete document.documentElement.dataset.fontSize;
+  applySpellCheck("on");
 });
 
 describe("AdminPanel", () => {
@@ -218,6 +219,15 @@ describe("AdminPanel", () => {
     expect(within(longMsgGroup).getByRole("tab", { name: "Expanded" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(within(longMsgGroup).getByRole("tab", { name: "Collapsed" }));
     expect(readLongMessagesPref()).toBe("collapsed");
+
+    const spellGroup = screen.getByRole("tablist", { name: "Spell check" });
+    expect(within(spellGroup).getByRole("tab", { name: "On" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(spellGroup).getByRole("tab", { name: "Off" }));
+    expect(readSpellCheck()).toBe("off");
+    expect(document.documentElement.dataset.spellcheck).toBe("off");
+    fireEvent.click(within(spellGroup).getByRole("tab", { name: "On" }));
+    expect(readSpellCheck()).toBe("on");
+    expect(document.documentElement.dataset.spellcheck).toBeUndefined();
 
     const accentGroup = screen.getByRole("radiogroup", { name: "Space accent" });
     fireEvent.click(within(accentGroup).getByRole("radio", { name: "Sky" }));

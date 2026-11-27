@@ -30,7 +30,7 @@ import {
 import { accentForeground, accentSwatch, SPACE_ACCENTS, type SpaceAccent } from "../accent";
 import { templateDriverSummary, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { api, formatClock, formatDay, type BootstrapData, type Conversation, type InboxItem, type Member, type RuntimeState, type Task, type TaskStatus } from "../api";
-import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, type FontFamilyPref, type FontSizePref } from "../preferences";
+import { isMacPlatform, useFontFamily, useFontSize, useLongMessagesPref, useSendKey, useSpellCheck, useSpellCheckAttr, type FontFamilyPref, type FontSizePref } from "../preferences";
 import type { ThemePref } from "../theme";
 import { AgentTemplateDialog } from "./AgentForm";
 import type { DetailTarget } from "./DetailPane";
@@ -340,6 +340,7 @@ export function TasksView({
   onOpenDetail: (t: DetailTarget) => void;
 }) {
   const qc = useQueryClient();
+  const spellCheck = useSpellCheckAttr();
   const [creating, setCreating] = useState(false);
   const [q, setQ] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
@@ -405,6 +406,7 @@ export function TasksView({
               <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 value={q}
+                spellCheck={spellCheck}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Filter by title, #number, or assignee…"
                 aria-label="Filter tasks"
@@ -536,6 +538,7 @@ function AgentList({
   onCopyAgent?: (agent: Member) => void;
 }) {
   const [q, setQ] = useState("");
+  const spellCheck = useSpellCheckAttr();
   const [stateFilter, setStateFilter] = useState<AgentStateFilter>("all");
   const [group, setGroup] = useState<"none" | "computer">("none");
   const allAgents = boot.members.filter((m) => m.kind === "agent");
@@ -589,6 +592,7 @@ function AgentList({
           <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={q}
+            spellCheck={spellCheck}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search agents by name, role, or model…"
             aria-label="Search agents"
@@ -1050,6 +1054,7 @@ export function AdminPanel({
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionID>("general");
   const settingsRefs = useRef<Partial<Record<SettingsSectionID, HTMLElement | null>>>({});
   const [sendKey, setSendKey] = useSendKey();
+  const [spellCheck, setSpellCheck] = useSpellCheck();
   const [longMessages, setLongMessages] = useLongMessagesPref();
   const [fontFamily, setFontFamily] = useFontFamily();
   const [fontSize, setFontSize] = useFontSize();
@@ -1334,6 +1339,7 @@ export function AdminPanel({
                 <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   value={peopleQuery}
+                  spellCheck={spellCheck === "off" ? false : undefined}
                   onChange={(e) => setPeopleQuery(e.target.value)}
                   placeholder="Search people…"
                   aria-label="Search people"
@@ -1560,7 +1566,7 @@ export function AdminPanel({
                     />
                   </div>
 
-                  <div className="pt-4 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="py-4 flex items-center justify-between gap-4 flex-wrap">
                     <div className="min-w-0">
                       <div className="text-[14px] font-medium text-fg">Send message shortcut</div>
                       <div className="text-[12.5px] text-fg-3 mt-0.5">
@@ -1576,6 +1582,26 @@ export function AdminPanel({
                       options={[
                         { value: "enter", label: "Enter" },
                         { value: "mod_enter", label: isMacPlatform() ? "⌘ + Enter" : "Ctrl + Enter" },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="pt-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-medium text-fg">Spell check</div>
+                      <div className="text-[12.5px] text-fg-3 mt-0.5">
+                        {spellCheck === "on"
+                          ? "Highlight spelling mistakes in message composers and text fields."
+                          : "Disable spell checking and red underlines in text inputs."}
+                      </div>
+                    </div>
+                    <Segmented
+                      ariaLabel="Spell check"
+                      value={spellCheck}
+                      onChange={setSpellCheck}
+                      options={[
+                        { value: "on", label: "On" },
+                        { value: "off", label: "Off" },
                       ]}
                     />
                   </div>

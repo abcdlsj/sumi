@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import { readDraft, writeDraft } from "../drafts";
-import { isComposerSendEvent, isMacPlatform, useSendKey } from "../preferences";
+import { isComposerSendEvent, isMacPlatform, useSendKey, useSpellCheckAttr } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
 import { AgentReadReceipts, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
@@ -356,6 +356,7 @@ function MessageComposer({
   const toast = useToast();
   const [composer, setComposer] = useState(() => readDraft(conv.id)?.text ?? "");
   const [sendKey] = useSendKey();
+  const spellCheck = useSpellCheckAttr();
   const draft = useAttachmentDraft(spaceSlug);
   const send = useAction();
   const inviteAct = useAction();
@@ -504,6 +505,7 @@ function MessageComposer({
           ref={textRef}
           rows={1}
           value={composer}
+          spellCheck={spellCheck}
           onChange={(e) => {
             setComposer(e.target.value);
             mentions.detect();
@@ -583,6 +585,7 @@ const MessageRow = memo(function MessageRow({
   creatingTask,
   newTaskTitle,
   taskBusy,
+  taskInputSpellCheck,
   reactionPickerOpen,
   moreMenuOpen,
   quickEmoji,
@@ -616,6 +619,7 @@ const MessageRow = memo(function MessageRow({
   creatingTask: boolean;
   newTaskTitle: string;
   taskBusy: boolean;
+  taskInputSpellCheck?: boolean;
   reactionPickerOpen: boolean;
   moreMenuOpen: boolean;
   quickEmoji: ReactionEmoji;
@@ -799,6 +803,7 @@ const MessageRow = memo(function MessageRow({
                 <input
                   autoFocus
                   value={newTaskTitle}
+                  spellCheck={taskInputSpellCheck}
                   onChange={(e) => onChangeTaskTitle(e.target.value)}
                   onKeyDown={(e) => e.key === "Escape" && onCancelTask()}
                   placeholder="Task title"
@@ -940,6 +945,7 @@ export function ConversationView({
   const [replyingTo, setReplyingTo] = useState<string | null>(() => readDraft(conv.id)?.replyTo ?? null);
   const [creatingTaskOnMsg, setCreatingTaskOnMsg] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const taskInputSpellCheck = useSpellCheckAttr();
   const [reactionPickerMsgID, setReactionPickerMsgID] = useState<string | null>(null);
   const [moreMenuMsgID, setMoreMenuMsgID] = useState<string | null>(null);
   const [highlightedMsgID, setHighlightedMsgID] = useState<string | null>(null);
@@ -1368,6 +1374,7 @@ export function ConversationView({
                     creatingTask={creatingTask}
                     newTaskTitle={creatingTask ? newTaskTitle : ""}
                     taskBusy={creatingTask ? taskAction.busy : false}
+                    taskInputSpellCheck={creatingTask ? taskInputSpellCheck : undefined}
                     reactionPickerOpen={reactionPickerMsgID === m.id}
                     moreMenuOpen={moreMenuMsgID === m.id}
                     quickEmoji={quickEmoji}

@@ -5,6 +5,7 @@ export type ChannelSortPref = "default" | "unread" | "name";
 export type LongMessagesPref = "expanded" | "collapsed";
 export type FontFamilyPref = "inter" | "system" | "serif" | "mono";
 export type FontSizePref = "sm" | "md" | "lg" | "xl";
+export type SpellCheckPref = "on" | "off";
 
 const SEND_KEY = "sumi.pref.send_key";
 const CHANNEL_SORT_KEY = "sumi.pref.channel_sort";
@@ -14,6 +15,7 @@ const LAST_LOCATION_KEY = "sumi.pref.last_location";
 const LONG_MESSAGES_KEY = "sumi.pref.long_messages";
 const FONT_FAMILY_KEY = "sumi.pref.font_family";
 const FONT_SIZE_KEY = "sumi.pref.font_size";
+const SPELL_CHECK_KEY = "sumi.pref.spell_check";
 const EVENT = "sumi:prefs";
 
 export type SavedMainView =
@@ -325,4 +327,57 @@ export function useFontSize(): [FontSizePref, (next: FontSizePref) => void] {
 export function applyTypographyPreferences(): void {
   applyFontFamily();
   applyFontSize();
+}
+
+export function readSpellCheck(): SpellCheckPref {
+  return readLS(SPELL_CHECK_KEY) === "off" ? "off" : "on";
+}
+
+export function applySpellCheck(pref: SpellCheckPref = readSpellCheck()): void {
+  if (typeof document === "undefined") return;
+  if (pref === "off") {
+    document.documentElement.dataset.spellcheck = "off";
+    document.documentElement.setAttribute("spellcheck", "false");
+  } else {
+    delete document.documentElement.dataset.spellcheck;
+    document.documentElement.removeAttribute("spellcheck");
+  }
+}
+
+export function writeSpellCheck(next: SpellCheckPref): void {
+  applySpellCheck(next);
+  writeLS(SPELL_CHECK_KEY, next);
+}
+
+export function useSpellCheck(): [SpellCheckPref, (next: SpellCheckPref) => void] {
+  const [pref, setPref] = useState<SpellCheckPref>(readSpellCheck);
+  useEffect(() => {
+    applySpellCheck(pref);
+  }, [pref]);
+  useEffect(() => {
+    const sync = () => {
+      const next = readSpellCheck();
+      applySpellCheck(next);
+      setPref(next);
+    };
+    window.addEventListener(EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const update = useCallback((next: SpellCheckPref) => {
+    applySpellCheck(next);
+    setPref(next);
+    writeLS(SPELL_CHECK_KEY, next);
+  }, []);
+  return [pref, update];
+}
+
+/** Resolves the React spellCheck prop: explicit overrides (e.g. code/URL inputs) win; otherwise off disables it and on keeps browser defaults. */
+export function useSpellCheckAttr(override?: boolean | "true" | "false"): boolean | undefined {
+  const [pref] = useSpellCheck();
+  if (override !== undefined) return override === true || override === "true";
+  return pref === "off" ? false : undefined;
 }

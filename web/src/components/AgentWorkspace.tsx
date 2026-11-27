@@ -33,6 +33,7 @@ import {
   type WorkspaceFileContent,
   type WorkspaceFileNode,
 } from "../api";
+import { useSpellCheckAttr } from "../preferences";
 import { CodeBlock, languageFromPath } from "./CodeHighlight";
 import { MessageBody } from "./MessageBody";
 import { ResizeHandle } from "./Resize";
@@ -109,6 +110,7 @@ export function AgentWorkspace({
   const isMemory = scope === "memory";
   const scopeLabel = isMemory ? "memory" : "workspace";
   const scopeTitle = isMemory ? "Memory" : "Workspace";
+  const spellCheck = useSpellCheckAttr();
   const [includeHidden, setIncludeHiddenState] = useState(readHiddenPref);
   const [treeQuery, setTreeQuery] = useState("");
   const [treeWidth, setTreeWidth] = useState(280);
@@ -521,6 +523,7 @@ export function AgentWorkspace({
             <Search className="size-3.5 text-fg-4 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               value={treeQuery}
+              spellCheck={spellCheck}
               onChange={(e) => setTreeQuery(e.target.value)}
               placeholder="Filter files…"
               aria-label={`Filter ${scopeLabel} files`}

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, Brain, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Copy, FolderOpen, Hash, Lock, MessageSquare, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Square, UserPlus, X } from "lucide-react";
 import { saveAgentTemplate, templateFromAgent } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
-import { isComposerSendEvent, useSendKey, useTaskDetailsCollapsed } from "../preferences";
+import { isComposerSendEvent, useSendKey, useSpellCheckAttr, useTaskDetailsCollapsed } from "../preferences";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
@@ -222,6 +222,7 @@ function ReplyBox({
 }) {
   const [reply, setReply] = useState("");
   const [sendKey] = useSendKey();
+  const spellCheck = useSpellCheckAttr();
   const draft = useAttachmentDraft(spaceSlug);
   const { busy, run } = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -262,6 +263,7 @@ function ReplyBox({
             ref={textRef}
             rows={1}
             value={reply}
+            spellCheck={spellCheck}
             onChange={(e) => {
               setReply(e.target.value);
               mentions.detect();
@@ -386,6 +388,7 @@ function ChannelTasksDetail({
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const spellCheck = useSpellCheckAttr();
   const [scope, setScope] = useState<"all" | "mine">("all");
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
@@ -475,6 +478,7 @@ function ChannelTasksDetail({
             <input
               autoFocus
               value={title}
+              spellCheck={spellCheck}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
               placeholder={`New task in #${conv?.slug ?? "channel"}…`}
@@ -559,6 +563,7 @@ function MembersDetail({
   const qc = useQueryClient();
   const act = useAction();
   const toast = useToast();
+  const spellCheck = useSpellCheckAttr();
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const conv = boot.conversations.find((c) => c.id === convID);
@@ -601,6 +606,7 @@ function MembersDetail({
           <input
             autoFocus
             value={q}
+            spellCheck={spellCheck}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Find people and agents"
             aria-label="Find members to add"
@@ -718,6 +724,7 @@ function TaskDetail({
 }) {
   const qc = useQueryClient();
   const act = useAction();
+  const spellCheck = useSpellCheckAttr();
   const [editing, setEditing] = useState(false);
   const [detailsCollapsed, setDetailsCollapsed] = useTaskDetailsCollapsed();
   const [editTitle, setEditTitle] = useState("");
@@ -884,6 +891,7 @@ function TaskDetail({
               <input
                 autoFocus
                 value={editTitle}
+                spellCheck={spellCheck}
                 onChange={(e) => setEditTitle(e.target.value)}
                 aria-label="Task title"
                 placeholder="Task title"
@@ -892,6 +900,7 @@ function TaskDetail({
               <textarea
                 rows={3}
                 value={editDesc}
+                spellCheck={spellCheck}
                 onChange={(e) => setEditDesc(e.target.value)}
                 aria-label="Task description"
                 placeholder="Add details…"
@@ -1313,6 +1322,7 @@ function AgentDetail({
   const qc = useQueryClient();
   const act = useAction();
   const toast = useToast();
+  const spellCheck = useSpellCheckAttr();
   const [pending, setPending] = useState<"restart" | "reset_session" | "stop_turn" | null>(null);
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
@@ -1445,6 +1455,7 @@ function AgentDetail({
           <input
             autoFocus
             value={tplName}
+            spellCheck={spellCheck}
             onChange={(e) => setTplName(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setSavingTemplate(false)}
             placeholder="Template name…"

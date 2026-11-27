@@ -18,6 +18,7 @@ import {
   type DriverKind,
   type Member,
 } from "../api";
+import { useSpellCheckAttr } from "../preferences";
 import { MemberAvatar, PixelAvatar } from "./Avatar";
 import { Button, Field, Modal, Select, TextArea, useToast } from "./ui";
 
@@ -579,6 +580,7 @@ export function AgentForm({
   footer?: (submit: ReactNode) => ReactNode;
 }) {
   const toast = useToast();
+  const spellCheck = useSpellCheckAttr();
   const { templates, save: saveTemplate, update: updateTemplate, remove: removeTemplate } = useAgentTemplates();
   const existingAgents = existingMembers.filter((m) => m.kind === "agent" && m.agent);
   const existingNames = existingMembers.map((m) => m.display_name);
@@ -895,6 +897,7 @@ export function AgentForm({
               <input
                 autoFocus
                 value={templateName}
+                spellCheck={spellCheck}
                 onChange={(e) => setTemplateName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
