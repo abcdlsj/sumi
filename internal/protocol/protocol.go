@@ -16,10 +16,12 @@ const (
 	CapAgentActivity = "agent_activity"
 	// CapAgentWorkspace: the Computer serves read-only workspace_list and workspace_read requests.
 	CapAgentWorkspace = "agent_workspace"
+	// CapAgentMemory: the Computer honors scope="memory" on workspace_list and workspace_read requests.
+	CapAgentMemory = "agent_memory"
 )
 
 // Supported lists every capability of this build, advertised in hello and hello_ack.
-var Supported = []string{CapAgentActivity, CapAgentWorkspace}
+var Supported = []string{CapAgentActivity, CapAgentWorkspace, CapAgentMemory}
 
 // Has reports whether caps contains c.
 func Has(caps []string, c string) bool {
@@ -128,10 +130,11 @@ type ShutdownFrame struct {
 }
 
 type WorkspaceListFrame struct {
-	RequestID     string `json:"request_id"`
-	AgentMemberID string `json:"agent_member_id"`
-	Path          string `json:"path"`
-	IncludeHidden bool   `json:"include_hidden,omitempty"`
+	RequestID     string                `json:"request_id"`
+	AgentMemberID string                `json:"agent_member_id"`
+	Scope         domain.WorkspaceScope `json:"scope,omitempty"`
+	Path          string                `json:"path"`
+	IncludeHidden bool                  `json:"include_hidden,omitempty"`
 }
 
 type WorkspaceListResultFrame struct {
@@ -142,9 +145,10 @@ type WorkspaceListResultFrame struct {
 }
 
 type WorkspaceReadFrame struct {
-	RequestID     string `json:"request_id"`
-	AgentMemberID string `json:"agent_member_id"`
-	Path          string `json:"path"`
+	RequestID     string                `json:"request_id"`
+	AgentMemberID string                `json:"agent_member_id"`
+	Scope         domain.WorkspaceScope `json:"scope,omitempty"`
+	Path          string                `json:"path"`
 }
 
 type WorkspaceReadResultFrame struct {

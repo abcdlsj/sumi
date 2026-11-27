@@ -530,14 +530,21 @@ func (d *Daemon) runConnection(ctx context.Context) error {
 	}
 }
 
-func (d *Daemon) agentWorkDir(agentID string) (string, bool) {
+func (d *Daemon) agentScopeDir(agentID string, scope domain.WorkspaceScope) (string, error) {
+	norm, err := domain.NormalizeWorkspaceScope(scope)
+	if err != nil {
+		return "", err
+	}
 	d.mu.RLock()
 	ag := d.agents[agentID]
 	d.mu.RUnlock()
 	if ag == nil {
-		return "", false
+		return "", domain.NewError(domain.CodeNotFound, "agent is not hosted on this computer")
 	}
-	return ag.workDir, true
+	if norm == domain.ScopeMemory {
+		return ag.memoryDir, nil
+	}
+	return ag.workDir, nil
 }
 
 func workspaceErrFrame(err error) (string, string) {
@@ -550,12 +557,11 @@ func workspaceErrFrame(err error) (string, string) {
 
 func (d *Daemon) handleWorkspaceList(req protocol.WorkspaceListFrame) {
 	res := &protocol.WorkspaceListResultFrame{RequestID: req.RequestID}
-	workDir, ok := d.agentWorkDir(req.AgentMemberID)
-	if !ok {
-		res.ErrorCode = string(domain.CodeNotFound)
-		res.Error = "agent workspace is not hosted on this computer"
+	rootDir, err := d.agentScopeDir(req.AgentMemberID, req.Scope)
+	if err != nil {
+		res.ErrorCode, res.Error = workspaceErrFrame(err)
 	} else {
-		listing, err := listWorkspaceDir(workDir, req.Path, req.IncludeHidden)
+		listing, err := listWorkspaceDir(rootDir, req.Path, req.IncludeHidden)
 		if err != nil {
 			res.ErrorCode, res.Error = workspaceErrFrame(err)
 		} else {
@@ -570,12 +576,11 @@ func (d *Daemon) handleWorkspaceList(req protocol.WorkspaceListFrame) {
 
 func (d *Daemon) handleWorkspaceRead(req protocol.WorkspaceReadFrame) {
 	res := &protocol.WorkspaceReadResultFrame{RequestID: req.RequestID}
-	workDir, ok := d.agentWorkDir(req.AgentMemberID)
-	if !ok {
-		res.ErrorCode = string(domain.CodeNotFound)
-		res.Error = "agent workspace is not hosted on this computer"
+	rootDir, err := d.agentScopeDir(req.AgentMemberID, req.Scope)
+	if err != nil {
+		res.ErrorCode, res.Error = workspaceErrFrame(err)
 	} else {
-		file, err := readWorkspaceFile(workDir, req.Path)
+		file, err := readWorkspaceFile(rootDir, req.Path)
 		if err != nil {
 			res.ErrorCode, res.Error = workspaceErrFrame(err)
 		} else {

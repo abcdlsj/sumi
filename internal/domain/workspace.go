@@ -1,5 +1,26 @@
 package domain
 
+// WorkspaceScope selects which agent-owned root directory a read-only viewer request targets.
+type WorkspaceScope string
+
+const (
+	ScopeWorkspace WorkspaceScope = "workspace"
+	ScopeMemory    WorkspaceScope = "memory"
+)
+
+// NormalizeWorkspaceScope defaults an empty scope to workspace for backward compatibility
+// and rejects unrecognized scopes.
+func NormalizeWorkspaceScope(raw WorkspaceScope) (WorkspaceScope, error) {
+	switch raw {
+	case "", ScopeWorkspace:
+		return ScopeWorkspace, nil
+	case ScopeMemory:
+		return ScopeMemory, nil
+	default:
+		return "", NewError(CodeInvalidArgument, "unsupported workspace scope")
+	}
+}
+
 // WorkspaceFileNode describes a single file, directory, or symlink entry inside an agent's workspace.
 type WorkspaceFileNode struct {
 	Name      string `json:"name"`

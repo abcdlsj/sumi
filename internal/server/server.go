@@ -148,6 +148,8 @@ func (s *Server) registerRoutes() {
 		r.Put("/agents/{agentID}/driver", s.asHuman(s.handleUpdateAgentDriver))
 		r.Get("/agents/{agentID}/workspace", s.asHuman(s.handleListAgentWorkspace))
 		r.Get("/agents/{agentID}/workspace/file", s.asHuman(s.handleReadAgentWorkspaceFile))
+		r.Get("/agents/{agentID}/memory", s.asHuman(s.handleListAgentMemory))
+		r.Get("/agents/{agentID}/memory/file", s.asHuman(s.handleReadAgentMemoryFile))
 
 		r.Get("/conversations", s.asHuman(s.handleListConversations))
 		r.Get("/channels/archived", s.asHuman(s.handleListArchivedChannels))

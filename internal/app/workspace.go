@@ -34,18 +34,34 @@ func (s *Service) resolveAgentWorkspaceTarget(ctx context.Context, actor domain.
 	return computerID.String, nil
 }
 
-func (s *Service) ListAgentWorkspace(ctx context.Context, actor domain.Member, agentID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+func (s *Service) listAgentFiles(ctx context.Context, actor domain.Member, agentID string, scope domain.WorkspaceScope, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
 	computerID, err := s.resolveAgentWorkspaceTarget(ctx, actor, agentID)
 	if err != nil {
 		return nil, err
 	}
-	return s.workspace.ListWorkspace(ctx, computerID, agentID, relPath, includeHidden)
+	return s.workspace.ListWorkspace(ctx, computerID, agentID, scope, relPath, includeHidden)
+}
+
+func (s *Service) readAgentFile(ctx context.Context, actor domain.Member, agentID string, scope domain.WorkspaceScope, relPath string) (*domain.WorkspaceFileContent, error) {
+	computerID, err := s.resolveAgentWorkspaceTarget(ctx, actor, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return s.workspace.ReadWorkspaceFile(ctx, computerID, agentID, scope, relPath)
+}
+
+func (s *Service) ListAgentWorkspace(ctx context.Context, actor domain.Member, agentID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+	return s.listAgentFiles(ctx, actor, agentID, domain.ScopeWorkspace, relPath, includeHidden)
 }
 
 func (s *Service) ReadAgentWorkspaceFile(ctx context.Context, actor domain.Member, agentID, relPath string) (*domain.WorkspaceFileContent, error) {
-	computerID, err := s.resolveAgentWorkspaceTarget(ctx, actor, agentID)
-	if err != nil {
-		return nil, err
-	}
-	return s.workspace.ReadWorkspaceFile(ctx, computerID, agentID, relPath)
+	return s.readAgentFile(ctx, actor, agentID, domain.ScopeWorkspace, relPath)
+}
+
+func (s *Service) ListAgentMemory(ctx context.Context, actor domain.Member, agentID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+	return s.listAgentFiles(ctx, actor, agentID, domain.ScopeMemory, relPath, includeHidden)
+}
+
+func (s *Service) ReadAgentMemoryFile(ctx context.Context, actor domain.Member, agentID, relPath string) (*domain.WorkspaceFileContent, error) {
+	return s.readAgentFile(ctx, actor, agentID, domain.ScopeMemory, relPath)
 }

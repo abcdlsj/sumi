@@ -102,15 +102,19 @@ func (h *computerHub) resolvePending(requestID string, env protocol.Envelope) {
 	}
 }
 
-func (h *computerHub) callWorkspace(ctx context.Context, computerID, reqID string, env protocol.Envelope) (protocol.Envelope, error) {
+func (h *computerHub) callWorkspace(ctx context.Context, computerID, reqID, requiredCap string, env protocol.Envelope) (protocol.Envelope, error) {
 	h.mu.RLock()
 	cc := h.conns[computerID]
 	h.mu.RUnlock()
 	if cc == nil {
 		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer is offline")
 	}
-	if !protocol.Has(cc.capabilities, protocol.CapAgentWorkspace) {
-		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, "computer does not support workspace viewing; please update the daemon")
+	if !protocol.Has(cc.capabilities, requiredCap) {
+		msg := "computer does not support workspace viewing; please update the daemon"
+		if requiredCap == protocol.CapAgentMemory {
+			msg = "computer does not support memory viewing; please update the daemon"
+		}
+		return protocol.Envelope{}, domain.NewError(domain.CodeUnavailable, msg)
 	}
 
 	ch := make(chan protocol.Envelope, 1)
@@ -156,13 +160,29 @@ func workspaceResultError(code, msg string) error {
 	return domain.NewError(c, msg)
 }
 
-func (h *computerHub) ListWorkspace(ctx context.Context, computerID, agentMemberID, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+func resolveWorkspaceCallScope(scope domain.WorkspaceScope) (requiredCap string, frameScope domain.WorkspaceScope, err error) {
+	norm, err := domain.NormalizeWorkspaceScope(scope)
+	if err != nil {
+		return "", "", err
+	}
+	if norm == domain.ScopeMemory {
+		return protocol.CapAgentMemory, domain.ScopeMemory, nil
+	}
+	return protocol.CapAgentWorkspace, "", nil
+}
+
+func (h *computerHub) ListWorkspace(ctx context.Context, computerID, agentMemberID string, scope domain.WorkspaceScope, relPath string, includeHidden bool) (*domain.WorkspaceListing, error) {
+	requiredCap, frameScope, err := resolveWorkspaceCallScope(scope)
+	if err != nil {
+		return nil, err
+	}
 	reqID := uuid.NewString()
-	resp, err := h.callWorkspace(ctx, computerID, reqID, protocol.Envelope{
+	resp, err := h.callWorkspace(ctx, computerID, reqID, requiredCap, protocol.Envelope{
 		Type: protocol.TypeWorkspaceList,
 		WorkspaceList: &protocol.WorkspaceListFrame{
 			RequestID:     reqID,
 			AgentMemberID: agentMemberID,
+			Scope:         frameScope,
 			Path:          relPath,
 			IncludeHidden: includeHidden,
 		},
@@ -182,13 +202,18 @@ func (h *computerHub) ListWorkspace(ctx context.Context, computerID, agentMember
 	return resp.WorkspaceListResult.Listing, nil
 }
 
-func (h *computerHub) ReadWorkspaceFile(ctx context.Context, computerID, agentMemberID, relPath string) (*domain.WorkspaceFileContent, error) {
+func (h *computerHub) ReadWorkspaceFile(ctx context.Context, computerID, agentMemberID string, scope domain.WorkspaceScope, relPath string) (*domain.WorkspaceFileContent, error) {
+	requiredCap, frameScope, err := resolveWorkspaceCallScope(scope)
+	if err != nil {
+		return nil, err
+	}
 	reqID := uuid.NewString()
-	resp, err := h.callWorkspace(ctx, computerID, reqID, protocol.Envelope{
+	resp, err := h.callWorkspace(ctx, computerID, reqID, requiredCap, protocol.Envelope{
 		Type: protocol.TypeWorkspaceRead,
 		WorkspaceRead: &protocol.WorkspaceReadFrame{
 			RequestID:     reqID,
 			AgentMemberID: agentMemberID,
+			Scope:         frameScope,
 			Path:          relPath,
 		},
 	})

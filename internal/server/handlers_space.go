@@ -280,3 +280,24 @@ func (s *Server) handleReadAgentWorkspaceFile(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, file)
 }
+
+func (s *Server) handleListAgentMemory(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	relPath := r.URL.Query().Get("path")
+	includeHidden := r.URL.Query().Get("include_hidden") == "true"
+	listing, err := s.svc.ListAgentMemory(r.Context(), actor, chi.URLParam(r, "agentID"), relPath, includeHidden)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) handleReadAgentMemoryFile(w http.ResponseWriter, r *http.Request, actor domain.Member) {
+	filePath := r.URL.Query().Get("path")
+	file, err := s.svc.ReadAgentMemoryFile(r.Context(), actor, chi.URLParam(r, "agentID"), filePath)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, file)
+}

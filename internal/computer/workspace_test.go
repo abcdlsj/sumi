@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/abcdlsj/sumi/internal/domain"
+	"github.com/abcdlsj/sumi/internal/protocol"
 )
 
 func assertDomainCode(t *testing.T, err error, want domain.Code) {
@@ -168,4 +169,139 @@ func TestWorkspaceListAndReadSecurity(t *testing.T) {
 
 	_, err = readWorkspaceFile(root, "hardlink.txt")
 	assertDomainCode(t, err, domain.CodePermissionDenied)
+}
+
+func TestDaemonWorkspaceAndMemoryScopes(t *testing.T) {
+	home := t.TempDir()
+	workDir := filepath.Join(home, "workspace")
+	memDir := filepath.Join(home, "memory")
+	notesDir := filepath.Join(memDir, "notes")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(notesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "driver.token"), []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("# Memory\nKey fact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(notesDir, "arch.md"), []byte("Arch note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "driver.token"), filepath.Join(memDir, "escape-link.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(workDir, "main.go"), filepath.Join(memDir, "escape-hardlink.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	d := NewDaemon(Config{DataDir: t.TempDir()}, nil)
+	ch := make(chan protocol.Envelope, 16)
+	d.wsSendCh = ch
+	d.agents["agent-1"] = &hostedAgent{
+		homeDir:   home,
+		workDir:   workDir,
+		memoryDir: memDir,
+	}
+
+	listScope := func(agentID string, scope domain.WorkspaceScope, rel string) *protocol.WorkspaceListResultFrame {
+		t.Helper()
+		d.handleWorkspaceList(protocol.WorkspaceListFrame{
+			RequestID:     "req-list",
+			AgentMemberID: agentID,
+			Scope:         scope,
+			Path:          rel,
+		})
+		env := <-ch
+		if env.Type != protocol.TypeWorkspaceListResult || env.WorkspaceListResult == nil {
+			t.Fatalf("unexpected list envelope type %q", env.Type)
+		}
+		return env.WorkspaceListResult
+	}
+	readScope := func(agentID string, scope domain.WorkspaceScope, rel string) *protocol.WorkspaceReadResultFrame {
+		t.Helper()
+		d.handleWorkspaceRead(protocol.WorkspaceReadFrame{
+			RequestID:     "req-read",
+			AgentMemberID: agentID,
+			Scope:         scope,
+			Path:          rel,
+		})
+		env := <-ch
+		if env.Type != protocol.TypeWorkspaceReadResult || env.WorkspaceReadResult == nil {
+			t.Fatalf("unexpected read envelope type %q", env.Type)
+		}
+		return env.WorkspaceReadResult
+	}
+
+	// Empty scope defaults to workspace.
+	wsRes := listScope("agent-1", "", "")
+	if wsRes.ErrorCode != "" || wsRes.Listing == nil || len(wsRes.Listing.Entries) != 1 || wsRes.Listing.Entries[0].Name != "main.go" {
+		t.Fatalf("default scope should list workspace, got err=%s entries=%d", wsRes.ErrorCode, len(wsRes.Listing.Entries))
+	}
+
+	// Explicit memory scope lists MEMORY.md and notes/ without workspace files.
+	memRes := listScope("agent-1", domain.ScopeMemory, "")
+	if memRes.ErrorCode != "" || memRes.Listing == nil {
+		t.Fatalf("memory list failed: %s %s", memRes.ErrorCode, memRes.Error)
+	}
+	memNames := make(map[string]bool)
+	for _, e := range memRes.Listing.Entries {
+		memNames[e.Name] = true
+	}
+	if !memNames["MEMORY.md"] || !memNames["notes"] || memNames["main.go"] {
+		t.Fatalf("unexpected memory root entries: %+v", memNames)
+	}
+
+	// Reading MEMORY.md and nested notes file succeeds.
+	readMem := readScope("agent-1", domain.ScopeMemory, "MEMORY.md")
+	if readMem.ErrorCode != "" || readMem.File == nil || readMem.File.Content != "# Memory\nKey fact" {
+		t.Fatalf("failed reading MEMORY.md: err=%s", readMem.ErrorCode)
+	}
+	readNote := readScope("agent-1", domain.ScopeMemory, "notes/arch.md")
+	if readNote.ErrorCode != "" || readNote.File == nil || readNote.File.Content != "Arch note" {
+		t.Fatalf("failed reading nested memory note: err=%s", readNote.ErrorCode)
+	}
+
+	// Path traversal, absolute paths, symlinks, hard links, unknown scopes, and unknown agents are rejected.
+	if r := readScope("agent-1", domain.ScopeMemory, "../workspace/main.go"); r.ErrorCode != string(domain.CodeInvalidArgument) {
+		t.Fatalf("expected traversal rejection, got %q", r.ErrorCode)
+	}
+	if r := readScope("agent-1", domain.ScopeMemory, "../driver.token"); r.ErrorCode != string(domain.CodeInvalidArgument) {
+		t.Fatalf("expected parent secret traversal rejection, got %q", r.ErrorCode)
+	}
+	if r := listScope("agent-1", domain.ScopeMemory, "../workspace"); r.ErrorCode != string(domain.CodeInvalidArgument) {
+		t.Fatalf("expected list traversal rejection, got %q", r.ErrorCode)
+	}
+	if r := readScope("agent-1", domain.ScopeMemory, "/etc/passwd"); r.ErrorCode != string(domain.CodeInvalidArgument) {
+		t.Fatalf("expected absolute path rejection, got %q", r.ErrorCode)
+	}
+	if r := readScope("agent-1", domain.ScopeMemory, "escape-link.md"); r.ErrorCode != string(domain.CodePermissionDenied) {
+		t.Fatalf("expected symlink rejection, got %q", r.ErrorCode)
+	}
+	if r := readScope("agent-1", domain.ScopeMemory, "escape-hardlink.md"); r.ErrorCode != string(domain.CodePermissionDenied) {
+		t.Fatalf("expected hardlink rejection, got %q", r.ErrorCode)
+	}
+	if r := listScope("agent-1", domain.WorkspaceScope("home"), ""); r.ErrorCode != string(domain.CodeInvalidArgument) {
+		t.Fatalf("expected unsupported scope rejection, got %q", r.ErrorCode)
+	}
+	if r := listScope("missing-agent", domain.ScopeMemory, ""); r.ErrorCode != string(domain.CodeNotFound) {
+		t.Fatalf("expected missing agent not_found, got %q", r.ErrorCode)
+	}
+
+	// Missing memory directory reports an empty listing at root.
+	d.agents["agent-empty"] = &hostedAgent{
+		homeDir:   home,
+		workDir:   workDir,
+		memoryDir: filepath.Join(home, "no-memory-yet"),
+	}
+	emptyRes := listScope("agent-empty", domain.ScopeMemory, "")
+	if emptyRes.ErrorCode != "" || emptyRes.Listing == nil || len(emptyRes.Listing.Entries) != 0 {
+		t.Fatalf("expected empty root listing when memory dir missing, got err=%s", emptyRes.ErrorCode)
+	}
 }
