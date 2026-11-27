@@ -5,7 +5,12 @@ import { App } from "./App";
 import { ToastProvider } from "./components/ui";
 import { capturePairingFromURL } from "./pairing";
 import { applyTypographyPreferences } from "./preferences";
-import { captureShellFromURL, installContextMenuGuard, installExternalLinkHandler } from "./shell";
+import {
+  captureShellFromURL,
+  installContextMenuGuard,
+  installExternalLinkHandler,
+  installWindowCloseHandler,
+} from "./shell";
 import { applyTheme } from "./theme";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
@@ -26,6 +31,7 @@ applyTheme();
 applyTypographyPreferences();
 installContextMenuGuard();
 installExternalLinkHandler();
+installWindowCloseHandler();
 
 // Gate focus rings by input modality: pointer clicks stay quiet, keyboard navigation stays crisp.
 window.addEventListener("pointerdown", () => {

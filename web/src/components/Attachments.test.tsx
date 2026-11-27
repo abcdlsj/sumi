@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "../api";
+import { resetLayers } from "../layers";
+import { installWindowCloseHandler } from "../shell";
 import { MessageAttachments } from "./Attachments";
 
 const img1: Attachment = {
@@ -33,7 +35,11 @@ const doc: Attachment = {
   created_at: "2026-11-20T10:02:00Z",
 };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetLayers();
+  sessionStorage.clear();
+});
 
 describe("MessageAttachments", () => {
   it("opens an image in a lightbox dialog, supports gallery navigation and zoom, and closes on Escape", () => {
@@ -88,5 +94,28 @@ describe("MessageAttachments", () => {
     expect(screen.getByAltText("agent-chart.png")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Preview agent-chart.png" }));
     expect(screen.getByRole("dialog", { name: "agent-chart.png" })).toBeTruthy();
+  });
+});
+
+describe("closing overlays with the window shortcut", () => {
+  it("closes the image lightbox on ⌘W instead of hiding the window", async () => {
+    sessionStorage.setItem("sumi.shell", "desktop");
+    sessionStorage.setItem("sumi.desktop.control", "http://127.0.0.1:54321");
+    sessionStorage.setItem("sumi.desktop.token", "tok-123");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const cleanup = installWindowCloseHandler(window);
+
+    render(<MessageAttachments spaceSlug="studio" attachments={[img1]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Preview diagram.png" }));
+    expect(screen.getByRole("dialog", { name: "diagram.png" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "w", metaKey: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // With nothing left open the shortcut falls through to the window itself.
+    fireEvent.keyDown(window, { key: "w", metaKey: true });
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    cleanup();
   });
 });

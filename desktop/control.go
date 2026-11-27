@@ -28,19 +28,21 @@ type desktopServerState struct {
 // window can read and switch the active Server URL or open external links in the
 // system browser without touching remote servers.
 type controlServer struct {
-	baseURL   string
-	token     string
-	httpSrv   *http.Server
-	rt        *runtime
-	onSwitch  func(ctx context.Context, rawURL string) (desktopServerState, error)
-	onOpenURL func(rawURL string) error
-	logger    *slog.Logger
+	baseURL      string
+	token        string
+	httpSrv      *http.Server
+	rt           *runtime
+	onSwitch     func(ctx context.Context, rawURL string) (desktopServerState, error)
+	onOpenURL    func(rawURL string) error
+	onHideWindow func() error
+	logger       *slog.Logger
 }
 
 func startControlServer(
 	rt *runtime,
 	onSwitch func(ctx context.Context, rawURL string) (desktopServerState, error),
 	onOpenURL func(rawURL string) error,
+	onHideWindow func() error,
 	logger *slog.Logger,
 ) (*controlServer, error) {
 	rawToken := make([]byte, 32)
@@ -52,16 +54,18 @@ func startControlServer(
 		return nil, fmt.Errorf("listen control server: %w", err)
 	}
 	cs := &controlServer{
-		baseURL:   "http://" + ln.Addr().String(),
-		token:     hex.EncodeToString(rawToken),
-		rt:        rt,
-		onSwitch:  onSwitch,
-		onOpenURL: onOpenURL,
-		logger:    logger,
+		baseURL:      "http://" + ln.Addr().String(),
+		token:        hex.EncodeToString(rawToken),
+		rt:           rt,
+		onSwitch:     onSwitch,
+		onOpenURL:    onOpenURL,
+		onHideWindow: onHideWindow,
+		logger:       logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/desktop/server", cs.handleServer)
 	mux.HandleFunc("/desktop/open-url", cs.handleOpenURL)
+	mux.HandleFunc("/desktop/hide-window", cs.handleHideWindow)
 	cs.httpSrv = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -216,6 +220,28 @@ func (c *controlServer) handleOpenURL(w http.ResponseWriter, r *http.Request) {
 	if err := c.onOpenURL(target); err != nil {
 		c.logger.Warn("Cannot open external URL in browser", "error", err.Error())
 		writeControlJSON(w, http.StatusInternalServerError, map[string]string{"error": "open_failed", "message": "Unable to open URL in browser"})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleHideWindow lets the Web UI dismiss the window after it closed its own
+// overlays, so the close shortcut hides Sumi instead of quitting it.
+func (c *controlServer) handleHideWindow(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.onHideWindow == nil {
+		writeControlJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Window control unavailable"})
+		return
+	}
+	if err := c.onHideWindow(); err != nil {
+		c.logger.Warn("Cannot hide the desktop window", "error", err.Error())
+		writeControlJSON(w, http.StatusInternalServerError, map[string]string{"error": "hide_failed", "message": "Unable to hide the window"})
 		return
 	}
 	writeControlJSON(w, http.StatusOK, map[string]bool{"ok": true})

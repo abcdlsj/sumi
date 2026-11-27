@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type 
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Eye, FileText, Loader2, Maximize2, Paperclip, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Attachment } from "../api";
+import { pushLayer, releaseLayer } from "../layers";
 import { CodeBlock, languageFromPath } from "./CodeHighlight";
 import { MessageBody } from "./MessageBody";
 
@@ -215,6 +216,11 @@ function ImageLightbox({
   useEffect(() => {
     resetZoom();
   }, [index]);
+
+  useEffect(() => {
+    const token = pushLayer(onClose);
+    return () => releaseLayer(token);
+  }, [onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -443,11 +449,15 @@ function DocumentPreviewModal({
   const lang = languageFromPath(attachment.name);
 
   useEffect(() => {
+    const token = pushLayer(onClose);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      releaseLayer(token);
+    };
   }, [onClose]);
 
   useEffect(() => {

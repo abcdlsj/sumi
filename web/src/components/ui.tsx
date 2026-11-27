@@ -20,6 +20,7 @@ import {
 import { createPortal } from "react-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Copy, Info, Loader2, RefreshCw, Search, X } from "lucide-react";
 import type { TaskStatus } from "../api";
+import { isTopLayer, pushLayer, releaseLayer } from "../layers";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "soft";
 type Size = "sm" | "md" | "lg";
@@ -189,8 +190,6 @@ export interface SelectOption<T extends string = string> {
 
 const FOCUSABLE_SELECTOR =
   'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
-
-const modalStack: symbol[] = [];
 
 /** Computes viewport-safe fixed coordinates for a portaled popover, flipping upward when near the bottom edge. */
 export function useFloatingPosition(
@@ -793,12 +792,11 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return;
-    const token = Symbol("modal");
-    modalStack.push(token);
+    const token = pushLayer(() => onCloseRef.current());
     const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const onKey = (e: KeyboardEvent) => {
-      if (modalStack[modalStack.length - 1] !== token) return;
+      if (!isTopLayer(token)) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onCloseRef.current();
@@ -821,8 +819,7 @@ export function Modal({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      const idx = modalStack.indexOf(token);
-      if (idx >= 0) modalStack.splice(idx, 1);
+      releaseLayer(token);
       if (prevFocus && document.contains(prevFocus)) prevFocus.focus();
     };
   }, [open]);

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installContextMenuGuard, installExternalLinkHandler, isEditableTextTarget, resolveExternalHref } from "./shell";
+import {
+  installContextMenuGuard,
+  installExternalLinkHandler,
+  installWindowCloseHandler,
+  isEditableTextTarget,
+  requestWindowClose,
+  resolveExternalHref,
+} from "./shell";
+import { pushLayer, resetLayers } from "./layers";
 
 function dispatchContextMenu(target: EventTarget): MouseEvent {
   const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
@@ -179,5 +187,70 @@ describe("installExternalLinkHandler", () => {
       cleanup();
       link.remove();
     }
+  });
+});
+
+describe("window close shortcut", () => {
+  afterEach(() => {
+    resetLayers();
+    sessionStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  function enterDesktopShell() {
+    sessionStorage.setItem("sumi.shell", "desktop");
+    sessionStorage.setItem("sumi.desktop.control", "http://127.0.0.1:54321");
+    sessionStorage.setItem("sumi.desktop.token", "tok-123");
+  }
+
+  it("closes the topmost overlay before touching the window", () => {
+    enterDesktopShell();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const close = vi.fn();
+    pushLayer(close);
+    const cleanup = installWindowCloseHandler(window);
+
+    const event = new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("hides the desktop window when no overlay is open", () => {
+    enterDesktopShell();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const cleanup = installWindowCloseHandler(window);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "W", ctrlKey: true, bubbles: true, cancelable: true }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe("http://127.0.0.1:54321/desktop/hide-window");
+    cleanup();
+  });
+
+  it("ignores the shortcut in the browser shell and leaves other keys alone", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const cleanup = installWindowCloseHandler(window);
+    const event = new KeyboardEvent("keydown", { key: "w", metaKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(requestWindowClose()).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("exposes the native menu entry point while installed", () => {
+    enterDesktopShell();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const close = vi.fn();
+    pushLayer(close);
+    const cleanup = installWindowCloseHandler(window);
+    expect(window.__sumiCloseRequest?.()).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+    cleanup();
+    expect(window.__sumiCloseRequest).toBeUndefined();
   });
 });

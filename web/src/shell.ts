@@ -1,3 +1,5 @@
+import { dismissTopLayer } from "./layers";
+
 const SHELL_KEY = "sumi.shell";
 const CONTROL_KEY = "sumi.desktop.control";
 const TOKEN_KEY = "sumi.desktop.token";
@@ -197,5 +199,55 @@ export function installExternalLinkHandler(target: Window = window): () => void 
   return () => {
     target.removeEventListener("click", onClick);
     target.removeEventListener("auxclick", onAuxClick);
+  };
+}
+
+/** Asks the desktop shell to hide its window (the same outcome as the close button). */
+export async function hideDesktopWindow(bridge: DesktopBridge): Promise<void> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/hide-window`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  if (!res.ok) {
+    throw new Error("Unable to hide the desktop window");
+  }
+}
+
+/**
+ * Handles a window-close request (⌘W / Ctrl+W, or the native File > Close item):
+ * the topmost overlay closes first, and only an empty overlay stack hides the window.
+ * Returns true when the request was consumed.
+ */
+export function requestWindowClose(): boolean {
+  if (dismissTopLayer()) return true;
+  const bridge = getDesktopBridge();
+  if (!bridge) return false;
+  void hideDesktopWindow(bridge).catch(() => {
+    // The shell reports bridge failures locally; the shortcut stays silent for the user.
+  });
+  return true;
+}
+
+declare global {
+  interface Window {
+    /** Entry point for the native Close menu item, which carries no ⌘W key equivalent. */
+    __sumiCloseRequest?: () => boolean;
+  }
+}
+
+/** Routes ⌘W / Ctrl+W to {@link requestWindowClose} in the desktop shell. */
+export function installWindowCloseHandler(target: Window = window): () => void {
+  if (!isDesktopShell()) return () => {};
+  target.__sumiCloseRequest = requestWindowClose;
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+    if (e.key.toLowerCase() !== "w") return;
+    e.preventDefault();
+    requestWindowClose();
+  };
+  target.addEventListener("keydown", onKeyDown);
+  return () => {
+    target.removeEventListener("keydown", onKeyDown);
+    delete target.__sumiCloseRequest;
   };
 }
