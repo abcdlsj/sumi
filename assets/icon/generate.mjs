@@ -5,13 +5,14 @@
  * Built in the machined architectural slab family of kip, hark, gaze, zoet, quiet, lull, and beck:
  *   - Plate: 824x824 continuous superellipse (n=5) on a 1024 canvas (100 px safe margin),
  *     radiant Sumi flame-orange gradient (#FF8152 -> #F0602E -> #D4421A) with crisp inner rim
- *   - Mark: Two equal-area machined slabs interlocked along a -8 deg diagonal —
- *     a pure luminous Circle (Human) nesting into a precision-carved concentric cradle
- *     of a Rounded Square (Agent), representing equal peers collaborating in one shared Space.
+ *   - Mark: Human and Agent as equal teammates standing shoulder-to-shoulder along a -5 deg cant —
+ *     a warm organic Human silhouette (circle head + arched shoulder dome) interlocked via an
+ *     exact concentric arc channel with a structured Sumi Agent silhouette (rounded-square head
+ *     with two pill eyes glancing gently toward the Human + precision-carved architectural shoulder).
  *   - Optical 3-tier sizing:
  *       > 32 px: machined warm-cream pearl (#FFFFFF -> #FFFBF4 / #F5DFD6) + warm lift shadow
- *     24-32 px: crisp flat #FFFBF4 / #FFEBE2 on solid #F0602E with widened negative-space channel
- *        16 px: bold high-contrast flat #FFFFFF / #FFFBF4 on solid #F0602E with generous channel
+ *     24-32 px: crisp flat #FFFBF4 / #FFEBE2 on solid #F0602E with widened seam & bolder eyes
+ *        16 px: bold high-contrast flat silhouette (eyes omitted for pixel-grid clarity)
  *   - Menu bar template: crisp 36x36 (@2x 18pt) monochrome black silhouette
  *
  * Usage:
@@ -34,52 +35,50 @@ const PLATE_BOT = "#D4421A";
 const PLATE_FLAT = "#F0602E";
 const SHADOW_COLOR = "#6E1D07";
 const CREAM = "#FFFBF4"; // original Sumi warm cream
-const TILT_DEG = -8; // family counter-clockwise cant (hark, gaze, zoet, quiet)
+const TILT_DEG = -5;
 
-// Symmetric 512x512 diagonal embrace with ~1:1 equal visual area between Human (circle)
-// and Agent (carved rounded square), and identical thickness on both cradling arms.
 const LARGE_SPEC = {
-  hr: 166,
-  S: 184,
-  rSq: 46,
-  sepX: 162,
-  sepY: 162,
-  gap: 44,
-  fillet: 24,
-  angleDeg: TILT_DEG,
+  gap: 34,
+  neckGap: 42,
+  eyeW: 28,
+  eyeH: 50,
+  eyeGap: 38,
+  eyeShiftX: -9,
+  showEyes: true,
+  tilt: TILT_DEG,
 };
 
 const FLAT_SPEC = {
-  hr: 168,
-  S: 186,
-  rSq: 44,
-  sepX: 166,
-  sepY: 166,
-  gap: 54,
-  fillet: 22,
-  angleDeg: TILT_DEG,
+  gap: 42,
+  neckGap: 48,
+  eyeW: 32,
+  eyeH: 54,
+  eyeGap: 36,
+  eyeShiftX: -8,
+  showEyes: true,
+  tilt: TILT_DEG,
 };
 
 const SMALL_SPEC = {
-  hr: 172,
-  S: 192,
-  rSq: 42,
-  sepX: 172,
-  sepY: 172,
-  gap: 68,
-  fillet: 20,
-  angleDeg: TILT_DEG,
+  gap: 50,
+  neckGap: 56,
+  eyeW: 0,
+  eyeH: 0,
+  eyeGap: 0,
+  eyeShiftX: 0,
+  showEyes: false,
+  tilt: TILT_DEG,
 };
 
 const TRAY_SPEC = {
-  hr: 232,
-  S: 256,
-  rSq: 62,
-  sepX: 230,
-  sepY: 230,
-  gap: 82,
-  fillet: 30,
-  angleDeg: TILT_DEG,
+  gap: 46,
+  neckGap: 50,
+  eyeW: 34,
+  eyeH: 56,
+  eyeGap: 36,
+  eyeShiftX: -8,
+  showEyes: true,
+  tilt: TILT_DEG,
 };
 // ---------------------------------------------------------------------------
 
@@ -107,88 +106,133 @@ function squircle(steps = 720, digits = 2) {
   return `M${pts.join("L")}Z`;
 }
 
+/** Rounded rectangle subpath; `ccw = true` winds counter-clockwise for even-odd cutouts. */
+function rrect(x, y, w, h, r, ccw = false) {
+  if (!ccw) {
+    return [
+      `M ${fmt(x + r)} ${fmt(y)}`,
+      `L ${fmt(x + w - r)} ${fmt(y)}`,
+      `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(x + w)} ${fmt(y + r)}`,
+      `L ${fmt(x + w)} ${fmt(y + h - r)}`,
+      `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(x + w - r)} ${fmt(y + h)}`,
+      `L ${fmt(x + r)} ${fmt(y + h)}`,
+      `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(x)} ${fmt(y + h - r)}`,
+      `L ${fmt(x)} ${fmt(y + r)}`,
+      `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(x + r)} ${fmt(y)}`,
+      "Z",
+    ].join(" ");
+  }
+  return [
+    `M ${fmt(x + r)} ${fmt(y)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 0 ${fmt(x)} ${fmt(y + r)}`,
+    `L ${fmt(x)} ${fmt(y + h - r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 0 ${fmt(x + r)} ${fmt(y + h)}`,
+    `L ${fmt(x + w - r)} ${fmt(y + h)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 0 ${fmt(x + w)} ${fmt(y + h - r)}`,
+    `L ${fmt(x + w)} ${fmt(y + r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 0 ${fmt(x + w - r)} ${fmt(y)}`,
+    "Z",
+  ].join(" ");
+}
+
 /**
- * Constructs the two-slab Human (Circle) + Agent (Carved Rounded Square) emblem
- * with exact analytical tangent circular corner fillets and automatic bbox centering.
+ * Builds the shoulder-to-shoulder Human + Sumi Agent emblem in local coords
+ * centered at (0, 0), with exact analytical circular corner fillets on the
+ * Agent shoulder's concentric cradle cutout.
  */
-function buildEmbrace({ hr, S, rSq, sepX, sepY, gap, fillet, angleDeg }) {
-  let hx = -sepX / 2;
-  let hy = -sepY / 2;
-  let ax = sepX / 2;
-  let ay = sepY / 2;
+function buildTeammates({ gap, neckGap, eyeW, eyeH, eyeGap, eyeShiftX, showEyes, tilt }) {
+  // Equal-height heads centered at y = headY
+  const hx = -124;
+  const ax = 132;
+  const hR = 96;
+  const aHeadW = 200;
+  const aHeadH = 186;
+  const aHeadR = 46;
 
-  // Center the unrotated composite bounding box exactly at origin before tilting
-  const minX = Math.min(hx - hr, ax - S);
-  const maxX = Math.max(hx + hr, ax + S);
-  const minY = Math.min(hy - hr, ay - S);
-  const maxY = Math.max(hy + hr, ay + S);
-  const shiftX = -(minX + maxX) / 2;
-  const shiftY = -(minY + maxY) / 2;
-  hx += shiftX;
-  hy += shiftY;
-  ax += shiftX;
-  ay += shiftY;
+  // Vertical layout: total height ~456 px centered at y = 0
+  const headY = -128;
+  const yBot = 224;
+  const Rsh = 132;
+  const hBodyTop = headY + hR + neckGap;
+  const domeCy = hBodyTop + Rsh;
+  const rBot = 36;
 
-  const rad = (angleDeg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const xf = (x, y) => [C + x * cos - y * sin, C + x * sin + y * cos];
-
-  const Rcut = hr + gap;
-  const xL = ax - S;
-  const xR = ax + S;
-  const yT = ay - S;
-  const yB = ay + S;
-  const r = fillet;
-
-  // Exact tangent circular fillet between top straight edge (y = yT) and cutout circle (hx, hy, Rcut)
-  const fyTop = yT + r;
-  const fxTop = hx + Math.sqrt(Math.max(0, (Rcut + r) ** 2 - (fyTop - hy) ** 2));
-  const sTop = Rcut / (Rcut + r);
-  const pTopArc = xf(hx + (fxTop - hx) * sTop, hy + (fyTop - hy) * sTop);
-  const pTopEdge = xf(fxTop, yT);
-
-  // Exact tangent circular fillet between left straight edge (x = xL) and cutout circle (hx, hy, Rcut)
-  const fxLeft = xL + r;
-  const fyLeft = hy + Math.sqrt(Math.max(0, (Rcut + r) ** 2 - (fxLeft - hx) ** 2));
-  const sLeft = Rcut / (Rcut + r);
-  const pLeftArc = xf(hx + (fxLeft - hx) * sLeft, hy + (fyLeft - hy) * sLeft);
-  const pLeftEdge = xf(xL, fyLeft);
-
-  const pTR1 = xf(xR - rSq, yT);
-  const pTR2 = xf(xR, yT + rSq);
-  const pBR1 = xf(xR, yB - rSq);
-  const pBR2 = xf(xR - rSq, yB);
-  const pBL1 = xf(xL + rSq, yB);
-  const pBL2 = xf(xL, yB - rSq);
-
-  const agentSlab = [
-    `M ${pt(pTopArc)}`,
-    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${pt(pTopEdge)}`,
-    `L ${pt(pTR1)}`,
-    `A ${fmt(rSq)} ${fmt(rSq)} 0 0 1 ${pt(pTR2)}`,
-    `L ${pt(pBR1)}`,
-    `A ${fmt(rSq)} ${fmt(rSq)} 0 0 1 ${pt(pBR2)}`,
-    `L ${pt(pBL1)}`,
-    `A ${fmt(rSq)} ${fmt(rSq)} 0 0 1 ${pt(pBL2)}`,
-    `L ${pt(pLeftEdge)}`,
-    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${pt(pLeftArc)}`,
-    `A ${fmt(Rcut)} ${fmt(Rcut)} 0 0 0 ${pt(pTopArc)}`,
+  const hBody = [
+    `M ${fmt(hx - Rsh)} ${fmt(domeCy)}`,
+    `A ${fmt(Rsh)} ${fmt(Rsh)} 0 0 1 ${fmt(hx + Rsh)} ${fmt(domeCy)}`,
+    `L ${fmt(hx + Rsh)} ${fmt(yBot - rBot)}`,
+    `A ${fmt(rBot)} ${fmt(rBot)} 0 0 1 ${fmt(hx + Rsh - rBot)} ${fmt(yBot)}`,
+    `L ${fmt(hx - Rsh + rBot)} ${fmt(yBot)}`,
+    `A ${fmt(rBot)} ${fmt(rBot)} 0 0 1 ${fmt(hx - Rsh)} ${fmt(yBot - rBot)}`,
     "Z",
   ].join(" ");
 
-  const [hcx, hcy] = xf(hx, hy);
+  const aHeadX = ax - aHeadW / 2;
+  const aHeadY = headY - aHeadH / 2;
+  const aHeadParts = [rrect(aHeadX, aHeadY, aHeadW, aHeadH, aHeadR, false)];
+  if (showEyes) {
+    const er = eyeW / 2;
+    const eyeCenterX = ax + eyeShiftX;
+    const eyeY = headY - eyeH / 2 + 2;
+    aHeadParts.push(rrect(eyeCenterX - eyeGap / 2 - eyeW, eyeY, eyeW, eyeH, er, true));
+    aHeadParts.push(rrect(eyeCenterX + eyeGap / 2, eyeY, eyeW, eyeH, er, true));
+  }
+  const aHead = aHeadParts.join(" ");
+
+  // Agent shoulder block aligns its top edge to the exact same neckGap below Agent's head
+  const yTopA = headY + aHeadH / 2 + neckGap;
+  const xRA = 256;
+  const rTopRA = 54;
+  const rBotA = 34;
+  const rFillet = 20;
+  const Rcut = Rsh + gap;
+  const xLA = hx + Rsh + gap;
+
+  // Exact tangent circular fillet between top horizontal edge (y = yTopA) and concentric arc (hx, domeCy, Rcut)
+  const fyT = yTopA + rFillet;
+  const fxT = hx + Math.sqrt(Math.max(0, (Rcut + rFillet) ** 2 - (fyT - domeCy) ** 2));
+  const sT = Rcut / (Rcut + rFillet);
+  const pArcTop = [hx + (fxT - hx) * sT, domeCy + (fyT - domeCy) * sT];
+  const pEdgeTop = [fxT, yTopA];
+
+  const aBody = [
+    `M ${pt(pArcTop)}`,
+    `A ${fmt(rFillet)} ${fmt(rFillet)} 0 0 1 ${pt(pEdgeTop)}`,
+    `L ${fmt(xRA - rTopRA)} ${fmt(yTopA)}`,
+    `A ${fmt(rTopRA)} ${fmt(rTopRA)} 0 0 1 ${fmt(xRA)} ${fmt(yTopA + rTopRA)}`,
+    `L ${fmt(xRA)} ${fmt(yBot - rBotA)}`,
+    `A ${fmt(rBotA)} ${fmt(rBotA)} 0 0 1 ${fmt(xRA - rBotA)} ${fmt(yBot)}`,
+    `L ${fmt(xLA + 24)} ${fmt(yBot)}`,
+    `A 24 24 0 0 1 ${fmt(xLA)} ${fmt(yBot - 24)}`,
+    `L ${fmt(xLA)} ${fmt(domeCy)}`,
+    `A ${fmt(Rcut)} ${fmt(Rcut)} 0 0 0 ${pt(pArcTop)}`,
+    "Z",
+  ].join(" ");
+
   return {
-    human: { cx: hcx, cy: hcy, r: hr },
-    agent: agentSlab,
+    tilt,
+    humanHead: { cx: hx, cy: headY, r: hR },
+    humanBody: hBody,
+    agentHead: aHead,
+    agentBody: aBody,
   };
 }
 
+function renderGroup(m, fillH, fillA, extraTransform = "") {
+  const tx = `translate(512 512) ${extraTransform}rotate(${m.tilt})`.trim();
+  return `<g transform="${tx}">
+    <path d="${m.agentHead}" fill="${fillA}" fill-rule="evenodd"/>
+    <path d="${m.agentBody}" fill="${fillA}"/>
+    <circle cx="${fmt(m.humanHead.cx)}" cy="${fmt(m.humanHead.cy)}" r="${fmt(m.humanHead.r)}" fill="${fillH}"/>
+    <path d="${m.humanBody}" fill="${fillH}"/>
+  </g>`;
+}
+
 const SQ = squircle(720, 2);
-const large = buildEmbrace(LARGE_SPEC);
-const flat = buildEmbrace(FLAT_SPEC);
-const small = buildEmbrace(SMALL_SPEC);
-const tray = buildEmbrace(TRAY_SPEC);
+const large = buildTeammates(LARGE_SPEC);
+const flat = buildTeammates(FLAT_SPEC);
+const small = buildTeammates(SMALL_SPEC);
+const tray = buildTeammates(TRAY_SPEC);
 
 const metalSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Generated by assets/icon/generate.mjs; edit the script, not this file. -->
@@ -214,8 +258,7 @@ const metalSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1
   <path d="${SQ}" fill="url(#plate)"/>
   <path d="${SQ}" fill="none" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="3.5" clip-path="url(#plate-clip)"/>
   <g filter="url(#lift)">
-    <path d="${large.agent}" fill="url(#slab-agent)"/>
-    <circle cx="${fmt(large.human.cx)}" cy="${fmt(large.human.cy)}" r="${fmt(large.human.r)}" fill="url(#slab-human)"/>
+    ${renderGroup(large, "url(#slab-human)", "url(#slab-agent)")}
   </g>
 </svg>
 `;
@@ -223,24 +266,21 @@ const metalSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1
 const flatSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Generated by assets/icon/generate.mjs; edit the script, not this file. -->
   <path d="${SQ}" fill="${PLATE_FLAT}"/>
-  <path d="${flat.agent}" fill="#FFEBE2"/>
-  <circle cx="${fmt(flat.human.cx)}" cy="${fmt(flat.human.cy)}" r="${fmt(flat.human.r)}" fill="${CREAM}"/>
+  ${renderGroup(flat, CREAM, "#FFEBE2")}
 </svg>
 `;
 
 const smallSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Generated by assets/icon/generate.mjs; edit the script, not this file. -->
   <path d="${SQ}" fill="${PLATE_FLAT}"/>
-  <path d="${small.agent}" fill="${CREAM}"/>
-  <circle cx="${fmt(small.human.cx)}" cy="${fmt(small.human.cy)}" r="${fmt(small.human.r)}" fill="#FFFFFF"/>
+  ${renderGroup(small, "#FFFFFF", CREAM)}
 </svg>
 `;
 
 const traySvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="36" height="36">
   <!-- Generated by assets/icon/generate.mjs; edit the script, not this file. -->
-  <path d="${tray.agent}" fill="#000000"/>
-  <circle cx="${fmt(tray.human.cx)}" cy="${fmt(tray.human.cy)}" r="${fmt(tray.human.r)}" fill="#000000"/>
+  ${renderGroup(tray, "#000000", "#000000", "scale(1.42) ")}
 </svg>
 `;
 
