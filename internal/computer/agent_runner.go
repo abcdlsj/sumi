@@ -93,6 +93,7 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 			workDir:     filepath.Join(homeDir, "workspace"),
 			memoryDir:   filepath.Join(homeDir, "memory"),
 			driverToken: loadOrCreateDriverToken(homeDir),
+			wakeGuard:   newWakeLoopGuard(d.wakeLoopBackoff),
 		}
 		d.agents[spec.MemberID] = ag
 		d.tokenToAgent[ag.driverToken] = spec.MemberID
@@ -119,6 +120,7 @@ func (d *Daemon) provisionAgent(spec protocol.AssignedAgentSpec) *hostedAgent {
 	ag.stopRequested = false
 	if specChanged {
 		ag.pendingRetry = nil
+		ag.resetWakeGuardLocked()
 	}
 	ag.resetBreakerLocked()
 	if old != nil {
@@ -304,6 +306,7 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		drv := ag.drv
 		ag.pendingRetry = nil
 		ag.resetBreakerLocked()
+		ag.resetWakeGuardLocked()
 		ag.mu.Unlock()
 		if drv != nil {
 			_ = drv.ResetSession()
@@ -330,6 +333,7 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 			}
 			ok, failCode, failDetail := ag.drv != nil, ag.failCode, ag.failDetail
 			ag.resetBreakerLocked()
+			ag.resetWakeGuardLocked()
 			ag.mu.Unlock()
 			if !ok {
 				d.reportAgentState(ctrl.AgentMemberID, domain.RuntimeError, "", failCode, failDetail)
@@ -356,6 +360,7 @@ func (d *Daemon) handleControl(ctx context.Context, ctrl protocol.AgentControlFr
 		} else {
 			ag.pendingRetry = nil
 		}
+		ag.resetWakeGuardLocked()
 		ag.mu.Unlock()
 		if cancelTurn != nil {
 			cancelTurn(errTurnStopped)
@@ -564,6 +569,32 @@ func orderInboxItems(items []domain.InboxItem, skipped map[string]int64) []domai
 	return out
 }
 
+// armWakeBackoffLocked schedules a single wake after a WakeLoopGuard backoff expires.
+// Caller holds ag.mu.
+func (d *Daemon) armWakeBackoffLocked(ctx context.Context, ag *hostedAgent, delay time.Duration) {
+	if delay <= 0 || ag.paused || d.isDraining() {
+		return
+	}
+	if ag.wakeBackoffTimer != nil {
+		ag.wakeBackoffTimer.Stop()
+	}
+	agentID := ag.spec.MemberID
+	// Pad slightly so the timer fires strictly after the guard's deadline.
+	wait := delay + 5*time.Millisecond
+	var timer *time.Timer
+	timer = time.AfterFunc(wait, func() {
+		ag.mu.Lock()
+		if ag.wakeBackoffTimer != timer {
+			ag.mu.Unlock()
+			return
+		}
+		ag.wakeBackoffTimer = nil
+		ag.mu.Unlock()
+		d.scheduleWake(ctx, agentID, "", "wake_backoff")
+	})
+	ag.wakeBackoffTimer = timer
+}
+
 func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 	released := false
 	defer func() {
@@ -582,8 +613,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 	}()
 
-	skipped := make(map[string]int64)
-	unreadNudged := make(map[string]int64)
+	localSkip := make(map[string]int64)
 	var pendingNudge *silentNudge
 	var prevConvID string
 	var prevSeq int64
@@ -593,6 +623,10 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		ag.mu.Lock()
 		spec, drv := ag.spec, ag.drv
 		failCode, failDetail := ag.failCode, ag.failDetail
+		if ag.wakeGuard == nil {
+			ag.wakeGuard = newWakeLoopGuard(d.wakeLoopBackoff)
+		}
+		wakeGuard := ag.wakeGuard
 		ag.mu.Unlock()
 		if drv == nil {
 			d.reportAgentState(spec.MemberID, domain.RuntimeError, "", failCode, failDetail)
@@ -629,18 +663,28 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 				return
 			}
 
+			now := time.Now()
 			// Detect when the previous normal turn finished without advancing read_seq on its focus.
 			if prevConvID != "" {
+				unchanged := false
 				for _, it := range items {
 					if it.ConversationID == prevConvID && it.LatestSeq == prevSeq {
-						if prevSeq == 0 || unreadNudged[prevConvID] == prevSeq {
-							// Already nudged once (or mock inbox without seq): skip to avoid spinning.
-							skipped[prevConvID] = prevSeq
-						} else {
-							unreadNudged[prevConvID] = prevSeq
-						}
+						unchanged = true
 						break
 					}
+				}
+				if unchanged {
+					act, backoffDur := wakeGuard.RecordZeroProgress(prevConvID, prevSeq, now)
+					switch act {
+					case wakeLoopSkip:
+						localSkip[prevConvID] = prevSeq
+					case wakeLoopBackoff:
+						d.logger.Warn("WakeLoopGuard backing off zero-progress conversation", "agent_id", spec.MemberID, "conversation_id", prevConvID, "latest_seq", prevSeq, "backoff_ms", backoffDur.Milliseconds())
+					case wakeLoopPark:
+						d.logger.Warn("WakeLoopGuard parked zero-progress conversation until newer message", "agent_id", spec.MemberID, "conversation_id", prevConvID, "latest_seq", prevSeq)
+					}
+				} else {
+					wakeGuard.NoteProgress(prevConvID, prevSeq)
 				}
 				prevConvID, prevSeq = "", 0
 			}
@@ -664,7 +708,8 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			}
 			ag.mu.Unlock()
 
-			ordered := orderInboxItems(items, skipped)
+			ready, earliestBackoff := wakeGuard.Filter(items, localSkip, now)
+			ordered := orderInboxItems(ready, nil)
 			if recovery != nil {
 				focus = recovery.focus
 				inboxCount = len(ordered) + 1
@@ -677,8 +722,11 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 					if ag.dirty && !ag.paused && !d.isDraining() {
 						ag.dirty = false
 						ag.mu.Unlock()
-						clear(skipped)
+						clear(localSkip)
 						continue
+					}
+					if earliestBackoff > 0 {
+						d.armWakeBackoffLocked(ctx, ag, earliestBackoff)
 					}
 					ag.busy = false
 					ag.focusConvID = ""
@@ -690,7 +738,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 				}
 				focus = ordered[0]
 				inboxCount = len(ordered)
-				if focus.LatestSeq > 0 && unreadNudged[focus.ConversationID] == focus.LatestSeq {
+				if wakeGuard.IsNudgeDue(focus.ConversationID, focus.LatestSeq) {
 					isNudge = true
 					userPrompt = buildUnreadNudgePrompt(focus)
 				} else {
@@ -718,8 +766,9 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			d.reportAgentStateWith(spec.MemberID, domain.RuntimeWorking, focus.ConversationID, "", "", a)
 		}, func() bool {
 			ag.mu.Lock()
-			defer ag.mu.Unlock()
-			return ag.dirty
+			dirty := ag.dirty
+			ag.mu.Unlock()
+			return dirty || inboxCount > 1
 		}, func() { cancel(errTurnStalled) })
 		if spec.DriverKind == domain.DriverACP && spec.DriverConfig.Provider != "" {
 			if err := prepareACPRuntimeDir(ag.homeDir, spec.DriverConfig); err != nil {
@@ -826,6 +875,36 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 				ag.pendingRetry = &retryContext{focus: focus, errCode: code}
 				ag.mu.Unlock()
 			}
+			if errors.Is(cause, errTurnStalled) {
+				ag.mu.Lock()
+				ag.stalledStreak++
+				streak := ag.stalledStreak
+				if streak > maxStalledReplacements {
+					ag.paused = true
+					if ag.retryTimer != nil {
+						ag.retryTimer.Stop()
+						ag.retryTimer = nil
+					}
+					if ag.probeTimer != nil {
+						ag.probeTimer.Stop()
+						ag.probeTimer = nil
+					}
+				}
+				ag.mu.Unlock()
+				if streak <= maxStalledReplacements {
+					delay := d.armRetry(ctx, ag)
+					d.logger.Warn("Agent turn stalled with queued work; retrying", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "stalled_streak", streak, "delay_ms", delay.Milliseconds())
+					detail = domain.BoundErrorDetail(fmt.Sprintf("stalled with queued work (%d/%d); retrying in %s", streak, maxStalledReplacements, delay.Round(time.Second)))
+				} else {
+					d.logger.Warn("Agent paused after repeated stalled turns", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "stalled_streak", streak)
+					detail = domain.BoundErrorDetail(fmt.Sprintf("stalled %d times with queued work; restart or reset session to resume", streak))
+				}
+				d.reportAgentState(spec.MemberID, domain.RuntimeError, focus.ConversationID, code, detail)
+				return
+			}
+			ag.mu.Lock()
+			ag.stalledStreak = 0
+			ag.mu.Unlock()
 			d.logger.Warn("Agent turn failed", "agent_id", spec.MemberID, "error_code", code, "error", detail)
 			if delay, paused := d.recordFailure(ctx, ag); paused {
 				d.logger.Warn("Agent paused after consecutive failures", "agent_id", spec.MemberID, "error_code", code, "probe_in", delay.String())
@@ -840,6 +919,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 
 		ag.mu.Lock()
 		ag.resetBreakerLocked()
+		ag.stalledStreak = 0
 		if ag.pendingRetry != nil && ag.pendingRetry.focus.ConversationID == focus.ConversationID {
 			ag.pendingRetry = nil
 		}
@@ -993,6 +1073,7 @@ func (d *Daemon) resumeAttachedTurn(ctx context.Context, ag *hostedAgent, turnID
 
 	ag.mu.Lock()
 	ag.resetBreakerLocked()
+	ag.stalledStreak = 0
 	ag.focusConvID = ""
 	shouldContinue := !ag.paused && !d.isDraining()
 	if !shouldContinue {

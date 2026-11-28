@@ -87,6 +87,11 @@ type hostedAgent struct {
 	// pendingRetry preserves the focus conversation if a turn fails after `sumi read` already
 	// advanced read_seq on the Server before any reply was sent.
 	pendingRetry *retryContext
+	// wakeGuard persists zero-progress wake backoff/park state across turns for this Agent.
+	wakeGuard        *wakeLoopGuard
+	wakeBackoffTimer *time.Timer
+	// stalledStreak bounds consecutive stalledWithWork auto-replacements before surfacing turn_stalled.
+	stalledStreak int
 }
 
 // turnTelemetry records metadata-only capability proxy outcomes for a single active turn.
@@ -195,6 +200,24 @@ func (ag *hostedAgent) stopSteerTimerLocked() {
 	ag.lastSteerFP = ""
 }
 
+// stopWakeBackoffTimerLocked cancels any pending WakeLoopGuard backoff timer. Caller holds ag.mu.
+func (ag *hostedAgent) stopWakeBackoffTimerLocked() {
+	if ag.wakeBackoffTimer != nil {
+		ag.wakeBackoffTimer.Stop()
+		ag.wakeBackoffTimer = nil
+	}
+}
+
+// resetWakeGuardLocked clears persisted zero-progress parks/backoffs and stall streaks on operator
+// intervention or spec changes. Caller holds ag.mu.
+func (ag *hostedAgent) resetWakeGuardLocked() {
+	ag.stopWakeBackoffTimerLocked()
+	ag.stalledStreak = 0
+	if ag.wakeGuard != nil {
+		ag.wakeGuard.Forget()
+	}
+}
+
 // resetBreakerLocked clears the failure breaker; caller holds ag.mu.
 func (ag *hostedAgent) resetBreakerLocked() {
 	ag.failStreak, ag.paused, ag.probeDelay = 0, false, 0
@@ -213,6 +236,7 @@ type Daemon struct {
 	breaker          breakerPolicy
 	activity         activityPolicy
 	steerDebounce    time.Duration
+	wakeLoopBackoff  time.Duration
 	proxyRetryDelays []time.Duration
 	logger           *slog.Logger
 	daemonSessionID  string
@@ -252,6 +276,9 @@ type breakerPolicy struct {
 }
 
 var defaultBreakerPolicy = breakerPolicy{threshold: 3, firstProbe: 10 * time.Minute, maxProbe: 2 * time.Hour, firstRetry: 10 * time.Second, maxRetry: 5 * time.Minute}
+
+// maxStalledReplacements bounds consecutive stalledWithWork turn replacements before pausing.
+const maxStalledReplacements = 2
 
 // errTurnStalled is the cancel cause when a silent turn is cut so queued work can run.
 var errTurnStalled = errors.New("turn produced no runtime events while new work was waiting")
@@ -390,6 +417,8 @@ func (d *Daemon) stopWith(graceful bool, timeoutSeconds int) {
 		for _, ag := range agents {
 			ag.mu.Lock()
 			ag.resetBreakerLocked()
+			ag.stopSteerTimerLocked()
+			ag.stopWakeBackoffTimerLocked()
 			drv := ag.drv
 			ag.mu.Unlock()
 			if drv == nil {
@@ -418,6 +447,8 @@ func (d *Daemon) Detach() {
 		for _, ag := range d.agents {
 			ag.mu.Lock()
 			ag.resetBreakerLocked()
+			ag.stopSteerTimerLocked()
+			ag.stopWakeBackoffTimerLocked()
 			if hc, ok := ag.drv.(*agenthost.Client); ok {
 				hc.Detach()
 			}

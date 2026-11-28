@@ -599,3 +599,199 @@ func TestMidTurnSteerInjectsNoticeWithoutAdvancingReadSeq(t *testing.T) {
 		t.Fatalf("turn 2 prompt should focus #ops: %s", drv.promptAt(1))
 	}
 }
+
+func TestWakeLoopGuardBackoffParkAndNewMessageUnpark(t *testing.T) {
+	t0 := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	unread := map[string]domain.InboxItem{
+		"c1": {ConversationID: "c1", Target: "#stuck", Title: "#stuck", Reason: "mention", UnreadCount: 1, LatestSeq: 5, LatestAt: t0},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/inbox"):
+			items := make([]domain.InboxItem, 0, len(unread))
+			for _, it := range unread {
+				items = append(items, it)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages"):
+			delete(unread, "c1")
+			_, _ = w.Write([]byte(`{"messages":[]}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages"):
+			_, _ = w.Write([]byte(`{"message":{"id":"m9"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	var d *Daemon
+	var ag *hostedAgent
+	drv := &scriptedDriver{}
+	drv.fn = func(turn int, _ driver.TurnInput) (driver.TurnResult, error) {
+		if turn <= 3 {
+			// Ignore #stuck@5 three times to walk: nudge -> backoff -> park.
+			return driver.TurnResult{}, nil
+		}
+		proxyHit(d, ag.driverToken, http.MethodGet, "/conversations/c1/messages?unread=true")
+		proxyHit(d, ag.driverToken, http.MethodPost, "/conversations/c1/messages")
+		return driver.TurnResult{ToolCalls: 2}, nil
+	}
+
+	d = NewDaemon(Config{ServerURL: srv.URL, DataDir: t.TempDir(), DriverFactory: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) { return drv, nil }}, nil)
+	d.wakeLoopBackoff = 60 * time.Millisecond
+	defer d.Stop()
+	ag = d.provisionAgent(builtinSpec("m1"))
+
+	d.scheduleWake(context.Background(), "agent-1", "c1", "mention")
+	// Backoff timer must trigger the 3rd attempt automatically, after which c1@5 is parked.
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy && drv.count() == 3 && ag.wakeBackoffTimer == nil
+	})
+
+	// Another wake while c1 is still at seq=5 must not run any new turn.
+	d.scheduleWake(context.Background(), "agent-1", "c1", "mention")
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy
+	})
+	if drv.count() != 3 {
+		t.Fatalf("parked conversation ran extra turns: got %d, want 3", drv.count())
+	}
+
+	// A newer message (seq=6) automatically unparks c1 and completes normally.
+	mu.Lock()
+	unread["c1"] = domain.InboxItem{ConversationID: "c1", Target: "#stuck", Title: "#stuck", Reason: "mention", UnreadCount: 2, LatestSeq: 6, LatestAt: t0.Add(time.Minute)}
+	mu.Unlock()
+	d.scheduleWake(context.Background(), "agent-1", "c1", "mention")
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy && drv.count() == 4
+	})
+}
+
+type stallAwareDriver struct {
+	mu     sync.Mutex
+	turns  int
+	hang   bool
+	onWork func()
+}
+
+func (s *stallAwareDriver) RunTurn(ctx context.Context, _ driver.TurnInput) (driver.TurnResult, error) {
+	s.mu.Lock()
+	s.turns++
+	hang := s.hang
+	fn := s.onWork
+	s.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return driver.TurnResult{}, ctx.Err()
+	}
+	if fn != nil {
+		fn()
+	}
+	return driver.TurnResult{ToolCalls: 1}, nil
+}
+func (s *stallAwareDriver) ResetSession() error { return nil }
+func (s *stallAwareDriver) Close() error        { return nil }
+func (s *stallAwareDriver) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turns
+}
+
+func TestStalledWithQueuedInboxCancelsAndBoundsReplacements(t *testing.T) {
+	t0 := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	unread := map[string]domain.InboxItem{
+		"c1": {ConversationID: "c1", Target: "#one", Title: "#one", Reason: "mention", UnreadCount: 1, LatestSeq: 1, LatestAt: t0},
+		"c2": {ConversationID: "c2", Target: "#two", Title: "#two", Reason: "mention", UnreadCount: 1, LatestSeq: 1, LatestAt: t0.Add(time.Second)},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/inbox"):
+			items := make([]domain.InboxItem, 0, len(unread))
+			for _, id := range []string{"c1", "c2"} {
+				if it, ok := unread[id]; ok {
+					items = append(items, it)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages"):
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			delete(unread, parts[len(parts)-2])
+			_, _ = w.Write([]byte(`{"messages":[]}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages"):
+			_, _ = w.Write([]byte(`{"message":{"id":"m1"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	var d *Daemon
+	var ag *hostedAgent
+	drv := &stallAwareDriver{hang: true}
+
+	d = NewDaemon(Config{ServerURL: srv.URL, DataDir: t.TempDir(), DriverFactory: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) { return drv, nil }}, nil)
+	d.activity = activityPolicy{
+		minInterval:        time.Hour,
+		stallAfter:         time.Hour,
+		cancelIdle:         30 * time.Millisecond,
+		cancelIdleOpenTool: 30 * time.Millisecond,
+		checkEvery:         10 * time.Millisecond,
+	}
+	d.breaker = breakerPolicy{
+		threshold:  10,
+		firstProbe: time.Hour,
+		maxProbe:   time.Hour,
+		firstRetry: 15 * time.Millisecond,
+		maxRetry:   30 * time.Millisecond,
+	}
+	defer d.Stop()
+	ag = d.provisionAgent(builtinSpec("m1"))
+
+	// Single wake with 2 unread conversations in inbox (ag.dirty remains false during turn).
+	// Must auto-replace at most maxStalledReplacements (2) times, then pause on the 3rd stall.
+	d.scheduleWake(context.Background(), "agent-1", "c1", "mention")
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy && ag.paused && ag.stalledStreak == maxStalledReplacements+1
+	})
+	time.Sleep(80 * time.Millisecond)
+	if got := drv.count(); got != maxStalledReplacements+1 {
+		t.Fatalf("turns = %d, want %d (initial + %d replacements)", got, maxStalledReplacements+1, maxStalledReplacements)
+	}
+
+	// Operator restart clears paused + stalledStreak and drains the remaining inbox cleanly.
+	drv.mu.Lock()
+	drv.hang = false
+	drv.onWork = func() {
+		mu.Lock()
+		var next string
+		for _, id := range []string{"c1", "c2"} {
+			if _, ok := unread[id]; ok {
+				next = id
+				break
+			}
+		}
+		mu.Unlock()
+		if next != "" {
+			proxyHit(d, ag.driverToken, http.MethodGet, "/conversations/"+next+"/messages?unread=true")
+			proxyHit(d, ag.driverToken, http.MethodPost, "/conversations/"+next+"/messages")
+		}
+	}
+	drv.mu.Unlock()
+
+	d.handleControl(context.Background(), protocol.AgentControlFrame{Action: "restart", AgentMemberID: "agent-1"})
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy && !ag.paused && ag.stalledStreak == 0 && drv.count() == maxStalledReplacements+3
+	})
+}
