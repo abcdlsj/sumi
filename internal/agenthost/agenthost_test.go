@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -396,5 +397,74 @@ func TestCloseDoesNotUnlinkReplacementSocketOrMeta(t *testing.T) {
 	}
 	if _, err := NewClient(sock).Status(context.Background()); err != nil {
 		t.Fatalf("replacement sidecar unreachable after srv1.Close: %v", err)
+	}
+}
+
+type steeringDriver struct {
+	gatedDriver
+	steered chan string
+}
+
+func (s *steeringDriver) Steer(_ context.Context, msg string) error {
+	s.steered <- msg
+	return nil
+}
+
+func TestSidecarSteerForwardsToSteererAndRejectsUnsupported(t *testing.T) {
+	home := t.TempDir()
+	sock := SocketPath(home)
+	sd := &steeringDriver{
+		gatedDriver: gatedDriver{started: make(chan struct{}, 1), release: make(chan struct{})},
+		steered:     make(chan string, 1),
+	}
+	srv := NewServer(ServerConfig{
+		SocketPath: sock,
+		MetaPath:   MetaPath(home),
+		DriverBuilder: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) {
+			return sd, nil
+		},
+	})
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer srv.Close(false)
+
+	c := NewClient(sock)
+	spec := protocol.AssignedAgentSpec{MemberID: "m1", SpaceID: "s1", DisplayName: "Lin", DriverKind: domain.DriverBuiltin}
+	if err := c.Configure(context.Background(), spec, home); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	// Steering when no turn is active returns ErrTurnNotActive.
+	if err := c.SteerTurn(context.Background(), "turn-1", "notice"); !errors.Is(err, driver.ErrTurnNotActive) {
+		t.Fatalf("idle steer = %v, want ErrTurnNotActive", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.RunTurnWithID(context.Background(), "turn-1", "conv-1", driver.TurnInput{UserPrompt: "go", WorkDir: home})
+		done <- err
+	}()
+	select {
+	case <-sd.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("turn did not start")
+	}
+
+	if err := c.SteerTurn(context.Background(), "turn-1", "[Sumi inbox notice]\n- #ops"); err != nil {
+		t.Fatalf("SteerTurn: %v", err)
+	}
+	select {
+	case got := <-sd.steered:
+		if !strings.Contains(got, "#ops") {
+			t.Fatalf("steered = %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("steered message not delivered")
+	}
+
+	close(sd.release)
+	if err := <-done; err != nil {
+		t.Fatalf("turn failed: %v", err)
 	}
 }

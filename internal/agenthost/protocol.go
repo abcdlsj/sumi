@@ -99,6 +99,10 @@ type StartTurnRequest struct {
 	Env            []string `json:"env,omitempty"`
 }
 
+type SteerTurnRequest struct {
+	Message string `json:"message"`
+}
+
 // Event is one NDJSON line streamed from /turns and /turns/{id}/wait.
 type Event struct {
 	Type        string             `json:"type"` // "activity" | "done"

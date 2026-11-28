@@ -411,3 +411,135 @@ func TestUnreadSpinGuardSkipsUnprogressedItemAndContinuesDrain(t *testing.T) {
 		t.Fatalf("turn 3 should move on to #other: %s", drv.promptAt(2))
 	}
 }
+
+type steerableScriptedDriver struct {
+	scriptedDriver
+	steeredMu sync.Mutex
+	steered   []string
+	steeredCh chan string
+}
+
+func (s *steerableScriptedDriver) Steer(_ context.Context, message string) error {
+	s.steeredMu.Lock()
+	s.steered = append(s.steered, message)
+	s.steeredMu.Unlock()
+	if s.steeredCh != nil {
+		select {
+		case s.steeredCh <- message:
+		default:
+		}
+	}
+	return nil
+}
+
+func (s *steerableScriptedDriver) steeredCount() int {
+	s.steeredMu.Lock()
+	defer s.steeredMu.Unlock()
+	return len(s.steered)
+}
+
+func TestMidTurnSteerInjectsNoticeWithoutAdvancingReadSeq(t *testing.T) {
+	t0 := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	unread := map[string]domain.InboxItem{
+		"c1": {ConversationID: "c1", Target: "#eng", Title: "#eng", Reason: "mention", UnreadCount: 1, LatestSeq: 1, LatestAt: t0},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/inbox"):
+			items := make([]domain.InboxItem, 0, len(unread))
+			for _, it := range unread {
+				items = append(items, it)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages"):
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			delete(unread, parts[len(parts)-2])
+			_, _ = w.Write([]byte(`{"messages":[]}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages"):
+			_, _ = w.Write([]byte(`{"message":{"id":"m1"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	turn1Started := make(chan struct{}, 1)
+	releaseTurn1 := make(chan struct{})
+	steeredCh := make(chan string, 4)
+
+	var d *Daemon
+	var ag *hostedAgent
+	drv := &steerableScriptedDriver{steeredCh: steeredCh}
+	drv.fn = func(n int, in driver.TurnInput) (driver.TurnResult, error) {
+		if n == 1 {
+			proxyHit(d, ag.driverToken, http.MethodGet, "/conversations/c1/messages?unread=true")
+			turn1Started <- struct{}{}
+			<-releaseTurn1
+			proxyHit(d, ag.driverToken, http.MethodPost, "/conversations/c1/messages")
+			return driver.TurnResult{}, nil
+		}
+		// Turn 2 drains c2 because mid-turn steer never advanced read_seq on c2.
+		proxyHit(d, ag.driverToken, http.MethodGet, "/conversations/c2/messages?unread=true")
+		proxyHit(d, ag.driverToken, http.MethodPost, "/conversations/c2/messages")
+		return driver.TurnResult{}, nil
+	}
+
+	d = NewDaemon(Config{ServerURL: srv.URL, DataDir: t.TempDir(), DriverFactory: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) { return drv, nil }}, nil)
+	d.steerDebounce = 25 * time.Millisecond
+	defer d.Stop()
+	ag = d.provisionAgent(builtinSpec("m1"))
+
+	d.scheduleWake(context.Background(), "agent-1", "c1", "mention")
+	select {
+	case <-turn1Started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("turn 1 did not start")
+	}
+
+	// New urgent message arrives in #ops while turn 1 is still running.
+	mu.Lock()
+	unread["c2"] = domain.InboxItem{
+		ConversationID:   "c2",
+		Target:           "#ops",
+		Title:            "#ops",
+		Reason:           "mention",
+		UnreadCount:      1,
+		LatestSeq:        7,
+		LatestAuthorName: "Lisi",
+		LatestPreview:    "Please pause deploy immediately",
+		LatestAt:         t0.Add(time.Minute),
+	}
+	mu.Unlock()
+	d.scheduleWake(context.Background(), "agent-1", "c2", "mention")
+
+	select {
+	case notice := <-steeredCh:
+		if !strings.Contains(notice, "read_seq was NOT advanced") || !strings.Contains(notice, "#ops") || !strings.Contains(notice, "Please pause deploy immediately") {
+			t.Fatalf("unexpected steer notice:\n%s", notice)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected mid-turn steer notice")
+	}
+
+	// Duplicate wake for the exact same unread state must be deduplicated (no second steer).
+	d.scheduleWake(context.Background(), "agent-1", "c2", "mention")
+	time.Sleep(80 * time.Millisecond)
+	if got := drv.steeredCount(); got != 1 {
+		t.Fatalf("steeredCount = %d, want 1 (duplicate fingerprint must be suppressed)", got)
+	}
+
+	// Release turn 1; c2 must still be drained in turn 2 since steer never advanced read_seq.
+	close(releaseTurn1)
+	waitFor(t, func() bool {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		return !ag.busy
+	})
+	if drv.count() != 2 {
+		t.Fatalf("turns = %d, want 2 (turn 2 drains c2)", drv.count())
+	}
+	if !strings.Contains(drv.promptAt(1), "sumi read #ops --unread") {
+		t.Fatalf("turn 2 prompt should focus #ops: %s", drv.promptAt(1))
+	}
+}

@@ -472,6 +472,40 @@ func (s *Server) handleTurnSubroute(w http.ResponseWriter, r *http.Request) {
 			active.cancel()
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "steer":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var req SteerTurnRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Message) == "" {
+			writeErrJSON(w, http.StatusBadRequest, domain.AgentErrTurnFailed, "invalid steer request")
+			return
+		}
+		s.mu.Lock()
+		active := s.active
+		drv := s.drv
+		s.mu.Unlock()
+		if active == nil || active.id != turnID {
+			writeErrJSON(w, http.StatusConflict, domain.AgentErrTurnFailed, "turn is not active")
+			return
+		}
+		steerer, ok := drv.(driver.Steerer)
+		if !ok {
+			writeErrJSON(w, http.StatusNotImplemented, domain.AgentErrTurnFailed, "driver does not support mid-turn steer")
+			return
+		}
+		if err := steerer.Steer(r.Context(), req.Message); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, driver.ErrTurnNotActive) {
+				status = http.StatusConflict
+			} else if errors.Is(err, driver.ErrSteerUnsupported) {
+				status = http.StatusNotImplemented
+			}
+			writeErrJSON(w, status, domain.AgentErrTurnFailed, domain.BoundErrorDetail(err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

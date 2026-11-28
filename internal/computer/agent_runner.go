@@ -395,6 +395,9 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 	}
 	if ag.busy || (ag.retryTimer != nil && reason != "retry") {
 		ag.dirty = true
+		if ag.busy && ag.retryTimer == nil {
+			d.armBusySteerLocked(ctx, ag)
+		}
 		ag.mu.Unlock()
 		return
 	}
@@ -404,6 +407,119 @@ func (d *Daemon) scheduleWake(ctx context.Context, agentID, convID, reason strin
 	ag.mu.Unlock()
 
 	go d.runAgentLoop(ctx, ag)
+}
+
+// armBusySteerLocked debounces mid-turn inbox notices while a turn is active. Caller holds ag.mu.
+func (d *Daemon) armBusySteerLocked(ctx context.Context, ag *hostedAgent) {
+	if !ag.busy || ag.stopRequested || ag.steerTimer != nil || ag.drv == nil {
+		return
+	}
+	if _, isSidecar := ag.drv.(*agenthost.Client); !isSidecar {
+		if _, ok := ag.drv.(driver.Steerer); !ok {
+			return
+		}
+	}
+	delay := d.steerDebounce
+	if delay <= 0 {
+		delay = 1500 * time.Millisecond
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		ag.mu.Lock()
+		if ag.steerTimer != timer {
+			ag.mu.Unlock()
+			return
+		}
+		ag.steerTimer = nil
+		ag.mu.Unlock()
+		d.trySteerBusyAgent(ctx, ag)
+	})
+	ag.steerTimer = timer
+}
+
+func steerFingerprint(items []domain.InboxItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, fmt.Sprintf("%s:%d:%d", it.ConversationID, it.LatestSeq, it.UnreadCount))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+// trySteerBusyAgent fetches read-only unread attention items and injects a deduplicated mid-turn
+// notice into drivers that support Steer. Failures are non-fatal; ag.dirty still guarantees drain.
+func (d *Daemon) trySteerBusyAgent(ctx context.Context, ag *hostedAgent) {
+	ag.mu.Lock()
+	if !ag.busy || ag.stopRequested || ag.drv == nil || d.isDraining() {
+		ag.mu.Unlock()
+		return
+	}
+	agentID := ag.spec.MemberID
+	drv := ag.drv
+	turnID := ag.activeTurnID
+	focusConvID := ag.focusConvID
+	focusSeq := ag.focusLatestSeq
+	prevFP := ag.lastSteerFP
+	ag.mu.Unlock()
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	items, err := d.fetchAgentInbox(fetchCtx, agentID)
+	cancel()
+	if err != nil || len(items) == 0 {
+		return
+	}
+	relevant := make([]domain.InboxItem, 0, len(items))
+	for _, it := range items {
+		if it.ConversationID != focusConvID {
+			relevant = append(relevant, it)
+		} else if focusSeq == 0 || it.LatestSeq > focusSeq {
+			relevant = append(relevant, it)
+		}
+	}
+	if len(relevant) == 0 {
+		return
+	}
+	relevant = orderInboxItems(relevant, nil)
+	fp := steerFingerprint(relevant)
+	if fp == "" || fp == prevFP {
+		return
+	}
+	notice := buildSteerNotice(focusConvID, relevant)
+	if notice == "" {
+		return
+	}
+
+	ag.mu.Lock()
+	stillSame := ag.busy && !ag.stopRequested && ag.drv == drv && ag.activeTurnID == turnID
+	ag.mu.Unlock()
+	if !stillSame {
+		return
+	}
+
+	steerCtx, steerCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer steerCancel()
+	if hc, ok := drv.(*agenthost.Client); ok {
+		err = hc.SteerTurn(steerCtx, turnID, notice)
+	} else if st, ok := drv.(driver.Steerer); ok {
+		err = st.Steer(steerCtx, notice)
+	} else {
+		return
+	}
+	if err != nil {
+		if !errors.Is(err, driver.ErrSteerUnsupported) && !errors.Is(err, driver.ErrTurnNotActive) {
+			d.logger.Debug("Mid-turn steer skipped", "agent_id", agentID, "turn_id", turnID, "error", err.Error())
+		}
+		return
+	}
+	ag.mu.Lock()
+	if ag.busy && ag.activeTurnID == turnID {
+		ag.lastSteerFP = fp
+	}
+	ag.mu.Unlock()
+	d.logger.Info("Mid-turn inbox notice steered", "agent_id", agentID, "turn_id", turnID, "items", len(relevant))
 }
 
 type silentNudge struct {
@@ -441,9 +557,12 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 			ag.mu.Lock()
 			ag.busy = false
 			ag.focusConvID = ""
+			ag.focusLatestSeq = 0
+			ag.activeTurnID = ""
 			ag.cancelTurn = nil
 			ag.activeTelemetry = nil
 			ag.stopRequested = false
+			ag.stopSteerTimerLocked()
 			ag.mu.Unlock()
 			d.notifyDrainCheck()
 		}
@@ -567,9 +686,13 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		}
 
 		tel := newTurnTelemetry()
+		turnID := uuid.NewString()
 		ag.mu.Lock()
 		ag.focusConvID = focus.ConversationID
+		ag.focusLatestSeq = focus.LatestSeq
+		ag.activeTurnID = turnID
 		ag.activeTelemetry = tel
+		ag.stopSteerTimerLocked()
 		ag.mu.Unlock()
 		turnStart := time.Now()
 		d.logger.Info("Agent turn started", "agent_id", spec.MemberID, "conversation_id", focus.ConversationID, "inbox_items", inboxCount, "reason", focus.Reason, "nudge", isNudge, "recovery", isRecovery)
@@ -626,11 +749,11 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		var turnRes driver.TurnResult
 		var runErr error
 		if hc, ok := drv.(*agenthost.Client); ok {
-			turnRes, runErr = hc.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+			turnRes, runErr = hc.RunTurnWithID(turnCtx, turnID, focus.ConversationID, turnInput)
 			if runErr != nil && isSidecarDialError(runErr) && turnCtx.Err() == nil {
 				if recovered, recErr := d.recoverDeadSidecar(ag, hc, spec); recovered != nil {
 					drv = recovered
-					turnRes, runErr = recovered.RunTurnWithID(turnCtx, uuid.NewString(), focus.ConversationID, turnInput)
+					turnRes, runErr = recovered.RunTurnWithID(turnCtx, turnID, focus.ConversationID, turnInput)
 				} else if recErr != nil {
 					runErr = recErr
 				}
@@ -648,7 +771,10 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 
 		ag.mu.Lock()
 		ag.cancelTurn = nil
+		ag.activeTurnID = ""
+		ag.focusLatestSeq = 0
 		ag.activeTelemetry = nil
+		ag.stopSteerTimerLocked()
 		stopped := ag.stopRequested || errors.Is(cause, errTurnStopped)
 		ag.stopRequested = false
 		replaced := ag.drv != drv
@@ -796,6 +922,8 @@ func (d *Daemon) resumeAttachedTurn(ctx context.Context, ag *hostedAgent, turnID
 		return
 	}
 	ag.cancelTurn = cancel
+	ag.activeTurnID = turnID
+	ag.stopSteerTimerLocked()
 	ag.mu.Unlock()
 
 	_, runErr := hc.WaitTurn(turnCtx, turnID, tracker.Observe)
@@ -809,6 +937,8 @@ func (d *Daemon) resumeAttachedTurn(ctx context.Context, ag *hostedAgent, turnID
 
 	ag.mu.Lock()
 	ag.cancelTurn = nil
+	ag.activeTurnID = ""
+	ag.stopSteerTimerLocked()
 	stopped := ag.stopRequested || errors.Is(cause, errTurnStopped)
 	ag.stopRequested = false
 	ag.mu.Unlock()

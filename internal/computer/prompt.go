@@ -199,6 +199,42 @@ func buildSilentReplyNudgePrompt(focus domain.InboxItem, unresolvedHeld bool) st
 		focus.Title, target, focus.Reason, target)
 }
 
+// buildSteerNotice formats a concise mid-turn inbox notice injected via Steer when new messages
+// arrive while a turn is already running. It never advances read_seq on the Server.
+func buildSteerNotice(focusConvID string, items []domain.InboxItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[Sumi inbox notice — mid-turn update; read_seq was NOT advanced:\n")
+	for _, it := range items {
+		target := wakeTarget(it)
+		tag := ""
+		if it.ConversationID == focusConvID {
+			tag = " [CURRENT CONVERSATION]"
+		}
+		fmt.Fprintf(&b, "- %s%s (target=%s, reason=%s, unread=%d)", it.Title, tag, target, it.Reason, it.UnreadCount)
+		if preview := compactSteerPreview(it.LatestPreview, 80); preview != "" {
+			fmt.Fprintf(&b, " — %s: %q", it.LatestAuthorName, preview)
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("]\nIf this changes or stops your current work, run `sumi read <target> --unread` now. Otherwise finish your current step and Sumi will wake you for queued conversations next.")
+	return b.String()
+}
+
+func compactSteerPreview(s string, maxRunes int) string {
+	flat := strings.Join(strings.Fields(s), " ")
+	if flat == "" {
+		return ""
+	}
+	runes := []rune(flat)
+	if len(runes) <= maxRunes {
+		return flat
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "…"
+}
+
 func wakeTarget(it domain.InboxItem) string {
 	if it.Target != "" {
 		return it.Target

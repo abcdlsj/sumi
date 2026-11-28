@@ -59,7 +59,11 @@ type hostedAgent struct {
 	busy           bool
 	dirty          bool
 	focusConvID    string
+	focusLatestSeq int64
+	activeTurnID   string
 	attachedTurnID string
+	steerTimer     *time.Timer
+	lastSteerFP    string
 	// staleBuild marks a sidecar that was re-attached while busy although it runs an older
 	// build than the one we would spawn; the agent loop replaces it once that turn has ended.
 	staleBuild    bool
@@ -181,6 +185,16 @@ type retryContext struct {
 	errCode string
 }
 
+// stopSteerTimerLocked cancels any pending mid-turn steer timer and clears per-turn steer dedup.
+// Caller holds ag.mu.
+func (ag *hostedAgent) stopSteerTimerLocked() {
+	if ag.steerTimer != nil {
+		ag.steerTimer.Stop()
+		ag.steerTimer = nil
+	}
+	ag.lastSteerFP = ""
+}
+
 // resetBreakerLocked clears the failure breaker; caller holds ag.mu.
 func (ag *hostedAgent) resetBreakerLocked() {
 	ag.failStreak, ag.paused, ag.probeDelay = 0, false, 0
@@ -198,6 +212,7 @@ type Daemon struct {
 	cfg              Config
 	breaker          breakerPolicy
 	activity         activityPolicy
+	steerDebounce    time.Duration
 	proxyRetryDelays []time.Duration
 	logger           *slog.Logger
 	daemonSessionID  string
@@ -261,6 +276,7 @@ func NewDaemon(cfg Config, logger *slog.Logger) *Daemon {
 		cfg:             cfg,
 		breaker:         defaultBreakerPolicy,
 		activity:        defaultActivityPolicy,
+		steerDebounce:   1500 * time.Millisecond,
 		logger:          logger,
 		daemonSessionID: uuid.NewString(),
 		httpClient:      &http.Client{Timeout: 30 * time.Second},

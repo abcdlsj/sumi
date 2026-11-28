@@ -429,6 +429,37 @@ func (c *Client) CancelTurn(turnID string) {
 	}
 }
 
+// SteerTurn injects a mid-turn notice into an active turn running inside the sidecar.
+func (c *Client) SteerTurn(ctx context.Context, turnID, message string) error {
+	if turnID == "" || strings.TrimSpace(message) == "" {
+		return driver.ErrTurnNotActive
+	}
+	raw, err := json.Marshal(SteerTurnRequest{Message: message})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/turns/"+turnID+"/steer", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusConflict:
+		return driver.ErrTurnNotActive
+	case http.StatusNotImplemented:
+		return driver.ErrSteerUnsupported
+	default:
+		return decodeSidecarError(resp.Body, domain.AgentErrTurnFailed)
+	}
+}
+
 func (c *Client) ResetSession() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
