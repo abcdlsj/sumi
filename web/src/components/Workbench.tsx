@@ -40,11 +40,12 @@ import {
 } from "lucide-react";
 import { activityLabel, api, ownComputers, type AgentCreateProposal, type BootstrapData, type ChannelGroup, type Conversation, type Member, type NotifyLevel, type SearchHit, type Space } from "../api";
 import { accentForeground, accentSwatch, applyAccent } from "../accent";
-import { useDraftConvIDs } from "../drafts";
+import { readAllDrafts, useDraftConvIDs } from "../drafts";
 import { readPendingPairing } from "../pairing";
 import { isMacPlatform, readLastSpaceView, useChannelSort, useSidebarCollapsed, writeLastSpaceView, type ChannelSortPref, type SavedMainView } from "../preferences";
 import { isDesktopShell } from "../shell";
 import { useTheme } from "../theme";
+import { subscribeStartupHandoff } from "../updateHandoff";
 import { AgentForm } from "./AgentForm";
 import { WorkingAgentsPopover } from "./AgentVisibility";
 import { agentStatusText, MemberAvatar } from "./Avatar";
@@ -55,6 +56,7 @@ import { ComputerStep, PairingCard } from "./Setup";
 import { DETAIL_MIN, ResizeHandle, SIDEBAR_MAX, SIDEBAR_MIN, usePaneWidths } from "./Resize";
 import { WorkbenchSkeleton } from "./Skeletons";
 import { Button, ErrorBoundary, ErrorState, Menu, MenuItem, Modal, useAction, useToast } from "./ui";
+import { UpdatePill, useAutoUpdate } from "./UpdatePill";
 import { AdminPanel, InboxView, TasksView, type AdminTab, type InboxFilter, type TaskFilter } from "./Views";
 import { ChannelGroupDialog, JumpDialog, NewChannelDialog, NewSpaceDialog, ShortcutsDialog, type JumpItem } from "./WorkbenchDialogs";
 
@@ -266,9 +268,34 @@ export function Workbench({
   const boot = bootQ.data;
   const panes = usePaneWidths();
   const draftConvIDs = useDraftConvIDs();
+  const handoffAppliedRef = useRef(false);
+  const { status: updateStatus, triggerUpdate } = useAutoUpdate({
+    captureRootState: () => ({
+      space_slug: spaceSlug,
+      main_view: toSavedMainView(mainView),
+      detail,
+      drafts: readAllDrafts(),
+    }),
+    onToast: (msg) => toast(msg, "error"),
+  });
   const accent = boot?.space.accent;
   useEffect(() => applyAccent(accent), [accent]);
   useEffect(() => setRecentConvIDs(readRecentConvs(spaceSlug)), [spaceSlug]);
+
+  // Apply one-shot desktop update handoff (view + detail panel) once for this space.
+  useEffect(() => {
+    return subscribeStartupHandoff((h) => {
+      if (handoffAppliedRef.current) return;
+      if (h.space_slug && h.space_slug !== spaceSlug) return;
+      handoffAppliedRef.current = true;
+      if (h.main_view) {
+        setMainViewState(h.main_view);
+      }
+      if (h.detail) {
+        setDetail(h.detail);
+      }
+    });
+  }, [spaceSlug]);
 
   const setMainView = useCallback(
     (next: MainView, opts?: { replace?: boolean; persist?: boolean }) => {
@@ -904,9 +931,14 @@ export function Workbench({
         {desktop && (
           <div
             data-desktop-titlebar
-            className={`h-[52px] ${sidebarCollapsed ? "pl-3 justify-center" : "pl-[92px] pr-4"} border-b border-nav-line flex items-center shrink-0 titlebar-drag`}
+            className={`h-[52px] ${sidebarCollapsed ? "pl-3 justify-center" : "pl-[92px] pr-3 gap-2"} border-b border-nav-line flex items-center shrink-0 titlebar-drag`}
           >
-            {!sidebarCollapsed && <span className="text-[15px] font-semibold text-nav-fg-strong truncate">{boot.space.name}</span>}
+            {!sidebarCollapsed && (
+              <>
+                <span className="text-[15px] font-semibold text-nav-fg-strong truncate flex-1">{boot.space.name}</span>
+                <UpdatePill status={updateStatus} onActivate={() => void triggerUpdate()} />
+              </>
+            )}
           </div>
         )}
         <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: sidebarCollapsed ? "56px" : "56px minmax(0, 1fr)" }}>
@@ -1013,6 +1045,7 @@ export function Workbench({
               {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`)}
               {railBtn("people", <Users />, "People")}
               {railBtn("settings", <Settings />, "Settings")}
+              {sidebarCollapsed && <UpdatePill status={updateStatus} onActivate={() => void triggerUpdate()} compact />}
               <DesktopServerTrigger variant="rail" />
             </div>
           </nav>

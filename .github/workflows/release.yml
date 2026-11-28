@@ -196,11 +196,31 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@v4
         with:
           pattern: sumi-*
           path: dist
           merge-multiple: true
+      - name: Generate signed update manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          python3 scripts/generate-update-manifest.py \
+            --app sumi \
+            --repo "${{ github.repository }}" \
+            --tag "$tag" \
+            --version "$version" \
+            --bundle-id com.sumi.desktop \
+            --bundle-name Sumi.app \
+            --min-os 11.0 \
+            --out-dir dist \
+            --asset "darwin-aarch64=dist/Sumi-${version}-aarch64-apple-darwin.app.zip" \
+            --asset "darwin-x86_64=dist/Sumi-${version}-x86_64-apple-darwin.app.zip"
       - name: Checksum the release assets
         working-directory: dist
         run: sha256sum $(ls | grep -v '^SHA256SUMS$') > SHA256SUMS

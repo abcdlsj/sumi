@@ -6,6 +6,7 @@ import { WorkbenchSkeleton } from "./components/Skeletons";
 import { ErrorBoundary, ErrorState } from "./components/ui";
 import { Workbench } from "./components/Workbench";
 import { clearLastLocation, readLastSpace, writeLastSpace } from "./preferences";
+import { subscribeStartupHandoff } from "./updateHandoff";
 
 type Setup = { slug: string; step: "computer" | "agent" } | null;
 
@@ -36,6 +37,14 @@ export function App() {
       writeLastSpace(activeSlug);
     }
   }, [user, activeSlug, setup]);
+
+  useEffect(() => {
+    return subscribeStartupHandoff((h) => {
+      if (h.space_slug) {
+        setSelectedSlug(h.space_slug);
+      }
+    });
+  }, []);
 
   if (meQ.isLoading) return <WorkbenchSkeleton />;
 

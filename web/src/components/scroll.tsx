@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { QueryClient } from "@tanstack/react-query";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { api, type AgentReadProgress, type Message } from "../api";
+import { takePendingScrollRestore } from "../updateHandoff";
 
 export interface MessagePage {
   messages: Message[];
@@ -120,7 +121,17 @@ export function useStickToBottom({ streamKey, count, lastSeq, lastId, anchorId }
 
     // First placement, and a divider that only shows up once the fresh page lands.
     if (!placed.current || (!anchored.current && anchor && !moved.current)) {
+      const firstPlace = !placed.current;
       placed.current = true;
+      const restoredTop = firstPlace ? takePendingScrollRestore(streamKey) : null;
+      if (restoredTop !== null) {
+        anchored.current = true;
+        setTop(el, Math.min(restoredTop, Math.max(0, el.scrollHeight - el.clientHeight)));
+        const dist = distanceFromEnd(el);
+        pinned.current = dist < NEAR_END_PX;
+        setFarFromEnd(dist > JUMP_TO_LATEST_PX);
+        return;
+      }
       if (anchor) {
         anchored.current = true;
         setTop(el, Math.max(0, anchor.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 16));

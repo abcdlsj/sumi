@@ -50,6 +50,38 @@ export interface DesktopServerState {
   computer_status: string;
 }
 
+export type DesktopUpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "verifying"
+  | "ready_to_restart"
+  | "flushing"
+  | "installing"
+  | "error";
+
+export interface DesktopUpdateStatus {
+  current: string;
+  latest?: string;
+  available: boolean;
+  state: DesktopUpdateState;
+  progress: number;
+  can_apply: boolean;
+  release_url?: string;
+  notes?: string;
+  error?: string;
+}
+
+export interface DesktopUpdateHandoff {
+  schema_version: number;
+  from_version: string;
+  to_version: string;
+  created_at_ms: number;
+  ttl_ms: number;
+  app_state: Record<string, unknown>;
+}
+
 /** Moves `?shell=desktop` and `#desktop_control=...&desktop_token=...` into sessionStorage and strips them from the URL. */
 export function captureShellFromURL(): void {
   const url = new URL(window.location.href);
@@ -140,6 +172,69 @@ export async function openDesktopURL(bridge: DesktopBridge, targetUrl: string): 
   if (!res.ok) {
     throw new Error("Unable to open URL in browser");
   }
+}
+
+export async function fetchDesktopUpdateStatus(bridge: DesktopBridge): Promise<DesktopUpdateStatus> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/update`, {
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  if (!res.ok) {
+    throw new Error("Unable to read desktop update status");
+  }
+  return (await res.json()) as DesktopUpdateStatus;
+}
+
+export async function checkDesktopUpdate(bridge: DesktopBridge): Promise<DesktopUpdateStatus> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/update/check`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  if (!res.ok) {
+    throw new Error("Unable to check for desktop updates");
+  }
+  return (await res.json()) as DesktopUpdateStatus;
+}
+
+export async function applyDesktopUpdate(bridge: DesktopBridge): Promise<DesktopUpdateStatus> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/update/apply`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  const body = (await res.json().catch(() => ({}))) as { message?: string } & Partial<DesktopUpdateStatus>;
+  if (!res.ok) {
+    throw new Error(body.message || "Unable to download update");
+  }
+  return body as DesktopUpdateStatus;
+}
+
+export async function commitDesktopUpdateRestart(
+  bridge: DesktopBridge,
+  appState: Record<string, unknown>,
+): Promise<void> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/update/commit`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bridge.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ app_state: appState }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { message?: string };
+  if (!res.ok) {
+    throw new Error(body.message || "Unable to commit update restart");
+  }
+}
+
+export async function consumeDesktopUpdateHandoff(bridge: DesktopBridge): Promise<DesktopUpdateHandoff | null> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/update/handoff`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  if (!res.ok) {
+    throw new Error("Unable to read update handoff");
+  }
+  const body = (await res.json()) as { handoff?: DesktopUpdateHandoff | null };
+  return body.handoff ?? null;
 }
 
 /**

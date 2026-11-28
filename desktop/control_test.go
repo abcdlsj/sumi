@@ -45,7 +45,7 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 	}
 
 	var err error
-	cs, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, func() error { return nil }, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, func() error { return nil }, nil, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestControlServerHideWindow(t *testing.T) {
 	}
 
 	var err error
-	cs, err = startControlServer(rt, onSwitch, func(string) error { return nil }, onHideWindow, onRevealWindow, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, func(string) error { return nil }, onHideWindow, onRevealWindow, nil, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -325,5 +325,129 @@ func TestControlServerHideWindow(t *testing.T) {
 	}
 	if revealCalls != 1 {
 		t.Fatalf("expected exactly one reveal call, got %d", revealCalls)
+	}
+}
+
+func TestControlServerUpdateEndpoints(t *testing.T) {
+	dataDir := t.TempDir()
+	handoffPath := dataDir + "/update-handoff.json"
+	if err := writeHandoffFile(handoffPath, updateHandoffPayload{
+		SchemaVersion: 1,
+		FromVersion:   "6.0.8",
+		ToVersion:     "6.0.9",
+		CreatedAtMS:   1e15, // far future so TTL never expires during test
+		TTLMS:         updaterHandoffTTLMS,
+		AppState:      map[string]any{"space_slug": "studio"},
+	}); err != nil {
+		t.Fatalf("seed handoff: %v", err)
+	}
+
+	rt := newRuntime(Config{
+		ServerURL: defaultServerURL,
+		DataDir:   dataDir,
+	}, slog.New(slog.DiscardHandler))
+	defer rt.detach()
+
+	upd := newUpdaterManager(updaterConfig{
+		CurrentVersion: "0.0.0-dev",
+		DataDir:        dataDir,
+		CacheDir:       t.TempDir(),
+	})
+
+	cs, err := startControlServer(
+		rt,
+		func(context.Context, string) (desktopServerState, error) { return desktopServerState{}, nil },
+		func(string) error { return nil },
+		func() error { return nil },
+		func() error { return nil },
+		upd,
+		slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatalf("start control server: %v", err)
+	}
+	defer cs.shutdown()
+
+	// Foreign origin must be rejected on update endpoints.
+	req, _ := http.NewRequest(http.MethodGet, cs.baseURL+"/desktop/update", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET update foreign origin: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for foreign origin, got %d", resp.StatusCode)
+	}
+
+	// Valid GET /desktop/update returns current idle status.
+	req, _ = http.NewRequest(http.MethodGet, cs.baseURL+"/desktop/update", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET update: %v", err)
+	}
+	var st updateStatus
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("decode update status: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || st.State != updateStateIdle {
+		t.Fatalf("unexpected status: code=%d st=%+v", resp.StatusCode, st)
+	}
+
+	// POST /desktop/update/apply fails with 400 when no update is available.
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/update/apply", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST apply: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when no update available, got %d", resp.StatusCode)
+	}
+
+	// POST /desktop/update/handoff consumes startup handoff strictly once.
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/update/handoff", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST handoff first: %v", err)
+	}
+	var first struct {
+		Handoff *updateHandoffPayload `json:"handoff"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("decode first handoff: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || first.Handoff == nil || first.Handoff.AppState["space_slug"] != "studio" {
+		t.Fatalf("unexpected first handoff response: code=%d payload=%+v", resp.StatusCode, first.Handoff)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/update/handoff", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST handoff second: %v", err)
+	}
+	var second struct {
+		Handoff *updateHandoffPayload `json:"handoff"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&second); err != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("decode second handoff: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || second.Handoff != nil {
+		t.Fatalf("expected nil on second handoff consume, got %+v", second.Handoff)
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/abcdlsj/sumi/internal/cli"
 	"github.com/abcdlsj/sumi/internal/lifecycle"
+	"github.com/abcdlsj/sumi/internal/version"
 )
 
 //go:embed assets/appicon.png
@@ -193,7 +194,25 @@ func main() {
 		return nil
 	}
 
-	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, onRevealWindow, logger)
+	updCtx, updCancel := context.WithCancel(bootCtx)
+	upd := newUpdaterManager(updaterConfig{
+		CurrentVersion: version.Value(),
+		DataDir:        cfg.DataDir,
+		Logger:         logger,
+		EnableApply:    true,
+		OnQuit: func() {
+			stopPairing()
+			ctrl.shutdown()
+			// Detach cleanly so background server, computer daemon, and agents stay alive across UI updates;
+			// the relaunched Sumi.app seamlessly hands off server (WAL flush) and hot-upgrades computer.
+			rt.detach()
+			if app != nil {
+				application.InvokeAsync(func() { app.Quit() })
+			}
+		},
+	})
+
+	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, onRevealWindow, upd, logger)
 	if err != nil {
 		logger.Warn("Desktop control server unavailable", "error", err.Error())
 	}
@@ -245,6 +264,7 @@ func main() {
 		// Safety fallback ensures the window never stays hidden if the remote/local Web UI
 		// is slow or predates the /desktop/reveal-window endpoint.
 		revealer.scheduleFallback(450 * time.Millisecond)
+		upd.start(updCtx)
 	})
 	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
 		if !revealer.reveal() {
@@ -267,6 +287,16 @@ func main() {
 	menu.Add("Restart Computer Daemon").OnClick(func(*application.Context) {
 		rt.restartDaemon(bootCtx)
 		statusItem.SetLabel("Computer: " + rt.status())
+	})
+	menu.Add("Check for Updates…").OnClick(func(*application.Context) {
+		go func() {
+			st := upd.checkManual(updCtx)
+			if st.Available {
+				if !revealer.reveal() {
+					presentWindow(80 * time.Millisecond)
+				}
+			}
+		}()
 	})
 	menu.AddSeparator()
 	menu.Add("Quit Sumi (Keep Agents Running)").OnClick(func(*application.Context) {
@@ -295,6 +325,7 @@ func main() {
 		code = 1
 	}
 	revealer.stop()
+	updCancel()
 	stopPairing()
 	ctrl.shutdown()
 	// Default shell exit detaches cleanly so background services and agents stay alive across UI updates.

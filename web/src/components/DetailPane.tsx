@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowUp, Bell, BellOff, Bookmark, Brain, CheckCircle2, C
 import { saveAgentTemplate, templateDriverSummary, templateFromAgent, useAgentTemplates, type AgentTemplate } from "../agentTemplates";
 import { activityLabel, api, formatClock, formatDay, formatTimestamp, type AgentCreateProposal, type BootstrapData, type Member, type Message, type Permission, type Task, type TaskStatus } from "../api";
 import { isComposerSendEvent, isMacPlatform, useSendKey, useSpellCheckAttr, useTaskDetailsCollapsed } from "../preferences";
+import { takePendingReplyDraft, updateFlushRegistry } from "../updateHandoff";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { AgentReadReceipts, buildAgentReadMap, ThreadOutlineRail } from "./AgentVisibility";
 import { agentFocus, MemberAvatar, StatusDot, stateLabel } from "./Avatar";
@@ -225,24 +226,40 @@ function CompactMessage({
 
 function ReplyBox({
   spaceSlug,
+  draftKey,
   placeholder,
   members,
   selfID,
   onSend,
 }: {
   spaceSlug: string;
+  draftKey?: string;
   placeholder: string;
   members: Member[];
   selfID: string;
   onSend: (body: string, attachmentIDs: string[]) => Promise<void>;
 }) {
-  const [reply, setReply] = useState("");
+  const [reply, setReply] = useState(() => (draftKey ? takePendingReplyDraft(draftKey) ?? "" : ""));
   const [sendKey] = useSendKey();
   const spellCheck = useSpellCheckAttr();
   const draft = useAttachmentDraft(spaceSlug);
   const { busy, run } = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const replyRef = useRef(reply);
+  replyRef.current = reply;
+  const uploadingRef = useRef(draft.uploading);
+  uploadingRef.current = draft.uploading;
   const mentions = useMentionPicker({ members, selfID, value: reply, onChange: setReply, inputRef: textRef });
+
+  useEffect(() => {
+    if (!draftKey) return;
+    return updateFlushRegistry.register({
+      id: `reply-box:${draftKey}`,
+      getBlockingReason: () => (uploadingRef.current ? "Attachment upload in progress" : null),
+      captureState: () =>
+        replyRef.current.trim() ? { reply_box_draft: { key: draftKey, text: replyRef.current } } : {},
+    });
+  }, [draftKey]);
 
   useLayoutEffect(() => {
     const el = textRef.current;
@@ -1099,6 +1116,7 @@ function TaskDetail({
 
       <ReplyBox
         spaceSlug={spaceSlug}
+        draftKey={`task:${task.id}`}
         placeholder={`Reply in #${task.number}…`}
         members={members}
         selfID={boot.current_member.id}
@@ -1256,6 +1274,7 @@ function ThreadDetail({
       </div>
       <ReplyBox
         spaceSlug={spaceSlug}
+        draftKey={`thread:${threadConvID}`}
         placeholder="Reply in thread…"
         members={members}
         selfID={boot.current_member.id}

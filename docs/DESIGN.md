@@ -83,6 +83,7 @@ adapters (server / computer / cli / web / desktop) ──▶ app ──▶ domai
   sumi.db                    # Server SQLite（WAL）
   objects/                   # 内容寻址附件对象
   desktop.json               # Desktop 壳配置（Server URL 与各 Server 的 Computer token）
+  update-handoff.json        # 桌面壳自更新一次性状态交接文件（120s TTL，启动即原子消费删除）
   bin/sumi                   # 指向当前激活版本的原子 symlink
   releases/<build-id>/sumi   # 不可变版本二进制（绝不原地覆写运行中可执行文件）
   backups/                   # 升级前自动生成的 SQLite 在线快照
@@ -173,6 +174,23 @@ flowchart TD
 5. **版本真值与发布**
    - 版本只有一处来源：`internal/version.Version`，构建时以 `-ldflags` 注入，并同时写入 `sumi version`、控制面 `/status`、`/api/v1/health` 的 `app_version`（`version` 始终是协议版本）以及 `Info.plist`。裸 `go build` 得到 `0.0.0-dev`，绝不冒充发布版。
    - 升级校验以二进制内容哈希为主、语义版本为辅：即使同版本号重建，也必须自证哈希匹配才能接管服务。发布产物（二进制与 `Sumi.app`）因此只由打了版本戳的统一构建路径产出，不支持手工拼装。
+
+### 4.3 桌面壳无缝自动更新（Seamless Auto-Update）
+
+桌面壳（`Sumi.app`）内置零依赖（纯 Go 标准库）自更新管理器，仅在桌面壳本机控制面运行，不向浏览器开放任何远程升级入口：
+
+1. **签名清单与双重 Ed25519 校验**
+   - 发布流水线通过 `scripts/generate-update-manifest.py` 生成并上传 `latest.json` 与 `latest.json.sig`（RFC 8032 Ed25519）。桌面壳直接轮询 GitHub Releases CDN（`https://github.com/abcdlsj/sumi/releases/latest/download/latest.json`，附带 `If-None-Match` ETag 条件请求），强制执行下载与重定向域名白名单（仅允许 `github.com/abcdlsj/sumi/`、`objects.githubusercontent.com/`、`release-assets.githubusercontent.com/`，测试覆盖时放行 loopback）。
+   - 使用内嵌 32 字节 Ed25519 公钥执行双重验签：① 校验 `latest.json` 原文字节与 `latest.json.sig` 一致；② 下载平台压缩包并流式校验字节长度与 SHA-256，随后校验规范载荷 `v1:sumi:<version>:<platform>:<sha256>:<size>` 的平台签名。
+   - macOS 端以 `ditto -x -k` 解包至临时暂存目录，核对 `CFBundleIdentifier`（`com.sumi.desktop`）、可执行文件 `Sumi` 及 `codesign --verify --deep --strict`，全部通过后才进入 `ready_to_restart`。未打发布版本号的 `0.0.0-dev` 构建默认跳过自动检查（可通过 `SUMI_UPDATE_TEST_VERSION` 覆盖测试）。
+
+2. **原子替换、TCC 签名保活与后台零中断**
+   - 确认重启后，桌面壳经本机回环控制桥（`/desktop/update/*`，同 Origin + Bearer Token 鉴权）落盘一次性 `update-handoff.json`（`0600` 原子重命名，120s TTL），以独立会话（`Setsid`）拉起 `apply.sh` 助手并执行 `rt.detach()` 与优雅退出——后台 `sumi server`、`sumi computer` 与所有 `agent-host` 持续运行不被打断。
+   - `apply.sh` 等待旧进程退出后清除 `com.apple.quarantine`，若当前安装由本机钥匙串证书（如本地开发签名）签名且新包为 ad-hoc 签名，则自动沿用原证书重签以保住 macOS TCC 权限；随后在目标同卷暂存并以双 `mv` 原子替换 `Sumi.app`（失败自动回滚）并重新拉起。新 `Sumi.app` 启动时自动通过 §4.2 的 FD 交接与热接管无缝升级本地 `sumi server`（刷盘 SQLite WAL）与 `sumi computer`。
+
+3. **无打断交互与零数据丢失交接**
+   - 前端仅在桌面壳内且存在可用/进行中更新时渲染极简 `UpdatePill`（浏览器或空闲态完全隐藏）。点击更新后实行智能重启门禁：仅当下载校验在短窗口（8s）内完成、近 2s 无键盘输入且无上传等阻塞项时自动触发提交重启；否则停留于就绪态等待用户点击。
+   - 提交重启前经 `FlushRegistry` 统一刷盘并采集当前 Space、主视图（Channel/DM/Inbox/Tasks/Admin）、Detail 面板（Thread/Task 等）、消息流滚动位置及未发送草稿写入 `update-handoff.json`；新版本启动时原子消费并立即删除该文件（防崩溃循环），无感恢复现场。日志、错误与测试严禁输出草稿或消息正文。
 
 ---
 

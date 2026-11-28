@@ -13,6 +13,7 @@ import {
   signalDesktopWindowReady,
 } from "./shell";
 import { applyTheme } from "./theme";
+import { consumeStartupHandoff } from "./updateHandoff";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
@@ -27,6 +28,7 @@ const queryClient = new QueryClient({
 });
 
 captureShellFromURL();
+void consumeStartupHandoff();
 capturePairingFromURL();
 applyTheme();
 applyTypographyPreferences();

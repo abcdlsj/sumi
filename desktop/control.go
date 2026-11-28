@@ -36,6 +36,7 @@ type controlServer struct {
 	onOpenURL      func(rawURL string) error
 	onHideWindow   func() error
 	onRevealWindow func() error
+	updater        *updaterManager
 	logger         *slog.Logger
 }
 
@@ -45,6 +46,7 @@ func startControlServer(
 	onOpenURL func(rawURL string) error,
 	onHideWindow func() error,
 	onRevealWindow func() error,
+	updater *updaterManager,
 	logger *slog.Logger,
 ) (*controlServer, error) {
 	rawToken := make([]byte, 32)
@@ -63,6 +65,7 @@ func startControlServer(
 		onOpenURL:      onOpenURL,
 		onHideWindow:   onHideWindow,
 		onRevealWindow: onRevealWindow,
+		updater:        updater,
 		logger:         logger,
 	}
 	mux := http.NewServeMux()
@@ -70,6 +73,11 @@ func startControlServer(
 	mux.HandleFunc("/desktop/open-url", cs.handleOpenURL)
 	mux.HandleFunc("/desktop/hide-window", cs.handleHideWindow)
 	mux.HandleFunc("/desktop/reveal-window", cs.handleRevealWindow)
+	mux.HandleFunc("/desktop/update", cs.handleUpdateStatus)
+	mux.HandleFunc("/desktop/update/check", cs.handleUpdateCheck)
+	mux.HandleFunc("/desktop/update/apply", cs.handleUpdateApply)
+	mux.HandleFunc("/desktop/update/commit", cs.handleUpdateCommit)
+	mux.HandleFunc("/desktop/update/handoff", cs.handleUpdateHandoff)
 	cs.httpSrv = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -271,6 +279,99 @@ func (c *controlServer) handleRevealWindow(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeControlJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (c *controlServer) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.updater == nil {
+		writeControlJSON(w, http.StatusOK, updateStatus{State: updateStateIdle})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, c.updater.currentStatus())
+}
+
+func (c *controlServer) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.updater == nil {
+		writeControlJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Updater unavailable"})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, c.updater.checkManual(r.Context()))
+}
+
+func (c *controlServer) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.updater == nil {
+		writeControlJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Updater unavailable"})
+		return
+	}
+	if err := c.updater.apply(); err != nil {
+		writeControlJSON(w, http.StatusBadRequest, map[string]string{"error": "update_unavailable", "message": err.Error()})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, c.updater.currentStatus())
+}
+
+func (c *controlServer) handleUpdateCommit(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.updater == nil {
+		writeControlJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Updater unavailable"})
+		return
+	}
+	var req struct {
+		AppState map[string]any `json:"app_state"`
+	}
+	// Cap handoff payload size; never log app_state because it may include unsaved drafts.
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeControlJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_argument", "message": "Invalid JSON body"})
+			return
+		}
+	}
+	if err := c.updater.commitRestart(req.AppState); err != nil {
+		writeControlJSON(w, http.StatusBadRequest, map[string]string{"error": "commit_failed", "message": err.Error()})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (c *controlServer) handleUpdateHandoff(w http.ResponseWriter, r *http.Request) {
+	if !c.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c.updater == nil {
+		writeControlJSON(w, http.StatusOK, map[string]any{"handoff": nil})
+		return
+	}
+	writeControlJSON(w, http.StatusOK, map[string]any{"handoff": c.updater.takeStartupHandoff()})
 }
 
 func writeControlJSON(w http.ResponseWriter, status int, payload any) {

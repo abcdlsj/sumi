@@ -70,6 +70,44 @@ export function clearAllDraftsForTests() {
   }
 }
 
+/** Returns a snapshot of all non-empty unsaved composer drafts for update handoff. */
+export function readAllDrafts(): Record<string, ComposerDraft> {
+  const merged: Record<string, ComposerDraft> = { ...loadAll() };
+  for (const [id, d] of memory) {
+    merged[id] = d;
+  }
+  const out: Record<string, ComposerDraft> = {};
+  for (const [id, d] of Object.entries(merged)) {
+    if (d && (d.text.trim() || d.replyTo)) {
+      out[id] = { text: d.text, replyTo: d.replyTo ?? null };
+    }
+  }
+  return out;
+}
+
+/** Merges restored drafts from an update handoff without discarding any newer local edits. */
+export function restoreDrafts(drafts: Record<string, ComposerDraft>): void {
+  const entries = Object.entries(drafts);
+  if (entries.length === 0) return;
+  const all = loadAll();
+  let changed = false;
+  for (const [convID, d] of entries) {
+    if (!convID || !d || typeof d.text !== "string") continue;
+    const replyTo = typeof d.replyTo === "string" ? d.replyTo : null;
+    if (!d.text.trim() && !replyTo) continue;
+    const existing = memory.get(convID) ?? all[convID];
+    if (existing && (existing.text.trim() || existing.replyTo)) continue;
+    const restored: ComposerDraft = { text: d.text, replyTo };
+    memory.set(convID, restored);
+    all[convID] = restored;
+    changed = true;
+  }
+  if (changed) {
+    saveAll(all);
+    window.dispatchEvent(new Event(EVENT));
+  }
+}
+
 /** Reactive set of conversation IDs that currently hold a non-empty unsaved text draft. */
 export function useDraftConvIDs(): Set<string> {
   const compute = () => {

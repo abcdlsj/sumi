@@ -30,6 +30,7 @@ import {
 import { activityLabel, api, formatClock, formatDay, formatTimestamp, type AgentCreateProposal, type BootstrapData, type Conversation, type Member, type Message, type NotifyLevel } from "../api";
 import { readDraft, writeDraft } from "../drafts";
 import { isComposerSendEvent, isMacPlatform, useSendKey, useSpellCheckAttr } from "../preferences";
+import { updateFlushRegistry } from "../updateHandoff";
 import { ActionCard, isActionCardMessage } from "./ActionCard";
 import { memberDetailTarget, type DetailTarget } from "./DetailPane";
 import { AgentReadReceipts, buildAgentReadMap, MemberHoverCard, WorkingAgentsPopover } from "./AgentVisibility";
@@ -414,6 +415,33 @@ function MessageComposer({
   const send = useAction();
   const inviteAct = useAction();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerRef = useRef(composer);
+  composerRef.current = composer;
+  const replyingToRef = useRef(replyingTo);
+  replyingToRef.current = replyingTo;
+  const uploadingRef = useRef(draft.uploading);
+  uploadingRef.current = draft.uploading;
+
+  useEffect(() => {
+    return updateFlushRegistry.register({
+      id: `composer:${conv.id}`,
+      getBlockingReason: () => (uploadingRef.current ? "Attachment upload in progress" : null),
+      flushBeforeRestart: async () => {
+        writeDraft(conv.id, { text: composerRef.current, replyTo: replyingToRef.current });
+      },
+    });
+  }, [conv.id]);
+
+  // Hydrate an update-handoff draft if it arrives asynchronously after mount while composer is empty.
+  useEffect(() => {
+    const sync = () => {
+      if (composerRef.current) return;
+      const saved = readDraft(conv.id);
+      if (saved?.text) setComposer(saved.text);
+    };
+    window.addEventListener("sumi:drafts", sync);
+    return () => window.removeEventListener("sumi:drafts", sync);
+  }, [conv.id]);
 
   useEffect(() => {
     focusRef.current = () => textRef.current?.focus();
@@ -1043,6 +1071,17 @@ export function ConversationView({
     lastId: lastTailMsg?.id,
     anchorId: "new",
   });
+
+  useEffect(() => {
+    return updateFlushRegistry.register({
+      id: `scroll:${conv.id}`,
+      captureState: () => {
+        const el = scrollRef.current;
+        if (!el) return {};
+        return { scroll_conv_id: conv.id, scroll_top: Math.round(el.scrollTop) };
+      },
+    });
+  }, [conv.id, scrollRef]);
   const history = useOlderMessages({
     spaceSlug,
     convID: conv.id,
