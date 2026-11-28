@@ -16,8 +16,8 @@ INSTALL_APP_DIR ?= /Applications
 GO              ?= go
 NODE_PKG    ?= pnpm
 # Single source of truth for the release version. Release automation overrides this,
-# and `make build VERSION=6.0.7` produces an identically stamped binary locally.
-VERSION         ?= 6.0.7
+# and `make build VERSION=6.0.8` produces an identically stamped binary locally.
+VERSION         ?= 6.0.8
 LDFLAGS         := -X github.com/abcdlsj/sumi/internal/version.Version=$(VERSION)
 
 # Pairing inputs for `make pair`: EMAIL=... PASSWORD=... [SPACE=studio] [DESKTOP_CONFIG=...]
