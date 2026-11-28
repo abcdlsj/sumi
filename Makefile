@@ -54,6 +54,10 @@ doctor: ## Verify the local toolchain (Go, Node, Wails v3)
 
 # ---- Build ----
 
+.PHONY: icons
+icons: ## Regenerate app icon SVGs, desktop PNG/ICNS, and Web favicon
+	node assets/icon/generate.mjs
+
 .PHONY: web
 web: ## Build the Web UI into web/dist
 	$(NODE_PKG) --dir web build

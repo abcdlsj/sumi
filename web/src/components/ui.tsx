@@ -1036,11 +1036,20 @@ export function MenuItem({
 export function SumiMark({ size = 32 }: { size?: number }) {
   return (
     <span
-      style={{ width: size, height: size, borderRadius: Math.max(4, Math.round(size * 0.16)), background: "var(--accent)" }}
-      className="text-accent-fg inline-flex items-center justify-center shrink-0 select-none"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.max(6, Math.round(size * 0.22)),
+        background: "var(--accent)",
+      }}
+      className="inline-flex items-center justify-center shrink-0 select-none overflow-hidden"
     >
-      <svg viewBox="0 0 24 24" width={size * 0.56} height={size * 0.56} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-        <path d="M16.5 7.5c-1-1.3-2.6-2-4.5-2-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9 2.6 9 7.2 0 2-2 3.4-4.6 3.4-2 0-3.7-.8-4.7-2.2" />
+      <svg viewBox="100 100 824 824" width={size} height={size} aria-hidden>
+        <path
+          d="M 628.18 404.61 A 22.00 22.00 0 0 1 646.93 379.94 L 710.31 371.03 A 44.00 44.00 0 0 1 760.01 408.48 L 799.53 689.71 A 44.00 44.00 0 0 1 762.08 739.41 L 480.85 778.93 A 44.00 44.00 0 0 1 431.15 741.49 L 422.24 678.10 A 22.00 22.00 0 0 1 440.79 653.28 A 222.00 222.00 0 0 0 628.18 404.61 Z"
+          fill="#FFEBE2"
+        />
+        <circle cx="408.09" cy="433.70" r="168.00" fill="#FFFBF4" />
       </svg>
     </span>
   );
