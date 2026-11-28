@@ -859,17 +859,10 @@ export function Workbench({
     tab: AdminTab,
     icon: ReactNode,
     label: string,
-    opts?: { title?: string; dotTone?: "online" | "busy" | "danger" | "muted" },
+    opts?: { title?: string; dotTone?: "busy" | "danger" },
   ) => {
     const active = mainView.kind === "admin" && mainView.tab === tab;
-    const dotClass =
-      opts?.dotTone === "online"
-        ? "bg-nav-online"
-        : opts?.dotTone === "busy"
-          ? "bg-nav-busy animate-breathe"
-          : opts?.dotTone === "danger"
-            ? "bg-nav-danger"
-            : "bg-nav-fg-3";
+    const dotClass = opts?.dotTone === "danger" ? "bg-nav-danger" : "bg-nav-busy animate-breathe";
     return (
       <button
         key={tab}
@@ -1017,9 +1010,7 @@ export function Workbench({
                       : "Agents",
                 dotTone: errorAgents.length > 0 ? "danger" : workingAgents.length > 0 ? "busy" : undefined,
               })}
-              {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`, {
-                dotTone: onlineComputers > 0 ? "online" : "muted",
-              })}
+              {railBtn("computers", <Monitor />, `Computers · ${onlineComputers} online`)}
               {railBtn("people", <Users />, "People")}
               {railBtn("settings", <Settings />, "Settings")}
               <DesktopServerTrigger variant="rail" />
