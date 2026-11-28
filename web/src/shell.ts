@@ -213,6 +213,35 @@ export async function hideDesktopWindow(bridge: DesktopBridge): Promise<void> {
   }
 }
 
+/** Notifies the desktop shell that the first styled frame has painted so the window can reveal. */
+export async function revealDesktopWindow(bridge: DesktopBridge): Promise<void> {
+  const res = await fetch(`${bridge.controlUrl}/desktop/reveal-window`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bridge.token}` },
+  });
+  if (!res.ok) {
+    throw new Error("Unable to reveal the desktop window");
+  }
+}
+
+/** Schedules a first-paint ready callback for the desktop shell without affecting normal browsers. */
+export function signalDesktopWindowReady(target: Window = window): void {
+  const bridge = getDesktopBridge();
+  if (!bridge) return;
+  const notify = () => {
+    void revealDesktopWindow(bridge).catch(() => {
+      // The desktop shell's fallback timer ensures the window still appears on bridge errors.
+    });
+  };
+  if (typeof target.requestAnimationFrame === "function") {
+    target.requestAnimationFrame(() => {
+      target.requestAnimationFrame(notify);
+    });
+  } else {
+    notify();
+  }
+}
+
 /**
  * Handles a window-close request (⌘W / Ctrl+W, or the native File > Close item):
  * the topmost overlay closes first, and only an empty overlay stack hides the window.

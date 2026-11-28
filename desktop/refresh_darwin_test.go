@@ -105,3 +105,22 @@ func TestAlignTrafficLightsForCompactCorners(t *testing.T) {
 		t.Fatalf("expected traffic lights left inset ~16pt, got %.2f", left)
 	}
 }
+
+func TestActivateNativeWindowSafetyAndSelectors(t *testing.T) {
+	if activateNativeWindow(nil) {
+		t.Fatal("expected nil window handle to return false")
+	}
+	if activateNativeWindowIfVisible(nil) {
+		t.Fatal("expected nil window handle to return false")
+	}
+	var appOK, winOK bool
+	runOnMainThread(func() {
+		appOK, winOK = probeActivationSelectors()
+	})
+	if !appOK {
+		t.Fatal("expected NSApplication to respond to activateIgnoringOtherApps:")
+	}
+	if !winOK {
+		t.Fatal("expected NSWindow to respond to makeKeyAndOrderFront:")
+	}
+}

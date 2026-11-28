@@ -10,6 +10,7 @@ import {
   installContextMenuGuard,
   installExternalLinkHandler,
   installWindowCloseHandler,
+  signalDesktopWindowReady,
 } from "./shell";
 import { applyTheme } from "./theme";
 import "@fontsource-variable/inter";
@@ -53,3 +54,4 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+signalDesktopWindowReady();

@@ -51,12 +51,14 @@ func main() {
 	rt.startDaemon(bootCtx)
 
 	var (
-		app        *application.App
-		window     *application.WebviewWindow
-		statusItem *application.MenuItem
-		ctrl       *controlServer
-		pairMu     sync.Mutex
-		pairCancel context.CancelFunc
+		app              *application.App
+		window           *application.WebviewWindow
+		statusItem       *application.MenuItem
+		ctrl             *controlServer
+		ensureConfigured func()
+		revealer         *windowRevealer
+		pairMu           sync.Mutex
+		pairCancel       context.CancelFunc
 	)
 
 	stopPairing := func() {
@@ -168,6 +170,13 @@ func main() {
 		return app.Browser.OpenURL(rawURL)
 	}
 
+	presentWindow := func(followUpDelay time.Duration) {
+		showAndActivateWindow(window, ensureConfigured, followUpDelay)
+	}
+	revealer = newWindowRevealer(func() {
+		presentWindow(120 * time.Millisecond)
+	})
+
 	onHideWindow := func() error {
 		if window == nil {
 			return nil
@@ -176,7 +185,15 @@ func main() {
 		return nil
 	}
 
-	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, logger)
+	onRevealWindow := func() error {
+		if window == nil {
+			return nil
+		}
+		revealer.reveal()
+		return nil
+	}
+
+	ctrl, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, onRevealWindow, logger)
 	if err != nil {
 		logger.Warn("Desktop control server unavailable", "error", err.Error())
 	}
@@ -205,6 +222,7 @@ func main() {
 		Height:                     900,
 		MinWidth:                   900,
 		MinHeight:                  600,
+		Hidden:                     true,
 		BackgroundColour:           application.NewRGBA(244, 244, 247, 255),
 		URL:                        startURL,
 		JS:                         desktopWindowDragJS,
@@ -220,8 +238,19 @@ func main() {
 		window.Hide()
 		e.Cancel()
 	})
-	attachNativeWebViewConfig(app, window, logger)
+	ensureConfigured = attachNativeWebViewConfig(app, window, logger)
 	installApplicationMenu(app, window)
+
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		// Safety fallback ensures the window never stays hidden if the remote/local Web UI
+		// is slow or predates the /desktop/reveal-window endpoint.
+		revealer.scheduleFallback(450 * time.Millisecond)
+	})
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+		if !revealer.reveal() {
+			presentWindow(100 * time.Millisecond)
+		}
+	})
 
 	tray := app.SystemTray.New()
 	tray.SetTemplateIcon(trayTemplatePNG)
@@ -229,8 +258,9 @@ func main() {
 
 	menu := app.NewMenu()
 	menu.Add("Open Sumi").OnClick(func(*application.Context) {
-		window.Show()
-		window.Focus()
+		if !revealer.reveal() {
+			presentWindow(80 * time.Millisecond)
+		}
 	})
 	statusItem = menu.Add("Computer: " + rt.status())
 	statusItem.SetEnabled(false)
@@ -264,6 +294,7 @@ func main() {
 		logger.Error("Desktop shell exited with error", "error", err.Error())
 		code = 1
 	}
+	revealer.stop()
 	stopPairing()
 	ctrl.shutdown()
 	// Default shell exit detaches cleanly so background services and agents stay alive across UI updates.

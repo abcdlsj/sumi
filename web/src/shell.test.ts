@@ -6,6 +6,7 @@ import {
   isEditableTextTarget,
   requestWindowClose,
   resolveExternalHref,
+  signalDesktopWindowReady,
 } from "./shell";
 import { pushLayer, resetLayers } from "./layers";
 
@@ -252,5 +253,36 @@ describe("window close shortcut", () => {
     expect(close).toHaveBeenCalledTimes(1);
     cleanup();
     expect(window.__sumiCloseRequest).toBeUndefined();
+  });
+
+  it("signals desktop window ready after two animation frames and skips regular browsers", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const frames: FrameRequestCallback[] = [];
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+
+    // Without bridge coordinates, nothing is scheduled or posted.
+    signalDesktopWindowReady(window);
+    expect(frames).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    enterDesktopShell();
+    signalDesktopWindowReady(window);
+    expect(frames).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    frames.shift()!(16);
+    expect(frames).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    frames.shift()!(32);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:54321/desktop/reveal-window", {
+      method: "POST",
+      headers: { Authorization: "Bearer tok-123" },
+    });
+    rafSpy.mockRestore();
   });
 });

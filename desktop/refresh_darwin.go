@@ -274,6 +274,43 @@ static int sumiConfigureNativeWindowWebView(void *nsWindowPtr, int *refreshUnloc
 	}
 }
 
+// Forces macOS to activate Sumi even when a non-activating launcher (Raycast / Spotlight)
+// is dismissing its panel and returning focus to the previously active application.
+static int sumiActivateWindow(void *nsWindowPtr) {
+	if (!nsWindowPtr || ![NSThread isMainThread]) {
+		return 0;
+	}
+	@autoreleasepool {
+		NSWindow *window = (__bridge NSWindow *)nsWindowPtr;
+		sumiInstallTrafficLightKeeper(window);
+		[NSApp activateIgnoringOtherApps:YES];
+		[window makeKeyAndOrderFront:nil];
+		return 1;
+	}
+}
+
+// Re-asserts foreground focus only if the window is still visible, so a delayed follow-up
+// never resurrects a window that the user immediately hid or closed.
+static int sumiActivateWindowIfVisible(void *nsWindowPtr) {
+	if (!nsWindowPtr || ![NSThread isMainThread]) {
+		return 0;
+	}
+	@autoreleasepool {
+		NSWindow *window = (__bridge NSWindow *)nsWindowPtr;
+		if (![window isVisible]) {
+			return 0;
+		}
+		[NSApp activateIgnoringOtherApps:YES];
+		[window makeKeyAndOrderFront:nil];
+		return 1;
+	}
+}
+
+static void sumiProbeActivationSelectors(int *appRespondsOut, int *winRespondsOut) {
+	*appRespondsOut = [[NSApplication class] instancesRespondToSelector:@selector(activateIgnoringOtherApps:)] ? 1 : 0;
+	*winRespondsOut = [[NSWindow class] instancesRespondToSelector:@selector(makeKeyAndOrderFront:)] ? 1 : 0;
+}
+
 static void sumiProbeTrafficLightAlignment(double *topFromWindowOut, double *leftOut, double *containerTopGapOut, int *alignedOut) {
 	@autoreleasepool {
 		NSWindow *w = [[NSWindow alloc]
@@ -358,6 +395,7 @@ import "C"
 import (
 	"log/slog"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -371,6 +409,26 @@ func configureNativeWindowWebView(nativeWindow unsafe.Pointer) (found, refreshUn
 	var unlocked, overscroll C.int
 	ok := C.sumiConfigureNativeWindowWebView(nativeWindow, &unlocked, &overscroll)
 	return ok != 0, unlocked != 0, int(overscroll)
+}
+
+func activateNativeWindow(nativeWindow unsafe.Pointer) bool {
+	if nativeWindow == nil {
+		return false
+	}
+	return C.sumiActivateWindow(nativeWindow) != 0
+}
+
+func activateNativeWindowIfVisible(nativeWindow unsafe.Pointer) bool {
+	if nativeWindow == nil {
+		return false
+	}
+	return C.sumiActivateWindowIfVisible(nativeWindow) != 0
+}
+
+func probeActivationSelectors() (appResponds, winResponds bool) {
+	var appOK, winOK C.int
+	C.sumiProbeActivationSelectors(&appOK, &winOK)
+	return appOK != 0, winOK != 0
 }
 
 func probeHighRefreshRateToggle() (before, after int, ok bool) {
@@ -409,27 +467,29 @@ func probeTrafficLightAlignment() (top, left, containerTopGap float64, aligned b
 
 // attachNativeWebViewConfig applies macOS WKWebView settings (120Hz ProMotion refresh and
 // overscroll/rubber-band disable) as soon as the main WebviewWindow's native NSWindow exists.
-func attachNativeWebViewConfig(app *application.App, window *application.WebviewWindow, logger *slog.Logger) {
+// It returns a synchronous main-thread helper that guarantees configuration has run before reveal.
+func attachNativeWebViewConfig(app *application.App, window *application.WebviewWindow, logger *slog.Logger) func() {
 	var done atomic.Bool
+	applyNow := func() {
+		if done.Load() || window == nil {
+			return
+		}
+		found, refreshUnlocked, overscrollApplied := configureNativeWindowWebView(window.NativeWindow())
+		if !found {
+			return
+		}
+		done.Store(true)
+		logger.Info(
+			"Configured native WKWebView",
+			"high_refresh_unlocked", refreshUnlocked,
+			"overscroll_flags_disabled", overscrollApplied,
+		)
+	}
 	tryConfigure := func() {
 		if done.Load() {
 			return
 		}
-		application.InvokeAsync(func() {
-			if done.Load() {
-				return
-			}
-			found, refreshUnlocked, overscrollApplied := configureNativeWindowWebView(window.NativeWindow())
-			if !found {
-				return
-			}
-			done.Store(true)
-			logger.Info(
-				"Configured native WKWebView",
-				"high_refresh_unlocked", refreshUnlocked,
-				"overscroll_flags_disabled", overscrollApplied,
-			)
-		})
+		application.InvokeAsync(applyNow)
 	}
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		tryConfigure()
@@ -437,4 +497,27 @@ func attachNativeWebViewConfig(app *application.App, window *application.Webview
 	window.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) {
 		tryConfigure()
 	})
+	return applyNow
+}
+
+func showAndActivateWindow(window *application.WebviewWindow, ensureConfigured func(), followUpDelay time.Duration) {
+	if window == nil {
+		return
+	}
+	application.InvokeAsync(func() {
+		if ensureConfigured != nil {
+			ensureConfigured()
+		}
+		window.UnMinimise()
+		window.Show()
+		activateNativeWindow(window.NativeWindow())
+		window.Focus()
+	})
+	if followUpDelay > 0 {
+		time.AfterFunc(followUpDelay, func() {
+			application.InvokeAsync(func() {
+				activateNativeWindowIfVisible(window.NativeWindow())
+			})
+		})
+	}
 }

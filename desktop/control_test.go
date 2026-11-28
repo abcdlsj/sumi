@@ -45,7 +45,7 @@ func TestControlServerSecurityAndSwitching(t *testing.T) {
 	}
 
 	var err error
-	cs, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, onOpenURL, onHideWindow, func() error { return nil }, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -231,8 +231,14 @@ func TestControlServerHideWindow(t *testing.T) {
 		return nil
 	}
 
+	var revealCalls int
+	onRevealWindow := func() error {
+		revealCalls++
+		return nil
+	}
+
 	var err error
-	cs, err = startControlServer(rt, onSwitch, func(string) error { return nil }, onHideWindow, slog.New(slog.DiscardHandler))
+	cs, err = startControlServer(rt, onSwitch, func(string) error { return nil }, onHideWindow, onRevealWindow, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("start control server: %v", err)
 	}
@@ -279,5 +285,45 @@ func TestControlServerHideWindow(t *testing.T) {
 	}
 	if hideCalls != 1 {
 		t.Fatalf("expected exactly one hide call, got %d", hideCalls)
+	}
+
+	// Reveal-window enforces origin, method, and forwards valid POSTs.
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/reveal-window", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reveal-window foreign origin: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for foreign origin on reveal-window, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, cs.baseURL+"/desktop/reveal-window", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reveal-window GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET on reveal-window, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, cs.baseURL+"/desktop/reveal-window", nil)
+	req.Header.Set("Origin", defaultServerURL)
+	req.Header.Set("Authorization", "Bearer "+cs.token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reveal-window POST: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for reveal-window POST, got %d", resp.StatusCode)
+	}
+	if revealCalls != 1 {
+		t.Fatalf("expected exactly one reveal call, got %d", revealCalls)
 	}
 }
