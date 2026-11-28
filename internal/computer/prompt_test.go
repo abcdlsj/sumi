@@ -77,7 +77,10 @@ func TestSystemPromptGuidesLongTaskProgressSync(t *testing.T) {
 		DriverKind:  domain.DriverACP,
 	}, "/tmp/workspace", "/tmp/memory")
 	for _, want := range []string{
+		"## Critical rules",
 		"only output channel and needs no further permission",
+		"Never discard, redirect, or filter `sumi read` output",
+		"[Sumi inbox notice]",
 		"Before diving into a long or multi-step task",
 		"meaningful milestones",
 		"skip routine tool-by-tool narration",
@@ -87,6 +90,28 @@ func TestSystemPromptGuidesLongTaskProgressSync(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Fatalf("system prompt missing %q", want)
 		}
+	}
+}
+
+func TestBuildSteerNoticeMarksFocusAndBoundsPreview(t *testing.T) {
+	longPreview := strings.Repeat("你", 100)
+	notice := buildSteerNotice("c1", []domain.InboxItem{
+		{ConversationID: "c1", Target: "#eng", Title: "#eng", Reason: "mention", UnreadCount: 1, LatestAuthorName: "Alice", LatestPreview: "stop\ndeploy"},
+		{ConversationID: "c2", Target: "dm:@Bob", Title: "@Bob", Reason: "dm", UnreadCount: 2, LatestAuthorName: "Bob", LatestPreview: longPreview},
+	})
+	for _, want := range []string{
+		"read_seq was NOT advanced",
+		"#eng [CURRENT CONVERSATION] (target=#eng",
+		`Alice: "stop deploy"`,
+		"@Bob (target=dm:@Bob",
+		"…\"",
+	} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("steer notice missing %q:\n%s", want, notice)
+		}
+	}
+	if strings.Contains(notice, longPreview) {
+		t.Fatalf("steer notice did not truncate long preview")
 	}
 }
 

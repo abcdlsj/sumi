@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // Stable error codes in the CLI envelope; server codes pass through unchanged.
@@ -79,12 +80,47 @@ func responseError(status int, raw []byte) (*EnvelopeError, any) {
 	return e, nil
 }
 
-const hintHeldDraft = "Your message was saved as a draft (kept 10 minutes). Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then drop it with `sumi send <target> --discard-draft` (a normal outcome when it is no longer needed), send it unchanged with `sumi send <target> --draft`, or send a rewritten --body."
+// quoteTargetArg formats a CLI target for copy-pasteable shell hints without altering clean tokens
+// like `#eng`, `dm:@Alice`, `thread:t1`, or `task:#4`.
+func quoteTargetArg(target string) string {
+	if target == "" {
+		return "<target>"
+	}
+	for i := 0; i < len(target); i++ {
+		c := target[i]
+		safe := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '#' || c == '@' || c == ':' || c == '-' || c == '_' || c == '.' || c == '/'
+		if !safe {
+			return "'" + strings.ReplaceAll(target, "'", `'\''`) + "'"
+		}
+	}
+	return target
+}
+
+func heldNextCommands(target string) map[string]string {
+	t := quoteTargetArg(target)
+	return map[string]string{
+		"send_draft":    fmt.Sprintf("sumi send %s --draft", t),
+		"discard_draft": fmt.Sprintf("sumi send %s --discard-draft", t),
+		"read_more":     fmt.Sprintf("sumi read %s --limit 20", t),
+	}
+}
+
+func heldDraftHint(target string) string {
+	cmds := heldNextCommands(target)
+	return fmt.Sprintf("Your message was saved as a draft (kept 10 minutes). Read data.unread_messages (older ones: `%s`). Then drop it with `%s` (a normal outcome when it is no longer needed), send it unchanged with `%s`, or send a rewritten --body.",
+		cmds["read_more"], cmds["discard_draft"], cmds["send_draft"])
+}
+
+func heldHint(target string) string {
+	t := quoteTargetArg(target)
+	return fmt.Sprintf("Read data.unread_messages (older ones: `sumi read %s --limit 20`). Then decide: skip if your reply is no longer needed, or rewrite it and run the command again.", t)
+}
 
 func hintFor(code string) string {
 	switch code {
 	case codeHeld:
-		return "Read data.unread_messages (older ones: `sumi read <target> --limit N`). Then decide: skip if your reply is no longer needed, or rewrite it and run the command again."
+		return heldHint("")
 	case "invalid_argument":
 		return "Fix the argument named in message; run `sumi <command> --help` for usage."
 	case "not_found":

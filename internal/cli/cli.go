@@ -405,11 +405,14 @@ func Run(args []string, stdout io.Writer) int {
 					if replaced, err := saveDraft(d); err == nil {
 						if m, ok := data.(map[string]any); ok {
 							m["draft_saved"] = true
+							m["next_commands"] = heldNextCommands(a[0])
 							if replaced != "" {
 								m["replaced_draft"] = replaced
 							}
 						}
-						e.Hint = hintHeldDraft
+						e.Hint = heldDraftHint(a[0])
+					} else {
+						e.Hint = heldHint(a[0])
 					}
 				}
 				return fail(e, data)

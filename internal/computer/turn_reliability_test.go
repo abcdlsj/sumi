@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -301,6 +303,60 @@ func TestSilentReplyNudgeRunsAtMostOnceAndHandlesHeldDrafts(t *testing.T) {
 		}
 		if !strings.Contains(drv.promptAt(1), "Freshness Guard") {
 			t.Fatalf("expected held-draft nudge: %s", drv.promptAt(1))
+		}
+	})
+
+	t.Run("discarded_held_draft_does_not_nudge", func(t *testing.T) {
+		var mu sync.Mutex
+		readDone := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/inbox"):
+				items := []domain.InboxItem{}
+				if !readDone {
+					items = append(items, domain.InboxItem{ConversationID: "c1", Target: "#dev", Title: "#dev", Reason: "channel", UnreadCount: 1, LatestSeq: 8})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages"):
+				readDone = true
+				_, _ = w.Write([]byte(`{"messages":[]}`))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages"):
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"held":true,"unread_messages":[]}`))
+			}
+		}))
+		defer srv.Close()
+
+		var d *Daemon
+		var ag *hostedAgent
+		drv := &scriptedDriver{}
+		drv.fn = func(_ int, _ driver.TurnInput) (driver.TurnResult, error) {
+			proxyHit(d, ag.driverToken, http.MethodGet, "/conversations/c1/messages?unread=true")
+			proxyHit(d, ag.driverToken, http.MethodPost, "/conversations/c1/messages")
+			// Simulate CLI saving a draft on 409 held and the agent running `--discard-draft`
+			// (which leaves <homeDir>/drafts present with c1.json deleted).
+			draftsDir := filepath.Join(ag.homeDir, "drafts")
+			_ = os.MkdirAll(draftsDir, 0o700)
+			draftPath := filepath.Join(draftsDir, "c1.json")
+			_ = os.WriteFile(draftPath, []byte(`{"conversation_id":"c1"}`), 0o600)
+			_ = os.Remove(draftPath)
+			return driver.TurnResult{ToolCalls: 1}, nil
+		}
+
+		d = NewDaemon(Config{ServerURL: srv.URL, DataDir: t.TempDir(), DriverFactory: func(protocol.AssignedAgentSpec, string) (driver.SessionDriver, error) { return drv, nil }}, nil)
+		defer d.Stop()
+		ag = d.provisionAgent(builtinSpec("m1"))
+
+		d.scheduleWake(context.Background(), "agent-1", "c1", "channel")
+		waitFor(t, func() bool {
+			ag.mu.Lock()
+			defer ag.mu.Unlock()
+			return !ag.busy
+		})
+		if drv.count() != 1 {
+			t.Fatalf("discarded draft must not trigger held nudge, turns = %d", drv.count())
 		}
 	})
 

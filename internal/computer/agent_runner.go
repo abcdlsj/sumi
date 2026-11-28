@@ -527,6 +527,20 @@ type silentNudge struct {
 	held  bool
 }
 
+// draftDiscarded reports whether the CLI draft directory exists for this Agent yet no pending
+// draft file remains for convID (meaning `--discard-draft` cleared it locally without hitting the proxy).
+func draftDiscarded(homeDir, convID string) bool {
+	if homeDir == "" || convID == "" || strings.ContainsAny(convID, `/\`) || strings.HasPrefix(convID, ".") {
+		return false
+	}
+	draftsDir := filepath.Join(homeDir, "drafts")
+	if _, err := os.Stat(draftsDir); err != nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(draftsDir, convID+".json"))
+	return errors.Is(err, os.ErrNotExist)
+}
+
 // orderInboxItems drops items that already failed to advance read_seq and orders the rest FIFO
 // (oldest LatestAt first) so earlier conversations are never starved by newer activity elsewhere.
 func orderInboxItems(items []domain.InboxItem, skipped map[string]int64) []domain.InboxItem {
@@ -849,7 +863,7 @@ func (d *Daemon) runAgentLoop(ctx context.Context, ag *hostedAgent) {
 		// and stopped without posting via `sumi send` or reacting via `sumi react`.
 		readFocus := tel.didRead(focus.ConversationID)
 		repliedFocus := tel.didReply(focus.ConversationID)
-		heldUnresolved := tel.hasUnresolvedHeld(focus.ConversationID)
+		heldUnresolved := tel.hasUnresolvedHeld(focus.ConversationID) && !draftDiscarded(ag.homeDir, focus.ConversationID)
 		if !isNudge && (readFocus || isRecovery) && !repliedFocus && (heldUnresolved || focus.Reason == "dm" || focus.Reason == "mention" || turnRes.ToolCalls >= 2) {
 			pendingNudge = &silentNudge{focus: focus, held: heldUnresolved}
 			continue

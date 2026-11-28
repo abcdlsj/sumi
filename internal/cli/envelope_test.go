@@ -76,11 +76,27 @@ func TestEnvelopeReportsHeldWithUnreadData(t *testing.T) {
 		t.Fatalf("env=%+v", env)
 	}
 	var data struct {
-		Unread  []map[string]any `json:"unread_messages"`
-		Omitted int              `json:"omitted_unread_count"`
+		Unread       []map[string]any  `json:"unread_messages"`
+		Omitted      int               `json:"omitted_unread_count"`
+		NextCommands map[string]string `json:"next_commands"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil || len(data.Unread) != 1 || data.Omitted != 2 {
 		t.Fatalf("held data=%s err=%v", env.Data, err)
+	}
+	if data.NextCommands["send_draft"] != "sumi send conv-1 --draft" ||
+		data.NextCommands["discard_draft"] != "sumi send conv-1 --discard-draft" ||
+		data.NextCommands["read_more"] != "sumi read conv-1 --limit 20" {
+		t.Fatalf("unexpected next_commands=%+v", data.NextCommands)
+	}
+	if !bytes.Contains([]byte(env.Error.Hint), []byte("sumi send conv-1 --draft")) ||
+		!bytes.Contains([]byte(env.Error.Hint), []byte("sumi send conv-1 --discard-draft")) {
+		t.Fatalf("held hint must include concrete target commands: %q", env.Error.Hint)
+	}
+	if got := quoteTargetArg("dm:@Li Si"); got != "'dm:@Li Si'" {
+		t.Fatalf("quoteTargetArg(space) = %q, want 'dm:@Li Si'", got)
+	}
+	if got := quoteTargetArg("dm:@Lisi"); got != "dm:@Lisi" {
+		t.Fatalf("quoteTargetArg(clean) = %q, want dm:@Lisi", got)
 	}
 }
 
