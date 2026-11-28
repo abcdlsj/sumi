@@ -209,10 +209,11 @@ func main() {
 		URL:                        startURL,
 		JS:                         desktopWindowDragJS,
 		DefaultContextMenuDisabled: true,
-		// Unified 52pt transparent toolbar centers macOS traffic lights on the same
-		// horizontal axis as the 52px pane headers; CSS --wails-draggable drives drag.
+		// Hidden titlebar (no NSToolbar) keeps native macOS window corners compact instead of
+		// Tahoe's wide unified-toolbar corners; refresh_darwin.go centers the traffic lights on
+		// the 52px pane-header axis while CSS --wails-draggable drives drag.
 		Mac: application.MacWindow{
-			TitleBar: application.MacTitleBarHiddenInsetUnified,
+			TitleBar: application.MacTitleBarHidden,
 		},
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {

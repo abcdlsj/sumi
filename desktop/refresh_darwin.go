@@ -9,6 +9,7 @@ package main
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
 
 static WKWebView *sumiFindWebViewInView(NSView *view) {
 	if (!view) {
@@ -119,6 +120,139 @@ static int sumiReadBoolSelector(id obj, NSString *selName) {
 	return ((BOOL (*)(id, SEL))objc_msgSend)(obj, sel) ? 1 : 0;
 }
 
+static const CGFloat sumiHeaderHeight = 52.0;
+static const CGFloat sumiTrafficLightTop = 16.0;
+static const CGFloat sumiTrafficLightLeft = 16.0;
+
+// Places the native traffic-light strip inside Sumi's 52px header without attaching
+// an NSToolbar (which inflates window corner radius on macOS 26).
+static int sumiAlignTrafficLights(NSWindow *window, CGFloat headerHeight, CGFloat topInset, CGFloat leftInset) {
+	if (!window) {
+		return 0;
+	}
+	if (([window styleMask] & NSWindowStyleMaskFullScreen) != 0) {
+		return 0;
+	}
+	NSButton *closeBtn = [window standardWindowButton:NSWindowCloseButton];
+	NSButton *miniBtn = [window standardWindowButton:NSWindowMiniaturizeButton];
+	NSButton *zoomBtn = [window standardWindowButton:NSWindowZoomButton];
+	if (!closeBtn || !miniBtn || !zoomBtn) {
+		return 0;
+	}
+	NSView *titlebarView = [closeBtn superview];
+	NSView *container = [titlebarView superview];
+	NSView *themeFrame = [container superview];
+	if (!titlebarView || !container || !themeFrame) {
+		return 0;
+	}
+
+	NSRect cFrame = [container frame];
+	NSRect tfBounds = [themeFrame bounds];
+	NSRect closeFrame = [closeBtn frame];
+	if (cFrame.size.height <= 0 || closeFrame.size.height <= 0) {
+		return 0;
+	}
+
+	// Expand the titlebar container to match Sumi's 52px header while keeping its top edge
+	// strictly flush with the window top so _NSTitlebarDecorationView never draws a second
+	// offset border line. NSTitlebarView autoresizing keeps hover tracking intact.
+	CGFloat targetH = headerHeight;
+	CGFloat targetOriginY = tfBounds.size.height - targetH;
+	if (fabs(cFrame.origin.y - targetOriginY) > 0.5 || fabs(cFrame.size.height - targetH) > 0.5) {
+		cFrame.origin.y = targetOriginY;
+		cFrame.size.height = targetH;
+		[container setFrame:cFrame];
+	}
+
+	NSRect tbBounds = [titlebarView bounds];
+	CGFloat targetY = round(tbBounds.size.height - topInset - closeFrame.size.height);
+	CGFloat pitch = [miniBtn frame].origin.x - closeFrame.origin.x;
+	if (pitch <= 0) {
+		pitch = 20.0;
+	}
+	NSButton *buttons[3] = { closeBtn, miniBtn, zoomBtn };
+	for (int i = 0; i < 3; i++) {
+		NSRect bf = [buttons[i] frame];
+		CGFloat targetX = leftInset + pitch * i;
+		if (fabs(bf.origin.x - targetX) > 0.5 || fabs(bf.origin.y - targetY) > 0.5) {
+			bf.origin.x = targetX;
+			bf.origin.y = targetY;
+			[buttons[i] setFrame:bf];
+		}
+	}
+	return 1;
+}
+
+@interface SumiTrafficLightKeeper : NSObject {
+	NSWindow *_window; // non-owning; associated object is released when window deallocates
+	BOOL _applying;
+}
+- (instancetype)initWithWindow:(NSWindow *)window;
+@end
+
+@implementation SumiTrafficLightKeeper
+- (instancetype)initWithWindow:(NSWindow *)window {
+	self = [super init];
+	if (self) {
+		_window = window;
+		NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+		NSArray<NSNotificationName> *names = @[
+			NSWindowDidResizeNotification,
+			NSWindowDidEndLiveResizeNotification,
+			NSWindowDidBecomeKeyNotification,
+			NSWindowDidResignKeyNotification,
+			NSWindowDidExitFullScreenNotification,
+		];
+		for (NSNotificationName name in names) {
+			[nc addObserver:self selector:@selector(realign:) name:name object:window];
+		}
+		NSView *container = [[[window standardWindowButton:NSWindowCloseButton] superview] superview];
+		if (container) {
+			[container setPostsFrameChangedNotifications:YES];
+			[nc addObserver:self selector:@selector(realign:) name:NSViewFrameDidChangeNotification object:container];
+		}
+		[self realign:nil];
+	}
+	return self;
+}
+
+- (void)dealloc {
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[super dealloc];
+}
+
+- (void)realign:(NSNotification *)note {
+	(void)note;
+	if (_applying) {
+		return;
+	}
+	NSWindow *win = _window;
+	if (!win) {
+		return;
+	}
+	_applying = YES;
+	sumiAlignTrafficLights(win, sumiHeaderHeight, sumiTrafficLightTop, sumiTrafficLightLeft);
+	_applying = NO;
+}
+@end
+
+static char sumiTrafficLightKeeperKey;
+
+static int sumiInstallTrafficLightKeeper(NSWindow *window) {
+	if (!window) {
+		return 0;
+	}
+	SumiTrafficLightKeeper *existing = objc_getAssociatedObject(window, &sumiTrafficLightKeeperKey);
+	if (existing) {
+		[existing realign:nil];
+		return 1;
+	}
+	SumiTrafficLightKeeper *keeper = [[SumiTrafficLightKeeper alloc] initWithWindow:window];
+	objc_setAssociatedObject(window, &sumiTrafficLightKeeperKey, keeper, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	[keeper release];
+	return 1;
+}
+
 static int sumiConfigureNativeWindowWebView(void *nsWindowPtr, int *refreshUnlockedOut, int *overscrollAppliedOut) {
 	if (refreshUnlockedOut) *refreshUnlockedOut = 0;
 	if (overscrollAppliedOut) *overscrollAppliedOut = 0;
@@ -127,6 +261,7 @@ static int sumiConfigureNativeWindowWebView(void *nsWindowPtr, int *refreshUnloc
 	}
 	@autoreleasepool {
 		NSWindow *window = (__bridge NSWindow *)nsWindowPtr;
+		sumiInstallTrafficLightKeeper(window);
 		WKWebView *webView = sumiFindWebView(window);
 		if (!webView) {
 			return 0;
@@ -136,6 +271,30 @@ static int sumiConfigureNativeWindowWebView(void *nsWindowPtr, int *refreshUnloc
 		if (refreshUnlockedOut) *refreshUnlockedOut = unlocked;
 		if (overscrollAppliedOut) *overscrollAppliedOut = overscroll;
 		return 1;
+	}
+}
+
+static void sumiProbeTrafficLightAlignment(double *topFromWindowOut, double *leftOut, double *containerTopGapOut, int *alignedOut) {
+	@autoreleasepool {
+		NSWindow *w = [[NSWindow alloc]
+			initWithContentRect:NSMakeRect(0, 0, 800, 600)
+			styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView)
+			backing:NSBackingStoreBuffered
+			defer:NO];
+		w.titlebarAppearsTransparent = YES;
+		w.titleVisibility = NSWindowTitleHidden;
+		[w layoutIfNeeded];
+		*alignedOut = sumiAlignTrafficLights(w, sumiHeaderHeight, sumiTrafficLightTop, sumiTrafficLightLeft);
+		NSButton *closeBtn = [w standardWindowButton:NSWindowCloseButton];
+		NSView *container = [[closeBtn superview] superview];
+		NSView *themeFrame = [container superview];
+		NSRect cFrame = [container frame];
+		NSRect tfBounds = [themeFrame bounds];
+		*containerTopGapOut = (double)(tfBounds.size.height - (cFrame.origin.y + cFrame.size.height));
+		NSRect btnInWin = [closeBtn convertRect:[closeBtn bounds] toView:nil];
+		*topFromWindowOut = (double)(w.frame.size.height - (btnInWin.origin.y + btnInWin.size.height));
+		*leftOut = (double)btnInWin.origin.x;
+		[w release];
 	}
 }
 
@@ -239,6 +398,13 @@ func probeWebViewOverscrollDisable() overscrollProbeResult {
 		bounceHAfter:     int(bhA),
 		applied:          int(applied),
 	}
+}
+
+func probeTrafficLightAlignment() (top, left, containerTopGap float64, aligned bool) {
+	var t, l, g C.double
+	var ok C.int
+	C.sumiProbeTrafficLightAlignment(&t, &l, &g, &ok)
+	return float64(t), float64(l), float64(g), ok != 0
 }
 
 // attachNativeWebViewConfig applies macOS WKWebView settings (120Hz ProMotion refresh and

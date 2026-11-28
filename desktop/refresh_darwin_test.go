@@ -85,3 +85,23 @@ func TestDisableNativeWebViewOverscroll(t *testing.T) {
 		t.Fatalf("expected _alwaysBounceHorizontal=0 after disable, got %d", res.bounceHAfter)
 	}
 }
+
+func TestAlignTrafficLightsForCompactCorners(t *testing.T) {
+	var top, left, topGap float64
+	var aligned bool
+	runOnMainThread(func() {
+		top, left, topGap, aligned = probeTrafficLightAlignment()
+	})
+	if !aligned {
+		t.Fatal("expected traffic lights alignment helper to succeed")
+	}
+	if topGap < -0.5 || topGap > 0.5 {
+		t.Fatalf("expected titlebar container flush with window top (gap=0), got %.2f", topGap)
+	}
+	if top < 15.0 || top > 17.0 {
+		t.Fatalf("expected traffic lights top inset ~16pt, got %.2f", top)
+	}
+	if left < 15.0 || left > 17.0 {
+		t.Fatalf("expected traffic lights left inset ~16pt, got %.2f", left)
+	}
+}
