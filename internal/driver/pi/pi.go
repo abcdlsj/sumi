@@ -116,6 +116,7 @@ type Driver struct {
 	mu                sync.Mutex
 	cfg               Config
 	proc              *process
+	activeProc        atomic.Pointer[process]
 	sessionFile       string
 	sysPromptHash     string
 	resumed           bool
@@ -623,6 +624,22 @@ type settledEvent struct {
 	aborted bool
 }
 
+// Steer injects a mid-turn notice into the active Pi RPC turn without cancelling it.
+// Safe to call concurrently while RunTurn holds d.mu.
+func (d *Driver) Steer(ctx context.Context, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
+	p := d.activeProc.Load()
+	if p == nil || p.exited() {
+		return driver.ErrTurnNotActive
+	}
+	callCtx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
+	defer cancel()
+	_, err := p.call(callCtx, "steer", map[string]any{"message": message})
+	return err
+}
+
 func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -646,6 +663,11 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	var toolCallCount atomic.Int64
 	var errMu sync.Mutex
 	var lastRunErr string
+	var pendingProviderErr string
+	var providerErrOwnedByCompaction bool
+	var sawAssistantStop bool
+	var sawMeaningfulOutput bool
+	var sawWhitespaceOnly bool
 
 	signalBudgetExceeded := func(reason string) {
 		select {
@@ -661,6 +683,9 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 			if tool == "" {
 				tool = "tool"
 			}
+			errMu.Lock()
+			sawMeaningfulOutput = true
+			errMu.Unlock()
 			in.Emit(driver.Activity{ToolCallID: ev.ToolCallID, Tool: tool, Done: false})
 			if maxTools > 0 && toolCallCount.Add(1) > int64(maxTools) {
 				signalBudgetExceeded(fmt.Sprintf("pi turn exceeded tool call budget (%d)", maxTools))
@@ -676,22 +701,88 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 			if maxSteps > 0 && stepCount.Add(1) > int64(maxSteps) {
 				signalBudgetExceeded(fmt.Sprintf("pi turn exceeded step budget (%d)", maxSteps))
 			}
-		case "message_update", "turn_end", "compaction_start", "compaction_end", "auto_retry_start":
+		case "message_end":
 			in.Emit(driver.Activity{})
-		case "auto_retry_end":
-			in.Emit(driver.Activity{})
-			if !ev.Success && ev.FinalError != "" {
+			obs := inspectAssistantMessage(ev.Message)
+			if obs.isAssistant {
 				errMu.Lock()
-				lastRunErr = ev.FinalError
+				switch obs.stopReason {
+				case "error":
+					if isContextOverflowMessage(obs.errMsg) {
+						pendingProviderErr = ""
+						providerErrOwnedByCompaction = true
+					} else {
+						providerErrOwnedByCompaction = false
+						if obs.errMsg != "" {
+							pendingProviderErr = obs.errMsg
+						} else {
+							pendingProviderErr = "pi assistant turn ended with error"
+						}
+					}
+				case "aborted":
+					providerErrOwnedByCompaction = false
+					if obs.errMsg != "" {
+						pendingProviderErr = obs.errMsg
+					} else if pendingProviderErr == "" {
+						pendingProviderErr = "pi assistant turn aborted"
+					}
+				case "stop":
+					sawAssistantStop = true
+					if obs.hasMeaningful {
+						sawMeaningfulOutput = true
+					} else if obs.hasWhitespace {
+						sawWhitespaceOnly = true
+					}
+				default:
+					if obs.hasMeaningful {
+						sawMeaningfulOutput = true
+					}
+				}
 				errMu.Unlock()
 			}
+		case "message_update", "turn_end", "compaction_start", "auto_retry_start":
+			in.Emit(driver.Activity{})
+		case "compaction_end":
+			in.Emit(driver.Activity{})
+			errMu.Lock()
+			if !ev.Aborted {
+				if msg := strings.TrimSpace(firstNonEmpty(ev.ErrorMessage, ev.Error)); msg != "" {
+					providerErrOwnedByCompaction = false
+					lastRunErr = msg
+				} else {
+					providerErrOwnedByCompaction = false
+				}
+			}
+			errMu.Unlock()
+		case "auto_retry_end":
+			in.Emit(driver.Activity{})
+			errMu.Lock()
+			if ev.Success {
+				pendingProviderErr = ""
+				lastRunErr = ""
+				providerErrOwnedByCompaction = false
+			} else if !providerErrOwnedByCompaction {
+				msg := strings.TrimSpace(firstNonEmpty(ev.FinalError, pendingProviderErr))
+				if msg == "" {
+					msg = "pi assistant turn failed after retry"
+				}
+				lastRunErr = msg
+				pendingProviderErr = ""
+			} else {
+				providerErrOwnedByCompaction = false
+			}
+			errMu.Unlock()
 		case "agent_end":
-			runErr := extractAssistantError(ev.Messages)
+			runErr, cleanAssistant := inspectAgentEndMessages(ev.Messages)
 			errMu.Lock()
 			if runErr != "" {
-				lastRunErr = runErr
-			} else if !ev.WillRetry {
+				if !(providerErrOwnedByCompaction && isContextOverflowMessage(runErr)) {
+					lastRunErr = runErr
+				}
+			} else if !ev.WillRetry && cleanAssistant {
 				lastRunErr = ""
+				pendingProviderErr = ""
+				providerErrOwnedByCompaction = false
 			}
 			errMu.Unlock()
 		case "agent_settled":
@@ -703,10 +794,25 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 	}
 	p.onEvent.Store(&onEvent)
 	defer p.onEvent.Store(nil)
+	d.activeProc.Store(p)
+	defer d.activeProc.Store(nil)
 
 	promptCtx, promptCancel := context.WithTimeout(ctx, rpcCallTimeout)
 	promptData, err := p.call(promptCtx, "prompt", map[string]any{"message": promptText})
 	promptCancel()
+	if err != nil && ctx.Err() == nil && !p.exited() && isCompactingPromptError(err) {
+		// Pi refuses prompt() while an in-flight compaction is open; abort compaction and retry once.
+		abortCompCtx, abortCompCancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _ = p.call(abortCompCtx, "abort_compaction", nil)
+		abortCompCancel()
+		select {
+		case <-ctx.Done():
+		case <-time.After(100 * time.Millisecond):
+		}
+		retryCtx, retryCancel := context.WithTimeout(ctx, rpcCallTimeout)
+		promptData, err = p.call(retryCtx, "prompt", map[string]any{"message": promptText})
+		retryCancel()
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			d.abortLocked(p, settledCh)
@@ -761,23 +867,28 @@ func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnR
 		d.sentFirstTurn = true
 		d.lastActiveAt = d.now()
 		d.persistSessionIfPresent()
+		errMu.Lock()
+		finalErr := firstNonEmpty(lastRunErr, pendingProviderErr)
+		emptyResp := sawAssistantStop && !sawMeaningfulOutput && toolCallCount.Load() == 0
+		wsOnly := sawWhitespaceOnly
+		errMu.Unlock()
 		if settled.aborted {
 			if ctx.Err() != nil {
 				return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, fmt.Errorf("pi turn cancelled: %w", ctx.Err()))
 			}
-			errMu.Lock()
-			finalErr := lastRunErr
-			errMu.Unlock()
 			if finalErr != "" {
 				return driver.TurnResult{}, classifyError(finalErr)
 			}
 			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, errors.New("pi turn aborted unexpectedly"))
 		}
-		errMu.Lock()
-		finalErr := lastRunErr
-		errMu.Unlock()
 		if finalErr != "" {
 			return driver.TurnResult{}, classifyError(finalErr)
+		}
+		if emptyResp {
+			if wsOnly {
+				return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, errors.New("pi model returned a whitespace-only response"))
+			}
+			return driver.TurnResult{}, driver.Fail(domain.AgentErrTurnFailed, errors.New("pi model returned an empty response"))
 		}
 		return d.postTurnStatsAndCompact(ctx, p, in), nil
 	case <-ctx.Done():
@@ -1024,9 +1135,80 @@ func (d *Driver) postTurnStatsAndCompact(ctx context.Context, p *process, in dri
 	return res
 }
 
-func extractAssistantError(rawMessages json.RawMessage) string {
+type assistantObservation struct {
+	isAssistant   bool
+	stopReason    string
+	errMsg        string
+	hasMeaningful bool
+	hasWhitespace bool
+}
+
+func inspectAssistantMessage(raw json.RawMessage) assistantObservation {
+	if len(raw) == 0 {
+		return assistantObservation{}
+	}
+	var m struct {
+		Role         string          `json:"role"`
+		StopReason   string          `json:"stopReason"`
+		ErrorMessage string          `json:"errorMessage"`
+		Content      json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &m) != nil || m.Role != "assistant" {
+		return assistantObservation{}
+	}
+	obs := assistantObservation{
+		isAssistant: true,
+		stopReason:  m.StopReason,
+		errMsg:      strings.TrimSpace(m.ErrorMessage),
+	}
+	if len(m.Content) == 0 || string(m.Content) == "null" {
+		return obs
+	}
+	var str string
+	if json.Unmarshal(m.Content, &str) == nil {
+		if strings.TrimSpace(str) != "" {
+			obs.hasMeaningful = true
+		} else if len(str) > 0 {
+			obs.hasWhitespace = true
+		}
+		return obs
+	}
+	var blocks []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Thinking string `json:"thinking"`
+	}
+	if json.Unmarshal(m.Content, &blocks) == nil {
+		for _, b := range blocks {
+			switch b.Type {
+			case "toolCall", "tool_use":
+				obs.hasMeaningful = true
+			case "thinking":
+				if strings.TrimSpace(b.Thinking) != "" || strings.TrimSpace(b.Text) != "" {
+					obs.hasMeaningful = true
+				}
+			case "text":
+				if strings.TrimSpace(b.Text) != "" {
+					obs.hasMeaningful = true
+				} else if len(b.Text) > 0 {
+					obs.hasWhitespace = true
+				}
+			default:
+				if b.Type != "" {
+					obs.hasMeaningful = true
+				}
+			}
+		}
+		return obs
+	}
+	// Unknown non-empty content shape is treated as meaningful to avoid false positives.
+	obs.hasMeaningful = true
+	return obs
+}
+
+func inspectAgentEndMessages(rawMessages json.RawMessage) (errMsg string, cleanAssistant bool) {
 	if len(rawMessages) == 0 {
-		return ""
+		return "", false
 	}
 	var msgs []struct {
 		Role         string `json:"role"`
@@ -1034,7 +1216,7 @@ func extractAssistantError(rawMessages json.RawMessage) string {
 		ErrorMessage string `json:"errorMessage"`
 	}
 	if json.Unmarshal(rawMessages, &msgs) != nil {
-		return ""
+		return "", false
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != "assistant" {
@@ -1042,14 +1224,49 @@ func extractAssistantError(rawMessages json.RawMessage) string {
 		}
 		if msgs[i].StopReason == "error" || msgs[i].StopReason == "aborted" {
 			if msgs[i].ErrorMessage != "" {
-				return msgs[i].ErrorMessage
+				return msgs[i].ErrorMessage, false
 			}
 			if msgs[i].StopReason == "aborted" {
-				return "pi assistant turn aborted"
+				return "pi assistant turn aborted", false
 			}
-			return "pi assistant turn ended with error"
+			return "pi assistant turn ended with error", false
 		}
-		return ""
+		return "", true
+	}
+	return "", false
+}
+
+func isContextOverflowMessage(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, needle := range []string{
+		"context_length_exceeded",
+		"maximum context length",
+		"prompt is too long",
+		"too many tokens",
+		"context window",
+		"input_too_large",
+		"exceeds the context",
+	} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCompactingPromptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "compact") && (strings.Contains(lower, "busy") || strings.Contains(lower, "in progress") || strings.Contains(lower, "running") || strings.Contains(lower, "streaming"))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
 	}
 	return ""
 }
@@ -1099,19 +1316,21 @@ type rpcResponse struct {
 }
 
 type rpcEvent struct {
-	Type       string          `json:"type"`
-	ID         string          `json:"id"`
-	Command    string          `json:"command"`
-	Success    bool            `json:"success"`
-	Data       json.RawMessage `json:"data"`
-	Error      string          `json:"error"`
-	ToolCallID string          `json:"toolCallId"`
-	ToolName   string          `json:"toolName"`
-	Method     string          `json:"method"`
-	Aborted    bool            `json:"aborted"`
-	WillRetry  bool            `json:"willRetry"`
-	FinalError string          `json:"finalError"`
-	Messages   json.RawMessage `json:"messages"`
+	Type         string          `json:"type"`
+	ID           string          `json:"id"`
+	Command      string          `json:"command"`
+	Success      bool            `json:"success"`
+	Data         json.RawMessage `json:"data"`
+	Error        string          `json:"error"`
+	ErrorMessage string          `json:"errorMessage"`
+	ToolCallID   string          `json:"toolCallId"`
+	ToolName     string          `json:"toolName"`
+	Method       string          `json:"method"`
+	Aborted      bool            `json:"aborted"`
+	WillRetry    bool            `json:"willRetry"`
+	FinalError   string          `json:"finalError"`
+	Message      json.RawMessage `json:"message"`
+	Messages     json.RawMessage `json:"messages"`
 }
 
 type process struct {

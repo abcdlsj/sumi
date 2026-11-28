@@ -121,6 +121,17 @@ func TestFakePiRPC(t *testing.T) {
 		case "prompt":
 			turns++
 			compacted = false
+			if mode == "prompt_compacting_once" && turns == 1 {
+				logLine("PROMPT_BUSY_COMPACT")
+				_ = out.Encode(map[string]any{
+					"id":      cmd.ID,
+					"type":    "response",
+					"command": "prompt",
+					"success": false,
+					"error":   "compaction in progress, busy",
+				})
+				continue
+			}
 			_ = os.MkdirAll(filepath.Dir(sessionFile), 0o700)
 			_ = os.WriteFile(sessionFile, []byte("{\"type\":\"session\"}\n"), 0o600)
 			logLine("PROMPT:" + strings.ReplaceAll(cmd.Message, "\n", "\\n"))
@@ -132,6 +143,63 @@ func TestFakePiRPC(t *testing.T) {
 				"data":    map[string]any{"disposition": "started"},
 			})
 			_ = out.Encode(map[string]any{"type": "agent_start"})
+			if mode == "empty_response" || mode == "whitespace_response" {
+				content := []any{}
+				if mode == "whitespace_response" {
+					content = []any{map[string]any{"type": "text", "text": "   \n\t "}}
+				}
+				_ = out.Encode(map[string]any{
+					"type": "message_end",
+					"message": map[string]any{
+						"role":       "assistant",
+						"stopReason": "stop",
+						"content":    content,
+					},
+				})
+				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+				continue
+			}
+			if mode == "message_end_error" {
+				_ = out.Encode(map[string]any{
+					"type": "message_end",
+					"message": map[string]any{
+						"role":         "assistant",
+						"stopReason":   "error",
+						"errorMessage": "Connection error.: read ECONNRESET",
+					},
+				})
+				_ = out.Encode(map[string]any{"type": "auto_retry_end", "success": false})
+				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+				continue
+			}
+			if mode == "message_end_retry_recovers" {
+				_ = out.Encode(map[string]any{
+					"type": "message_end",
+					"message": map[string]any{
+						"role":         "assistant",
+						"stopReason":   "error",
+						"errorMessage": "temporary 503",
+					},
+				})
+				_ = out.Encode(map[string]any{
+					"type": "message_end",
+					"message": map[string]any{
+						"role":       "assistant",
+						"stopReason": "stop",
+						"content":    []any{map[string]any{"type": "text", "text": "recovered"}},
+					},
+				})
+				_ = out.Encode(map[string]any{"type": "auto_retry_end", "success": true})
+				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+				continue
+			}
+			if mode == "steer_wait" {
+				_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "tc-steer", "toolName": "bash"})
+				continue
+			}
 			if mode == "many_steps_over_budget" {
 				for step := 1; step <= 4; step++ {
 					_ = out.Encode(map[string]any{"type": "turn_start"})
@@ -200,6 +268,17 @@ func TestFakePiRPC(t *testing.T) {
 				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
 				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
 			}
+		case "steer":
+			logLine("STEER:" + strings.ReplaceAll(cmd.Message, "\n", "\\n"))
+			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "steer", "success": true})
+			if mode == "steer_wait" {
+				_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "tc-steer", "toolName": "bash", "isError": false})
+				_ = out.Encode(map[string]any{"type": "agent_end", "messages": []any{}, "willRetry": false})
+				_ = out.Encode(map[string]any{"type": "agent_settled", "aborted": false})
+			}
+		case "abort_compaction":
+			logLine("ABORT_COMPACTION")
+			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "abort_compaction", "success": true})
 		case "abort":
 			logLine("ABORT")
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "abort", "success": true})
@@ -1212,5 +1291,89 @@ func TestUnexpectedAbortReturnsErrorAndClassifiesSocketErrors(t *testing.T) {
 		if !errors.As(err, &cf) || cf.Code != domain.AgentErrModelUnreachable {
 			t.Fatalf("classifyError(%q) = %v, want %q", msg, err, domain.AgentErrModelUnreachable)
 		}
+	}
+}
+
+func TestSteerInjectsMidTurnAndErrorsWhenIdle(t *testing.T) {
+	d, in, logPath := newFakeDriver(t, "steer_wait", Config{})
+	defer d.Close()
+
+	if err := d.Steer(context.Background(), "too early"); !errors.Is(err, driver.ErrTurnNotActive) {
+		t.Fatalf("expected ErrTurnNotActive when idle, got %v", err)
+	}
+
+	started := make(chan struct{}, 1)
+	in.OnActivity = func(a driver.Activity) {
+		if a.ToolCallID == "tc-steer" && !a.Done {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.RunTurn(context.Background(), in)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for fake pi turn to start")
+	}
+
+	if err := d.Steer(context.Background(), "[Sumi inbox notice]\n- #ops (unread=1)"); err != nil {
+		t.Fatalf("Steer: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunTurn after steer: %v", err)
+	}
+	joined := strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "STEER:[Sumi inbox notice]\\n- #ops (unread=1)") {
+		t.Fatalf("expected steer RPC logged, got:\n%s", joined)
+	}
+}
+
+func TestPendingProviderErrorAndAutoRetryRecovery(t *testing.T) {
+	dErr, inErr, _ := newFakeDriver(t, "message_end_error", Config{})
+	defer dErr.Close()
+	_, err := dErr.RunTurn(context.Background(), inErr)
+	var f *driver.Failure
+	if !errors.As(err, &f) || f.Code != domain.AgentErrModelUnreachable {
+		t.Fatalf("expected %s from message_end error, got %v", domain.AgentErrModelUnreachable, err)
+	}
+
+	dRec, inRec, _ := newFakeDriver(t, "message_end_retry_recovers", Config{})
+	defer dRec.Close()
+	if _, err := dRec.RunTurn(context.Background(), inRec); err != nil {
+		t.Fatalf("successful auto_retry_end must clear prior provider error, got %v", err)
+	}
+}
+
+func TestEmptyAndWhitespaceResponsesFailTurn(t *testing.T) {
+	for _, mode := range []string{"empty_response", "whitespace_response"} {
+		t.Run(mode, func(t *testing.T) {
+			d, in, _ := newFakeDriver(t, mode, Config{})
+			defer d.Close()
+			_, err := d.RunTurn(context.Background(), in)
+			var f *driver.Failure
+			if !errors.As(err, &f) || f.Code != domain.AgentErrTurnFailed {
+				t.Fatalf("mode %s: expected turn_failed, got %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestPromptRetriesOnceAfterCompactionAbort(t *testing.T) {
+	d, in, logPath := newFakeDriver(t, "prompt_compacting_once", Config{})
+	defer d.Close()
+	if _, err := d.RunTurn(context.Background(), in); err != nil {
+		t.Fatalf("prompt during compaction must abort compaction and retry: %v", err)
+	}
+	joined := strings.Join(readLogLines(logPath), "\n")
+	if !strings.Contains(joined, "PROMPT_BUSY_COMPACT") || !strings.Contains(joined, "ABORT_COMPACTION") {
+		t.Fatalf("expected compaction abort before prompt retry:\n%s", joined)
 	}
 }

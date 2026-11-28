@@ -68,6 +68,7 @@ func TestFakeClaude(t *testing.T) {
 
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1<<20), 1<<24)
+	inSteerTurn := false
 	for in.Scan() {
 		var msg struct {
 			Type      string `json:"type"`
@@ -97,6 +98,12 @@ func TestFakeClaude(t *testing.T) {
 			}
 		case "user":
 			text := msg.Message.Content[0].Text
+			if inSteerTurn {
+				logLine("STEER:" + strings.ReplaceAll(text, "\n", "\\n"))
+				inSteerTurn = false
+				result(false, "success", "steered")
+				continue
+			}
 			logLine("PROMPT:" + strings.ReplaceAll(text, "\n", "\\n"))
 			if strings.HasPrefix(text, "/compact ") {
 				emit(map[string]any{"type": "system", "subtype": "status", "status": "compacting"})
@@ -116,6 +123,10 @@ func TestFakeClaude(t *testing.T) {
 					"id": fmt.Sprintf("msg-%d", i), "content": []map[string]any{{"type": "tool_use", "id": id, "name": "Bash"}}}})
 				emit(map[string]any{"type": "user", "message": map[string]any{
 					"content": []map[string]any{{"type": "tool_result", "tool_use_id": id}}}})
+			}
+			if mode == "steer_wait" {
+				inSteerTurn = true
+				continue
 			}
 			if mode == "hang" {
 				continue // wait for interrupt
@@ -334,5 +345,44 @@ func TestStartNamesMissingWorkDir(t *testing.T) {
 	_, err := d.RunTurn(context.Background(), in)
 	if err == nil || !strings.Contains(err.Error(), "work dir "+in.WorkDir+" does not exist") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSteerInjectsMidTurnAndErrorsWhenIdle(t *testing.T) {
+	d, in, logPath := newFakeDriver(t, "steer_wait", Config{})
+	if err := d.Steer(context.Background(), "too early"); !errors.Is(err, driver.ErrTurnNotActive) {
+		t.Fatalf("expected ErrTurnNotActive when idle, got %v", err)
+	}
+
+	ready := make(chan struct{}, 1)
+	in.OnActivity = func(a driver.Activity) {
+		if a.Tool == "Bash" && !a.Done {
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.RunTurn(context.Background(), in)
+		errCh <- err
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for fake claude turn to emit model activity")
+	}
+
+	if err := d.Steer(context.Background(), "[Sumi inbox notice]\n- #ops (unread=1)"); err != nil {
+		t.Fatalf("Steer: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if steers := logLines(t, logPath, "STEER:"); len(steers) != 1 || !strings.Contains(steers[0], "#ops") {
+		t.Fatalf("expected steer logged, got %q", steers)
 	}
 }

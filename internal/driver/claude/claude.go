@@ -89,11 +89,17 @@ type Config struct {
 	Now                   func() time.Time
 }
 
+type activeTurnHandle struct {
+	proc     *process
+	sawModel *atomic.Bool
+}
+
 // Driver manages one persistent `claude -p` stream-json child and its single session.
 type Driver struct {
 	mu                sync.Mutex
 	cfg               Config
 	proc              *process
+	activeTurn        atomic.Pointer[activeTurnHandle]
 	sessionID         string
 	sysPromptHash     string
 	resumed           bool
@@ -436,6 +442,19 @@ func (d *Driver) ensureStartedLocked(in driver.TurnInput) error {
 	return nil
 }
 
+// Steer queues a mid-turn notice onto Claude's stream-json stdin once the active turn has begun
+// producing model output. Safe to call concurrently while RunTurn holds d.mu.
+func (d *Driver) Steer(_ context.Context, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
+	h := d.activeTurn.Load()
+	if h == nil || h.proc == nil || h.proc.exited() || !h.sawModel.Load() {
+		return driver.ErrTurnNotActive
+	}
+	return h.proc.write(userMessage(message))
+}
+
 func (d *Driver) RunTurn(ctx context.Context, in driver.TurnInput) (driver.TurnResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -574,6 +593,8 @@ func (d *Driver) runTurnLocked(ctx context.Context, in driver.TurnInput) (driver
 	fn := obs.handle
 	p.onMsg.Store(&fn)
 	defer p.onMsg.Store(nil)
+	d.activeTurn.Store(&activeTurnHandle{proc: p, sawModel: &obs.sawModel})
+	defer d.activeTurn.Store(nil)
 	if err := p.write(userMessage(prompt)); err != nil {
 		d.stopLocked()
 		return driver.TurnResult{}, startFailure("write claude prompt: %v", err, p), false
@@ -779,10 +800,12 @@ func classifyError(msg string) error {
 		strings.Contains(lower, "authentication"), strings.Contains(lower, "not logged in"),
 		strings.Contains(lower, "/login"):
 		return driver.Fail(domain.AgentErrModelAuthFailed, errors.New(msg))
-	case strings.Contains(lower, "econnrefused"), strings.Contains(lower, "enotfound"),
-		strings.Contains(lower, "etimedout"), strings.Contains(lower, "fetch failed"),
-		strings.Contains(lower, "connection refused"), strings.Contains(lower, "unreachable"),
-		strings.Contains(lower, "connection error"):
+	case strings.Contains(lower, "econnrefused"), strings.Contains(lower, "econnreset"),
+		strings.Contains(lower, "enotfound"), strings.Contains(lower, "etimedout"),
+		strings.Contains(lower, "fetch failed"), strings.Contains(lower, "connection refused"),
+		strings.Contains(lower, "connection error"), strings.Contains(lower, "connect timeout"),
+		strings.Contains(lower, "socket hang up"), strings.Contains(lower, "und_err_socket"),
+		strings.Contains(lower, "unreachable"):
 		return driver.Fail(domain.AgentErrModelUnreachable, errors.New(msg))
 	default:
 		return driver.Fail(domain.AgentErrTurnFailed, errors.New(msg))

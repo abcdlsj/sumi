@@ -73,6 +73,18 @@ type GracefulCloser interface {
 	GracefulClose(timeoutSeconds int) error
 }
 
+// ErrSteerUnsupported is returned when a driver does not support mid-turn steering.
+var ErrSteerUnsupported = errors.New("mid-turn steer is not supported")
+
+// ErrTurnNotActive is returned when Steer is called while no turn is actively running.
+var ErrTurnNotActive = errors.New("no active turn to steer")
+
+// Steerer is optionally implemented by persistent drivers (Pi RPC, Claude stream-json) that can
+// inject a mid-turn notice into an active turn without cancelling it.
+type Steerer interface {
+	Steer(ctx context.Context, message string) error
+}
+
 // Failure tags a driver error with a stable agent error code (domain.AgentErr*).
 // Its message must describe the driver/HTTP failure only, never prompts or message bodies.
 type Failure struct {
